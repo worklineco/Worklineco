@@ -47,7 +47,9 @@ C = Password
    - Due Date
    - Section
    - Reply Filing
-7. Upsert rows into `gst_litigation_cases` using Supabase.
+7. Save extracted rows into `collector-output` for first-run verification.
+8. After selectors and headers are confirmed, upsert rows into
+   `gst_litigation_cases` using Supabase.
 
 ## Security Rule
 

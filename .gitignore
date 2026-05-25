@@ -7,3 +7,5 @@ build
 .vercel
 *.log
 tsconfig.tsbuildinfo
+collector-output
+WorkLineCo.xlsx

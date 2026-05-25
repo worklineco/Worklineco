@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "gst:collector": "node scripts/gst-portal-collector.mjs",
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit"
@@ -15,9 +16,11 @@
     "clsx": "^2.1.1",
     "lucide-react": "^0.468.0",
     "next": "^15.3.2",
+    "playwright-core": "^1.60.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "tailwind-merge": "^2.6.0"
+    "tailwind-merge": "^2.6.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@types/node": "^22.15.3",
