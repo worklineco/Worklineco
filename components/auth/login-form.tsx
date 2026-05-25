@@ -2,7 +2,9 @@
 
 import { supabase } from "@/lib/supabase/client";
 import { AlertCircle, ArrowRight, CheckCircle2, Eye, EyeOff, Loader2 } from "lucide-react";
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
+
+const RESEND_COOLDOWN_SECONDS = 60;
 
 export function LoginForm() {
   const [mode, setMode] = useState<"signin" | "signup">("signin");
@@ -13,6 +15,19 @@ export function LoginForm() {
   const [messageType, setMessageType] = useState<"error" | "success" | "info">("info");
   const [isLoading, setIsLoading] = useState(false);
   const [isResending, setIsResending] = useState(false);
+  const [resendCooldown, setResendCooldown] = useState(0);
+
+  useEffect(() => {
+    if (resendCooldown <= 0) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      setResendCooldown((current) => Math.max(0, current - 1));
+    }, 1000);
+
+    return () => window.clearTimeout(timer);
+  }, [resendCooldown]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -37,6 +52,9 @@ export function LoginForm() {
         ? "Signed in. Dashboard routing will be added in the next build."
         : "Account request created. Please open the confirmation email from Supabase, then come back and sign in."
     );
+    if (mode === "signup") {
+      setResendCooldown(RESEND_COOLDOWN_SECONDS);
+    }
     setMessageType("success");
     setIsLoading(false);
   }
@@ -49,6 +67,7 @@ export function LoginForm() {
     }
 
     setIsResending(true);
+    setResendCooldown(RESEND_COOLDOWN_SECONDS);
     setMessage("");
 
     const { error } = await supabase.auth.resend({
@@ -161,11 +180,15 @@ export function LoginForm() {
         {mode === "signin" ? (
           <button
             className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-black text-slate-700 shadow-sm transition hover:border-sky-200 hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-70"
-            disabled={isResending}
+            disabled={isResending || resendCooldown > 0}
             onClick={resendConfirmation}
             type="button"
           >
-            {isResending ? "Sending confirmation..." : "Resend confirmation email"}
+            {isResending
+              ? "Sending confirmation..."
+              : resendCooldown > 0
+                ? `Try again in ${resendCooldown}s`
+                : "Resend confirmation email"}
           </button>
         ) : null}
 
@@ -191,6 +214,10 @@ export function LoginForm() {
 function formatAuthMessage(message: string) {
   if (message.toLowerCase().includes("security purposes")) {
     return "Supabase has temporarily paused repeated signup attempts for this email. Please wait for the countdown, then try again.";
+  }
+
+  if (message.toLowerCase().includes("email rate limit")) {
+    return "Supabase email sending limit is active. Please wait before requesting another confirmation email, or confirm this test user from the Supabase dashboard.";
   }
 
   if (message.toLowerCase().includes("invalid login credentials")) {
