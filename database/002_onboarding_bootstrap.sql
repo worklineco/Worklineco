@@ -53,9 +53,9 @@ create or replace function public.bootstrap_organisation(
   p_task_statuses text[] default array['Pending', 'In Progress', 'Under Review', 'Completed']
 )
 returns table (
-  organisation_id uuid,
-  organisation_name text,
-  organisation_slug text
+  created_organisation_id uuid,
+  created_organisation_name text,
+  created_organisation_slug text
 )
 language plpgsql
 security definer
