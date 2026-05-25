@@ -42,6 +42,8 @@ create policy "members read custom fields in own organisation"
 on public.custom_fields for select
 using (organisation_id = public.current_user_organisation_id());
 
+drop function if exists public.bootstrap_organisation(text, text, text, text, text[], text[]);
+
 create or replace function public.bootstrap_organisation(
   p_organisation_name text,
   p_organisation_type text default 'Professional services firm',
