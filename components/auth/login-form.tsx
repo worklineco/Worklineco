@@ -2,9 +2,7 @@
 
 import { supabase } from "@/lib/supabase/client";
 import { AlertCircle, ArrowRight, CheckCircle2, Eye, EyeOff, Loader2 } from "lucide-react";
-import { FormEvent, useEffect, useState } from "react";
-
-const RESEND_COOLDOWN_SECONDS = 60;
+import { FormEvent, useState } from "react";
 
 export function LoginForm() {
   const [mode, setMode] = useState<"signin" | "signup">("signin");
@@ -14,20 +12,12 @@ export function LoginForm() {
   const [message, setMessage] = useState("");
   const [messageType, setMessageType] = useState<"error" | "success" | "info">("info");
   const [isLoading, setIsLoading] = useState(false);
-  const [isResending, setIsResending] = useState(false);
-  const [resendCooldown, setResendCooldown] = useState(0);
 
-  useEffect(() => {
-    if (resendCooldown <= 0) {
-      return;
-    }
-
-    const timer = window.setTimeout(() => {
-      setResendCooldown((current) => Math.max(0, current - 1));
-    }, 1000);
-
-    return () => window.clearTimeout(timer);
-  }, [resendCooldown]);
+  function changeMode(nextMode: "signin" | "signup") {
+    setMode(nextMode);
+    setMessage("");
+    setMessageType("info");
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -53,44 +43,18 @@ export function LoginForm() {
       return;
     }
 
+    if (result.data.session) {
+      window.location.href = "/onboarding";
+      return;
+    }
+
     setMessage(
       mode === "signin"
-        ? "Signed in. Dashboard routing will be added in the next build."
-        : "Account request created. Please open the confirmation email from Supabase, then come back and sign in."
+        ? "Signed in. Redirecting to organisation setup..."
+        : "Account created. If your project still requires confirmation, check email once; otherwise sign in now."
     );
-    if (mode === "signup") {
-      setResendCooldown(RESEND_COOLDOWN_SECONDS);
-    }
     setMessageType("success");
     setIsLoading(false);
-  }
-
-  async function resendConfirmation() {
-    if (!email) {
-      setMessage("Enter your email ID first, then request the confirmation email.");
-      setMessageType("error");
-      return;
-    }
-
-    setIsResending(true);
-    setResendCooldown(RESEND_COOLDOWN_SECONDS);
-    setMessage("");
-
-    const { error } = await supabase.auth.resend({
-      email,
-      type: "signup"
-    });
-
-    if (error) {
-      setMessage(formatAuthMessage(error.message));
-      setMessageType("error");
-      setIsResending(false);
-      return;
-    }
-
-    setMessage("Confirmation email sent again. Please check inbox and spam folder.");
-    setMessageType("success");
-    setIsResending(false);
   }
 
   return (
@@ -116,7 +80,7 @@ export function LoginForm() {
           className={`rounded-xl px-3 py-2.5 text-sm font-black transition ${
             mode === "signin" ? "bg-white text-slate-950 shadow-sm" : "text-slate-500"
           }`}
-          onClick={() => setMode("signin")}
+          onClick={() => changeMode("signin")}
           type="button"
         >
           Sign in
@@ -125,7 +89,7 @@ export function LoginForm() {
           className={`rounded-xl px-3 py-2.5 text-sm font-black transition ${
             mode === "signup" ? "bg-white text-slate-950 shadow-sm" : "text-slate-500"
           }`}
-          onClick={() => setMode("signup")}
+          onClick={() => changeMode("signup")}
           type="button"
         >
           Sign up
@@ -179,24 +143,10 @@ export function LoginForm() {
         </button>
 
         <p className="rounded-2xl border border-sky-100 bg-sky-50 px-4 py-3 text-xs font-bold leading-5 text-sky-900">
-          Use your email as the user ID. New accounts must confirm their email
-          before sign in because Supabase email auto-confirm is currently off.
+          Use your email as the user ID. For development, keep email
+          confirmation off in Supabase. For production scale, connect custom
+          SMTP before enabling email verification or OTP.
         </p>
-
-        {mode === "signin" ? (
-          <button
-            className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-black text-slate-700 shadow-sm transition hover:border-sky-200 hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-70"
-            disabled={isResending || resendCooldown > 0}
-            onClick={resendConfirmation}
-            type="button"
-          >
-            {isResending
-              ? "Sending confirmation..."
-              : resendCooldown > 0
-                ? `Try again in ${resendCooldown}s`
-                : "Resend confirmation email"}
-          </button>
-        ) : null}
 
         {message ? (
           <div
@@ -223,11 +173,11 @@ function formatAuthMessage(message: string) {
   }
 
   if (message.toLowerCase().includes("email rate limit")) {
-    return "Supabase email sending limit is active. Please wait before requesting another confirmation email, or confirm this test user from the Supabase dashboard.";
+    return "Supabase built-in email sending limit is active. For scale, connect custom SMTP before using email confirmation or OTP.";
   }
 
   if (message.toLowerCase().includes("invalid login credentials")) {
-    return "Invalid login credentials. If this account was just created, confirm the email first, then try signing in again.";
+    return "Invalid login credentials. If you deleted this user in Supabase, create the account again from the Sign up tab.";
   }
 
   return message;
