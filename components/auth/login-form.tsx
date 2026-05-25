@@ -12,6 +12,7 @@ export function LoginForm() {
   const [message, setMessage] = useState("");
   const [messageType, setMessageType] = useState<"error" | "success" | "info">("info");
   const [isLoading, setIsLoading] = useState(false);
+  const [isResending, setIsResending] = useState(false);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -34,10 +35,37 @@ export function LoginForm() {
     setMessage(
       mode === "signin"
         ? "Signed in. Dashboard routing will be added in the next build."
-        : "Account created. Check email confirmation settings in Supabase if required."
+        : "Account request created. Please open the confirmation email from Supabase, then come back and sign in."
     );
     setMessageType("success");
     setIsLoading(false);
+  }
+
+  async function resendConfirmation() {
+    if (!email) {
+      setMessage("Enter your email ID first, then request the confirmation email.");
+      setMessageType("error");
+      return;
+    }
+
+    setIsResending(true);
+    setMessage("");
+
+    const { error } = await supabase.auth.resend({
+      email,
+      type: "signup"
+    });
+
+    if (error) {
+      setMessage(formatAuthMessage(error.message));
+      setMessageType("error");
+      setIsResending(false);
+      return;
+    }
+
+    setMessage("Confirmation email sent again. Please check inbox and spam folder.");
+    setMessageType("success");
+    setIsResending(false);
   }
 
   return (
@@ -126,9 +154,20 @@ export function LoginForm() {
         </button>
 
         <p className="rounded-2xl border border-sky-100 bg-sky-50 px-4 py-3 text-xs font-bold leading-5 text-sky-900">
-          Use your email as the user ID. If Supabase asks you to wait before
-          retrying, it is a temporary security cooldown.
+          Use your email as the user ID. New accounts must confirm their email
+          before sign in because Supabase email auto-confirm is currently off.
         </p>
+
+        {mode === "signin" ? (
+          <button
+            className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-black text-slate-700 shadow-sm transition hover:border-sky-200 hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-70"
+            disabled={isResending}
+            onClick={resendConfirmation}
+            type="button"
+          >
+            {isResending ? "Sending confirmation..." : "Resend confirmation email"}
+          </button>
+        ) : null}
 
         {message ? (
           <div
@@ -152,6 +191,10 @@ export function LoginForm() {
 function formatAuthMessage(message: string) {
   if (message.toLowerCase().includes("security purposes")) {
     return "Supabase has temporarily paused repeated signup attempts for this email. Please wait for the countdown, then try again.";
+  }
+
+  if (message.toLowerCase().includes("invalid login credentials")) {
+    return "Invalid login credentials. If this account was just created, confirm the email first, then try signing in again.";
   }
 
   return message;
