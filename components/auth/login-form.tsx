@@ -1,7 +1,7 @@
 "use client";
 
 import { supabase } from "@/lib/supabase/client";
-import { ArrowRight, Eye, EyeOff, Loader2 } from "lucide-react";
+import { AlertCircle, ArrowRight, CheckCircle2, Eye, EyeOff, Loader2 } from "lucide-react";
 import { FormEvent, useState } from "react";
 
 export function LoginForm() {
@@ -10,12 +10,14 @@ export function LoginForm() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [message, setMessage] = useState("");
+  const [messageType, setMessageType] = useState<"error" | "success" | "info">("info");
   const [isLoading, setIsLoading] = useState(false);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setIsLoading(true);
     setMessage("");
+    setMessageType("info");
 
     const result =
       mode === "signin"
@@ -23,7 +25,8 @@ export function LoginForm() {
         : await supabase.auth.signUp({ email, password });
 
     if (result.error) {
-      setMessage(result.error.message);
+      setMessage(formatAuthMessage(result.error.message));
+      setMessageType("error");
       setIsLoading(false);
       return;
     }
@@ -33,6 +36,7 @@ export function LoginForm() {
         ? "Signed in. Dashboard routing will be added in the next build."
         : "Account created. Check email confirmation settings in Supabase if required."
     );
+    setMessageType("success");
     setIsLoading(false);
   }
 
@@ -112,7 +116,7 @@ export function LoginForm() {
         </label>
 
         <button
-          className="flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-teal-600 via-sky-600 to-fuchsia-600 text-sm font-black text-white shadow-lg shadow-sky-900/15 transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-70"
+          className="flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-slate-950 text-sm font-black text-white shadow-[0_18px_45px_rgba(15,23,42,0.28)] transition hover:-translate-y-0.5 hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-500"
           disabled={isLoading}
           type="submit"
         >
@@ -121,12 +125,46 @@ export function LoginForm() {
           {!isLoading ? <ArrowRight className="size-4" /> : null}
         </button>
 
+        <p className="rounded-2xl border border-sky-100 bg-sky-50 px-4 py-3 text-xs font-bold leading-5 text-sky-900">
+          Use your email as the user ID. If Supabase asks you to wait before
+          retrying, it is a temporary security cooldown.
+        </p>
+
         {message ? (
-          <p className="rounded-2xl bg-slate-100 px-4 py-3 text-sm font-semibold text-slate-700">
-            {message}
-          </p>
+          <div
+            className={`flex items-start gap-3 rounded-2xl px-4 py-3 text-sm font-bold leading-5 ${messageTone(
+              messageType
+            )}`}
+          >
+            {messageType === "success" ? (
+              <CheckCircle2 className="mt-0.5 size-4 shrink-0" />
+            ) : (
+              <AlertCircle className="mt-0.5 size-4 shrink-0" />
+            )}
+            <p>{message}</p>
+          </div>
         ) : null}
       </form>
     </section>
   );
+}
+
+function formatAuthMessage(message: string) {
+  if (message.toLowerCase().includes("security purposes")) {
+    return "Supabase has temporarily paused repeated signup attempts for this email. Please wait for the countdown, then try again.";
+  }
+
+  return message;
+}
+
+function messageTone(type: "error" | "success" | "info") {
+  if (type === "success") {
+    return "border border-emerald-200 bg-emerald-50 text-emerald-900";
+  }
+
+  if (type === "error") {
+    return "border border-rose-200 bg-rose-50 text-rose-900";
+  }
+
+  return "border border-slate-200 bg-slate-50 text-slate-700";
 }
