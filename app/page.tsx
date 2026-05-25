@@ -91,16 +91,16 @@ export default function Home() {
             {modules.slice(0, 8).map((module) => {
               const Icon = module.icon;
               return (
-                <a
+                <Link
                   className="group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-white hover:text-slate-950 hover:shadow-sm"
-                  href="#modules"
+                  href={module.name === "GST Tracker" ? "/gst" : "#modules"}
                   key={module.name}
                 >
                   <span className={`flex size-8 items-center justify-center rounded-lg ${iconTone(module.color)}`}>
                     <Icon className="size-4" />
                   </span>
                   <span className="min-w-0 flex-1 truncate">{module.name}</span>
-                </a>
+                </Link>
               );
             })}
           </nav>
@@ -190,7 +190,8 @@ export default function Home() {
                 {modules.map((module) => {
                   const Icon = module.icon;
                   return (
-                    <article
+                    <Link
+                      href={module.name === "GST Tracker" ? "/gst" : "#modules"}
                       className="group min-h-36 rounded-2xl border border-slate-200/80 bg-gradient-to-br from-white to-slate-50 p-4 shadow-sm transition hover:-translate-y-1 hover:shadow-xl"
                       key={module.name}
                     >
@@ -206,7 +207,7 @@ export default function Home() {
                         {module.name}
                       </h3>
                       <p className="mt-2 text-xs font-bold text-slate-500">{module.group}</p>
-                    </article>
+                    </Link>
                   );
                 })}
               </div>

@@ -3,19 +3,15 @@
 import { supabase } from "@/lib/supabase/client";
 import {
   AlertCircle,
-  ArrowRight,
   Building2,
-  CalendarDays,
-  CheckCircle2,
-  ClipboardCheck,
-  IndianRupee,
+  FileSearch,
   Loader2,
   Plus,
   RefreshCw,
+  Scale,
   Search,
   ShieldCheck
 } from "lucide-react";
-import Link from "next/link";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
 type GstRegistration = {
@@ -25,52 +21,53 @@ type GstRegistration = {
   gstin: string;
   trade_name: string | null;
   state_name: string | null;
-  registration_type: string;
-  filing_frequency: string;
   portal_status: string;
 };
 
-type GstReturnTracker = {
+type GstLitigationCase = {
   id: string;
   organisation_id: string;
   gst_registration_id: string;
-  return_type: string;
-  period_label: string;
+  serial_no: number | null;
+  notice_type: string | null;
+  description: string | null;
+  ref_id: string | null;
+  date_of_issue: string | null;
+  case_id: string | null;
+  status: string | null;
+  tax_period: string | null;
   due_date: string | null;
-  status: string;
-  filed_at: string | null;
-  arn: string | null;
+  section: string | null;
+  reply_filing_status: string | null;
   source: string;
-  notes: string | null;
 };
-
-const returnTypes = ["GSTR-1", "GSTR-3B", "GSTR-9", "GSTR-9C"];
-const statuses = ["pending", "filed", "not_applicable", "on_hold"];
 
 export function GstTracker() {
   const [organisationId, setOrganisationId] = useState("");
   const [registrations, setRegistrations] = useState<GstRegistration[]>([]);
-  const [trackers, setTrackers] = useState<GstReturnTracker[]>([]);
+  const [cases, setCases] = useState<GstLitigationCase[]>([]);
   const [selectedRegistrationId, setSelectedRegistrationId] = useState("");
   const [search, setSearch] = useState("");
+  const [message, setMessage] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [isSavingClient, setIsSavingClient] = useState(false);
-  const [isSavingTracker, setIsSavingTracker] = useState(false);
-  const [message, setMessage] = useState("");
+  const [isSavingCase, setIsSavingCase] = useState(false);
 
   const [clientName, setClientName] = useState("");
   const [gstin, setGstin] = useState("");
   const [tradeName, setTradeName] = useState("");
   const [stateName, setStateName] = useState("");
-  const [filingFrequency, setFilingFrequency] = useState("Monthly");
 
-  const [returnType, setReturnType] = useState("GSTR-3B");
-  const [periodLabel, setPeriodLabel] = useState("May 2026");
+  const [noticeType, setNoticeType] = useState("");
+  const [description, setDescription] = useState("");
+  const [refId, setRefId] = useState("");
+  const [dateOfIssue, setDateOfIssue] = useState("");
+  const [caseId, setCaseId] = useState("");
+  const [caseStatus, setCaseStatus] = useState("");
+  const [taxPeriod, setTaxPeriod] = useState("");
   const [dueDate, setDueDate] = useState("");
-  const [filingStatus, setFilingStatus] = useState("pending");
-  const [filedAt, setFiledAt] = useState("");
-  const [arn, setArn] = useState("");
-  const [notes, setNotes] = useState("");
+  const [section, setSection] = useState("");
+  const [replyFilingStatus, setReplyFilingStatus] = useState("");
 
   useEffect(() => {
     void loadWorkspace();
@@ -80,10 +77,10 @@ export function GstTracker() {
     setIsLoading(true);
     setMessage("");
 
-    const { data: userData, error: userError } = await supabase.auth.getUser();
+    const { data: userData } = await supabase.auth.getUser();
 
-    if (userError || !userData.user) {
-      setMessage("Please sign in again to access GST Tracker.");
+    if (!userData.user) {
+      setMessage("Please sign in again to access GST Litigation Monitor.");
       setIsLoading(false);
       return;
     }
@@ -95,14 +92,14 @@ export function GstTracker() {
       .single();
 
     if (profileError || !profile?.organisation_id) {
-      setMessage("Create your organisation workspace before using GST Tracker.");
+      setMessage("Create your organisation workspace before using GST Litigation Monitor.");
       setIsLoading(false);
       return;
     }
 
     setOrganisationId(profile.organisation_id);
 
-    const [{ data: gstRows, error: gstError }, { data: trackerRows, error: trackerError }] =
+    const [{ data: gstRows, error: gstError }, { data: caseRows, error: caseError }] =
       await Promise.all([
         supabase
           .from("gst_registrations")
@@ -110,20 +107,20 @@ export function GstTracker() {
           .eq("organisation_id", profile.organisation_id)
           .order("client_name", { ascending: true }),
         supabase
-          .from("gst_return_trackers")
+          .from("gst_litigation_cases")
           .select("*")
           .eq("organisation_id", profile.organisation_id)
-          .order("due_date", { ascending: true, nullsFirst: false })
+          .order("date_of_issue", { ascending: false, nullsFirst: false })
       ]);
 
-    if (gstError || trackerError) {
-      setMessage(formatLoadError(gstError?.message ?? trackerError?.message ?? "Unable to load GST data."));
+    if (gstError || caseError) {
+      setMessage(formatLoadError(gstError?.message ?? caseError?.message ?? "Unable to load GST litigation data."));
       setIsLoading(false);
       return;
     }
 
     setRegistrations((gstRows ?? []) as GstRegistration[]);
-    setTrackers((trackerRows ?? []) as GstReturnTracker[]);
+    setCases((caseRows ?? []) as GstLitigationCase[]);
     setSelectedRegistrationId((current) => current || gstRows?.[0]?.id || "");
     setIsLoading(false);
   }
@@ -133,12 +130,9 @@ export function GstTracker() {
     setIsSavingClient(true);
     setMessage("");
 
-    const cleanedGstin = gstin.trim().toUpperCase();
-
     const { error } = await supabase.from("gst_registrations").insert({
       client_name: clientName.trim(),
-      filing_frequency: filingFrequency,
-      gstin: cleanedGstin,
+      gstin: gstin.trim().toUpperCase(),
       organisation_id: organisationId,
       state_name: stateName.trim() || null,
       trade_name: tradeName.trim() || null
@@ -154,61 +148,49 @@ export function GstTracker() {
     setGstin("");
     setTradeName("");
     setStateName("");
-    setFilingFrequency("Monthly");
     setIsSavingClient(false);
     await loadWorkspace();
   }
 
-  async function addTracker(event: FormEvent<HTMLFormElement>) {
+  async function addCase(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setIsSavingTracker(true);
+    setIsSavingCase(true);
     setMessage("");
 
-    const { error } = await supabase.from("gst_return_trackers").insert({
-      arn: arn.trim() || null,
+    const { error } = await supabase.from("gst_litigation_cases").insert({
+      case_id: caseId.trim() || null,
+      date_of_issue: dateOfIssue || null,
+      description: description.trim() || null,
       due_date: dueDate || null,
-      filed_at: filedAt || null,
       gst_registration_id: selectedRegistrationId,
-      notes: notes.trim() || null,
+      notice_type: noticeType.trim() || null,
       organisation_id: organisationId,
-      period_label: periodLabel.trim(),
-      return_type: returnType,
+      ref_id: refId.trim() || null,
+      reply_filing_status: replyFilingStatus.trim() || null,
+      section: section.trim() || null,
+      serial_no: visibleCases.length + 1,
       source: "manual",
-      status: filingStatus
+      status: caseStatus.trim() || null,
+      tax_period: taxPeriod.trim() || null
     });
 
     if (error) {
       setMessage(error.message);
-      setIsSavingTracker(false);
+      setIsSavingCase(false);
       return;
     }
 
-    setReturnType("GSTR-3B");
-    setPeriodLabel("May 2026");
+    setNoticeType("");
+    setDescription("");
+    setRefId("");
+    setDateOfIssue("");
+    setCaseId("");
+    setCaseStatus("");
+    setTaxPeriod("");
     setDueDate("");
-    setFilingStatus("pending");
-    setFiledAt("");
-    setArn("");
-    setNotes("");
-    setIsSavingTracker(false);
-    await loadWorkspace();
-  }
-
-  async function updateTrackerStatus(tracker: GstReturnTracker, status: string) {
-    const { error } = await supabase
-      .from("gst_return_trackers")
-      .update({
-        filed_at: status === "filed" ? tracker.filed_at || new Date().toISOString().slice(0, 10) : tracker.filed_at,
-        status
-      })
-      .eq("id", tracker.id)
-      .eq("organisation_id", tracker.organisation_id);
-
-    if (error) {
-      setMessage(error.message);
-      return;
-    }
-
+    setSection("");
+    setReplyFilingStatus("");
+    setIsSavingCase(false);
     await loadWorkspace();
   }
 
@@ -227,49 +209,51 @@ export function GstTracker() {
   }, [registrations, search]);
 
   const selectedRegistration = registrations.find((registration) => registration.id === selectedRegistrationId);
-  const visibleTrackers = trackers.filter((tracker) =>
-    selectedRegistrationId ? tracker.gst_registration_id === selectedRegistrationId : true
+  const visibleCases = cases.filter((item) =>
+    selectedRegistrationId ? item.gst_registration_id === selectedRegistrationId : true
   );
-  const pendingCount = trackers.filter((tracker) => tracker.status === "pending").length;
-  const filedCount = trackers.filter((tracker) => tracker.status === "filed").length;
-  const overdueCount = trackers.filter((tracker) => {
-    if (tracker.status === "filed" || !tracker.due_date) {
+  const openCases = cases.filter((item) => !["closed", "disposed", "replied"].includes((item.status ?? "").toLowerCase())).length;
+  const dueSoon = cases.filter((item) => {
+    if (!item.due_date) {
       return false;
     }
 
-    return tracker.due_date < new Date().toISOString().slice(0, 10);
+    const today = new Date();
+    const due = new Date(item.due_date);
+    const diffDays = Math.ceil((due.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+    return diffDays >= 0 && diffDays <= 7;
   }).length;
 
   return (
     <main className="min-h-screen bg-[#fbf7ef] px-4 py-5 text-slate-950 sm:px-6 lg:px-8">
       <div className="pointer-events-none fixed inset-0 -z-10 bg-[radial-gradient(circle_at_20%_15%,rgba(14,165,233,0.16),transparent_30%),radial-gradient(circle_at_80%_20%,rgba(217,70,239,0.14),transparent_28%),radial-gradient(circle_at_50%_86%,rgba(245,158,11,0.16),transparent_34%)]" />
 
-      <section className="mx-auto max-w-[1500px]">
+      <section className="mx-auto max-w-[1540px]">
         <header className="rounded-[28px] border border-white/80 bg-white/90 p-5 shadow-[0_24px_80px_rgba(15,23,42,0.12)]">
           <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
             <div>
               <div className="flex flex-wrap items-center gap-2">
-                <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-black uppercase text-amber-800">
-                  Urgent module
+                <span className="rounded-full bg-rose-100 px-3 py-1 text-xs font-black uppercase text-rose-800">
+                  Priority build
                 </span>
-                <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-black uppercase text-emerald-800">
-                  GST compliance tracker
+                <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-black uppercase text-amber-800">
+                  GST portal litigation monitor
                 </span>
               </div>
               <h1 className="mt-3 text-4xl font-black leading-tight text-slate-950">
-                GST Client Tracker
+                GST Litigation Monitor
               </h1>
               <p className="mt-3 max-w-4xl text-sm font-semibold leading-6 text-slate-600">
-                Track client GSTINs, return periods, due dates, filing status,
-                ARN, and portal/import source. Portal sync can be layered later
-                through authorised API/import workflows without changing this model.
+                Track notices, proceedings, case IDs, sections, tax periods,
+                due dates, and reply filing status. Portal scraping will run
+                locally with manual CAPTCHA and push extracted rows here.
               </p>
             </div>
 
             <div className="grid grid-cols-3 gap-3 text-center">
               <Metric label="GSTINs" value={registrations.length.toString()} tone="bg-sky-100 text-sky-800" />
-              <Metric label="Pending" value={pendingCount.toString()} tone="bg-amber-100 text-amber-800" />
-              <Metric label="Overdue" value={overdueCount.toString()} tone="bg-rose-100 text-rose-800" />
+              <Metric label="Open" value={openCases.toString()} tone="bg-amber-100 text-amber-800" />
+              <Metric label="Due 7d" value={dueSoon.toString()} tone="bg-rose-100 text-rose-800" />
             </div>
           </div>
         </header>
@@ -284,43 +268,32 @@ export function GstTracker() {
         {isLoading ? (
           <div className="mt-5 rounded-[28px] border border-white/80 bg-white/90 p-8 shadow-[0_24px_80px_rgba(15,23,42,0.12)]">
             <Loader2 className="size-6 animate-spin text-teal-700" />
-            <p className="mt-4 text-sm font-bold text-slate-600">Loading GST workspace...</p>
+            <p className="mt-4 text-sm font-bold text-slate-600">Loading GST litigation workspace...</p>
           </div>
         ) : (
-          <div className="mt-5 grid gap-5 xl:grid-cols-[0.72fr_1.28fr]">
+          <div className="mt-5 grid gap-5 xl:grid-cols-[0.66fr_1.34fr]">
             <aside className="space-y-5">
               <section className="rounded-[28px] border border-white/80 bg-white/90 p-5 shadow-[0_24px_80px_rgba(15,23,42,0.10)]">
                 <div className="flex items-center justify-between gap-3">
                   <div>
-                    <p className="text-xs font-black uppercase tracking-[0.16em] text-teal-700">Client GSTINs</p>
-                    <h2 className="mt-2 text-2xl font-black">Registrations</h2>
+                    <p className="text-xs font-black uppercase tracking-[0.16em] text-teal-700">GSTIN source list</p>
+                    <h2 className="mt-2 text-2xl font-black">Clients</h2>
                   </div>
-                  <button
-                    className="flex size-10 items-center justify-center rounded-2xl bg-slate-950 text-white"
-                    onClick={() => void loadWorkspace()}
-                    type="button"
-                  >
+                  <button className="flex size-10 items-center justify-center rounded-2xl bg-slate-950 text-white" onClick={() => void loadWorkspace()} type="button">
                     <RefreshCw className="size-4" />
                   </button>
                 </div>
 
                 <div className="mt-4 flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3">
                   <Search className="size-4 text-slate-400" />
-                  <input
-                    className="h-11 min-w-0 flex-1 border-0 bg-transparent text-sm font-semibold outline-none"
-                    onChange={(event) => setSearch(event.target.value)}
-                    placeholder="Search client or GSTIN"
-                    value={search}
-                  />
+                  <input className="h-11 min-w-0 flex-1 border-0 bg-transparent text-sm font-semibold outline-none" onChange={(event) => setSearch(event.target.value)} placeholder="Search client or GSTIN" value={search} />
                 </div>
 
-                <div className="mt-4 max-h-[520px] space-y-2 overflow-auto pr-1">
+                <div className="mt-4 max-h-[440px] space-y-2 overflow-auto pr-1">
                   {filteredRegistrations.map((registration) => (
                     <button
                       className={`w-full rounded-2xl border px-4 py-3 text-left transition ${
-                        registration.id === selectedRegistrationId
-                          ? "border-teal-300 bg-teal-50"
-                          : "border-slate-200 bg-slate-50 hover:bg-white"
+                        registration.id === selectedRegistrationId ? "border-teal-300 bg-teal-50" : "border-slate-200 bg-slate-50 hover:bg-white"
                       }`}
                       key={registration.id}
                       onClick={() => setSelectedRegistrationId(registration.id)}
@@ -328,39 +301,19 @@ export function GstTracker() {
                     >
                       <p className="text-sm font-black text-slate-950">{registration.client_name}</p>
                       <p className="mt-1 text-xs font-bold text-slate-500">{registration.gstin}</p>
-                      <div className="mt-2 flex flex-wrap gap-2">
-                        <span className="rounded-full bg-white px-2 py-1 text-[11px] font-black text-slate-600">
-                          {registration.filing_frequency}
-                        </span>
-                        <span className="rounded-full bg-emerald-100 px-2 py-1 text-[11px] font-black text-emerald-800">
-                          {registration.portal_status}
-                        </span>
-                      </div>
+                      <p className="mt-2 text-[11px] font-black uppercase text-slate-400">{registration.trade_name || registration.state_name || "Portal credentials mapped externally"}</p>
                     </button>
                   ))}
                 </div>
               </section>
 
               <section className="rounded-[28px] border border-white/80 bg-white/90 p-5 shadow-[0_24px_80px_rgba(15,23,42,0.10)]">
-                <h2 className="text-xl font-black text-slate-950">Add GSTIN</h2>
+                <h2 className="text-xl font-black text-slate-950">Add client GSTIN</h2>
                 <form className="mt-4 space-y-3" onSubmit={addRegistration}>
                   <input className="input" onChange={(e) => setClientName(e.target.value)} placeholder="Client name" required value={clientName} />
-                  <input
-                    className="input uppercase"
-                    maxLength={15}
-                    minLength={15}
-                    onChange={(e) => setGstin(e.target.value)}
-                    placeholder="15 digit GSTIN"
-                    required
-                    value={gstin}
-                  />
+                  <input className="input uppercase" maxLength={15} minLength={15} onChange={(e) => setGstin(e.target.value)} placeholder="GSTIN from Excel A2" required value={gstin} />
                   <input className="input" onChange={(e) => setTradeName(e.target.value)} placeholder="Trade name optional" value={tradeName} />
                   <input className="input" onChange={(e) => setStateName(e.target.value)} placeholder="State optional" value={stateName} />
-                  <select className="input" onChange={(e) => setFilingFrequency(e.target.value)} value={filingFrequency}>
-                    <option>Monthly</option>
-                    <option>Quarterly</option>
-                    <option>Annual</option>
-                  </select>
                   <button className="flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-slate-950 text-sm font-black text-white" disabled={isSavingClient} type="submit">
                     {isSavingClient ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}
                     Add GST client
@@ -373,84 +326,55 @@ export function GstTracker() {
               <section className="rounded-[28px] border border-white/80 bg-white/90 p-5 shadow-[0_24px_80px_rgba(15,23,42,0.10)]">
                 <div className="flex flex-col gap-4 border-b border-slate-200 pb-5 md:flex-row md:items-center md:justify-between">
                   <div>
-                    <p className="text-xs font-black uppercase tracking-[0.16em] text-fuchsia-700">Return monitor</p>
-                    <h2 className="mt-2 text-2xl font-black text-slate-950">
-                      {selectedRegistration?.client_name ?? "Select a GST client"}
-                    </h2>
-                    <p className="mt-1 text-sm font-bold text-slate-500">
-                      {selectedRegistration?.gstin ?? "Add a GSTIN to begin tracking returns"}
-                    </p>
+                    <p className="text-xs font-black uppercase tracking-[0.16em] text-fuchsia-700">Litigation / notices</p>
+                    <h2 className="mt-2 text-2xl font-black text-slate-950">{selectedRegistration?.client_name ?? "Select a GST client"}</h2>
+                    <p className="mt-1 text-sm font-bold text-slate-500">{selectedRegistration?.gstin ?? "Add a GSTIN to begin monitoring portal cases"}</p>
                   </div>
-                  <div className="grid grid-cols-2 gap-2 text-center">
-                    <Metric label="Filed" value={filedCount.toString()} tone="bg-emerald-100 text-emerald-800" />
-                    <Metric label="Rows" value={visibleTrackers.length.toString()} tone="bg-slate-100 text-slate-700" />
-                  </div>
+                  <Metric label="Rows" value={visibleCases.length.toString()} tone="bg-slate-100 text-slate-700" />
                 </div>
 
-                <form className="mt-5 grid gap-3 lg:grid-cols-6" onSubmit={addTracker}>
-                  <select className="input lg:col-span-1" onChange={(e) => setReturnType(e.target.value)} value={returnType}>
-                    {returnTypes.map((type) => (
-                      <option key={type}>{type}</option>
-                    ))}
-                  </select>
-                  <input className="input lg:col-span-1" onChange={(e) => setPeriodLabel(e.target.value)} placeholder="May 2026" required value={periodLabel} />
-                  <input className="input lg:col-span-1" onChange={(e) => setDueDate(e.target.value)} type="date" value={dueDate} />
-                  <select className="input lg:col-span-1" onChange={(e) => setFilingStatus(e.target.value)} value={filingStatus}>
-                    {statuses.map((status) => (
-                      <option key={status} value={status}>
-                        {statusLabel(status)}
-                      </option>
-                    ))}
-                  </select>
-                  <input className="input lg:col-span-1" onChange={(e) => setFiledAt(e.target.value)} type="date" value={filedAt} />
-                  <button
-                    className="flex h-12 items-center justify-center gap-2 rounded-2xl bg-slate-950 px-4 text-sm font-black text-white disabled:opacity-60 lg:col-span-1"
-                    disabled={!selectedRegistrationId || isSavingTracker}
-                    type="submit"
-                  >
-                    {isSavingTracker ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}
-                    Add row
+                <form className="mt-5 grid gap-3 lg:grid-cols-12" onSubmit={addCase}>
+                  <input className="input lg:col-span-2" onChange={(e) => setNoticeType(e.target.value)} placeholder="Type of Notice" value={noticeType} />
+                  <input className="input lg:col-span-3" onChange={(e) => setDescription(e.target.value)} placeholder="Description" value={description} />
+                  <input className="input lg:col-span-2" onChange={(e) => setRefId(e.target.value)} placeholder="Ref ID" value={refId} />
+                  <input className="input lg:col-span-2" onChange={(e) => setDateOfIssue(e.target.value)} type="date" value={dateOfIssue} />
+                  <input className="input lg:col-span-3" onChange={(e) => setCaseId(e.target.value)} placeholder="Case ID" value={caseId} />
+                  <input className="input lg:col-span-2" onChange={(e) => setCaseStatus(e.target.value)} placeholder="Status" value={caseStatus} />
+                  <input className="input lg:col-span-2" onChange={(e) => setTaxPeriod(e.target.value)} placeholder="Tax Period" value={taxPeriod} />
+                  <input className="input lg:col-span-2" onChange={(e) => setDueDate(e.target.value)} type="date" value={dueDate} />
+                  <input className="input lg:col-span-2" onChange={(e) => setSection(e.target.value)} placeholder="Section" value={section} />
+                  <input className="input lg:col-span-3" onChange={(e) => setReplyFilingStatus(e.target.value)} placeholder="Reply Filing" value={replyFilingStatus} />
+                  <button className="flex h-12 items-center justify-center gap-2 rounded-2xl bg-slate-950 px-4 text-sm font-black text-white disabled:opacity-60 lg:col-span-1" disabled={!selectedRegistrationId || isSavingCase} type="submit">
+                    {isSavingCase ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}
+                    Add
                   </button>
-                  <input className="input lg:col-span-2" onChange={(e) => setArn(e.target.value)} placeholder="ARN optional" value={arn} />
-                  <input className="input lg:col-span-4" onChange={(e) => setNotes(e.target.value)} placeholder="Notes / portal observation" value={notes} />
                 </form>
 
-                <div className="mt-5 overflow-hidden rounded-2xl border border-slate-200">
-                  <table className="w-full min-w-[860px] border-collapse bg-white text-left text-sm">
+                <div className="mt-5 overflow-auto rounded-2xl border border-slate-200">
+                  <table className="w-full min-w-[1280px] border-collapse bg-white text-left text-sm">
                     <thead className="bg-slate-50 text-xs font-black uppercase text-slate-500">
                       <tr>
-                        <th className="px-4 py-3">Return</th>
-                        <th className="px-4 py-3">Period</th>
-                        <th className="px-4 py-3">Due date</th>
-                        <th className="px-4 py-3">Status</th>
-                        <th className="px-4 py-3">Filed</th>
-                        <th className="px-4 py-3">ARN</th>
-                        <th className="px-4 py-3">Action</th>
+                        {["S.No.", "Type of Notice", "Description", "Ref ID", "Date of Issue", "Case ID", "Status", "Tax Period", "Due Date", "Section", "Reply Filing"].map((column) => (
+                          <th className="px-4 py-3" key={column}>{column}</th>
+                        ))}
                       </tr>
                     </thead>
                     <tbody>
-                      {visibleTrackers.map((tracker) => (
-                        <tr className="border-t border-slate-100" key={tracker.id}>
-                          <td className="px-4 py-3 font-black text-slate-950">{tracker.return_type}</td>
-                          <td className="px-4 py-3 font-bold text-slate-700">{tracker.period_label}</td>
-                          <td className="px-4 py-3 font-semibold text-slate-600">{tracker.due_date ?? "-"}</td>
+                      {visibleCases.map((item, index) => (
+                        <tr className="border-t border-slate-100" key={item.id}>
+                          <td className="px-4 py-3 font-bold">{item.serial_no ?? index + 1}</td>
+                          <td className="px-4 py-3 font-bold">{item.notice_type || "-"}</td>
+                          <td className="px-4 py-3">{item.description || "-"}</td>
+                          <td className="px-4 py-3">{item.ref_id || "-"}</td>
+                          <td className="px-4 py-3">{item.date_of_issue || "-"}</td>
+                          <td className="px-4 py-3">{item.case_id || "-"}</td>
                           <td className="px-4 py-3">
-                            <span className={`rounded-full px-2.5 py-1 text-xs font-black ${statusTone(tracker.status)}`}>
-                              {statusLabel(tracker.status)}
-                            </span>
+                            <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-black text-amber-800">{item.status || "-"}</span>
                           </td>
-                          <td className="px-4 py-3 font-semibold text-slate-600">{tracker.filed_at ?? "-"}</td>
-                          <td className="px-4 py-3 font-semibold text-slate-600">{tracker.arn || "-"}</td>
-                          <td className="px-4 py-3">
-                            <button
-                              className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-black text-emerald-800 disabled:opacity-50"
-                              disabled={tracker.status === "filed"}
-                              onClick={() => void updateTrackerStatus(tracker, "filed")}
-                              type="button"
-                            >
-                              Mark filed
-                            </button>
-                          </td>
+                          <td className="px-4 py-3">{item.tax_period || "-"}</td>
+                          <td className="px-4 py-3">{item.due_date || "-"}</td>
+                          <td className="px-4 py-3">{item.section || "-"}</td>
+                          <td className="px-4 py-3">{item.reply_filing_status || "-"}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -459,9 +383,9 @@ export function GstTracker() {
               </section>
 
               <section className="grid gap-4 md:grid-cols-3">
-                <InfoCard icon={ShieldCheck} title="Portal Sync Later" text="Do not store GST portal passwords. Use authorised APIs, import files, or controlled user-assisted intake." />
-                <InfoCard icon={CalendarDays} title="Due Date Control" text="Due dates are editable because GST deadlines can vary by filing type, state, turnover, and notifications." />
-                <InfoCard icon={IndianRupee} title="Billing Link Later" text="The same tracker can later drive compliance billing, fee realisation, and outstanding reports." />
+                <InfoCard icon={ShieldCheck} title="Local Portal Collector" text="The scraper runs on your computer, reads Downloads/WorkLineCo.xlsx, opens GST Portal, waits for manual CAPTCHA, and syncs rows." />
+                <InfoCard icon={FileSearch} title="Excel Mapping" text="For first client: A2 = GSTIN, B2 = GST Portal user ID, C2 = password. Later rows can hold more clients." />
+                <InfoCard icon={Scale} title="Legal Workflow First" text="This table is shaped around GST notices, proceedings, replies, and due-date follow-up." />
               </section>
             </section>
           </div>
@@ -498,29 +422,13 @@ function InfoCard({
   );
 }
 
-function statusLabel(status: string) {
-  return status.replaceAll("_", " ");
-}
-
-function statusTone(status: string) {
-  if (status === "filed") {
-    return "bg-emerald-100 text-emerald-800";
-  }
-
-  if (status === "on_hold") {
-    return "bg-sky-100 text-sky-800";
-  }
-
-  if (status === "not_applicable") {
-    return "bg-slate-100 text-slate-700";
-  }
-
-  return "bg-amber-100 text-amber-800";
-}
-
 function formatLoadError(message: string) {
+  if (message.toLowerCase().includes("gst_litigation_cases")) {
+    return "GST litigation database table is not installed yet. Run database/004_gst_litigation_monitor.sql in Supabase SQL Editor.";
+  }
+
   if (message.toLowerCase().includes("gst_registrations")) {
-    return "GST database tables are not installed yet. Run database/003_gst_tracker.sql in Supabase SQL Editor.";
+    return "GST registration table is not installed yet. Run database/003_gst_tracker.sql first, then database/004_gst_litigation_monitor.sql.";
   }
 
   return message;
