@@ -15,7 +15,6 @@ const config: Config = {
         moss: "#51675b",
         clay: "#b6654f",
         brass: "#a57d2a",
-        teal: "#2e6d74",
         plum: "#6f4a66"
       },
       boxShadow: {
