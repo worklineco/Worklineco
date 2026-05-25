@@ -10,14 +10,14 @@ export default function DashboardPage() {
             Workspace ready
           </p>
           <h1 className="mt-3 text-4xl font-black leading-tight text-slate-950">
-            Organisation foundation created.
+            GST compliance workspace.
           </h1>
           <p className="mt-4 text-sm font-semibold leading-6 text-slate-600">
-            Next we will replace this with the authenticated dashboard: clients,
-            tasks, team, billing state, and configurable role controls.
+            We are prioritising GST client tracking first: GSTINs, return
+            periods, due dates, filing status, ARN, and portal/import source.
           </p>
           <div className="mt-6 grid gap-3 sm:grid-cols-3">
-            {["Client Master", "Team Master", "Task Allocation"].map((item) => (
+            {["GST Client Tracker", "Due Date Monitor", "Filing Status"].map((item) => (
               <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold text-slate-700" key={item}>
                 {item}
               </div>
@@ -25,9 +25,9 @@ export default function DashboardPage() {
           </div>
           <Link
             className="mt-7 inline-flex h-12 items-center justify-center rounded-2xl bg-slate-950 px-5 text-sm font-black text-white"
-            href="/"
+            href="/gst"
           >
-            Back to public shell
+            Open GST Tracker
           </Link>
         </div>
       </section>

@@ -28,7 +28,7 @@ import type { ComponentType, ReactNode } from "react";
 const modules = [
   { name: "Dashboard", status: "Live", group: "Foundation", icon: LayoutDashboard, color: "teal" },
   { name: "Client Master", status: "Next", group: "Core records", icon: Building2, color: "blue" },
-  { name: "GST Tracker", status: "Planned", group: "Compliance", icon: ClipboardCheck, color: "amber" },
+  { name: "GST Tracker", status: "Live", group: "Compliance", icon: ClipboardCheck, color: "amber" },
   { name: "Attendance", status: "Planned", group: "People", icon: CalendarClock, color: "violet" },
   { name: "Team Master", status: "Next", group: "People", icon: UsersRound, color: "coral" },
   { name: "Task & Work Allocation", status: "Next", group: "Operations", icon: Activity, color: "green" },
@@ -64,7 +64,7 @@ const nextActions = [
   "Create password login",
   "Create organisation setup",
   "Add custom roles",
-  "Build client master"
+  "Build GST tracker"
 ];
 
 export default function Home() {
