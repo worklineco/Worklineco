@@ -9,8 +9,18 @@ max_rows = 1000
 
 [auth]
 enabled = true
-site_url = "http://localhost:3001"
-additional_redirect_urls = ["https://worklineco.com", "https://app.worklineco.com"]
+site_url = "https://worklineco.com"
+additional_redirect_urls = [
+  "https://worklineco.com",
+  "https://worklineco.com/auth/callback",
+  "https://worklineco.com/login",
+  "https://www.worklineco.com",
+  "https://www.worklineco.com/auth/callback",
+  "https://www.worklineco.com/login",
+  "http://localhost:3001",
+  "http://localhost:3001/auth/callback",
+  "http://localhost:3001/login"
+]
 jwt_expiry = 3600
 enable_signup = true
 
