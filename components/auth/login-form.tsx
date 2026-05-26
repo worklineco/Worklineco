@@ -44,7 +44,7 @@ export function LoginForm() {
     }
 
     if (result.data.session) {
-      window.location.href = "/onboarding";
+      window.location.href = getRedirectPath();
       return;
     }
 
@@ -165,6 +165,17 @@ export function LoginForm() {
       </form>
     </section>
   );
+}
+
+function getRedirectPath() {
+  const params = new URLSearchParams(window.location.search);
+  const nextPath = params.get("next");
+
+  if (nextPath?.startsWith("/") && !nextPath.startsWith("//")) {
+    return nextPath;
+  }
+
+  return "/onboarding";
 }
 
 function formatAuthMessage(message: string) {
