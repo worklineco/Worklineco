@@ -78,22 +78,30 @@ function startCollector({ gstin, rowNumber }) {
   const logStream = fs.createWriteStream(logPath, { flags: "a" });
   logStream.write(`\n[${new Date().toISOString()}] Starting collector for ${gstin || "Excel row"}\n`);
 
-  const child = spawn(process.execPath, args, {
-    cwd: process.cwd(),
-    detached: true,
-    stdio: ["ignore", "pipe", "pipe"],
-    windowsHide: false,
-  });
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, args, {
+      cwd: process.cwd(),
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+    });
 
-  child.stdout.pipe(logStream, { end: false });
-  child.stderr.pipe(logStream, { end: false });
-  child.on("exit", (code, signal) => {
-    logStream.write(`[${new Date().toISOString()}] Collector exited code=${code} signal=${signal}\n`);
-    logStream.end();
-  });
+    child.once("spawn", () => {
+      resolve(logPath);
+    });
 
-  child.unref();
-  return logPath;
+    child.once("error", (error) => {
+      logStream.write(`[${new Date().toISOString()}] Collector spawn failed: ${error.message}\n`);
+      logStream.end();
+      reject(error);
+    });
+
+    child.stdout.pipe(logStream, { end: false });
+    child.stderr.pipe(logStream, { end: false });
+    child.on("exit", (code, signal) => {
+      logStream.write(`[${new Date().toISOString()}] Collector exited code=${code} signal=${signal}\n`);
+      logStream.end();
+    });
+  });
 }
 
 const server = http.createServer(async (request, response) => {
@@ -121,7 +129,7 @@ const server = http.createServer(async (request, response) => {
 
   try {
     const body = await readJson(request);
-    const logPath = startCollector({
+    const logPath = await startCollector({
       gstin: body.gstin,
       rowNumber: Number.isInteger(body.rowNumber) ? body.rowNumber : null,
     });
