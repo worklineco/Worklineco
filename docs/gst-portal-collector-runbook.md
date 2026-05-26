@@ -62,11 +62,11 @@ portal login button, then the user still handles any CAPTCHA or portal prompt
 manually.
 
 When using the live WorkLine site at `https://worklineco.com/gst`, each user
-clicks **Install GST helper on this PC** once. That downloads
-`WorkLineGSTHelperSetup.vbs`, which runs hidden elevated PowerShell after the user
-clicks Open/Run and Yes on Windows prompts. The helper installs under
-`%LOCALAPPDATA%\WorkLine\GSTHelper`, registers `workline-gst://`, and starts the
-helper at sign-in.
+downloads **WorkLineGSTHelper-Windows.zip** once, extracts it, and runs
+**Install WorkLine GST Helper.bat**. The package includes Node.js and dependencies,
+so laptops do not need npm or manual PowerShell. The helper installs under
+`%LOCALAPPDATA%\WorkLine\GSTHelper`, registers `workline-gst://`, and starts at
+sign-in. See `docs/gst-helper-team-rollout.md` for a 50+ user email template.
 
 Developers can still run the helper manually:
 

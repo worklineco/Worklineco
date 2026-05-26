@@ -1,6 +1,7 @@
 export const LOCAL_GST_HELPER_URL = "http://127.0.0.1:48782";
 export const GST_HELPER_PROTOCOL = "workline-gst";
 export const GST_HELPER_INSTALL_PROTOCOL = "workline-gst-install";
+export const GST_HELPER_PORTABLE_ZIP = "/WorkLineGSTHelper-Windows.zip";
 
 export type GstHelperStatus = "ready" | "missing" | "checking";
 
@@ -31,7 +32,6 @@ export function launchGstHelperViaProtocol(gstin: string) {
   window.setTimeout(() => frame.remove(), 2000);
 }
 
-/** Opens the one-click installer if it was set up before on this PC. */
 export function launchGstHelperInstallViaProtocol() {
   const frame = document.createElement("iframe");
   frame.style.display = "none";
@@ -40,23 +40,14 @@ export function launchGstHelperInstallViaProtocol() {
   window.setTimeout(() => frame.remove(), 2000);
 }
 
-export function downloadGstHelperSetup(origin: string) {
+/** Recommended install for many laptops: portable ZIP with Node + dependencies included. */
+export function downloadPortableGstHelper(origin: string) {
   const link = document.createElement("a");
-  link.href = `${origin}/api/gst/helper/setup`;
-  link.download = "WorkLineGSTHelperSetup.vbs";
+  link.href = `${origin}${GST_HELPER_PORTABLE_ZIP}`;
+  link.download = "WorkLineGSTHelper-Windows.zip";
   document.body.appendChild(link);
   link.click();
   link.remove();
-}
-
-/**
- * Triggers the Windows installer (download + optional protocol relaunch) and waits
- * until the local helper responds on 127.0.0.1:48782.
- */
-export async function runGstHelperSetup(origin: string, timeoutMs = 180_000) {
-  launchGstHelperInstallViaProtocol();
-  downloadGstHelperSetup(origin);
-  return waitForGstHelperReady(timeoutMs, 2000);
 }
 
 export async function waitForGstHelperReady(timeoutMs = 12_000, intervalMs = 800): Promise<boolean> {

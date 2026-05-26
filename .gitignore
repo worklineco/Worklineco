@@ -9,5 +9,7 @@ build
 tsconfig.tsbuildinfo
 collector-output
 public/gst-helper-bundle.zip
+public/WorkLineGSTHelper-Windows.zip
 .gst-helper-bundle
+.gst-helper-portable
 WorkLineCo.xlsx

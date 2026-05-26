@@ -3,8 +3,8 @@
 import {
   LOCAL_GST_HELPER_URL,
   checkGstHelperReady,
+  downloadPortableGstHelper,
   launchGstHelperViaProtocol,
-  runGstHelperSetup,
   waitForGstHelperReady,
 } from "@/lib/gst-local-helper";
 import { supabase } from "@/lib/supabase/client";
@@ -250,28 +250,40 @@ export function GstTracker() {
       return true;
     }
 
-    return installGstHelperOnThisComputer();
-  }
-
-  async function installGstHelperOnThisComputer() {
-    setIsInstallingHelper(true);
+    setHelperReady(false);
     setInstallModalOpen(true);
     setInstallModalStep(1);
+    return false;
+  }
+
+  function beginPortableInstall() {
     setHelperReady(false);
     setMessage("");
+    setInstallModalOpen(true);
+    setInstallModalStep(1);
+    downloadPortableGstHelper(window.location.origin);
+  }
 
-    const ready = await runGstHelperSetup(window.location.origin);
+  async function verifyGstHelperInstalled() {
+    setIsInstallingHelper(true);
+    setMessage("");
 
+    const ready = await checkGstHelperReady();
     setIsInstallingHelper(false);
 
     if (ready) {
       setHelperReady(true);
       setInstallModalStep(3);
-      window.setTimeout(() => setInstallModalOpen(false), 2000);
+      setMessage("GST helper is connected on this PC.");
+      window.setTimeout(() => setInstallModalOpen(false), 2500);
       return true;
     }
 
+    setHelperReady(false);
     setInstallModalStep(2);
+    setMessage(
+      "Helper not detected yet. Extract the ZIP, run Install WorkLine GST Helper.bat, then click Check again.",
+    );
     return false;
   }
 
@@ -487,20 +499,33 @@ export function GstTracker() {
 
         {helperReady === false ? (
           <div className="mt-4 rounded-2xl border border-teal-200 bg-teal-50 px-4 py-4 text-sm text-teal-950">
-            <p className="font-black">One-time setup on this computer</p>
+            <p className="font-black">One-time setup on this computer (each laptop once)</p>
             <p className="mt-2 font-semibold leading-6">
-              GST portal login runs on this PC only. Click the button below — WorkLine will start setup for you.
-              Windows may show permission popups; you do not need to open PowerShell.
+              Download the WorkLine GST Helper ZIP, extract it, and run the install file inside.
+              No PowerShell commands. Takes about 2 minutes after download.
             </p>
-            <button
-              className="mt-4 flex h-12 items-center justify-center gap-2 rounded-2xl bg-teal-800 px-5 text-sm font-black text-white disabled:opacity-60"
-              disabled={isInstallingHelper}
-              onClick={() => void installGstHelperOnThisComputer()}
-              type="button"
-            >
-              {isInstallingHelper ? <Loader2 className="size-4 animate-spin" /> : <ShieldCheck className="size-4" />}
-              Install GST helper on this PC
-            </button>
+            <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+              <button
+                className="flex h-12 items-center justify-center gap-2 rounded-2xl bg-teal-800 px-5 text-sm font-black text-white"
+                onClick={beginPortableInstall}
+                type="button"
+              >
+                <ShieldCheck className="size-4" />
+                Download GST helper (Windows)
+              </button>
+              <button
+                className="flex h-12 items-center justify-center gap-2 rounded-2xl border border-teal-300 bg-white px-5 text-sm font-black text-teal-900 disabled:opacity-60"
+                disabled={isInstallingHelper}
+                onClick={() => void verifyGstHelperInstalled()}
+                type="button"
+              >
+                {isInstallingHelper ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
+                Check helper connection
+              </button>
+            </div>
+            <p className="mt-3 text-xs font-semibold text-teal-800">
+              If Smart App Control blocked a file, use More info → Run anyway on the .bat file (not the old .vbs).
+            </p>
           </div>
         ) : null}
 
@@ -510,33 +535,39 @@ export function GstTracker() {
               <p className="text-lg font-black text-slate-950">Setting up GST helper</p>
               {installModalStep === 3 ? (
                 <p className="mt-3 text-sm font-semibold leading-6 text-teal-800">
-                  Setup finished. You can click Get data now.
+                  Helper connected. You can click Get data now.
                 </p>
               ) : installModalStep === 2 ? (
                 <>
                   <p className="mt-3 text-sm font-semibold leading-6 text-slate-600">
-                    Setup is still running or was not approved. Click Open or Run on the downloaded
-                    WorkLineGSTHelperSetup file, then choose Yes on the Windows permission window.
+                    The helper is not running yet. Open the extracted folder and double-click
+                    Install WorkLine GST Helper.bat. If Windows blocks it, choose More info → Run anyway.
                   </p>
                   <button
                     className="mt-5 flex h-11 w-full items-center justify-center rounded-2xl bg-teal-800 text-sm font-black text-white"
-                    onClick={() => void installGstHelperOnThisComputer()}
+                    onClick={() => void verifyGstHelperInstalled()}
                     type="button"
                   >
-                    Try setup again
+                    Check helper connection
                   </button>
                 </>
               ) : (
                 <>
                   <ol className="mt-4 list-decimal space-y-2 pl-5 text-sm font-semibold leading-6 text-slate-600">
-                    <li>If your browser asks about WorkLineGSTHelperSetup, click Open or Run.</li>
-                    <li>If Windows shows a security prompt, click Yes. PowerShell will not open.</li>
-                    <li>Wait while WorkLine installs the helper (this can take a few minutes).</li>
+                    <li>Download WorkLineGSTHelper-Windows.zip (started automatically).</li>
+                    <li>Right-click the ZIP → Extract All → open the folder.</li>
+                    <li>Double-click Install WorkLine GST Helper.bat → More info → Run anyway if asked.</li>
+                    <li>Click Check helper connection below when the black window says setup complete.</li>
                   </ol>
-                  <div className="mt-5 flex items-center gap-2 text-sm font-bold text-teal-800">
-                    <Loader2 className="size-4 animate-spin" />
-                    Installing…
-                  </div>
+                  <button
+                    className="mt-5 flex h-11 w-full items-center justify-center gap-2 rounded-2xl bg-teal-800 text-sm font-black text-white disabled:opacity-60"
+                    disabled={isInstallingHelper}
+                    onClick={() => void verifyGstHelperInstalled()}
+                    type="button"
+                  >
+                    {isInstallingHelper ? <Loader2 className="size-4 animate-spin" /> : null}
+                    Check helper connection
+                  </button>
                 </>
               )}
               {installModalStep !== 3 ? (
@@ -749,7 +780,7 @@ function formatLoadError(message: string) {
 }
 
 function getCollectorSetupMessage() {
-  return "Complete the one-time GST helper setup on this computer (click Install GST helper on this PC), approve any Windows prompts, then click Get data again.";
+  return "Complete the one-time GST helper setup: download the Windows ZIP, run Install WorkLine GST Helper.bat, click Check helper connection, then try Get data again.";
 }
 
 function getCollectorHelpMessage() {
