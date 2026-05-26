@@ -115,6 +115,7 @@ function parseArgs() {
     autoNotices: parseBooleanFlag(args.get("auto-notices")),
     dryRun: parseBooleanFlag(args.get("dry-run")),
     expectedGstin: String(args.get("expect-gstin") || "").trim().toUpperCase(),
+    importNoticesFile: args.get("import-notices-file") || "",
     loginOnly: parseBooleanFlag(args.get("login-only")),
     outputDir: path.resolve(args.get("out") || OUTPUT_DIR),
     rowNumber: args.has("row") ? Number(args.get("row")) : null,
@@ -253,6 +254,58 @@ function normalizeExtractedRow(row, index) {
     due_date: parsePortalDate(row.dueDate),
     section: cleanCell(row.section) || null,
     reply_filing_status: cleanCell(row.replyFiling) || null,
+  };
+}
+
+function isPortalDate(value) {
+  return Boolean(parsePortalDate(value));
+}
+
+function normalizeNoticeTableRow(row, index) {
+  const refId = cleanCell(row.refId ?? row["Ref ID"] ?? row["Column 1"]);
+  const noticeType = cleanCell(row.typeOfNotice ?? row["Type of Notice"] ?? row["Column 2"]);
+  const description = cleanCell(row.description ?? row.Description ?? row["Column 3"]);
+  const dateOfIssue = cleanCell(row.dateOfIssue ?? row["Date of Issue"] ?? row["Date of Issuance"] ?? row["Column 4"]);
+  const fifthColumn = cleanCell(row.dueDate ?? row["Due Date"] ?? row["Column 5"]);
+
+  return {
+    sNo: row.sNo ?? row["S.No."] ?? String(index + 1),
+    typeOfNotice: noticeType,
+    description,
+    refId,
+    dateOfIssue,
+    caseId: cleanCell(row.caseId ?? row["Case ID"] ?? ""),
+    status: isPortalDate(fifthColumn) ? "" : fifthColumn,
+    taxPeriod: cleanCell(row.taxPeriod ?? row["Tax Period"] ?? ""),
+    dueDate: isPortalDate(fifthColumn) ? fifthColumn : "",
+    section: cleanCell(row.section ?? row.Section ?? ""),
+    replyFiling: cleanCell(row.replyFiling ?? row["Reply Filing"] ?? ""),
+  };
+}
+
+async function readNoticeRowsFromOutput(filePath) {
+  const content = await fs.readFile(filePath, "utf8");
+  const payload = JSON.parse(content);
+  const rows = [];
+
+  for (const table of payload.tables ?? []) {
+    for (const row of table.rows ?? []) {
+      rows.push(
+        normalizeNoticeTableRow(
+          {
+            ...row,
+            sourceSection: table.section,
+          },
+          rows.length,
+        ),
+      );
+    }
+  }
+
+  return {
+    extractedAt: payload.extractedAt || new Date().toISOString(),
+    gstin: String(payload.gstin || "").trim().toUpperCase(),
+    rows,
   };
 }
 
@@ -850,9 +903,11 @@ async function syncRowsToSupabase({ client, extractedAt, options, rows }) {
 
   const payload = rows.map((row, index) => {
     const normalized = normalizeExtractedRow(row, index);
+    const fallbackCaseId = normalized.case_id || normalized.ref_id || `row-${index + 1}`;
 
     return {
       ...normalized,
+      case_id: fallbackCaseId,
       organisation_id: organisationId,
       gst_registration_id: registrationId,
       source: "gst-portal-local-collector",
@@ -878,6 +933,40 @@ async function syncRowsToSupabase({ client, extractedAt, options, rows }) {
 async function main() {
   await loadLocalEnv();
   let options = parseArgs();
+
+  if (options.importNoticesFile) {
+    const imported = await readNoticeRowsFromOutput(path.resolve(options.importNoticesFile));
+    options = {
+      ...options,
+      expectedGstin: options.expectedGstin || imported.gstin,
+      sync: true,
+    };
+
+    if (!options.expectedGstin) {
+      throw new Error("The notices file does not include a GSTIN. Pass --expect-gstin with the matching GSTIN.");
+    }
+
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    options = await promptForWorkLineLogin(rl, options);
+    const client = {
+      gstin: options.expectedGstin,
+      rowNumber: options.rowNumber || 2,
+      userId: "",
+      password: "",
+    };
+
+    const result = await syncRowsToSupabase({
+      client,
+      extractedAt: imported.extractedAt,
+      options,
+      rows: imported.rows,
+    });
+
+    console.log(`Imported ${result.insertedOrUpdated} notice rows into WorkLine registration ${result.registrationId}.`);
+    await rl.close();
+    return;
+  }
+
   const client = readClientFromWorkbook(options);
   options = { ...options, rowNumber: client.rowNumber };
 

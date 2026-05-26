@@ -43,6 +43,15 @@ type GstLitigationCase = {
   source: string;
 };
 
+type GstNoticeOutput = {
+  extractedAt?: string;
+  gstin?: string;
+  tables?: {
+    rows?: Record<string, unknown>[];
+    section?: string;
+  }[];
+};
+
 const LOCAL_GST_HELPER_URL = "http://127.0.0.1:48782";
 
 export function GstTracker() {
@@ -236,6 +245,74 @@ export function GstTracker() {
     }
 
     setMessage(result.message ?? "GST portal collector started. Chrome or Edge should open shortly.");
+    void pollAndImportLatestNotices(selectedRegistration);
+  }
+
+  async function pollAndImportLatestNotices(registration: GstRegistration) {
+    const startedAt = Date.now();
+    const deadline = startedAt + 8 * 60 * 1000;
+
+    while (Date.now() < deadline) {
+      await wait(5000);
+
+      const response = await fetch(
+        `${LOCAL_GST_HELPER_URL}/latest?gstin=${encodeURIComponent(registration.gstin)}`,
+      ).catch(() => null);
+
+      if (!response?.ok) {
+        continue;
+      }
+
+      const latest = (await response.json().catch(() => null)) as
+        | { modifiedAt?: string; payload?: GstNoticeOutput }
+        | null;
+      const modifiedAt = latest?.modifiedAt ? new Date(latest.modifiedAt).getTime() : 0;
+
+      if (!latest?.payload || modifiedAt < startedAt) {
+        continue;
+      }
+
+      const imported = await importNoticeOutput(registration, latest.payload);
+      if (imported > 0) {
+        setMessage(`Imported ${imported} GST portal rows into WorkLine.`);
+        await loadWorkspace();
+        return;
+      }
+    }
+
+    setMessage("GST portal data was saved locally, but WorkLine did not receive a fresh output file in time. Click Refresh after a moment.");
+  }
+
+  async function importNoticeOutput(registration: GstRegistration, output: GstNoticeOutput) {
+    const rows = (output.tables ?? []).flatMap((table) => table.rows ?? []);
+    const payload = rows
+      .map((row, index) => normalizeNoticeOutputRow(row, index))
+      .filter((row) => row.ref_id || row.description)
+      .map((row) => ({
+        ...row,
+        case_id: row.case_id || row.ref_id || `row-${row.serial_no}`,
+        gst_registration_id: registration.id,
+        organisation_id: organisationId,
+        raw_payload: row,
+        scraped_at: output.extractedAt || new Date().toISOString(),
+        source: "gst-portal-local-helper",
+        updated_at: new Date().toISOString()
+      }));
+
+    if (!payload.length) {
+      return 0;
+    }
+
+    const { error } = await supabase.from("gst_litigation_cases").upsert(payload, {
+      onConflict: "organisation_id,gst_registration_id,ref_id,case_id"
+    });
+
+    if (error) {
+      setMessage(`Could not import GST portal rows: ${error.message}`);
+      return 0;
+    }
+
+    return payload.length;
   }
 
   const filteredRegistrations = useMemo(() => {
@@ -504,4 +581,54 @@ function formatCollectorStartError(error?: string) {
   }
 
   return error;
+}
+
+function cleanOutputCell(value: unknown) {
+  return String(value ?? "").replace(/\s+/g, " ").trim();
+}
+
+function parsePortalDate(value: unknown) {
+  const text = cleanOutputCell(value);
+
+  if (!text || ["-", "na", "n/a", "as applicable*"].includes(text.toLowerCase())) {
+    return null;
+  }
+
+  const match = text.match(/^(\d{1,2})[-/.\s](\d{1,2})[-/.\s](\d{2,4})$/);
+  if (!match) {
+    return null;
+  }
+
+  const [, day, month, yearValue] = match;
+  const year = yearValue.length === 2 ? `20${yearValue}` : yearValue;
+  return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+}
+
+function normalizeNoticeOutputRow(row: Record<string, unknown>, index: number) {
+  const refId = cleanOutputCell(row.refId ?? row["Ref ID"] ?? row["Column 1"]);
+  const noticeType = cleanOutputCell(row.typeOfNotice ?? row["Type of Notice"] ?? row["Column 2"]);
+  const description = cleanOutputCell(row.description ?? row.Description ?? row["Column 3"]);
+  const dateOfIssue = cleanOutputCell(row.dateOfIssue ?? row["Date of Issue"] ?? row["Date of Issuance"] ?? row["Column 4"]);
+  const fifthColumn = cleanOutputCell(row.dueDate ?? row["Due Date"] ?? row["Column 5"]);
+  const parsedFifthColumnDate = parsePortalDate(fifthColumn);
+
+  return {
+    case_id: cleanOutputCell(row.caseId ?? row["Case ID"] ?? ""),
+    date_of_issue: parsePortalDate(dateOfIssue),
+    description: description || null,
+    due_date: parsedFifthColumnDate,
+    notice_type: noticeType || null,
+    ref_id: refId || null,
+    reply_filing_status: cleanOutputCell(row.replyFiling ?? row["Reply Filing"] ?? "") || null,
+    section: cleanOutputCell(row.section ?? row.Section ?? "") || null,
+    serial_no: index + 1,
+    status: parsedFifthColumnDate ? null : fifthColumn || null,
+    tax_period: cleanOutputCell(row.taxPeriod ?? row["Tax Period"] ?? "") || null
+  };
+}
+
+function wait(ms: number) {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
 }

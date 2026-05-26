@@ -3,6 +3,7 @@ import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import process from "node:process";
+import { URL } from "node:url";
 
 const HOST = "127.0.0.1";
 const PORT = Number(process.env.WORKLINE_GST_HELPER_PORT || 48782);
@@ -104,8 +105,39 @@ function startCollector({ gstin, rowNumber }) {
   });
 }
 
+function findLatestOutput(gstin) {
+  const outputDir = path.join(process.cwd(), "collector-output");
+  const expectedGstin = String(gstin || "").trim().toUpperCase();
+  const files = fs.existsSync(outputDir)
+    ? fs.readdirSync(outputDir)
+      .filter((fileName) => fileName.startsWith("gst-notices-orders-") && fileName.endsWith(".json"))
+      .filter((fileName) => !expectedGstin || fileName.includes(expectedGstin))
+      .map((fileName) => {
+        const filePath = path.join(outputDir, fileName);
+        return {
+          fileName,
+          filePath,
+          stats: fs.statSync(filePath),
+        };
+      })
+      .sort((left, right) => right.stats.mtimeMs - left.stats.mtimeMs)
+    : [];
+
+  const latest = files[0];
+  if (!latest) {
+    return null;
+  }
+
+  return {
+    fileName: latest.fileName,
+    modifiedAt: latest.stats.mtime.toISOString(),
+    payload: JSON.parse(fs.readFileSync(latest.filePath, "utf8")),
+  };
+}
+
 const server = http.createServer(async (request, response) => {
   const origin = request.headers.origin || "";
+  const requestUrl = new URL(request.url || "/", `http://${HOST}:${PORT}`);
 
   if (!isAllowedOrigin(origin)) {
     sendJson(response, 403, { error: "Origin is not allowed for the WorkLine GST helper." }, "");
@@ -117,12 +149,24 @@ const server = http.createServer(async (request, response) => {
     return;
   }
 
-  if (request.method === "GET" && request.url === "/health") {
+  if (request.method === "GET" && requestUrl.pathname === "/health") {
     sendJson(response, 200, { status: "ready" }, origin);
     return;
   }
 
-  if (request.method !== "POST" || request.url !== "/start") {
+  if (request.method === "GET" && requestUrl.pathname === "/latest") {
+    const latest = findLatestOutput(requestUrl.searchParams.get("gstin"));
+
+    if (!latest) {
+      sendJson(response, 404, { error: "No GST notices output is available yet." }, origin);
+      return;
+    }
+
+    sendJson(response, 200, latest, origin);
+    return;
+  }
+
+  if (request.method !== "POST" || requestUrl.pathname !== "/start") {
     sendJson(response, 404, { error: "Unknown WorkLine GST helper endpoint." }, origin);
     return;
   }
