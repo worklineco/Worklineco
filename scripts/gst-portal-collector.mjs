@@ -5,7 +5,7 @@ import process from "node:process";
 import readline from "node:readline/promises";
 import { createClient } from "@supabase/supabase-js";
 import { chromium } from "playwright-core";
-import * as XLSX from "xlsx";
+import XLSX from "xlsx";
 
 const GST_PORTAL_LOGIN_URL = "https://services.gst.gov.in/services/login";
 const DEFAULT_WORKBOOK_PATH = path.join(os.homedir(), "Downloads", "WorkLineCo.xlsx");
