@@ -316,7 +316,7 @@ export function GstTracker() {
 
   async function importNoticeOutput(registration: GstRegistration, output: GstNoticeOutput) {
     const rows = (output.tables ?? []).flatMap((table) => table.rows ?? []);
-    const payload = rows
+    const payload = dedupeCaseRows(rows
       .map((row, index) => normalizeNoticeOutputRow(row, index))
       .filter((row) => row.ref_id || row.description)
       .map((row) => ({
@@ -328,7 +328,7 @@ export function GstTracker() {
         scraped_at: output.extractedAt || new Date().toISOString(),
         source: "gst-portal-local-helper",
         updated_at: new Date().toISOString()
-      }));
+      })));
 
     if (!payload.length) {
       return 0;
@@ -671,4 +671,22 @@ function wait(ms: number) {
   return new Promise((resolve) => {
     window.setTimeout(resolve, ms);
   });
+}
+
+function dedupeCaseRows<T extends { case_id: string | null; ref_id: string | null }>(rows: T[]) {
+  const seen = new Set<string>();
+  const deduped: T[] = [];
+
+  for (const row of rows) {
+    const key = `${row.ref_id || ""}::${row.case_id || ""}`;
+
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    deduped.push(row);
+  }
+
+  return deduped;
 }
