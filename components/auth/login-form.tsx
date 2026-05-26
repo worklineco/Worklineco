@@ -18,6 +18,18 @@ const teamOptions = [
   "Team 10",
   "Team 12"
 ];
+const teamEmailByName: Record<string, string> = {
+  "Team 01": "team01.dco@gmail.com",
+  "Team 03": "team03.dco@gmail.com",
+  "Team 04": "team04.dco@gmail.com",
+  "Team 05": "team05.dco@gmail.com",
+  "Team 06": "team06.dco@gmail.com",
+  "Team 07": "team07.dco@gmail.com",
+  "Team 08": "team08.dco@gmail.com",
+  "Team 09": "team09.dco@gmail.com",
+  "Team 10": "team10.dco@gmail.com",
+  "Team 12": "team12.dco@gmail.com"
+};
 const partnerOptions = [
   "Mr. Arvind Dhadda",
   "Mr. Yash Dhadda",
@@ -36,9 +48,10 @@ export function LoginForm() {
   const [team, setTeam] = useState("");
   const [email, setEmail] = useState("");
   const [emailOtp, setEmailOtp] = useState("");
+  const [teamOtp, setTeamOtp] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [signupStep, setSignupStep] = useState<"details" | "emailOtp">("details");
+  const [signupStep, setSignupStep] = useState<"details" | "emailOtp" | "teamOtp">("details");
   const [message, setMessage] = useState("");
   const [messageType, setMessageType] = useState<"error" | "success" | "info">("info");
   const [isLoading, setIsLoading] = useState(false);
@@ -46,6 +59,7 @@ export function LoginForm() {
   const isValidOrg = orgId.trim().toUpperCase() === organisationId;
   const needsTeam = ["Article Assistant", "Associate / Manager", "Senior Manager"].includes(role);
   const needsPartner = role === "Partner";
+  const teamEmail = needsTeam ? teamEmailByName[team] : "";
 
   function changeMode(nextMode: "signin" | "signup") {
     setMode(nextMode);
@@ -53,6 +67,7 @@ export function LoginForm() {
     setMessageType("info");
     setSignupStep("details");
     setEmailOtp("");
+    setTeamOtp("");
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -104,16 +119,14 @@ export function LoginForm() {
     };
 
     if (signupStep === "details") {
-      const result = await supabase.auth.signInWithOtp({
+      const result = await sendOtp({
         email,
-        options: {
-          data: userData,
-          shouldCreateUser: true
-        }
+        label: name,
+        purpose: "signup-email"
       });
 
-      if (result.error) {
-        setMessage(formatAuthMessage(result.error.message));
+      if (!result.ok) {
+        setMessage(result.error);
         setMessageType("error");
         setIsLoading(false);
         return;
@@ -126,32 +139,72 @@ export function LoginForm() {
       return;
     }
 
-    const verified = await supabase.auth.verifyOtp({
-      email,
-      token: emailOtp,
-      type: "email"
+    if (signupStep === "emailOtp") {
+      const verified = await verifyOtp({
+        email,
+        otp: emailOtp,
+        purpose: "signup-email"
+      });
+
+      if (!verified.ok) {
+        setMessage(verified.error);
+        setMessageType("error");
+        setIsLoading(false);
+        return;
+      }
+
+      if (teamEmail) {
+        const teamOtpResult = await sendOtp({
+          email: teamEmail,
+          label: team,
+          purpose: "team"
+        });
+
+        if (!teamOtpResult.ok) {
+          setMessage(teamOtpResult.error);
+          setMessageType("error");
+          setIsLoading(false);
+          return;
+        }
+
+        setSignupStep("teamOtp");
+        setMessage(`Team OTP sent to ${teamEmail}.`);
+        setMessageType("success");
+        setIsLoading(false);
+        return;
+      }
+
+      const completed = await completeSignup({ email, metadata: userData, password, teamEmail });
+
+      if (!completed.ok) {
+        setMessage(completed.error);
+        setMessageType("error");
+        setIsLoading(false);
+      }
+
+      return;
+    }
+
+    const teamVerified = await verifyOtp({
+      email: teamEmail,
+      otp: teamOtp,
+      purpose: "team"
     });
 
-    if (verified.error) {
-      setMessage(formatAuthMessage(verified.error.message));
+    if (!teamVerified.ok) {
+      setMessage(teamVerified.error);
       setMessageType("error");
       setIsLoading(false);
       return;
     }
 
-    const updated = await supabase.auth.updateUser({
-      data: userData,
-      password
-    });
+    const completed = await completeSignup({ email, metadata: userData, password, teamEmail });
 
-    if (updated.error) {
-      setMessage(formatAuthMessage(updated.error.message));
+    if (!completed.ok) {
+      setMessage(completed.error);
       setMessageType("error");
       setIsLoading(false);
-      return;
     }
-
-    window.location.href = getRedirectPath();
   }
 
   return (
@@ -218,7 +271,7 @@ export function LoginForm() {
                   setRole("");
                   setTeam("");
                 }}
-                placeholder="DCO1433"
+                placeholder="Enter organisation ID"
                 required
                 value={orgId}
               />
@@ -326,6 +379,20 @@ export function LoginForm() {
           </label>
         ) : null}
 
+        {mode === "signup" && signupStep === "teamOtp" ? (
+          <label className="block">
+            <span className="text-xs font-black uppercase text-slate-500">Team OTP</span>
+            <input
+              className={inputClass}
+              inputMode="numeric"
+              onChange={(event) => setTeamOtp(event.target.value)}
+              placeholder={`Enter OTP sent to ${teamEmail}`}
+              required
+              value={teamOtp}
+            />
+          </label>
+        ) : null}
+
         <button
           className="flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-slate-950 text-sm font-black text-white shadow-[0_18px_45px_rgba(15,23,42,0.28)] transition hover:-translate-y-0.5 hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-500"
           disabled={isLoading || (mode === "signup" && Boolean(orgId) && !isValidOrg)}
@@ -336,15 +403,17 @@ export function LoginForm() {
             ? "Sign in"
             : signupStep === "details"
               ? "Send email OTP"
-              : "Verify OTP and create account"}
+              : signupStep === "emailOtp"
+                ? "Verify email OTP"
+                : "Verify team OTP and create account"}
           {!isLoading ? <ArrowRight className="size-4" /> : null}
         </button>
 
-        <p className="rounded-2xl border border-sky-100 bg-sky-50 px-4 py-3 text-xs font-bold leading-5 text-sky-900">
-          {mode === "signin"
-            ? "Use your email ID and password to access WorkLine Co."
-            : "Signup is currently limited to organisation ID DCO1433 and requires email OTP verification first."}
-        </p>
+        {mode === "signin" ? (
+          <p className="rounded-2xl border border-sky-100 bg-sky-50 px-4 py-3 text-xs font-bold leading-5 text-sky-900">
+            Use your email ID and password to access WorkLine Co.
+          </p>
+        ) : null}
 
         {message ? (
           <div
@@ -365,6 +434,38 @@ export function LoginForm() {
   );
 }
 
+async function completeSignup({
+  email,
+  metadata,
+  password,
+  teamEmail
+}: {
+  email: string;
+  metadata: Record<string, string>;
+  password: string;
+  teamEmail: string;
+}) {
+  const response = await fetch("/api/auth/complete-signup", {
+    body: JSON.stringify({ email, metadata, password, teamEmail }),
+    headers: { "Content-Type": "application/json" },
+    method: "POST"
+  });
+  const result = (await response.json()) as { error?: string; ok?: boolean };
+
+  if (!response.ok || !result.ok) {
+    return { error: result.error ?? "Could not complete signup.", ok: false as const };
+  }
+
+  const signin = await supabase.auth.signInWithPassword({ email, password });
+
+  if (signin.error) {
+    return { error: formatAuthMessage(signin.error.message), ok: false as const };
+  }
+
+  window.location.href = getRedirectPath();
+  return { ok: true as const };
+}
+
 function getRedirectPath() {
   const params = new URLSearchParams(window.location.search);
   const nextPath = params.get("next");
@@ -374,6 +475,48 @@ function getRedirectPath() {
   }
 
   return "/onboarding";
+}
+
+async function sendOtp({
+  email,
+  label,
+  purpose
+}: {
+  email: string;
+  label: string;
+  purpose: string;
+}) {
+  const response = await fetch("/api/auth/send-otp", {
+    body: JSON.stringify({ email, label, purpose }),
+    headers: { "Content-Type": "application/json" },
+    method: "POST"
+  });
+  const result = (await response.json()) as { error?: string; ok?: boolean };
+
+  return response.ok && result.ok
+    ? { ok: true as const }
+    : { error: result.error ?? "Could not send OTP.", ok: false as const };
+}
+
+async function verifyOtp({
+  email,
+  otp,
+  purpose
+}: {
+  email: string;
+  otp: string;
+  purpose: string;
+}) {
+  const response = await fetch("/api/auth/verify-otp", {
+    body: JSON.stringify({ email, otp, purpose }),
+    headers: { "Content-Type": "application/json" },
+    method: "POST"
+  });
+  const result = (await response.json()) as { error?: string; ok?: boolean };
+
+  return response.ok && result.ok
+    ? { ok: true as const }
+    : { error: result.error ?? "Invalid OTP.", ok: false as const };
 }
 
 function formatAuthMessage(message: string) {
