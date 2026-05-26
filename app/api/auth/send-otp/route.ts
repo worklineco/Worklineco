@@ -19,7 +19,8 @@ export async function POST(request: Request) {
 
   const smtpHost = process.env.SMTP_HOST;
   const smtpPort = Number(process.env.SMTP_PORT ?? 465);
-  const smtpUser = process.env.SMTP_USER;
+  const fromEmail = process.env.OTP_FROM_EMAIL ?? "";
+  const smtpUser = process.env.SMTP_USER ?? extractEmailAddress(fromEmail);
   const smtpAppPassword = process.env.SMTP_APP_PASSWORD;
 
   if (!smtpHost || !smtpUser || !smtpAppPassword) {
@@ -57,7 +58,7 @@ export async function POST(request: Request) {
   try {
     await sendSmtpMail({
       body: `${description}\n\n${otp}\n\nThis OTP expires in 10 minutes.`,
-      from: process.env.OTP_FROM_EMAIL ?? `WorkLine Co <${smtpUser}>`,
+      from: fromEmail || `WorkLine Co <${smtpUser}>`,
       host: smtpHost,
       password: smtpAppPassword,
       port: smtpPort,
@@ -80,6 +81,16 @@ export async function POST(request: Request) {
 
 function otpCookieName(purpose: string) {
   return `wl_${purpose.replace(/[^a-z0-9-]/gi, "")}_otp`;
+}
+
+function extractEmailAddress(value: string) {
+  const match = value.match(/<([^>]+)>/);
+
+  if (match?.[1]) {
+    return match[1].trim();
+  }
+
+  return value.includes("@") ? value.trim() : undefined;
 }
 
 function signOtp({
