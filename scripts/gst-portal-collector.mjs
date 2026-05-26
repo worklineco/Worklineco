@@ -420,9 +420,49 @@ async function clickPortalLinkByText(page, text, label) {
     }
 
     link.scrollIntoView({ block: "center", inline: "center" });
+    link.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, cancelable: true, view: window }));
+    link.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window }));
+    link.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, view: window }));
     link.click();
     return true;
   }, text).catch(() => false);
+
+  if (clicked) {
+    console.log(`Clicked ${label}.`);
+    await page.waitForLoadState("domcontentloaded", { timeout: 15_000 }).catch(() => {});
+    await page.waitForTimeout(1_000);
+    return true;
+  }
+
+  console.log(`Could not click ${label}.`);
+  return false;
+}
+
+async function clickPortalLinkByHref(page, hrefPart, text, label) {
+  const clicked = await page.evaluate(
+    ({ hrefPart: targetHrefPart, text: targetText }) => {
+      const normalize = (value) => String(value ?? "").replace(/\s+/g, " ").trim().toLowerCase();
+      const target = normalize(targetText);
+      const link = [...document.querySelectorAll("a")]
+        .find((element) => {
+          const href = element.getAttribute("href") || element.getAttribute("data-ng-href") || "";
+          const textMatches = !target || normalize(element.innerText || element.textContent) === target;
+          return href.includes(targetHrefPart) && textMatches;
+        });
+
+      if (!link) {
+        return false;
+      }
+
+      link.scrollIntoView({ block: "center", inline: "center" });
+      link.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, cancelable: true, view: window }));
+      link.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window }));
+      link.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, view: window }));
+      link.click();
+      return true;
+    },
+    { hrefPart, text },
+  ).catch(() => false);
 
   if (clicked) {
     console.log(`Clicked ${label}.`);
@@ -446,26 +486,12 @@ async function navigateToNoticesAndOrders(page) {
   await waitForAuthenticatedPortal(page);
   await handlePortalPopups(page);
 
-  await clickFirstVisible(
-    page,
-    [
-      "a.dropdown-toggle:has-text('Services')",
-      "a[href='#']:has-text('Services')",
-      "a:has-text('Services')",
-    ],
-    "Services",
-  );
-  await page.waitForTimeout(750);
+  await clickPortalLinkByText(page, "Services", "Services");
+  await page.waitForTimeout(3_000);
 
-  const clickedUserServices = await clickFirstVisible(
-    page,
-    [
-      "a[href='//services.gst.gov.in/services/auth/quicklinks/userservices']:has-text('User Services')",
-      "a[href*='/services/auth/quicklinks/userservices']:has-text('User Services')",
-      "a:has-text('User Services')",
-    ],
-    "User Services",
-  );
+  const clickedUserServices =
+    await clickPortalLinkByText(page, "User Services", "User Services") ||
+    await clickPortalLinkByHref(page, "/services/auth/quicklinks/userservices", "User Services", "User Services");
 
   if (!clickedUserServices) {
     await page.goto("https://services.gst.gov.in/services/auth/quicklinks/userservices", {
@@ -476,15 +502,9 @@ async function navigateToNoticesAndOrders(page) {
 
   await page.waitForTimeout(1_000);
 
-  const clickedNotices = await clickFirstVisible(
-    page,
-    [
-      "a[href='//services.gst.gov.in/services/auth/notices']:has-text('View Notices and Orders')",
-      "a[href*='/services/auth/notices']:has-text('View Notices and Orders')",
-      "a:has-text('View Notices and Orders')",
-    ],
-    "View Notices and Orders",
-  );
+  const clickedNotices =
+    await clickPortalLinkByText(page, "View Notices and Orders", "View Notices and Orders") ||
+    await clickPortalLinkByHref(page, "/services/auth/notices", "View Notices and Orders", "View Notices and Orders");
 
   const reached = await page.waitForFunction(
     () =>
