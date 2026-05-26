@@ -275,20 +275,31 @@ async function launchChrome() {
 }
 
 async function fillFirstVisible(page, selectors, value, label) {
-  for (const selector of selectors) {
-    const locator = page.locator(selector);
-    const count = await locator.count().catch(() => 0);
+  const deadline = Date.now() + 20_000;
 
-    for (let index = 0; index < Math.min(count, 5); index += 1) {
-      const input = locator.nth(index);
-      const visible = await input.isVisible({ timeout: 500 }).catch(() => false);
+  while (Date.now() < deadline) {
+    for (const selector of selectors) {
+      const locator = page.locator(selector);
+      const count = await locator.count().catch(() => 0);
 
-      if (visible) {
-        await input.fill(value);
-        console.log(`Filled ${label}.`);
-        return true;
+      for (let index = 0; index < Math.min(count, 5); index += 1) {
+        const input = locator.nth(index);
+        const visible = await input.isVisible({ timeout: 500 }).catch(() => false);
+
+        if (visible) {
+          await input.fill(value);
+          await input.evaluate((element) => {
+            element.dispatchEvent(new Event("input", { bubbles: true }));
+            element.dispatchEvent(new Event("change", { bubbles: true }));
+            element.dispatchEvent(new Event("blur", { bubbles: true }));
+          }).catch(() => {});
+          console.log(`Filled ${label}.`);
+          return true;
+        }
       }
     }
+
+    await page.waitForTimeout(500);
   }
 
   console.log(`Could not auto-fill ${label}. Please type it manually in the browser.`);
@@ -296,25 +307,50 @@ async function fillFirstVisible(page, selectors, value, label) {
 }
 
 async function clickFirstVisible(page, selectors, label) {
-  for (const selector of selectors) {
-    const locator = page.locator(selector);
-    const count = await locator.count().catch(() => 0);
+  const deadline = Date.now() + 20_000;
 
-    for (let index = 0; index < Math.min(count, 5); index += 1) {
-      const element = locator.nth(index);
-      const visible = await element.isVisible({ timeout: 500 }).catch(() => false);
-      const enabled = await element.isEnabled({ timeout: 500 }).catch(() => false);
+  while (Date.now() < deadline) {
+    for (const selector of selectors) {
+      const locator = page.locator(selector);
+      const count = await locator.count().catch(() => 0);
 
-      if (visible && enabled) {
-        await element.click();
-        console.log(`Clicked ${label}.`);
-        return true;
+      for (let index = 0; index < Math.min(count, 5); index += 1) {
+        const element = locator.nth(index);
+        const visible = await element.isVisible({ timeout: 500 }).catch(() => false);
+        const enabled = await element.isEnabled({ timeout: 500 }).catch(() => false);
+
+        if (visible && enabled) {
+          await element.click();
+          console.log(`Clicked ${label}.`);
+          return true;
+        }
       }
     }
+
+    await page.waitForTimeout(500);
   }
 
   console.log(`Could not auto-click ${label}. Please click it manually in the browser.`);
   return false;
+}
+
+async function clickGstLoginButton(page, label) {
+  return clickFirstVisible(
+    page,
+    [
+      "button[type='submit']:has-text('LOGIN')",
+      "button[type='submit']:has-text('Login')",
+      "button:has-text('LOGIN')",
+      "button:has-text('Login')",
+      "input[type='submit'][value='LOGIN']",
+      "input[type='submit'][value='Login']",
+      "input[type='button'][value='LOGIN']",
+      "input[type='button'][value='Login']",
+      "a:has-text('LOGIN')",
+      "a:has-text('Login')",
+    ],
+    label,
+  );
 }
 
 async function waitForCaptchaAndSubmit(page) {
@@ -322,6 +358,8 @@ async function waitForCaptchaAndSubmit(page) {
     "input#captcha",
     "input[name='captcha']",
     "input[formcontrolname='captcha']",
+    "input[ng-model*='captcha' i]",
+    "input[placeholder*='characters' i]",
     "input[placeholder*='Captcha' i]",
     "input[aria-label*='Captcha' i]",
   ];
@@ -345,20 +383,7 @@ async function waitForCaptchaAndSubmit(page) {
         const value = await input.inputValue().catch(() => "");
         if (value.trim().length >= 6) {
           console.log("CAPTCHA entered.");
-          return clickFirstVisible(
-            page,
-            [
-              "button:has-text('LOGIN')",
-              "button:has-text('Login')",
-              "input[type='submit'][value='LOGIN']",
-              "input[type='submit'][value='Login']",
-              "input[type='button'][value='LOGIN']",
-              "input[type='button'][value='Login']",
-              "a:has-text('LOGIN')",
-              "a:has-text('Login')",
-            ],
-            "GST portal login button",
-          );
+          return clickGstLoginButton(page, "GST portal login button");
         }
 
         await page.waitForTimeout(500);
@@ -621,13 +646,16 @@ async function main() {
   const page = await context.newPage();
 
   await page.goto(GST_PORTAL_LOGIN_URL, { waitUntil: "domcontentloaded" });
+  await page.waitForLoadState("load", { timeout: 20_000 }).catch(() => {});
 
   await fillFirstVisible(
     page,
     [
       "input#username",
+      "input[name='user_name']",
       "input[name='username']",
       "input[formcontrolname='username']",
+      "input[placeholder*='Username' i]",
       "input[type='text']",
     ],
     client.userId,
@@ -641,6 +669,7 @@ async function main() {
       "input#password",
       "input[name='user_pass']",
       "input[name='password']",
+      "input[placeholder*='Password' i]",
       "input[type='password']",
     ],
     client.password,
@@ -650,6 +679,8 @@ async function main() {
   if (options.loginOnly) {
     console.log("");
     console.log("GST portal opened and credentials were filled from Excel.");
+    console.log("Clicking GST portal login button so CAPTCHA can load.");
+    await clickGstLoginButton(page, "GST portal login button");
     await waitForCaptchaAndSubmit(page);
     console.log("Keep this process running while the browser is in use.");
     await new Promise(() => {});
