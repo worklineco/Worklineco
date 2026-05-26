@@ -153,7 +153,7 @@ async function sendSmtpMail({
       ].join("\r\n") + "\r\n"
     );
     await readResponse(socket);
-    await command(socket, "QUIT");
+    await command(socket, "QUIT", 221);
   } finally {
     socket.end();
   }
