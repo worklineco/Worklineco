@@ -51,7 +51,7 @@ export async function POST(request: Request) {
 
   const emailResult = await fetch("https://api.resend.com/emails", {
     body: JSON.stringify({
-      from: process.env.OTP_FROM_EMAIL ?? "WorkLine Co <onboarding@resend.dev>",
+      from: process.env.OTP_FROM_EMAIL ?? "WorkLine Co <onboarding@worklineco.com>",
       html: `<p>${description}</p><p style="font-size:24px;font-weight:700;letter-spacing:4px">${otp}</p><p>This OTP expires in 10 minutes.</p>`,
       subject,
       text: `${description}\n\n${otp}\n\nThis OTP expires in 10 minutes.`,
@@ -66,10 +66,22 @@ export async function POST(request: Request) {
 
   if (!emailResult.ok) {
     const details = await emailResult.text();
-    return NextResponse.json({ error: "Could not send OTP email.", details }, { status: 502 });
+    return NextResponse.json({ error: formatEmailError(details), details }, { status: 502 });
   }
 
   return NextResponse.json({ ok: true });
+}
+
+function formatEmailError(details: string) {
+  if (details.toLowerCase().includes("resend.dev")) {
+    return "OTP email could not be sent because the sender domain is still in test mode. Please verify worklineco.com in Resend.";
+  }
+
+  if (details.toLowerCase().includes("domain") || details.toLowerCase().includes("from")) {
+    return "OTP email could not be sent because the sender email domain is not verified in Resend.";
+  }
+
+  return "Could not send OTP email. Please check the email sender setup.";
 }
 
 function otpCookieName(purpose: string) {
