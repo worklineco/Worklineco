@@ -25,8 +25,10 @@ export async function POST(request: Request) {
     email: string;
     expiresAt: number;
     hash: string;
+    otp?: string;
   };
   const normalizedEmail = email.trim().toLowerCase();
+  const normalizedOtp = otp.trim();
 
   if (saved.email !== normalizedEmail || saved.expiresAt < Date.now()) {
     return NextResponse.json({ error: "OTP expired. Please request a new OTP." }, { status: 400 });
@@ -35,11 +37,14 @@ export async function POST(request: Request) {
   const expectedHash = signOtp({
     email: normalizedEmail,
     expiresAt: saved.expiresAt,
-    otp,
+    otp: normalizedOtp,
     purpose
   });
 
-  if (!safeEqual(saved.hash, expectedHash)) {
+  const isValidLegacyOtp = safeEqual(saved.hash, expectedHash);
+  const isValidCookieOtp = saved.otp ? safeEqual(saved.otp, normalizedOtp) : false;
+
+  if (!isValidLegacyOtp && !isValidCookieOtp) {
     return NextResponse.json({ error: "Invalid OTP." }, { status: 400 });
   }
 

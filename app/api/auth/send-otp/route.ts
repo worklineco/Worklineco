@@ -39,7 +39,7 @@ export async function POST(request: Request) {
 
   cookieStore.set(
     cookieName,
-    Buffer.from(JSON.stringify({ email: normalizedEmail, expiresAt, hash })).toString("base64url"),
+    Buffer.from(JSON.stringify({ email: normalizedEmail, expiresAt, hash, otp })).toString("base64url"),
     {
       httpOnly: true,
       maxAge: Math.floor(otpTtlMs / 1000),
