@@ -112,6 +112,7 @@ function parseArgs() {
 
   return {
     clientName: args.get("client-name") || "",
+    autoNotices: parseBooleanFlag(args.get("auto-notices")),
     dryRun: parseBooleanFlag(args.get("dry-run")),
     expectedGstin: String(args.get("expect-gstin") || "").trim().toUpperCase(),
     loginOnly: parseBooleanFlag(args.get("login-only")),
@@ -395,6 +396,171 @@ async function waitForCaptchaAndSubmit(page) {
   return false;
 }
 
+async function waitForAuthenticatedPortal(page) {
+  await page.waitForLoadState("domcontentloaded", { timeout: 20_000 }).catch(() => {});
+  await page.waitForFunction(
+    () =>
+      location.href.includes("/auth/") ||
+      document.body.innerText.includes("Dashboard") ||
+      document.body.innerText.includes("Services"),
+    null,
+    { timeout: 45_000 },
+  ).catch(() => {});
+}
+
+async function clickPortalLinkByText(page, text, label) {
+  const clicked = await page.evaluate((targetText) => {
+    const normalize = (value) => String(value ?? "").replace(/\s+/g, " ").trim().toLowerCase();
+    const target = normalize(targetText);
+    const link = [...document.querySelectorAll("a,button")]
+      .find((element) => normalize(element.innerText || element.textContent) === target);
+
+    if (!link) {
+      return false;
+    }
+
+    link.scrollIntoView({ block: "center", inline: "center" });
+    link.click();
+    return true;
+  }, text).catch(() => false);
+
+  if (clicked) {
+    console.log(`Clicked ${label}.`);
+    await page.waitForLoadState("domcontentloaded", { timeout: 15_000 }).catch(() => {});
+    await page.waitForTimeout(1_000);
+    return true;
+  }
+
+  console.log(`Could not click ${label}.`);
+  return false;
+}
+
+async function handlePortalPopups(page) {
+  for (const label of ["Remind me later", "No-Remind me later", "No, Remind me later", "Remind Me Later"]) {
+    await clickPortalLinkByText(page, label, label).catch(() => false);
+  }
+}
+
+async function navigateToNoticesAndOrders(page) {
+  console.log("Navigating to Services > User Services > View Notices and Orders.");
+  await waitForAuthenticatedPortal(page);
+  await handlePortalPopups(page);
+
+  const steps = [
+    ["Services", "Services"],
+    ["User Services", "User Services"],
+    ["View Notices and Orders", "View Notices and Orders"],
+  ];
+
+  for (const [text, label] of steps) {
+    await clickPortalLinkByText(page, text, label);
+  }
+
+  const reached = await page.waitForFunction(
+    () =>
+      location.href.includes("/auth/notices") ||
+      document.body.innerText.includes("Additional Notices") ||
+      document.body.innerText.includes("Notices and Orders"),
+    null,
+    { timeout: 20_000 },
+  ).then(() => true).catch(() => false);
+
+  if (!reached) {
+    console.log("Menu navigation did not reach notices page. Opening View Notices and Orders directly.");
+    await page.goto("https://services.gst.gov.in/services/auth/notices", {
+      waitUntil: "domcontentloaded",
+      timeout: 30_000,
+    });
+  }
+
+  await page.waitForLoadState("domcontentloaded", { timeout: 20_000 }).catch(() => {});
+  await page.waitForTimeout(2_000);
+}
+
+async function extractAllVisibleTables(page) {
+  return page.evaluate(() => {
+    function visibleText(node) {
+      return String(node?.innerText ?? node?.textContent ?? "")
+        .replace(/\s+/g, " ")
+        .trim();
+    }
+
+    function isVisible(node) {
+      return Boolean(node.offsetWidth || node.offsetHeight || node.getClientRects().length);
+    }
+
+    return [...document.querySelectorAll("table")]
+      .filter(isVisible)
+      .map((table, tableIndex) => {
+        const headerRows = [...table.querySelectorAll("thead tr")];
+        const fallbackHeaderRow = table.querySelector("tr");
+        const headerCells = [
+          ...(headerRows.at(-1)?.querySelectorAll("th,td") ?? fallbackHeaderRow?.querySelectorAll("th,td") ?? []),
+        ].map(visibleText);
+        const bodyRows = [...table.querySelectorAll("tbody tr")];
+        const fallbackRows = [...table.querySelectorAll("tr")].slice(headerCells.length ? 1 : 0);
+        const dataRows = bodyRows.length ? bodyRows : fallbackRows;
+        const rows = dataRows
+          .map((row) => {
+            const cells = [...row.querySelectorAll("td,th")].map(visibleText);
+            if (!cells.some(Boolean)) {
+              return null;
+            }
+
+            if (!headerCells.length) {
+              return cells;
+            }
+
+            return Object.fromEntries(headerCells.map((header, index) => [header || `Column ${index + 1}`, cells[index] ?? ""]));
+          })
+          .filter(Boolean);
+
+        return {
+          tableIndex: tableIndex + 1,
+          caption: visibleText(table.querySelector("caption")),
+          headers: headerCells,
+          rows,
+        };
+      })
+      .filter((table) => table.rows.length);
+  });
+}
+
+async function collectNoticesAndOrders(page) {
+  await navigateToNoticesAndOrders(page);
+
+  const possibleTabs = ["Additional Notices and Orders", "Notices and Orders"];
+  const tables = [];
+
+  for (const tabName of possibleTabs) {
+    await clickPortalLinkByText(page, tabName, `${tabName} tab`).catch(() => false);
+    await page.waitForTimeout(1_500);
+
+    await clickPortalLinkByText(page, "100", "100 rows per page").catch(() => false);
+    await page.waitForTimeout(1_000);
+
+    const extractedTables = await extractAllVisibleTables(page);
+    for (const table of extractedTables) {
+      tables.push({
+        section: tabName,
+        ...table,
+      });
+    }
+  }
+
+  if (!tables.length) {
+    const extractedTables = await extractAllVisibleTables(page);
+    for (const table of extractedTables) {
+      tables.push({
+        section: "View Notices and Orders",
+        ...table,
+      });
+    }
+  }
+
+  return tables;
+}
+
 async function extractBestTableFromFrame(frame) {
   return frame.evaluate(
     ({ aliases, fieldNames }) => {
@@ -508,6 +674,17 @@ async function saveDebugHtml(page, outputDir, gstin) {
       html,
     );
   }
+}
+
+async function saveCollectorOutput({ client, extractedAt, outputDir, payload, prefix }) {
+  await fs.mkdir(outputDir, { recursive: true });
+  const outputPath = path.join(
+    outputDir,
+    `${prefix}-${client.gstin}-${extractedAt.slice(0, 10)}.json`,
+  );
+
+  await fs.writeFile(outputPath, JSON.stringify(payload, null, 2));
+  return outputPath;
 }
 
 function createSupabaseClient() {
@@ -682,6 +859,29 @@ async function main() {
     console.log("Clicking GST portal login button so CAPTCHA can load.");
     await clickGstLoginButton(page, "GST portal login button");
     await waitForCaptchaAndSubmit(page);
+
+    if (options.autoNotices) {
+      await waitForAuthenticatedPortal(page);
+      const tables = await collectNoticesAndOrders(page);
+      const extractedAt = new Date().toISOString();
+      const outputPath = await saveCollectorOutput({
+        client,
+        extractedAt,
+        outputDir: options.outputDir,
+        prefix: "gst-notices-orders",
+        payload: {
+          gstin: client.gstin,
+          source: "gst-portal-local-browser",
+          extractedAt,
+          tables,
+        },
+      });
+
+      console.log("");
+      console.log(`Extracted ${tables.reduce((total, table) => total + table.rows.length, 0)} table rows from ${tables.length} table(s).`);
+      console.log(`Saved local output: ${outputPath}`);
+    }
+
     console.log("Keep this process running while the browser is in use.");
     await new Promise(() => {});
     return;
@@ -694,30 +894,23 @@ async function main() {
   const extraction = await extractLitigationRows(page);
   const extractedAt = new Date().toISOString();
 
-  await fs.mkdir(options.outputDir, { recursive: true });
-  const outputPath = path.join(
-    options.outputDir,
-    `gst-litigation-${client.gstin}-${extractedAt.slice(0, 10)}.json`,
-  );
-
   if (options.saveHtml) {
     await saveDebugHtml(page, options.outputDir, client.gstin);
   }
 
-  await fs.writeFile(
-    outputPath,
-    JSON.stringify(
-      {
-        gstin: client.gstin,
-        source: "gst-portal-local-browser",
-        extractedAt,
-        headers: extraction.headers,
-        rows: extraction.rows,
-      },
-      null,
-      2,
-    ),
-  );
+  const outputPath = await saveCollectorOutput({
+    client,
+    extractedAt,
+    outputDir: options.outputDir,
+    prefix: "gst-litigation",
+    payload: {
+      gstin: client.gstin,
+      source: "gst-portal-local-browser",
+      extractedAt,
+      headers: extraction.headers,
+      rows: extraction.rows,
+    },
+  });
 
   console.log("");
   console.log(`Extracted ${extraction.rows.length} rows.`);

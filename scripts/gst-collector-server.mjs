@@ -62,7 +62,7 @@ function isAllowedOrigin(origin) {
 
 function startCollector({ gstin, rowNumber }) {
   const scriptPath = path.join(process.cwd(), "scripts", "gst-portal-collector.mjs");
-  const args = [scriptPath, "--login-only"];
+  const args = [scriptPath, "--login-only", "--auto-notices"];
 
   if (gstin) {
     args.push("--expect-gstin", String(gstin).trim().toUpperCase());
@@ -139,7 +139,7 @@ const server = http.createServer(async (request, response) => {
       200,
       {
         message:
-          "GST portal login opened. Enter CAPTCHA in Chrome or Edge; the helper will submit login after CAPTCHA is entered.",
+          "GST portal login opened. Enter CAPTCHA in Chrome or Edge; the helper will submit login, open View Notices and Orders, and save the table data.",
         logPath,
       },
       origin,
