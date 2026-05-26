@@ -60,7 +60,7 @@ export async function POST(request: Request) {
       body: `${description}\n\n${otp}\n\nThis OTP expires in 10 minutes.`,
       from: fromEmail || `WorkLine Co <${smtpUser}>`,
       host: smtpHost,
-      password: smtpAppPassword,
+      password: smtpAppPassword.replace(/\s+/g, ""),
       port: smtpPort,
       subject,
       to: normalizedEmail,
@@ -134,9 +134,9 @@ async function sendSmtpMail({
   try {
     await readResponse(socket);
     await command(socket, `EHLO ${host}`);
-    await command(socket, "AUTH LOGIN");
-    await command(socket, Buffer.from(user).toString("base64"));
-    await command(socket, Buffer.from(password).toString("base64"));
+    await command(socket, "AUTH LOGIN", 334);
+    await command(socket, Buffer.from(user).toString("base64"), 334);
+    await command(socket, Buffer.from(password).toString("base64"), 235);
     await command(socket, `MAIL FROM:<${user}>`);
     await command(socket, `RCPT TO:<${to}>`);
     await command(socket, "DATA", 354);
