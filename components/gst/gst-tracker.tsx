@@ -6,6 +6,7 @@ import {
   Building2,
   FileSearch,
   Loader2,
+  LogIn,
   Plus,
   RefreshCw,
   Scale,
@@ -42,6 +43,8 @@ type GstLitigationCase = {
   source: string;
 };
 
+const LOCAL_GST_HELPER_URL = "http://127.0.0.1:48782";
+
 export function GstTracker() {
   const [organisationId, setOrganisationId] = useState("");
   const [registrations, setRegistrations] = useState<GstRegistration[]>([]);
@@ -50,6 +53,7 @@ export function GstTracker() {
   const [search, setSearch] = useState("");
   const [message, setMessage] = useState("");
   const [isLoading, setIsLoading] = useState(true);
+  const [isLaunchingCollector, setIsLaunchingCollector] = useState(false);
   const [isSavingClient, setIsSavingClient] = useState(false);
   const [isSavingCase, setIsSavingCase] = useState(false);
 
@@ -194,6 +198,50 @@ export function GstTracker() {
     await loadWorkspace();
   }
 
+  async function startGstCollector() {
+    if (!selectedRegistration) {
+      setMessage("Select a GST client before opening the portal collector.");
+      return;
+    }
+
+    setIsLaunchingCollector(true);
+    setMessage("");
+
+    const rowNumber = 2;
+    const endpoint = isLocalAppHost() ? "/api/gst/collector/start" : `${LOCAL_GST_HELPER_URL}/start`;
+    let response: Response;
+
+    try {
+      response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          gstin: selectedRegistration.gstin,
+          rowNumber
+        })
+      });
+    } catch {
+      setIsLaunchingCollector(false);
+      setMessage(
+        "Start the local GST helper on this computer, then click Get data again. Run: npm run gst:helper"
+      );
+      return;
+    }
+
+    const result = (await response.json().catch(() => ({}))) as { error?: string; message?: string };
+
+    setIsLaunchingCollector(false);
+
+    if (!response.ok) {
+      setMessage(result.error ?? "Unable to start the local GST portal collector.");
+      return;
+    }
+
+    setMessage(result.message ?? "GST portal collector started. Chrome or Edge should open shortly.");
+  }
+
   const filteredRegistrations = useMemo(() => {
     const value = search.trim().toLowerCase();
 
@@ -246,7 +294,8 @@ export function GstTracker() {
               <p className="mt-3 max-w-4xl text-sm font-semibold leading-6 text-slate-600">
                 Track notices, proceedings, case IDs, sections, tax periods,
                 due dates, and reply filing status. Portal scraping will run
-                locally with manual CAPTCHA and push extracted rows here.
+                through a per-user local collector with manual CAPTCHA and
+                push extracted rows here.
               </p>
             </div>
 
@@ -330,7 +379,18 @@ export function GstTracker() {
                     <h2 className="mt-2 text-2xl font-black text-slate-950">{selectedRegistration?.client_name ?? "Select a GST client"}</h2>
                     <p className="mt-1 text-sm font-bold text-slate-500">{selectedRegistration?.gstin ?? "Add a GSTIN to begin monitoring portal cases"}</p>
                   </div>
-                  <Metric label="Rows" value={visibleCases.length.toString()} tone="bg-slate-100 text-slate-700" />
+                  <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center">
+                    <button
+                      className="flex h-12 items-center justify-center gap-2 rounded-2xl bg-teal-700 px-5 text-sm font-black text-white shadow-sm transition hover:bg-teal-800 disabled:cursor-not-allowed disabled:opacity-60"
+                      disabled={!selectedRegistrationId || isLaunchingCollector}
+                      onClick={() => void startGstCollector()}
+                      type="button"
+                    >
+                      {isLaunchingCollector ? <Loader2 className="size-4 animate-spin" /> : <LogIn className="size-4" />}
+                      Get data
+                    </button>
+                    <Metric label="Rows" value={visibleCases.length.toString()} tone="bg-slate-100 text-slate-700" />
+                  </div>
                 </div>
 
                 <form className="mt-5 grid gap-3 lg:grid-cols-12" onSubmit={addCase}>
@@ -383,9 +443,9 @@ export function GstTracker() {
               </section>
 
               <section className="grid gap-4 md:grid-cols-3">
-                <InfoCard icon={ShieldCheck} title="Local Portal Collector" text="The scraper runs on your computer, reads Downloads/WorkLineCo.xlsx, opens GST Portal, waits for manual CAPTCHA, and syncs rows." />
-                <InfoCard icon={FileSearch} title="Excel Mapping" text="For first client: A2 = GSTIN, B2 = GST Portal user ID, C2 = password. Later rows can hold more clients." />
-                <InfoCard icon={Scale} title="Legal Workflow First" text="This table is shaped around GST notices, proceedings, replies, and due-date follow-up." />
+                <InfoCard icon={ShieldCheck} title="Per-user Collector" text="Every authorised user can run the local collector on their own machine. GST passwords stay local; WorkLine receives only extracted rows." />
+                <InfoCard icon={FileSearch} title="Excel Mapping" text="Default file is each user's Downloads/WorkLineCo.xlsx. A = GSTIN, B = GST Portal user ID, C = password." />
+                <InfoCard icon={Scale} title="Legal Workflow First" text="The cloud dashboard stays shared by the firm and tracks notices, proceedings, replies, and due-date follow-up." />
               </section>
             </section>
           </div>
@@ -432,4 +492,12 @@ function formatLoadError(message: string) {
   }
 
   return message;
+}
+
+function isLocalAppHost() {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  return ["localhost", "127.0.0.1"].includes(window.location.hostname);
 }

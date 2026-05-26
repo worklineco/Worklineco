@@ -6,6 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "gst:collector": "node scripts/gst-portal-collector.mjs",
+    "gst:helper": "node scripts/gst-collector-server.mjs",
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit"

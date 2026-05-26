@@ -1,15 +1,15 @@
 # GST Portal Collector Plan
 
-The GST portal collector should run locally on the user's machine, not inside
-Vercel. Vercel cannot access `Downloads`, cannot keep a logged-in browser
-session for the GST portal, and should not store GST portal credentials.
+The GST portal collector should run locally on each user's machine, not inside
+Vercel. Vercel cannot access a user's local Excel file, cannot keep a logged-in
+browser session for the GST portal, and should not store GST portal credentials.
 
 ## First Client Input
 
-Use an Excel file in Downloads:
+Use an Excel file in each user's Downloads folder by default:
 
 ```text
-Downloads/WorkLineCo.xlsx
+<User Home>/Downloads/WorkLineCo.xlsx
 ```
 
 For the first client:
@@ -30,7 +30,7 @@ C = Password
 
 ## Collector Flow
 
-1. Read `Downloads/WorkLineCo.xlsx`.
+1. Read the user's selected local Excel file.
 2. Open GST portal in a local browser.
 3. Fill user ID and password.
 4. Pause for the user to manually solve CAPTCHA.
@@ -48,10 +48,21 @@ C = Password
    - Section
    - Reply Filing
 7. Save extracted rows into `collector-output` for first-run verification.
-8. After selectors and headers are confirmed, upsert rows into
-   `gst_litigation_cases` using Supabase.
+8. Optionally save local HTML snapshots when selectors need diagnosis.
+9. After selectors and headers are confirmed, sign into WorkLine as the local
+   user and upsert rows into `gst_litigation_cases` using Supabase RLS.
+
+For `worklineco.com`, the page button calls a helper on the user's own computer
+at `http://127.0.0.1:48782`. The helper starts the collector locally, opens the
+GST portal, fills credentials from Excel, and clicks login. This keeps the live
+Vercel app as the control surface while the browser and credentials remain local.
 
 ## Security Rule
 
-Do not store GST portal passwords in WorkLine's cloud database. Use the local
-Excel file only for the collector run.
+Do not store GST portal passwords in WorkLine's cloud database. Use the user's
+local Excel file only for the collector run.
+
+The collector may ask for the user's WorkLine login when `--sync` is used. That
+login is used only to create a Supabase session for the current run, so the
+database still applies organisation-level RLS and the collector never needs a
+service-role key.
