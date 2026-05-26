@@ -6,10 +6,12 @@ import readline from "node:readline/promises";
 import { createClient } from "@supabase/supabase-js";
 import { chromium } from "playwright-core";
 import XLSX from "xlsx";
+import { getCollectorOutputDir, getDefaultWorkbookPath, getWorklineGstHome } from "./gst-helper-home.mjs";
 
 const GST_PORTAL_LOGIN_URL = "https://services.gst.gov.in/services/login";
-const DEFAULT_WORKBOOK_PATH = path.join(os.homedir(), "Downloads", "WorkLineCo.xlsx");
-const OUTPUT_DIR = path.join(process.cwd(), "collector-output");
+const WORKLINE_GST_HOME = getWorklineGstHome();
+const DEFAULT_WORKBOOK_PATH = getDefaultWorkbookPath();
+const OUTPUT_DIR = getCollectorOutputDir(WORKLINE_GST_HOME);
 const ENV_FILES = [".env.local", ".env"];
 
 const FIELD_NAMES = [
@@ -129,7 +131,7 @@ function parseArgs() {
 
 async function loadLocalEnv() {
   for (const fileName of ENV_FILES) {
-    const filePath = path.join(process.cwd(), fileName);
+    const filePath = path.join(WORKLINE_GST_HOME, fileName);
     const content = await fs.readFile(filePath, "utf8").catch(() => "");
 
     if (!content) {

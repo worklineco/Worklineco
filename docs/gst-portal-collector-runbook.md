@@ -61,14 +61,25 @@ and fills the portal user ID and password from columns B and C. It clicks the GS
 portal login button, then the user still handles any CAPTCHA or portal prompt
 manually.
 
-When using the live WorkLine site at `https://worklineco.com/gst`, start the
-local helper first:
+When using the live WorkLine site at `https://worklineco.com/gst`, each user
+clicks **Install GST helper on this PC** once. That downloads
+`WorkLineGSTHelperSetup.vbs`, which runs hidden elevated PowerShell after the user
+clicks Open/Run and Yes on Windows prompts. The helper installs under
+`%LOCALAPPDATA%\WorkLine\GSTHelper`, registers `workline-gst://`, and starts the
+helper at sign-in.
+
+Developers can still run the helper manually:
 
 ```bash
 npm run gst:helper
 ```
 
-Keep that helper window open, then click `Get data` on `worklineco.com/gst`.
+Before deploying, build the downloadable bundle once:
+
+```bash
+npm run gst:helper:bundle
+```
+
 The live site calls the helper at `http://127.0.0.1:48782`, so Vercel never sees
 the GST portal password and never tries to run a browser session in the cloud.
 

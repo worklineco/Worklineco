@@ -4,8 +4,10 @@ import http from "node:http";
 import path from "node:path";
 import process from "node:process";
 import { URL } from "node:url";
+import { getCollectorOutputDir, getWorklineGstHome } from "./gst-helper-home.mjs";
 
 const HOST = "127.0.0.1";
+const WORKLINE_GST_HOME = getWorklineGstHome();
 const PORT = Number(process.env.WORKLINE_GST_HELPER_PORT || 48782);
 const ALLOWED_ORIGINS = new Set([
   "https://worklineco.com",
@@ -62,7 +64,7 @@ function isAllowedOrigin(origin) {
 }
 
 function startCollector({ gstin, rowNumber }) {
-  const scriptPath = path.join(process.cwd(), "scripts", "gst-portal-collector.mjs");
+  const scriptPath = path.join(WORKLINE_GST_HOME, "scripts", "gst-portal-collector.mjs");
   const args = [scriptPath, "--login-only", "--auto-notices"];
 
   if (gstin) {
@@ -73,7 +75,7 @@ function startCollector({ gstin, rowNumber }) {
     args.push("--row", String(rowNumber));
   }
 
-  const outputDir = path.join(process.cwd(), "collector-output");
+  const outputDir = getCollectorOutputDir(WORKLINE_GST_HOME);
   fs.mkdirSync(outputDir, { recursive: true });
   const logPath = path.join(outputDir, "gst-helper.log");
   const logStream = fs.createWriteStream(logPath, { flags: "a" });
@@ -81,9 +83,13 @@ function startCollector({ gstin, rowNumber }) {
 
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, args, {
-      cwd: process.cwd(),
+      cwd: WORKLINE_GST_HOME,
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
+      env: {
+        ...process.env,
+        WORKLINE_GST_HOME,
+      },
     });
 
     child.once("spawn", () => {
@@ -106,7 +112,7 @@ function startCollector({ gstin, rowNumber }) {
 }
 
 function findLatestOutput(gstin) {
-  const outputDir = path.join(process.cwd(), "collector-output");
+  const outputDir = getCollectorOutputDir(WORKLINE_GST_HOME);
   const expectedGstin = String(gstin || "").trim().toUpperCase();
   const files = fs.existsSync(outputDir)
     ? fs.readdirSync(outputDir)
@@ -195,5 +201,6 @@ const server = http.createServer(async (request, response) => {
 
 server.listen(PORT, HOST, () => {
   console.log(`WorkLine GST helper listening on http://${HOST}:${PORT}`);
+  console.log(`Helper home: ${WORKLINE_GST_HOME}`);
   console.log("Keep this window open while using Get data on worklineco.com/gst.");
 });

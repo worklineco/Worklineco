@@ -8,4 +8,6 @@ build
 *.log
 tsconfig.tsbuildinfo
 collector-output
+public/gst-helper-bundle.zip
+.gst-helper-bundle
 WorkLineCo.xlsx
