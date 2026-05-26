@@ -69,7 +69,7 @@ export async function POST(request: Request) {
   } catch (error) {
     return NextResponse.json(
       {
-        error: "Could not send OTP email. Please check the Gmail SMTP setup.",
+        error: formatSmtpError(error),
         details: error instanceof Error ? error.message : "Unknown SMTP error."
       },
       { status: 502 }
@@ -160,8 +160,9 @@ async function sendSmtpMail({
 }
 
 function command(socket: tls.TLSSocket, value: string, expectedCode = 250) {
+  const response = readResponse(socket, expectedCode);
   socket.write(`${value}\r\n`);
-  return readResponse(socket, expectedCode);
+  return response;
 }
 
 function readResponse(socket: tls.TLSSocket, expectedCode?: number) {
@@ -211,4 +212,23 @@ function readResponse(socket: tls.TLSSocket, expectedCode?: number) {
     socket.on("data", onData);
     socket.on("error", onError);
   });
+}
+
+function formatSmtpError(error: unknown) {
+  const message = error instanceof Error ? error.message : "";
+  const lowerMessage = message.toLowerCase();
+
+  if (lowerMessage.includes("535") || lowerMessage.includes("authentication failed")) {
+    return "Gmail rejected the SMTP login. Please check the Gmail app password and make sure 2-Step Verification is enabled.";
+  }
+
+  if (lowerMessage.includes("timed out")) {
+    return "Gmail SMTP timed out. Please check SMTP_HOST and SMTP_PORT in Vercel.";
+  }
+
+  if (lowerMessage.includes("mail from")) {
+    return "Gmail rejected the sender email. Please make sure SMTP_USER and OTP_FROM_EMAIL use the same Gmail account.";
+  }
+
+  return "Could not send OTP email. Please check the Gmail SMTP setup.";
 }
