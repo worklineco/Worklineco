@@ -19,7 +19,7 @@ export async function POST(request: Request) {
 
   if (!resendApiKey) {
     return NextResponse.json(
-      { error: "OTP email service is not configured yet. Add RESEND_API_KEY in Vercel." },
+      { error: "OTP email is not available right now. Please contact the administrator." },
       { status: 500 }
     );
   }

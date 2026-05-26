@@ -529,7 +529,7 @@ function formatAuthMessage(message: string) {
   }
 
   if (message.toLowerCase().includes("invalid login credentials")) {
-    return "Invalid login credentials. If you deleted this user in Supabase, create the account again from the Sign up tab.";
+    return "Invalid email ID or password.";
   }
 
   return message;
