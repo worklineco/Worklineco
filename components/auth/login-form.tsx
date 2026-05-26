@@ -208,27 +208,32 @@ export function LoginForm() {
   }
 
   return (
-    <section className="rounded-[28px] border border-white/80 bg-white/90 p-5 shadow-[0_24px_80px_rgba(15,23,42,0.14)] backdrop-blur sm:p-6">
-      <div className="rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-teal-950 p-5 text-white">
+    <section className="rounded-[28px] border border-white/80 bg-white/90 p-5 shadow-[0_28px_90px_rgba(15,23,42,0.18)] backdrop-blur sm:p-6">
+      <div className="rounded-3xl bg-[linear-gradient(135deg,#0f172a_0%,#0f766e_52%,#c026d3_100%)] p-5 text-white shadow-[0_18px_50px_rgba(15,23,42,0.20)]">
         <div className="flex items-center justify-between gap-4">
           <div>
-            <p className="text-xs font-black uppercase tracking-[0.16em] text-teal-200">
-              Secure access
+            <p className="text-xs font-black uppercase tracking-[0.16em] text-teal-100">
+              WorkLine secure access
             </p>
             <h2 className="mt-2 text-2xl font-black">
-              {mode === "signin" ? "Welcome back" : "Create account"}
+              {mode === "signin" ? "Welcome back" : "Join your workspace"}
             </h2>
+            <p className="mt-2 text-xs font-semibold leading-5 text-white/75">
+              {mode === "signin"
+                ? "Continue to your firm dashboard."
+                : "Verified access for approved firm members."}
+            </p>
           </div>
-          <div className="flex size-12 items-center justify-center rounded-2xl bg-white text-sm font-black text-slate-950">
+          <div className="flex size-12 items-center justify-center rounded-2xl bg-white text-sm font-black text-slate-950 shadow-lg shadow-slate-950/20">
             WL
           </div>
         </div>
       </div>
 
-      <div className="mt-5 grid grid-cols-2 rounded-2xl bg-slate-100 p-1">
+      <div className="mt-5 grid grid-cols-2 rounded-2xl bg-slate-100 p-1 shadow-inner">
         <button
           className={`rounded-xl px-3 py-2.5 text-sm font-black transition ${
-            mode === "signin" ? "bg-white text-slate-950 shadow-sm" : "text-slate-500"
+            mode === "signin" ? "bg-white text-slate-950 shadow-sm" : "text-slate-500 hover:text-slate-700"
           }`}
           onClick={() => changeMode("signin")}
           type="button"
@@ -237,7 +242,7 @@ export function LoginForm() {
         </button>
         <button
           className={`rounded-xl px-3 py-2.5 text-sm font-black transition ${
-            mode === "signup" ? "bg-white text-slate-950 shadow-sm" : "text-slate-500"
+            mode === "signup" ? "bg-white text-slate-950 shadow-sm" : "text-slate-500 hover:text-slate-700"
           }`}
           onClick={() => changeMode("signup")}
           type="button"
