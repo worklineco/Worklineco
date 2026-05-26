@@ -9,7 +9,10 @@ const accessHighlights = [
 
 export default function LoginPage() {
   return (
-    <main className="min-h-screen overflow-hidden bg-[#f7f3ea] px-4 py-6 text-slate-950 sm:px-6 lg:px-8">
+    <main
+      className="min-h-screen overflow-hidden bg-[#f7f3ea] px-4 py-6 text-slate-950 sm:px-6 lg:px-8"
+      data-ui="border-refresh"
+    >
       <div className="pointer-events-none fixed inset-0 -z-10">
         <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(15,23,42,0.08),transparent_28%),radial-gradient(circle_at_18%_20%,rgba(20,184,166,0.22),transparent_26%),radial-gradient(circle_at_80%_18%,rgba(244,114,182,0.20),transparent_24%),radial-gradient(circle_at_50%_88%,rgba(245,158,11,0.18),transparent_30%)]" />
         <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(15,23,42,0.045)_1px,transparent_1px),linear-gradient(180deg,rgba(15,23,42,0.045)_1px,transparent_1px)] bg-[size:48px_48px]" />
