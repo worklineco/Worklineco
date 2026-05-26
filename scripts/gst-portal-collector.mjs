@@ -116,7 +116,7 @@ function parseArgs() {
     expectedGstin: String(args.get("expect-gstin") || "").trim().toUpperCase(),
     loginOnly: parseBooleanFlag(args.get("login-only")),
     outputDir: path.resolve(args.get("out") || OUTPUT_DIR),
-    rowNumber: Number(args.get("row") || 2),
+    rowNumber: args.has("row") ? Number(args.get("row")) : null,
     saveHtml: parseBooleanFlag(args.get("save-html")),
     sync: parseBooleanFlag(args.get("sync")),
     workbookPath: path.resolve(args.get("file") || DEFAULT_WORKBOOK_PATH),
@@ -154,7 +154,7 @@ async function loadLocalEnv() {
   }
 }
 
-function readClientFromWorkbook({ rowNumber, workbookPath }) {
+function readClientFromWorkbook({ expectedGstin, rowNumber, workbookPath }) {
   const workbook = XLSX.readFile(workbookPath);
   const sheet = workbook.Sheets[workbook.SheetNames[0]];
   const rows = XLSX.utils.sheet_to_json(sheet, {
@@ -163,7 +163,29 @@ function readClientFromWorkbook({ rowNumber, workbookPath }) {
     raw: false,
   });
 
-  const rowIndex = rowNumber - 1;
+  let resolvedRowNumber = rowNumber;
+
+  if (!resolvedRowNumber && expectedGstin) {
+    const matchingIndex = rows.findIndex((row, index) => {
+      if (index === 0) {
+        return false;
+      }
+
+      return String(row?.[0] ?? "").trim().toUpperCase() === expectedGstin;
+    });
+
+    if (matchingIndex !== -1) {
+      resolvedRowNumber = matchingIndex + 1;
+    }
+  }
+
+  resolvedRowNumber ||= 2;
+
+  if (!Number.isInteger(resolvedRowNumber) || resolvedRowNumber < 2) {
+    throw new Error("Use --row with a valid Excel data row number, for example --row 2.");
+  }
+
+  const rowIndex = resolvedRowNumber - 1;
   const clientRow = rows[rowIndex] ?? [];
   const [gstin, userId, password] = clientRow.map((value) =>
     String(value ?? "").trim(),
@@ -171,11 +193,19 @@ function readClientFromWorkbook({ rowNumber, workbookPath }) {
 
   if (!gstin || !userId || !password) {
     throw new Error(
-      `Missing client credentials in ${workbookPath}. Use row ${rowNumber}: A = GSTIN, B = GST user ID, C = password.`,
+      `Missing client credentials in ${workbookPath}. Use row ${resolvedRowNumber}: A = GSTIN, B = GST user ID, C = password.`,
     );
   }
 
-  return { gstin, userId, password };
+  if (expectedGstin && gstin.toUpperCase() !== expectedGstin) {
+    const hint = rowNumber
+      ? `Excel row ${resolvedRowNumber} contains GSTIN ${gstin}, but selected client is ${expectedGstin}.`
+      : `Could not find GSTIN ${expectedGstin} in column A, so row ${resolvedRowNumber} was checked and contains ${gstin}.`;
+
+    throw new Error(`${hint} Put the selected GSTIN in column A or pass the matching --row number.`);
+  }
+
+  return { gstin, rowNumber: resolvedRowNumber, userId, password };
 }
 
 function parsePortalDate(value) {
@@ -575,12 +605,7 @@ async function main() {
   await loadLocalEnv();
   let options = parseArgs();
   const client = readClientFromWorkbook(options);
-
-  if (options.expectedGstin && client.gstin.toUpperCase() !== options.expectedGstin) {
-    throw new Error(
-      `Excel row ${options.rowNumber} contains GSTIN ${client.gstin}, but selected client is ${options.expectedGstin}.`,
-    );
-  }
+  options = { ...options, rowNumber: client.rowNumber };
 
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   options = await promptForWorkLineLogin(rl, options);

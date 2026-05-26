@@ -55,10 +55,11 @@ The script will:
 7. Save output under `collector-output`.
 
 From the GST Litigation Monitor, the `Get data` button starts this same local
-collector in login-only mode for the selected GSTIN. It reads row 2 of the Excel
-file, opens `https://services.gst.gov.in/services/login`, and fills the portal
-user ID and password. It clicks the GST portal login button, then the user still
-handles any CAPTCHA or portal prompt manually.
+collector in login-only mode for the selected GSTIN. It finds the selected GSTIN
+in column A of the Excel file, opens `https://services.gst.gov.in/services/login`,
+and fills the portal user ID and password from columns B and C. It clicks the GST
+portal login button, then the user still handles any CAPTCHA or portal prompt
+manually.
 
 When using the live WorkLine site at `https://worklineco.com/gst`, start the
 local helper first:

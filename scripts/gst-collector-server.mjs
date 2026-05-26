@@ -62,10 +62,14 @@ function isAllowedOrigin(origin) {
 
 function startCollector({ gstin, rowNumber }) {
   const scriptPath = path.join(process.cwd(), "scripts", "gst-portal-collector.mjs");
-  const args = [scriptPath, "--login-only", "--row", String(rowNumber || 2)];
+  const args = [scriptPath, "--login-only"];
 
   if (gstin) {
     args.push("--expect-gstin", String(gstin).trim().toUpperCase());
+  }
+
+  if (rowNumber) {
+    args.push("--row", String(rowNumber));
   }
 
   const outputDir = path.join(process.cwd(), "collector-output");
@@ -119,7 +123,7 @@ const server = http.createServer(async (request, response) => {
     const body = await readJson(request);
     const logPath = startCollector({
       gstin: body.gstin,
-      rowNumber: Number.isInteger(body.rowNumber) ? body.rowNumber : 2,
+      rowNumber: Number.isInteger(body.rowNumber) ? body.rowNumber : null,
     });
 
     sendJson(

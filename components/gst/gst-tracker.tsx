@@ -207,8 +207,7 @@ export function GstTracker() {
     setIsLaunchingCollector(true);
     setMessage("");
 
-    const rowNumber = 2;
-    const endpoint = isLocalAppHost() ? "/api/gst/collector/start" : `${LOCAL_GST_HELPER_URL}/start`;
+    const endpoint = `${LOCAL_GST_HELPER_URL}/start`;
     let response: Response;
 
     try {
@@ -218,15 +217,12 @@ export function GstTracker() {
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
-          gstin: selectedRegistration.gstin,
-          rowNumber
+          gstin: selectedRegistration.gstin
         })
       });
     } catch {
       setIsLaunchingCollector(false);
-      setMessage(
-        "Start the local GST helper on this computer, then click Get data again. Run: npm run gst:helper"
-      );
+      setMessage(getCollectorHelpMessage());
       return;
     }
 
@@ -235,7 +231,7 @@ export function GstTracker() {
     setIsLaunchingCollector(false);
 
     if (!response.ok) {
-      setMessage(result.error ?? "Unable to start the local GST portal collector.");
+      setMessage(formatCollectorStartError(result.error));
       return;
     }
 
@@ -444,7 +440,7 @@ export function GstTracker() {
 
               <section className="grid gap-4 md:grid-cols-3">
                 <InfoCard icon={ShieldCheck} title="Per-user Collector" text="Every authorised user can run the local collector on their own machine. GST passwords stay local; WorkLine receives only extracted rows." />
-                <InfoCard icon={FileSearch} title="Excel Mapping" text="Default file is each user's Downloads/WorkLineCo.xlsx. A = GSTIN, B = GST Portal user ID, C = password." />
+                <InfoCard icon={FileSearch} title="Excel Mapping" text="Default file is each user's Downloads/WorkLineCo.xlsx. The collector finds the selected GSTIN in column A, then reads B = GST Portal user ID and C = password." />
                 <InfoCard icon={Scale} title="Legal Workflow First" text="The cloud dashboard stays shared by the firm and tracks notices, proceedings, replies, and due-date follow-up." />
               </section>
             </section>
@@ -494,10 +490,18 @@ function formatLoadError(message: string) {
   return message;
 }
 
-function isLocalAppHost() {
-  if (typeof window === "undefined") {
-    return false;
+function getCollectorHelpMessage() {
+  return "Start the WorkLine GST helper on this computer, then click Get data again. Run: npm run gst:helper";
+}
+
+function formatCollectorStartError(error?: string) {
+  if (!error) {
+    return "Unable to start the local GST portal collector.";
   }
 
-  return ["localhost", "127.0.0.1"].includes(window.location.hostname);
+  if (error.toLowerCase().includes("spawn") || error.toLowerCase().includes("eperm")) {
+    return getCollectorHelpMessage();
+  }
+
+  return error;
 }

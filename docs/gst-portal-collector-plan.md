@@ -54,8 +54,9 @@ C = Password
 
 For `worklineco.com`, the page button calls a helper on the user's own computer
 at `http://127.0.0.1:48782`. The helper starts the collector locally, opens the
-GST portal, fills credentials from Excel, and clicks login. This keeps the live
-Vercel app as the control surface while the browser and credentials remain local.
+GST portal, finds the selected GSTIN in Excel column A, fills credentials from
+columns B and C, and clicks login. This keeps the live Vercel app as the control
+surface while the browser and credentials remain local.
 
 ## Security Rule
 
