@@ -486,6 +486,28 @@ async function navigateToNoticesAndOrders(page) {
   await waitForAuthenticatedPortal(page);
   await handlePortalPopups(page);
 
+  console.log("Opening View Notices and Orders directly in the authenticated GST session.");
+  await page.goto("https://services.gst.gov.in/services/auth/notices", {
+    waitUntil: "domcontentloaded",
+    timeout: 30_000,
+  }).catch(() => {});
+  await page.waitForTimeout(2_000);
+
+  const directReached = await page.waitForFunction(
+    () =>
+      location.href.includes("/auth/notices") ||
+      document.body.innerText.includes("Additional Notices") ||
+      document.body.innerText.includes("Notices and Orders"),
+    null,
+    { timeout: 15_000 },
+  ).then(() => true).catch(() => false);
+
+  if (directReached) {
+    console.log("Opened View Notices and Orders.");
+    return;
+  }
+
+  console.log("Direct navigation did not reach notices page. Trying GST menu clicks.");
   await clickPortalLinkByText(page, "Services", "Services");
   await page.waitForTimeout(3_000);
 
