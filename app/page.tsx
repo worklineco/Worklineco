@@ -14,8 +14,8 @@ import type { ComponentType } from "react";
 
 const navigation = [
   { href: "/", icon: LayoutDashboard, label: "Overview", tone: "bg-teal-100 text-teal-800" },
-  { href: "/gst", icon: ClipboardCheck, label: "GST Tracker", tone: "bg-amber-100 text-amber-800" },
-  { href: "#gstat", icon: Scale, label: "GSTAT", tone: "bg-fuchsia-100 text-fuchsia-800" },
+  { href: "/gst", icon: ClipboardCheck, label: "GST Tracker", target: "_blank", tone: "bg-amber-100 text-amber-800" },
+  { href: "/gstat", icon: Scale, label: "GSTAT", target: "_blank", tone: "bg-fuchsia-100 text-fuchsia-800" },
   { href: "#records", icon: Building2, label: "Client Records", tone: "bg-sky-100 text-sky-800" },
   { href: "#reports", icon: BarChart3, label: "Reports", tone: "bg-emerald-100 text-emerald-800" }
 ];
@@ -27,15 +27,17 @@ const productFocus = [
     href: "/gst",
     icon: ClipboardCheck,
     label: "Live workspace",
+    target: "_blank",
     title: "GST Tracker",
     tone: "from-amber-300 via-orange-300 to-rose-300"
   },
   {
     action: "Prepare workspace",
     description: "GSTAT matters, appeal stages, hearing dates, documents, and action ownership will sit here as the next priority.",
-    href: "#gstat",
+    href: "/gstat",
     icon: Scale,
     label: "Now building",
+    target: "_blank",
     title: "GSTAT",
     tone: "from-teal-300 via-sky-300 to-fuchsia-300"
   }
@@ -156,6 +158,7 @@ function NavItem({
     href: string;
     icon: ComponentType<{ className?: string }>;
     label: string;
+    target?: string;
     tone: string;
   };
 }) {
@@ -165,6 +168,8 @@ function NavItem({
     <Link
       className="group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-700 transition hover:bg-white hover:text-slate-950 hover:shadow-sm"
       href={item.href}
+      rel={item.target ? "noreferrer" : undefined}
+      target={item.target}
     >
       <span className={`flex size-9 items-center justify-center rounded-xl ${item.tone}`}>
         <Icon className="size-4" />
@@ -183,6 +188,7 @@ function ProductCard({
     href: string;
     icon: ComponentType<{ className?: string }>;
     label: string;
+    target?: string;
     title: string;
     tone: string;
   };
@@ -194,6 +200,8 @@ function ProductCard({
       className="workline-panel group rounded-[26px] p-5 transition hover:-translate-y-1 hover:shadow-[0_30px_90px_rgba(15,23,42,0.16)] md:p-6"
       href={item.href}
       id={item.title === "GSTAT" ? "gstat" : undefined}
+      rel={item.target ? "noreferrer" : undefined}
+      target={item.target}
     >
       <div className="flex items-start justify-between gap-4">
         <div className={`flex size-14 items-center justify-center rounded-2xl bg-gradient-to-br ${item.tone} text-slate-950`}>
