@@ -56,8 +56,8 @@ export default function Home() {
       </div>
 
       <div className="mx-auto grid w-full max-w-[1440px] gap-5 px-4 py-4 sm:px-6 lg:grid-cols-[280px_1fr] lg:px-8">
-        <aside className="hidden rounded-[22px] border border-white/80 bg-white/85 p-4 shadow-[0_24px_80px_rgba(15,23,42,0.12)] backdrop-blur lg:block">
-          <div className="rounded-2xl bg-slate-950 p-4 text-white">
+        <aside className="workline-frame hidden rounded-[22px] p-4 lg:block">
+          <div className="rounded-2xl border border-white/15 bg-slate-950 p-4 text-white">
             <div className="flex items-center gap-3">
               <div className="flex size-12 items-center justify-center rounded-xl bg-gradient-to-br from-teal-300 via-sky-300 to-fuchsia-300 text-sm font-black text-slate-950">
                 WL
@@ -77,7 +77,7 @@ export default function Home() {
         </aside>
 
         <section className="min-w-0">
-          <header className="rounded-[26px] border border-white/80 bg-white/90 p-5 shadow-[0_24px_80px_rgba(15,23,42,0.12)] backdrop-blur md:p-7">
+          <header className="workline-frame rounded-[26px] p-5 md:p-7">
             <div className="grid gap-6 xl:grid-cols-[1fr_360px] xl:items-center">
               <div>
                 <div className="inline-flex items-center gap-2 rounded-full bg-emerald-100 px-3 py-1.5 text-xs font-black uppercase text-emerald-800">
@@ -94,7 +94,7 @@ export default function Home() {
                 </p>
               </div>
 
-              <div className="rounded-3xl bg-slate-950 p-5 text-white">
+              <div className="rounded-3xl border border-white/15 bg-slate-950 p-5 text-white shadow-[0_18px_50px_rgba(15,23,42,0.20)]">
                 <p className="text-xs font-black uppercase tracking-[0.16em] text-teal-200">
                   Current priority
                 </p>
@@ -112,7 +112,7 @@ export default function Home() {
             ))}
           </section>
 
-          <section className="mt-5 rounded-[26px] border border-white/80 bg-white/90 p-5 shadow-[0_24px_80px_rgba(15,23,42,0.10)] backdrop-blur md:p-6">
+          <section className="workline-frame mt-5 rounded-[26px] p-5 md:p-6">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
               <div>
                 <p className="text-xs font-black uppercase tracking-[0.16em] text-teal-700">
@@ -130,7 +130,7 @@ export default function Home() {
                 const Icon = item.icon;
                 return (
                   <div
-                    className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm"
+                    className="rounded-2xl border border-slate-950/10 bg-white p-4 shadow-sm ring-1 ring-white/70"
                     key={item.label}
                   >
                     <div className="flex size-11 items-center justify-center rounded-xl bg-slate-100 text-slate-800">
@@ -191,7 +191,7 @@ function ProductCard({
 
   return (
     <Link
-      className="group rounded-[26px] border border-white/80 bg-white/90 p-5 shadow-[0_24px_80px_rgba(15,23,42,0.10)] transition hover:-translate-y-1 hover:shadow-[0_30px_90px_rgba(15,23,42,0.16)] md:p-6"
+      className="workline-panel group rounded-[26px] p-5 transition hover:-translate-y-1 hover:shadow-[0_30px_90px_rgba(15,23,42,0.16)] md:p-6"
       href={item.href}
       id={item.title === "GSTAT" ? "gstat" : undefined}
     >

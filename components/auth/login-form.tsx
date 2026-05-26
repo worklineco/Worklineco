@@ -208,8 +208,8 @@ export function LoginForm() {
   }
 
   return (
-    <section className="rounded-[28px] border border-white/80 bg-white/90 p-5 shadow-[0_28px_90px_rgba(15,23,42,0.18)] backdrop-blur sm:p-6">
-      <div className="rounded-3xl bg-[linear-gradient(135deg,#0f172a_0%,#0f766e_52%,#c026d3_100%)] p-5 text-white shadow-[0_18px_50px_rgba(15,23,42,0.20)]">
+    <section className="workline-frame rounded-[28px] p-5 sm:p-6">
+      <div className="rounded-3xl border border-white/15 bg-[linear-gradient(135deg,#0f172a_0%,#0f766e_52%,#c026d3_100%)] p-5 text-white shadow-[0_18px_50px_rgba(15,23,42,0.20)]">
         <div className="flex items-center justify-between gap-4">
           <div>
             <p className="text-xs font-black uppercase tracking-[0.16em] text-teal-100">
