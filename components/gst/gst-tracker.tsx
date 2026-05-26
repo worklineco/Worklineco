@@ -1,13 +1,5 @@
 "use client";
 
-import { GstSacHelp } from "@/components/gst/gst-sac-help";
-import {
-  LOCAL_GST_HELPER_URL,
-  checkGstHelperReady,
-  downloadPortableGstHelper,
-  launchGstHelperViaProtocol,
-  waitForGstHelperReady,
-} from "@/lib/gst-local-helper";
 import { supabase } from "@/lib/supabase/client";
 import {
   AlertCircle,
@@ -60,6 +52,8 @@ type GstNoticeOutput = {
   }[];
 };
 
+const LOCAL_GST_HELPER_URL = "http://127.0.0.1:48782";
+
 export function GstTracker() {
   const [organisationId, setOrganisationId] = useState("");
   const [registrations, setRegistrations] = useState<GstRegistration[]>([]);
@@ -72,11 +66,6 @@ export function GstTracker() {
   const [isLaunchingCollector, setIsLaunchingCollector] = useState(false);
   const [isSavingClient, setIsSavingClient] = useState(false);
   const [isSavingCase, setIsSavingCase] = useState(false);
-  const [helperReady, setHelperReady] = useState<boolean | null>(null);
-  const [isInstallingHelper, setIsInstallingHelper] = useState(false);
-  const [installModalOpen, setInstallModalOpen] = useState(false);
-  const [installModalStep, setInstallModalStep] = useState(0);
-  const [showSacHelp, setShowSacHelp] = useState(false);
 
   const [clientName, setClientName] = useState("");
   const [gstin, setGstin] = useState("");
@@ -96,22 +85,6 @@ export function GstTracker() {
 
   useEffect(() => {
     void loadWorkspace();
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function refreshHelperStatus() {
-      const ready = await checkGstHelperReady();
-      if (!cancelled) {
-        setHelperReady(ready);
-      }
-    }
-
-    void refreshHelperStatus();
-    return () => {
-      cancelled = true;
-    };
   }, []);
 
   async function loadWorkspace() {
@@ -235,60 +208,6 @@ export function GstTracker() {
     await loadWorkspace();
   }
 
-  async function ensureGstHelperReady() {
-    let ready = await checkGstHelperReady();
-    if (ready) {
-      setHelperReady(true);
-      return true;
-    }
-
-    if (selectedRegistration) {
-      launchGstHelperViaProtocol(selectedRegistration.gstin);
-      ready = await waitForGstHelperReady(8000, 800);
-    }
-
-    if (ready) {
-      setHelperReady(true);
-      return true;
-    }
-
-    setHelperReady(false);
-    setInstallModalOpen(true);
-    setInstallModalStep(1);
-    return false;
-  }
-
-  function beginPortableInstall() {
-    setHelperReady(false);
-    setMessage("");
-    setInstallModalOpen(true);
-    setInstallModalStep(1);
-    downloadPortableGstHelper(window.location.origin);
-  }
-
-  async function verifyGstHelperInstalled() {
-    setIsInstallingHelper(true);
-    setMessage("");
-
-    const ready = await checkGstHelperReady();
-    setIsInstallingHelper(false);
-
-    if (ready) {
-      setHelperReady(true);
-      setInstallModalStep(3);
-      setMessage("GST helper is connected on this PC.");
-      window.setTimeout(() => setInstallModalOpen(false), 2500);
-      return true;
-    }
-
-    setHelperReady(false);
-    setInstallModalStep(2);
-    setMessage(
-      "Helper not detected yet. Extract the ZIP, run Install WorkLine GST Helper.bat, then click Check again.",
-    );
-    return false;
-  }
-
   async function startGstCollector() {
     if (!selectedRegistration) {
       setMessage("Select a GST client before opening the portal collector.");
@@ -297,13 +216,6 @@ export function GstTracker() {
 
     setIsLaunchingCollector(true);
     setMessage("");
-
-    const ready = await ensureGstHelperReady();
-    if (!ready) {
-      setIsLaunchingCollector(false);
-      setMessage(getCollectorSetupMessage());
-      return;
-    }
 
     const endpoint = `${LOCAL_GST_HELPER_URL}/start`;
     let response: Response;
@@ -498,98 +410,6 @@ export function GstTracker() {
             </div>
           </div>
         </header>
-
-        {helperReady === false ? (
-          <div className="mt-4 rounded-2xl border border-teal-200 bg-teal-50 px-4 py-4 text-sm text-teal-950">
-            <p className="font-black">One-time setup on this computer (each laptop once)</p>
-            <p className="mt-2 font-semibold leading-6">
-              Download the WorkLine GST Helper ZIP, extract it, and run the install file inside.
-              No PowerShell commands. Takes about 2 minutes after download.
-            </p>
-            <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
-              <button
-                className="flex h-12 items-center justify-center gap-2 rounded-2xl bg-teal-800 px-5 text-sm font-black text-white"
-                onClick={beginPortableInstall}
-                type="button"
-              >
-                <ShieldCheck className="size-4" />
-                Download GST helper (Windows)
-              </button>
-              <button
-                className="flex h-12 items-center justify-center gap-2 rounded-2xl border border-teal-300 bg-white px-5 text-sm font-black text-teal-900 disabled:opacity-60"
-                disabled={isInstallingHelper}
-                onClick={() => void verifyGstHelperInstalled()}
-                type="button"
-              >
-                {isInstallingHelper ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
-                Check helper connection
-              </button>
-            </div>
-            <button
-              className="mt-3 text-sm font-black text-amber-800 underline"
-              onClick={() => setShowSacHelp((value) => !value)}
-              type="button"
-            >
-              {showSacHelp ? "Hide" : "Windows blocked the install? Click here"}
-            </button>
-          </div>
-        ) : null}
-
-        {helperReady === false && showSacHelp ? <GstSacHelp origin={typeof window !== "undefined" ? window.location.origin : "https://worklineco.com"} /> : null}
-
-        {installModalOpen ? (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 px-4">
-            <div className="w-full max-w-lg rounded-3xl border border-white bg-white p-6 shadow-2xl">
-              <p className="text-lg font-black text-slate-950">Setting up GST helper</p>
-              {installModalStep === 3 ? (
-                <p className="mt-3 text-sm font-semibold leading-6 text-teal-800">
-                  Helper connected. You can click Get data now.
-                </p>
-              ) : installModalStep === 2 ? (
-                <>
-                  <p className="mt-3 text-sm font-semibold leading-6 text-slate-600">
-                    The helper is not running yet. If Smart App Control blocked the .bat file, close this
-                    window and use &quot;Windows blocked the install?&quot; on the page.
-                  </p>
-                  <button
-                    className="mt-5 flex h-11 w-full items-center justify-center rounded-2xl bg-teal-800 text-sm font-black text-white"
-                    onClick={() => void verifyGstHelperInstalled()}
-                    type="button"
-                  >
-                    Check helper connection
-                  </button>
-                </>
-              ) : (
-                <>
-                  <ol className="mt-4 list-decimal space-y-2 pl-5 text-sm font-semibold leading-6 text-slate-600">
-                    <li>Download WorkLineGSTHelper-Windows.zip (started automatically).</li>
-                    <li>Right-click the ZIP → Extract All → open the folder.</li>
-                    <li>Double-click Install WorkLine GST Helper.bat → More info → Run anyway if asked.</li>
-                    <li>Click Check helper connection below when the black window says setup complete.</li>
-                  </ol>
-                  <button
-                    className="mt-5 flex h-11 w-full items-center justify-center gap-2 rounded-2xl bg-teal-800 text-sm font-black text-white disabled:opacity-60"
-                    disabled={isInstallingHelper}
-                    onClick={() => void verifyGstHelperInstalled()}
-                    type="button"
-                  >
-                    {isInstallingHelper ? <Loader2 className="size-4 animate-spin" /> : null}
-                    Check helper connection
-                  </button>
-                </>
-              )}
-              {installModalStep !== 3 ? (
-                <button
-                  className="mt-5 text-sm font-bold text-slate-500 underline"
-                  onClick={() => setInstallModalOpen(false)}
-                  type="button"
-                >
-                  Close
-                </button>
-              ) : null}
-            </div>
-          </div>
-        ) : null}
 
         {message ? (
           <div className="mt-4 flex items-start gap-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-bold text-rose-900">
@@ -787,12 +607,8 @@ function formatLoadError(message: string) {
   return message;
 }
 
-function getCollectorSetupMessage() {
-  return "Complete the one-time GST helper setup: download the Windows ZIP, run Install WorkLine GST Helper.bat, click Check helper connection, then try Get data again.";
-}
-
 function getCollectorHelpMessage() {
-  return getCollectorSetupMessage();
+  return "Start the WorkLine GST helper on this computer, then click Get data again. Run: npm run gst:helper";
 }
 
 function formatCollectorStartError(error?: string) {

@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "npm run gst:helper:bundle && npm run gst:helper:portable && next build",
+    "build": "next build",
     "gst:helper:portable": "node scripts/build-gst-helper-portable.mjs",
     "gst:collector": "node scripts/gst-portal-collector.mjs",
     "gst:helper": "node scripts/gst-collector-server.mjs",
