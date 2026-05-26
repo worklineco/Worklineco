@@ -1,6 +1,8 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { createHmac, randomInt } from "node:crypto";
+import { Buffer } from "node:buffer";
+import tls from "node:tls";
 
 const otpTtlMs = 10 * 60 * 1000;
 
@@ -15,9 +17,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Email and purpose are required." }, { status: 400 });
   }
 
-  const resendApiKey = process.env.RESEND_API_KEY;
+  const smtpHost = process.env.SMTP_HOST;
+  const smtpPort = Number(process.env.SMTP_PORT ?? 465);
+  const smtpUser = process.env.SMTP_USER;
+  const smtpAppPassword = process.env.SMTP_APP_PASSWORD;
 
-  if (!resendApiKey) {
+  if (!smtpHost || !smtpUser || !smtpAppPassword) {
     return NextResponse.json(
       { error: "OTP email is not available right now. Please contact the administrator." },
       { status: 500 }
@@ -49,39 +54,28 @@ export async function POST(request: Request) {
       ? `Approval OTP for ${label ?? "this team"}`
       : "Email verification OTP for your WorkLine signup";
 
-  const emailResult = await fetch("https://api.resend.com/emails", {
-    body: JSON.stringify({
-      from: process.env.OTP_FROM_EMAIL ?? "WorkLine Co <onboarding@worklineco.com>",
-      html: `<p>${description}</p><p style="font-size:24px;font-weight:700;letter-spacing:4px">${otp}</p><p>This OTP expires in 10 minutes.</p>`,
+  try {
+    await sendSmtpMail({
+      body: `${description}\n\n${otp}\n\nThis OTP expires in 10 minutes.`,
+      from: process.env.OTP_FROM_EMAIL ?? `WorkLine Co <${smtpUser}>`,
+      host: smtpHost,
+      password: smtpAppPassword,
+      port: smtpPort,
       subject,
-      text: `${description}\n\n${otp}\n\nThis OTP expires in 10 minutes.`,
-      to: [normalizedEmail]
-    }),
-    headers: {
-      Authorization: `Bearer ${resendApiKey}`,
-      "Content-Type": "application/json"
-    },
-    method: "POST"
-  });
-
-  if (!emailResult.ok) {
-    const details = await emailResult.text();
-    return NextResponse.json({ error: formatEmailError(details), details }, { status: 502 });
+      to: normalizedEmail,
+      user: smtpUser
+    });
+  } catch (error) {
+    return NextResponse.json(
+      {
+        error: "Could not send OTP email. Please check the Gmail SMTP setup.",
+        details: error instanceof Error ? error.message : "Unknown SMTP error."
+      },
+      { status: 502 }
+    );
   }
 
   return NextResponse.json({ ok: true });
-}
-
-function formatEmailError(details: string) {
-  if (details.toLowerCase().includes("resend.dev")) {
-    return "OTP email could not be sent because the sender domain is still in test mode. Please verify worklineco.com in Resend.";
-  }
-
-  if (details.toLowerCase().includes("domain") || details.toLowerCase().includes("from")) {
-    return "OTP email could not be sent because the sender email domain is not verified in Resend.";
-  }
-
-  return "Could not send OTP email. Please check the email sender setup.";
 }
 
 function otpCookieName(purpose: string) {
@@ -102,4 +96,108 @@ function signOtp({
   return createHmac("sha256", process.env.OTP_SECRET ?? process.env.SUPABASE_SERVICE_ROLE_KEY ?? "workline-otp")
     .update(`${email}|${purpose}|${otp}|${expiresAt}`)
     .digest("hex");
+}
+
+async function sendSmtpMail({
+  body,
+  from,
+  host,
+  password,
+  port,
+  subject,
+  to,
+  user
+}: {
+  body: string;
+  from: string;
+  host: string;
+  password: string;
+  port: number;
+  subject: string;
+  to: string;
+  user: string;
+}) {
+  const socket = tls.connect({ host, port, servername: host });
+  socket.setEncoding("utf8");
+
+  try {
+    await readResponse(socket);
+    await command(socket, `EHLO ${host}`);
+    await command(socket, "AUTH LOGIN");
+    await command(socket, Buffer.from(user).toString("base64"));
+    await command(socket, Buffer.from(password).toString("base64"));
+    await command(socket, `MAIL FROM:<${user}>`);
+    await command(socket, `RCPT TO:<${to}>`);
+    await command(socket, "DATA", 354);
+    socket.write(
+      [
+        `From: ${from}`,
+        `To: ${to}`,
+        `Subject: ${subject}`,
+        "MIME-Version: 1.0",
+        "Content-Type: text/plain; charset=UTF-8",
+        "",
+        body,
+        "."
+      ].join("\r\n") + "\r\n"
+    );
+    await readResponse(socket);
+    await command(socket, "QUIT");
+  } finally {
+    socket.end();
+  }
+}
+
+function command(socket: tls.TLSSocket, value: string, expectedCode = 250) {
+  socket.write(`${value}\r\n`);
+  return readResponse(socket, expectedCode);
+}
+
+function readResponse(socket: tls.TLSSocket, expectedCode?: number) {
+  return new Promise<string>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      cleanup();
+      reject(new Error("SMTP request timed out."));
+    }, 15000);
+
+    function cleanup() {
+      clearTimeout(timeout);
+      socket.off("data", onData);
+      socket.off("error", onError);
+    }
+
+    function onData(data: string) {
+      const lines = data.trimEnd().split(/\r?\n/);
+      const lastLine = lines[lines.length - 1] ?? "";
+
+      if (!/^\d{3}\s/.test(lastLine)) {
+        return;
+      }
+
+      const code = Number(lastLine.slice(0, 3));
+
+      if (expectedCode && code !== expectedCode) {
+        cleanup();
+        reject(new Error(data.trim()));
+        return;
+      }
+
+      if (!expectedCode && code >= 400) {
+        cleanup();
+        reject(new Error(data.trim()));
+        return;
+      }
+
+      cleanup();
+      resolve(data);
+    }
+
+    function onError(error: Error) {
+      cleanup();
+      reject(error);
+    }
+
+    socket.on("data", onData);
+    socket.on("error", onError);
+  });
 }
