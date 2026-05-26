@@ -62,6 +62,7 @@ export function GstTracker() {
   const [search, setSearch] = useState("");
   const [message, setMessage] = useState("");
   const [isLoading, setIsLoading] = useState(true);
+  const [isImportingLatest, setIsImportingLatest] = useState(false);
   const [isLaunchingCollector, setIsLaunchingCollector] = useState(false);
   const [isSavingClient, setIsSavingClient] = useState(false);
   const [isSavingCase, setIsSavingCase] = useState(false);
@@ -255,17 +256,7 @@ export function GstTracker() {
     while (Date.now() < deadline) {
       await wait(5000);
 
-      const response = await fetch(
-        `${LOCAL_GST_HELPER_URL}/latest?gstin=${encodeURIComponent(registration.gstin)}`,
-      ).catch(() => null);
-
-      if (!response?.ok) {
-        continue;
-      }
-
-      const latest = (await response.json().catch(() => null)) as
-        | { modifiedAt?: string; payload?: GstNoticeOutput }
-        | null;
+      const latest = await fetchLatestHelperOutput(registration);
       const modifiedAt = latest?.modifiedAt ? new Date(latest.modifiedAt).getTime() : 0;
 
       if (!latest?.payload || modifiedAt < startedAt) {
@@ -281,6 +272,46 @@ export function GstTracker() {
     }
 
     setMessage("GST portal data was saved locally, but WorkLine did not receive a fresh output file in time. Click Refresh after a moment.");
+  }
+
+  async function importLatestHelperOutput() {
+    if (!selectedRegistration) {
+      setMessage("Select a GST client before importing latest helper output.");
+      return;
+    }
+
+    setIsImportingLatest(true);
+    setMessage("");
+
+    const latest = await fetchLatestHelperOutput(selectedRegistration);
+
+    if (!latest?.payload) {
+      setMessage("No local GST portal output is available yet. Run Get data first.");
+      setIsImportingLatest(false);
+      return;
+    }
+
+    const imported = await importNoticeOutput(selectedRegistration, latest.payload);
+    if (imported > 0) {
+      setMessage(`Imported ${imported} GST portal rows into WorkLine.`);
+      await loadWorkspace();
+    }
+
+    setIsImportingLatest(false);
+  }
+
+  async function fetchLatestHelperOutput(registration: GstRegistration) {
+    const response = await fetch(
+      `${LOCAL_GST_HELPER_URL}/latest?gstin=${encodeURIComponent(registration.gstin)}`,
+    ).catch(() => null);
+
+    if (!response?.ok) {
+      return null;
+    }
+
+    return (await response.json().catch(() => null)) as
+      | { modifiedAt?: string; payload?: GstNoticeOutput }
+      | null;
   }
 
   async function importNoticeOutput(registration: GstRegistration, output: GstNoticeOutput) {
@@ -461,6 +492,15 @@ export function GstTracker() {
                     >
                       {isLaunchingCollector ? <Loader2 className="size-4 animate-spin" /> : <LogIn className="size-4" />}
                       Get data
+                    </button>
+                    <button
+                      className="flex h-12 items-center justify-center gap-2 rounded-2xl border border-teal-200 bg-white px-5 text-sm font-black text-teal-800 shadow-sm transition hover:bg-teal-50 disabled:cursor-not-allowed disabled:opacity-60"
+                      disabled={!selectedRegistrationId || isImportingLatest}
+                      onClick={() => void importLatestHelperOutput()}
+                      type="button"
+                    >
+                      {isImportingLatest ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
+                      Import latest
                     </button>
                     <Metric label="Rows" value={visibleCases.length.toString()} tone="bg-slate-100 text-slate-700" />
                   </div>
