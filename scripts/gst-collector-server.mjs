@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import process from "node:process";
@@ -67,14 +68,28 @@ function startCollector({ gstin, rowNumber }) {
     args.push("--expect-gstin", String(gstin).trim().toUpperCase());
   }
 
+  const outputDir = path.join(process.cwd(), "collector-output");
+  fs.mkdirSync(outputDir, { recursive: true });
+  const logPath = path.join(outputDir, "gst-helper.log");
+  const logStream = fs.createWriteStream(logPath, { flags: "a" });
+  logStream.write(`\n[${new Date().toISOString()}] Starting collector for ${gstin || "Excel row"}\n`);
+
   const child = spawn(process.execPath, args, {
     cwd: process.cwd(),
     detached: true,
-    stdio: "ignore",
+    stdio: ["ignore", "pipe", "pipe"],
     windowsHide: false,
   });
 
+  child.stdout.pipe(logStream, { end: false });
+  child.stderr.pipe(logStream, { end: false });
+  child.on("exit", (code, signal) => {
+    logStream.write(`[${new Date().toISOString()}] Collector exited code=${code} signal=${signal}\n`);
+    logStream.end();
+  });
+
   child.unref();
+  return logPath;
 }
 
 const server = http.createServer(async (request, response) => {
@@ -102,7 +117,7 @@ const server = http.createServer(async (request, response) => {
 
   try {
     const body = await readJson(request);
-    startCollector({
+    const logPath = startCollector({
       gstin: body.gstin,
       rowNumber: Number.isInteger(body.rowNumber) ? body.rowNumber : 2,
     });
@@ -112,7 +127,8 @@ const server = http.createServer(async (request, response) => {
       200,
       {
         message:
-          "GST portal collector started. Chrome or Edge should open and continue with the selected GSTIN.",
+          "GST portal login opened. Enter CAPTCHA in Chrome or Edge; the helper will submit login after CAPTCHA is entered.",
+        logPath,
       },
       origin,
     );

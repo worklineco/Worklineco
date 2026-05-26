@@ -287,6 +287,59 @@ async function clickFirstVisible(page, selectors, label) {
   return false;
 }
 
+async function waitForCaptchaAndSubmit(page) {
+  const selectors = [
+    "input#captcha",
+    "input[name='captcha']",
+    "input[formcontrolname='captcha']",
+    "input[placeholder*='Captcha' i]",
+    "input[aria-label*='Captcha' i]",
+  ];
+
+  for (const selector of selectors) {
+    const locator = page.locator(selector);
+    const count = await locator.count().catch(() => 0);
+
+    for (let index = 0; index < Math.min(count, 3); index += 1) {
+      const input = locator.nth(index);
+      const visible = await input.isVisible({ timeout: 500 }).catch(() => false);
+
+      if (!visible) {
+        continue;
+      }
+
+      await input.focus();
+      console.log("Focused CAPTCHA field. Type CAPTCHA in the browser; login will submit automatically.");
+
+      while (true) {
+        const value = await input.inputValue().catch(() => "");
+        if (value.trim().length >= 6) {
+          console.log("CAPTCHA entered.");
+          return clickFirstVisible(
+            page,
+            [
+              "button:has-text('LOGIN')",
+              "button:has-text('Login')",
+              "input[type='submit'][value='LOGIN']",
+              "input[type='submit'][value='Login']",
+              "input[type='button'][value='LOGIN']",
+              "input[type='button'][value='Login']",
+              "a:has-text('LOGIN')",
+              "a:has-text('Login')",
+            ],
+            "GST portal login button",
+          );
+        }
+
+        await page.waitForTimeout(500);
+      }
+    }
+  }
+
+  console.log("Could not find a CAPTCHA field. Please solve CAPTCHA and click Login manually.");
+  return false;
+}
+
 async function extractBestTableFromFrame(frame) {
   return frame.evaluate(
     ({ aliases, fieldNames }) => {
@@ -569,25 +622,11 @@ async function main() {
     "GST password",
   );
 
-  await clickFirstVisible(
-    page,
-    [
-      "button:has-text('LOGIN')",
-      "button:has-text('Login')",
-      "input[type='submit'][value='LOGIN']",
-      "input[type='submit'][value='Login']",
-      "input[type='button'][value='LOGIN']",
-      "input[type='button'][value='Login']",
-      "a:has-text('LOGIN')",
-      "a:has-text('Login')",
-    ],
-    "GST portal login button",
-  );
-
   if (options.loginOnly) {
     console.log("");
-    console.log("GST portal opened, credentials were filled from Excel, and login was clicked.");
-    console.log("Solve any CAPTCHA or portal prompt in the browser. Keep this process running while the browser is in use.");
+    console.log("GST portal opened and credentials were filled from Excel.");
+    await waitForCaptchaAndSubmit(page);
+    console.log("Keep this process running while the browser is in use.");
     await new Promise(() => {});
     return;
   }

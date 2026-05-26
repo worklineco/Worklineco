@@ -37,7 +37,8 @@ export async function POST(request: Request) {
   child.unref();
 
   return NextResponse.json({
-    message: "GST portal collector started. Chrome or Edge should open shortly.",
+    message:
+      "GST portal login opened. Enter CAPTCHA in Chrome or Edge; the helper will submit login after CAPTCHA is entered.",
     rowNumber,
   });
 }
