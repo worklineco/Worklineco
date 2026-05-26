@@ -1,5 +1,6 @@
 "use client";
 
+import { GstSacHelp } from "@/components/gst/gst-sac-help";
 import {
   LOCAL_GST_HELPER_URL,
   checkGstHelperReady,
@@ -75,6 +76,7 @@ export function GstTracker() {
   const [isInstallingHelper, setIsInstallingHelper] = useState(false);
   const [installModalOpen, setInstallModalOpen] = useState(false);
   const [installModalStep, setInstallModalStep] = useState(0);
+  const [showSacHelp, setShowSacHelp] = useState(false);
 
   const [clientName, setClientName] = useState("");
   const [gstin, setGstin] = useState("");
@@ -523,11 +525,17 @@ export function GstTracker() {
                 Check helper connection
               </button>
             </div>
-            <p className="mt-3 text-xs font-semibold text-teal-800">
-              If Smart App Control blocked a file, use More info → Run anyway on the .bat file (not the old .vbs).
-            </p>
+            <button
+              className="mt-3 text-sm font-black text-amber-800 underline"
+              onClick={() => setShowSacHelp((value) => !value)}
+              type="button"
+            >
+              {showSacHelp ? "Hide" : "Windows blocked the install? Click here"}
+            </button>
           </div>
         ) : null}
+
+        {helperReady === false && showSacHelp ? <GstSacHelp origin={typeof window !== "undefined" ? window.location.origin : "https://worklineco.com"} /> : null}
 
         {installModalOpen ? (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 px-4">
@@ -540,8 +548,8 @@ export function GstTracker() {
               ) : installModalStep === 2 ? (
                 <>
                   <p className="mt-3 text-sm font-semibold leading-6 text-slate-600">
-                    The helper is not running yet. Open the extracted folder and double-click
-                    Install WorkLine GST Helper.bat. If Windows blocks it, choose More info → Run anyway.
+                    The helper is not running yet. If Smart App Control blocked the .bat file, close this
+                    window and use &quot;Windows blocked the install?&quot; on the page.
                   </p>
                   <button
                     className="mt-5 flex h-11 w-full items-center justify-center rounded-2xl bg-teal-800 text-sm font-black text-white"

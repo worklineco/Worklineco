@@ -50,17 +50,21 @@ pause
 const readmeTxt = `WorkLine GST Helper - Windows setup (one time per laptop)
 ============================================================
 
+NORMAL INSTALL
 1. Extract this ZIP folder (right-click -> Extract All).
-2. Open the extracted folder and double-click:
-   "Install WorkLine GST Helper.bat"
-3. If Windows Smart Screen appears, click More info -> Run anyway.
-4. When setup finishes, open https://worklineco.com/gst and click Get data.
+2. Double-click "Install WorkLine GST Helper.bat"
+3. Open https://worklineco.com/gst and click Check helper connection.
+
+IF SMART APP CONTROL BLOCKED THE .BAT
+1. Install Node.js LTS from https://nodejs.org/en/download (official .msi).
+2. Extract THIS zip so files are in:
+   %LOCALAPPDATA%\\WorkLine\\GSTHelper
+3. On worklineco.com/gst open "Windows blocked the install?" and copy the Win+R commands.
+4. Click Check helper connection on the website.
 
 Excel file (on this same PC):
   %USERPROFILE%\\Downloads\\WorkLineCo.xlsx
   Column A = GSTIN, B = portal user ID, C = portal password
-
-Support: contact your WorkLine administrator.
 `;
 
 function resetDirectory(directory) {

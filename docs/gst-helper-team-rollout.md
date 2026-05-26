@@ -19,9 +19,16 @@ Each person installs **once** on their own laptop. You do not need to visit each
 
 ## If Windows “Smart App Control” blocks the install
 
-- Do **not** use `WorkLineGSTHelperSetup.vbs`.
-- Use the **ZIP** and **.bat** file steps above.
-- On the warning: **More info** → **Run anyway**.
+Smart App Control often blocks `.bat` and `.vbs` files. Do **not** fight it with random downloads.
+
+On **worklineco.com/gst**, click **Windows blocked the install?** and follow **Option B**:
+
+1. Install **Node.js LTS** from https://nodejs.org/en/download (official `.msi`).
+2. Extract **WorkLineGSTHelper-Windows.zip** into `%LOCALAPPDATA%\WorkLine\GSTHelper`.
+3. Use **Win+R** and paste the two commands from the website (Copy start command / Copy startup command).
+4. Click **Check helper connection**.
+
+Optional: Settings → Windows Security → Smart App Control → **Off** (only if shown as Evaluation mode), run the `.bat` once, turn back on.
 
 ## Verify on one laptop before emailing everyone
 
