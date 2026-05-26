@@ -446,15 +446,45 @@ async function navigateToNoticesAndOrders(page) {
   await waitForAuthenticatedPortal(page);
   await handlePortalPopups(page);
 
-  const steps = [
-    ["Services", "Services"],
-    ["User Services", "User Services"],
-    ["View Notices and Orders", "View Notices and Orders"],
-  ];
+  await clickFirstVisible(
+    page,
+    [
+      "a.dropdown-toggle:has-text('Services')",
+      "a[href='#']:has-text('Services')",
+      "a:has-text('Services')",
+    ],
+    "Services",
+  );
+  await page.waitForTimeout(750);
 
-  for (const [text, label] of steps) {
-    await clickPortalLinkByText(page, text, label);
+  const clickedUserServices = await clickFirstVisible(
+    page,
+    [
+      "a[href='//services.gst.gov.in/services/auth/quicklinks/userservices']:has-text('User Services')",
+      "a[href*='/services/auth/quicklinks/userservices']:has-text('User Services')",
+      "a:has-text('User Services')",
+    ],
+    "User Services",
+  );
+
+  if (!clickedUserServices) {
+    await page.goto("https://services.gst.gov.in/services/auth/quicklinks/userservices", {
+      waitUntil: "domcontentloaded",
+      timeout: 30_000,
+    });
   }
+
+  await page.waitForTimeout(1_000);
+
+  const clickedNotices = await clickFirstVisible(
+    page,
+    [
+      "a[href='//services.gst.gov.in/services/auth/notices']:has-text('View Notices and Orders')",
+      "a[href*='/services/auth/notices']:has-text('View Notices and Orders')",
+      "a:has-text('View Notices and Orders')",
+    ],
+    "View Notices and Orders",
+  );
 
   const reached = await page.waitForFunction(
     () =>
@@ -465,7 +495,7 @@ async function navigateToNoticesAndOrders(page) {
     { timeout: 20_000 },
   ).then(() => true).catch(() => false);
 
-  if (!reached) {
+  if (!clickedNotices || !reached) {
     console.log("Menu navigation did not reach notices page. Opening View Notices and Orders directly.");
     await page.goto("https://services.gst.gov.in/services/auth/notices", {
       waitUntil: "domcontentloaded",
