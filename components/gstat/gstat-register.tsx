@@ -476,6 +476,14 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                   {isMaximized ? "GSTAT Register" : "Appeals Register"}
                 </h2>
               </div>
+              {isMaximized && (
+                <div className="mt-2 flex items-center gap-3">
+                  <span className="inline-flex items-center gap-1.5 rounded-lg bg-teal-50 px-2.5 py-1 text-xs font-black text-teal-700">
+                    <FileSpreadsheet className="size-3.5" />
+                    Unique Appeals: {hasActiveFilters ? `${filteredUniqueAppeals} / ${uniqueAppeals}` : String(uniqueAppeals)}
+                  </span>
+                </div>
+              )}
               {message ? <p className="mt-1 text-sm font-bold text-emerald-700">{message}</p> : null}
               {isLoading ? <p className="mt-1 text-sm font-bold text-slate-500">Loading saved GSTAT data...</p> : null}
               {hasActiveFilters && (
