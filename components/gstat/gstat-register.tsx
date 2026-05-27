@@ -153,6 +153,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
     () => new Set(rows.map((row) => String(row.data["OIA No"] ?? "").trim()).filter(Boolean)).size,
     [rows]
   );
+  
   const filteredRows = useMemo(
     () =>
       rows
@@ -171,6 +172,16 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
           })
         ),
     [filters, rows]
+  );
+  
+  const filteredUniqueAppeals = useMemo(
+    () => new Set(filteredRows.map(({ row }) => String(row.data["OIA No"] ?? "").trim()).filter(Boolean)).size,
+    [filteredRows]
+  );
+  
+  const hasActiveFilters = useMemo(
+    () => Object.values(filters).some((filter) => filter?.trim()),
+    [filters]
   );
 
   useEffect(() => {
@@ -437,7 +448,11 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
             </div>
 
             <div className="grid gap-3 sm:grid-cols-2">
-              <Metric icon={FileSpreadsheet} label="Unique Appeals" value={String(uniqueAppeals)} />
+              <Metric 
+                icon={FileSpreadsheet} 
+                label="Unique Appeals" 
+                value={hasActiveFilters ? `${filteredUniqueAppeals} / ${uniqueAppeals}` : String(uniqueAppeals)} 
+              />
               <Metric icon={ShieldCheck} label="Workspace" value="Protected" />
             </div>
           </div>
@@ -463,6 +478,12 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
               </div>
               {message ? <p className="mt-1 text-sm font-bold text-emerald-700">{message}</p> : null}
               {isLoading ? <p className="mt-1 text-sm font-bold text-slate-500">Loading saved GSTAT data...</p> : null}
+              {hasActiveFilters && (
+                <p className="mt-1 text-sm font-semibold text-slate-600">
+                  Showing <span className="font-black text-teal-700">{filteredRows.length}</span> rows 
+                  ({filteredUniqueAppeals} unique appeals) of <span className="font-black text-slate-700">{rows.length}</span> total
+                </p>
+              )}
             </div>
             <div className="flex flex-wrap gap-2">
               <input

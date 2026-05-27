@@ -43,17 +43,6 @@ type GstLitigationCase = {
   source: string;
 };
 
-type GstNoticeOutput = {
-  extractedAt?: string;
-  gstin?: string;
-  tables?: {
-    rows?: Record<string, unknown>[];
-    section?: string;
-  }[];
-};
-
-const LOCAL_GST_HELPER_URL = "http://127.0.0.1:48782";
-
 export function GstTracker() {
   const [organisationId, setOrganisationId] = useState("");
   const [registrations, setRegistrations] = useState<GstRegistration[]>([]);
@@ -62,8 +51,6 @@ export function GstTracker() {
   const [search, setSearch] = useState("");
   const [message, setMessage] = useState("");
   const [isLoading, setIsLoading] = useState(true);
-  const [isImportingLatest, setIsImportingLatest] = useState(false);
-  const [isLaunchingCollector, setIsLaunchingCollector] = useState(false);
   const [isSavingClient, setIsSavingClient] = useState(false);
   const [isSavingCase, setIsSavingCase] = useState(false);
 
@@ -208,142 +195,14 @@ export function GstTracker() {
     await loadWorkspace();
   }
 
-  async function startGstCollector() {
+  function openGstPortal() {
     if (!selectedRegistration) {
-      setMessage("Select a GST client before opening the portal collector.");
+      setMessage("Select a GST client before opening the GST portal.");
       return;
     }
 
-    setIsLaunchingCollector(true);
-    setMessage("");
-
-    const endpoint = `${LOCAL_GST_HELPER_URL}/start`;
-    let response: Response;
-
-    try {
-      response = await fetch(endpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          gstin: selectedRegistration.gstin
-        })
-      });
-    } catch {
-      setIsLaunchingCollector(false);
-      setMessage(getCollectorHelpMessage());
-      return;
-    }
-
-    const result = (await response.json().catch(() => ({}))) as { error?: string; message?: string };
-
-    setIsLaunchingCollector(false);
-
-    if (!response.ok) {
-      setMessage(formatCollectorStartError(result.error));
-      return;
-    }
-
-    setMessage(result.message ?? "GST portal collector started. Chrome or Edge should open shortly.");
-    void pollAndImportLatestNotices(selectedRegistration);
-  }
-
-  async function pollAndImportLatestNotices(registration: GstRegistration) {
-    const startedAt = Date.now();
-    const deadline = startedAt + 8 * 60 * 1000;
-
-    while (Date.now() < deadline) {
-      await wait(5000);
-
-      const latest = await fetchLatestHelperOutput(registration);
-      const modifiedAt = latest?.modifiedAt ? new Date(latest.modifiedAt).getTime() : 0;
-
-      if (!latest?.payload || modifiedAt < startedAt) {
-        continue;
-      }
-
-      const imported = await importNoticeOutput(registration, latest.payload);
-      if (imported > 0) {
-        setMessage(`Imported ${imported} GST portal rows into WorkLine.`);
-        await loadWorkspace();
-        return;
-      }
-    }
-
-    setMessage("GST portal data was saved locally, but WorkLine did not receive a fresh output file in time. Click Refresh after a moment.");
-  }
-
-  async function importLatestHelperOutput() {
-    if (!selectedRegistration) {
-      setMessage("Select a GST client before importing latest helper output.");
-      return;
-    }
-
-    setIsImportingLatest(true);
-    setMessage("");
-
-    const latest = await fetchLatestHelperOutput(selectedRegistration);
-
-    if (!latest?.payload) {
-      setMessage("No local GST portal output is available yet. Run Get data first.");
-      setIsImportingLatest(false);
-      return;
-    }
-
-    const imported = await importNoticeOutput(selectedRegistration, latest.payload);
-    if (imported > 0) {
-      setMessage(`Imported ${imported} GST portal rows into WorkLine.`);
-      await loadWorkspace();
-    }
-
-    setIsImportingLatest(false);
-  }
-
-  async function fetchLatestHelperOutput(registration: GstRegistration) {
-    const response = await fetch(
-      `${LOCAL_GST_HELPER_URL}/latest?gstin=${encodeURIComponent(registration.gstin)}`,
-    ).catch(() => null);
-
-    if (!response?.ok) {
-      return null;
-    }
-
-    return (await response.json().catch(() => null)) as
-      | { modifiedAt?: string; payload?: GstNoticeOutput }
-      | null;
-  }
-
-  async function importNoticeOutput(registration: GstRegistration, output: GstNoticeOutput) {
-    const rows = (output.tables ?? []).flatMap((table) => table.rows ?? []);
-    const payload = dedupeCaseRows(rows
-      .map((row, index) => normalizeNoticeOutputRow(row, index))
-      .filter((row) => row.ref_id || row.description)
-      .map((row) => ({
-        ...row,
-        case_id: row.case_id || row.ref_id || `row-${row.serial_no}`,
-        gst_registration_id: registration.id,
-        organisation_id: organisationId,
-        raw_payload: row,
-        scraped_at: output.extractedAt || new Date().toISOString(),
-        source: "gst-portal-local-helper",
-        updated_at: new Date().toISOString()
-      })));
-
-    if (!payload.length) {
-      return 0;
-    }
-
-    const { error } = await supabase.from("gst_litigation_cases").upsert(payload, {
-      onConflict: "organisation_id,gst_registration_id,ref_id,case_id"
-    });
-
-    if (error) {
-      setMessage(`Could not import GST portal rows: ${error.message}`);
-      return 0;
-    }
-
-    return payload.length;
+    window.open("https://services.gst.gov.in/services/login", "_blank", "noopener,noreferrer");
+    setMessage("GST portal opened in a new tab. Copy notice details into the form below and click Add.");
   }
 
   const filteredRegistrations = useMemo(() => {
@@ -397,9 +256,8 @@ export function GstTracker() {
               </h1>
               <p className="mt-3 max-w-4xl text-sm font-semibold leading-6 text-slate-600">
                 Track notices, proceedings, case IDs, sections, tax periods,
-                due dates, and reply filing status. Portal scraping will run
-                through a per-user local collector with manual CAPTCHA and
-                push extracted rows here.
+                due dates, and reply filing status. Open the GST portal when
+                needed, then save notice details directly in this shared tracker.
               </p>
             </div>
 
@@ -409,12 +267,17 @@ export function GstTracker() {
               <Metric label="Due 7d" value={dueSoon.toString()} tone="bg-rose-100 text-rose-800" />
             </div>
           </div>
+
         </header>
 
         {message ? (
-          <div className="mt-4 flex items-start gap-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-bold text-rose-900">
-            <AlertCircle className="mt-0.5 size-4 shrink-0" />
-            <p>{message}</p>
+          <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-900">
+            <div className="flex items-start gap-3">
+              <AlertCircle className="mt-0.5 size-4 shrink-0" />
+              <div className="min-w-0 flex-1">
+                <p>{message}</p>
+              </div>
+            </div>
           </div>
         ) : null}
 
@@ -486,21 +349,12 @@ export function GstTracker() {
                   <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center">
                     <button
                       className="flex h-12 items-center justify-center gap-2 rounded-2xl bg-teal-700 px-5 text-sm font-black text-white shadow-sm transition hover:bg-teal-800 disabled:cursor-not-allowed disabled:opacity-60"
-                      disabled={!selectedRegistrationId || isLaunchingCollector}
-                      onClick={() => void startGstCollector()}
+                      disabled={!selectedRegistrationId}
+                      onClick={openGstPortal}
                       type="button"
                     >
-                      {isLaunchingCollector ? <Loader2 className="size-4 animate-spin" /> : <LogIn className="size-4" />}
-                      Get data
-                    </button>
-                    <button
-                      className="flex h-12 items-center justify-center gap-2 rounded-2xl border border-teal-200 bg-white px-5 text-sm font-black text-teal-800 shadow-sm transition hover:bg-teal-50 disabled:cursor-not-allowed disabled:opacity-60"
-                      disabled={!selectedRegistrationId || isImportingLatest}
-                      onClick={() => void importLatestHelperOutput()}
-                      type="button"
-                    >
-                      {isImportingLatest ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
-                      Import latest
+                      <LogIn className="size-4" />
+                      Open GST portal
                     </button>
                     <Metric label="Rows" value={visibleCases.length.toString()} tone="bg-slate-100 text-slate-700" />
                   </div>
@@ -556,8 +410,8 @@ export function GstTracker() {
               </section>
 
               <section className="grid gap-4 md:grid-cols-3">
-                <InfoCard icon={ShieldCheck} title="Per-user Collector" text="Every authorised user can run the local collector on their own machine. GST passwords stay local; WorkLine receives only extracted rows." />
-                <InfoCard icon={FileSearch} title="Excel Mapping" text="Default file is each user's Downloads/WorkLineCo.xlsx. The collector finds the selected GSTIN in column A, then reads B = GST Portal user ID and C = password." />
+                <InfoCard icon={ShieldCheck} title="Shared Tracker" text="Everyone in the firm can keep notice status, reply filing, and due dates in one workspace." />
+                <InfoCard icon={FileSearch} title="Manual Entry" text="Open the GST portal, copy the notice details, and save the row here without any laptop setup." />
                 <InfoCard icon={Scale} title="Legal Workflow First" text="The cloud dashboard stays shared by the firm and tracks notices, proceedings, replies, and due-date follow-up." />
               </section>
             </section>
@@ -605,88 +459,4 @@ function formatLoadError(message: string) {
   }
 
   return message;
-}
-
-function getCollectorHelpMessage() {
-  return "Start the WorkLine GST helper on this computer, then click Get data again. Run: npm run gst:helper";
-}
-
-function formatCollectorStartError(error?: string) {
-  if (!error) {
-    return "Unable to start the local GST portal collector.";
-  }
-
-  if (error.toLowerCase().includes("spawn") || error.toLowerCase().includes("eperm")) {
-    return getCollectorHelpMessage();
-  }
-
-  return error;
-}
-
-function cleanOutputCell(value: unknown) {
-  return String(value ?? "").replace(/\s+/g, " ").trim();
-}
-
-function parsePortalDate(value: unknown) {
-  const text = cleanOutputCell(value);
-
-  if (!text || ["-", "na", "n/a", "as applicable*"].includes(text.toLowerCase())) {
-    return null;
-  }
-
-  const match = text.match(/^(\d{1,2})[-/.\s](\d{1,2})[-/.\s](\d{2,4})$/);
-  if (!match) {
-    return null;
-  }
-
-  const [, day, month, yearValue] = match;
-  const year = yearValue.length === 2 ? `20${yearValue}` : yearValue;
-  return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
-}
-
-function normalizeNoticeOutputRow(row: Record<string, unknown>, index: number) {
-  const refId = cleanOutputCell(row.refId ?? row["Ref ID"] ?? row["Column 1"]);
-  const noticeType = cleanOutputCell(row.typeOfNotice ?? row["Type of Notice"] ?? row["Column 2"]);
-  const description = cleanOutputCell(row.description ?? row.Description ?? row["Column 3"]);
-  const dateOfIssue = cleanOutputCell(row.dateOfIssue ?? row["Date of Issue"] ?? row["Date of Issuance"] ?? row["Column 4"]);
-  const fifthColumn = cleanOutputCell(row.dueDate ?? row["Due Date"] ?? row["Column 5"]);
-  const parsedFifthColumnDate = parsePortalDate(fifthColumn);
-
-  return {
-    case_id: cleanOutputCell(row.caseId ?? row["Case ID"] ?? ""),
-    date_of_issue: parsePortalDate(dateOfIssue),
-    description: description || null,
-    due_date: parsedFifthColumnDate,
-    notice_type: noticeType || null,
-    ref_id: refId || null,
-    reply_filing_status: cleanOutputCell(row.replyFiling ?? row["Reply Filing"] ?? "") || null,
-    section: cleanOutputCell(row.section ?? row.Section ?? "") || null,
-    serial_no: index + 1,
-    status: parsedFifthColumnDate ? null : fifthColumn || null,
-    tax_period: cleanOutputCell(row.taxPeriod ?? row["Tax Period"] ?? "") || null
-  };
-}
-
-function wait(ms: number) {
-  return new Promise((resolve) => {
-    window.setTimeout(resolve, ms);
-  });
-}
-
-function dedupeCaseRows<T extends { case_id: string | null; ref_id: string | null }>(rows: T[]) {
-  const seen = new Set<string>();
-  const deduped: T[] = [];
-
-  for (const row of rows) {
-    const key = `${row.ref_id || ""}::${row.case_id || ""}`;
-
-    if (seen.has(key)) {
-      continue;
-    }
-
-    seen.add(key);
-    deduped.push(row);
-  }
-
-  return deduped;
 }
