@@ -9,6 +9,10 @@ type AppealRow = {
   id?: string;
   row_number?: number;
 };
+type AccessScope = {
+  isPartner: boolean;
+  team: string;
+};
 
 const organisationCode = "DCO1433";
 
@@ -20,6 +24,7 @@ export async function GET() {
   }
 
   const admin = createAdminClient();
+  const access = getAccessScope(auth.user);
   const { data, error } = await admin
     .from("gstat_appeals")
     .select("id,row_number,data,updated_at")
@@ -30,7 +35,7 @@ export async function GET() {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  return NextResponse.json({ rows: data ?? [] });
+  return NextResponse.json({ rows: filterRowsForAccess(data ?? [], access) });
 }
 
 export async function POST(request: Request) {
@@ -50,6 +55,7 @@ export async function POST(request: Request) {
     : "bulk_save";
 
   const admin = createAdminClient();
+  const access = getAccessScope(auth.user);
   const previous = await admin
     .from("gstat_appeals")
     .select("id,data,row_number")
@@ -60,7 +66,7 @@ export async function POST(request: Request) {
   }
 
   if (auditAction === "row_insert" || auditAction === "row_delete") {
-    const existingRows = (previous.data ?? [])
+    const existingRows = filterRowsForAccess(previous.data ?? [], access)
       .sort((first, second) => (first.row_number ?? 0) - (second.row_number ?? 0))
       .map((row) => ({ data: row.data ?? {}, row_number: row.row_number ?? 1 }));
     const nextRows =
@@ -76,14 +82,19 @@ export async function POST(request: Request) {
               : [{ data: {}, row_number: 1 }]
           );
 
-    return replaceRows(admin, auth.user.id, nextRows, auditAction, previous.data?.length ?? 0);
+    return replaceRows(admin, auth.user.id, nextRows, auditAction, previous.data?.length ?? 0, access);
   }
 
   if (!Array.isArray(rows)) {
     return NextResponse.json({ error: "Rows are required." }, { status: 400 });
   }
 
-  return replaceRows(admin, auth.user.id, rows, auditAction, previous.data?.length ?? 0);
+  const scopedRows = rows.map((row) => ({
+    ...row,
+    data: applyAccessToRowData(row.data ?? {}, access)
+  }));
+
+  return replaceRows(admin, auth.user.id, scopedRows, auditAction, previous.data?.length ?? 0, access);
 }
 
 async function replaceRows(
@@ -91,12 +102,19 @@ async function replaceRows(
   userId: string,
   rows: AppealRow[],
   auditAction: string,
-  previousRowCount: number
+  previousRowCount: number,
+  access: AccessScope = { isPartner: true, team: "" }
 ) {
-  const { error: deleteError } = await admin
+  let deleteQuery = admin
     .from("gstat_appeals")
     .delete()
     .eq("organisation_code", organisationCode);
+
+  if (!access.isPartner && access.team) {
+    deleteQuery = deleteQuery.eq("data->>Person handling", access.team);
+  }
+
+  const { error: deleteError } = await deleteQuery;
 
   if (deleteError) {
     return NextResponse.json({ error: deleteError.message }, { status: 500 });
@@ -130,7 +148,7 @@ async function replaceRows(
     organisation_code: organisationCode
   });
 
-  return NextResponse.json({ rows: inserted.data ?? [] });
+  return NextResponse.json({ rows: filterRowsForAccess(inserted.data ?? [], access) });
 }
 
 export async function PATCH(request: Request) {
@@ -153,13 +171,15 @@ export async function PATCH(request: Request) {
   }
 
   const admin = createAdminClient();
+  const access = getAccessScope(auth.user);
+  const scopedRowData = rowData ? applyAccessToRowData(rowData, access) : undefined;
 
   if (!id) {
     const inserted = await admin
       .from("gstat_appeals")
       .insert({
         created_by: auth.user.id,
-        data: rowData ?? { ...row.data, [field!]: value ?? "" },
+        data: scopedRowData ?? applyAccessToRowData({ ...row.data, [field!]: value ?? "" }, access),
         organisation_code: organisationCode,
         row_number: row.row_number ?? 1,
         updated_by: auth.user.id
@@ -172,11 +192,11 @@ export async function PATCH(request: Request) {
     }
 
     await admin.from("gstat_audit_logs").insert({
-      action: rowData ? "create_row" : "create",
+      action: scopedRowData ? "create_row" : "create",
       actor_user_id: auth.user.id,
       appeal_id: inserted.data.id,
-      field_name: rowData ? "row" : field,
-      new_value: rowData ?? value ?? "",
+      field_name: scopedRowData ? "row" : field,
+      new_value: scopedRowData ?? value ?? "",
       old_value: null,
       organisation_code: organisationCode
     });
@@ -195,8 +215,12 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: existing.error.message }, { status: 404 });
   }
 
+  if (!canAccessRow(existing.data, access)) {
+    return NextResponse.json({ error: "Not allowed to update this GSTAT row." }, { status: 403 });
+  }
+
   const oldValue = field ? existing.data.data?.[field] ?? "" : existing.data.data;
-  const nextData = rowData ?? { ...existing.data.data, [field!]: value ?? "" };
+  const nextData = scopedRowData ?? applyAccessToRowData({ ...existing.data.data, [field!]: value ?? "" }, access);
 
   const updated = await admin
     .from("gstat_appeals")
@@ -213,19 +237,49 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: updated.error.message }, { status: 500 });
   }
 
-  if (JSON.stringify(oldValue) !== JSON.stringify(rowData ?? value ?? "")) {
+  if (JSON.stringify(oldValue) !== JSON.stringify(scopedRowData ?? value ?? "")) {
     await admin.from("gstat_audit_logs").insert({
-      action: rowData ? "update_row" : "update",
+      action: scopedRowData ? "update_row" : "update",
       actor_user_id: auth.user.id,
       appeal_id: id,
-      field_name: rowData ? "row" : field,
-      new_value: rowData ?? value ?? "",
+      field_name: scopedRowData ? "row" : field,
+      new_value: scopedRowData ?? value ?? "",
       old_value: oldValue,
       organisation_code: organisationCode
     });
   }
 
   return NextResponse.json({ row: updated.data });
+}
+
+function applyAccessToRowData(data: Record<string, string | number>, access: AccessScope) {
+  if (access.isPartner || !access.team) {
+    return data;
+  }
+
+  return { ...data, "Person handling": access.team };
+}
+
+function canAccessRow(row: AppealRow, access: AccessScope) {
+  return access.isPartner || !access.team || String(row.data?.["Person handling"] ?? "") === access.team;
+}
+
+function filterRowsForAccess<T extends AppealRow>(rows: T[], access: AccessScope) {
+  if (access.isPartner || !access.team) {
+    return rows;
+  }
+
+  return rows.filter((row) => canAccessRow(row, access));
+}
+
+function getAccessScope(user: { user_metadata?: Record<string, unknown> }): AccessScope {
+  const role = String(user.user_metadata?.role ?? "").trim().toLowerCase();
+  const team = String(user.user_metadata?.team ?? "").trim();
+
+  return {
+    isPartner: role === "partner",
+    team
+  };
 }
 
 function createAdminClient() {

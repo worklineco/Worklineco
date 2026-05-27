@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, Download, Expand, FileSpreadsheet, Pencil, Plus, Scale, ShieldCheck, Trash2, Upload, X } from "lucide-react";
+import { ArrowLeft, Download, Expand, FileSpreadsheet, History, Pencil, Plus, Scale, ShieldCheck, Trash2, Upload, X } from "lucide-react";
 import Link from "next/link";
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
@@ -65,6 +65,18 @@ const demandColumns: Column[] = groupedColumns.flatMap((group) =>
 );
 const finalColumns: Column[] = [{ key: "Pre Deposit Workings", label: "Pre Deposit Workings" }];
 const columns = [...baseColumns, ...demandColumns, ...finalColumns];
+const teamOptions = [
+  "Team 01",
+  "Team 03",
+  "Team 04",
+  "Team 05",
+  "Team 06",
+  "Team 07",
+  "Team 08",
+  "Team 09",
+  "Team 10",
+  "Team 12"
+];
 const editorSections = [
   {
     fields: [
@@ -474,6 +486,17 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
               {!isMaximized ? (
                 <Link
                   className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-950/10 bg-white px-3 text-xs font-black uppercase text-slate-800 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+                  href="/gstat/audit"
+                  rel="noreferrer"
+                  target="_blank"
+                >
+                  <History className="size-4" />
+                  Audit Trail
+                </Link>
+              ) : null}
+              {!isMaximized ? (
+                <Link
+                  className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-950/10 bg-white px-3 text-xs font-black uppercase text-slate-800 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
                   href="/gstat/max"
                   rel="noreferrer"
                   target="_blank"
@@ -560,18 +583,39 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                         className="h-8 border-b border-r border-slate-200 bg-white px-1.5 py-1"
                         key={`filter-${column.key}`}
                       >
-                        <input
-                          aria-label={`Filter ${column.label}`}
-                          className="h-7 w-full min-w-0 rounded-md border border-slate-200 bg-slate-50 px-1.5 text-[11px] font-bold text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-teal-300 focus:bg-white focus:ring-2 focus:ring-teal-100"
-                          onChange={(event) =>
-                            setFilters((currentFilters) => ({
-                              ...currentFilters,
-                              [column.key]: event.target.value
-                            }))
-                          }
-                          placeholder="Filter"
-                          value={filters[column.key] ?? ""}
-                        />
+                        {column.key === "Person handling" ? (
+                          <select
+                            aria-label="Filter Person handling"
+                            className="h-7 w-full min-w-0 rounded-md border border-slate-200 bg-slate-50 px-1.5 text-[11px] font-bold text-slate-800 outline-none transition focus:border-teal-300 focus:bg-white focus:ring-2 focus:ring-teal-100"
+                            onChange={(event) =>
+                              setFilters((currentFilters) => ({
+                                ...currentFilters,
+                                [column.key]: event.target.value
+                              }))
+                            }
+                            value={filters[column.key] ?? ""}
+                          >
+                            <option value="">All</option>
+                            {teamOptions.map((team) => (
+                              <option key={team} value={team}>
+                                {team}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <input
+                            aria-label={`Filter ${column.label}`}
+                            className="h-7 w-full min-w-0 rounded-md border border-slate-200 bg-slate-50 px-1.5 text-[11px] font-bold text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-teal-300 focus:bg-white focus:ring-2 focus:ring-teal-100"
+                            onChange={(event) =>
+                              setFilters((currentFilters) => ({
+                                ...currentFilters,
+                                [column.key]: event.target.value
+                              }))
+                            }
+                            placeholder="Filter"
+                            value={filters[column.key] ?? ""}
+                          />
+                        )}
                       </td>
                     ))}
                   </tr>
@@ -669,11 +713,26 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                     {section.fields.map((field) => (
                       <label className="block" key={field}>
                         <span className="text-[11px] font-black uppercase text-slate-500">{field}</span>
-                        <input
-                          className="mt-1 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-900 outline-none transition focus:border-teal-300 focus:ring-2 focus:ring-teal-100"
-                          onChange={(event) => updateDraft(field, event.target.value)}
-                          value={editor.draft[field] ?? ""}
-                        />
+                        {field === "Person handling" ? (
+                          <select
+                            className="mt-1 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-900 outline-none transition focus:border-teal-300 focus:ring-2 focus:ring-teal-100"
+                            onChange={(event) => updateDraft(field, event.target.value)}
+                            value={editor.draft[field] ?? ""}
+                          >
+                            <option value="">Select team</option>
+                            {teamOptions.map((team) => (
+                              <option key={team} value={team}>
+                                {team}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <input
+                            className="mt-1 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-900 outline-none transition focus:border-teal-300 focus:ring-2 focus:ring-teal-100"
+                            onChange={(event) => updateDraft(field, event.target.value)}
+                            value={editor.draft[field] ?? ""}
+                          />
+                        )}
                       </label>
                     ))}
                   </div>
