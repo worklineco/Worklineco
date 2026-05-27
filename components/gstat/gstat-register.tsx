@@ -137,39 +137,63 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
       return;
     }
 
-    const buffer = await file.arrayBuffer();
-    const workbook = XLSX.read(buffer);
-    const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-    const rawRows = XLSX.utils.sheet_to_json<Array<string | number>>(worksheet, {
-      blankrows: false,
-      defval: "",
-      header: 1
-    });
-    const dataStartIndex = findDataStart(rawRows);
-    const nextRows = rawRows.slice(dataStartIndex).map((rawRow, rowIndex) => ({
-      data: columns.reduce<RowData>((row, column, columnIndex) => {
-        row[column.key] = column.key === "Sno" ? rawRow[columnIndex] || rowIndex + 1 : rawRow[columnIndex] ?? "";
-        return row;
-      }, {}),
-      row_number: rowIndex + 1
-    }));
+    setMessage(`Importing ${file.name}...`);
 
-    const response = await fetch("/api/gstat", {
-      body: JSON.stringify({ rows: nextRows }),
-      headers: { "Content-Type": "application/json" },
-      method: "POST"
-    });
-    const result = (await response.json()) as { error?: string; rows?: AppealRow[] };
+    try {
+      const buffer = await file.arrayBuffer();
+      const workbook = XLSX.read(buffer);
+      const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+      const rawRows = XLSX.utils.sheet_to_json<Array<string | number>>(worksheet, {
+        blankrows: false,
+        defval: "",
+        header: 1
+      });
+      const headerIndex = findHeaderRow(rawRows);
+      const dataStartIndex = headerIndex + 1;
+      const nextRows = rawRows
+        .slice(dataStartIndex)
+        .filter((rawRow) => rawRow.some((value) => String(value).trim()))
+        .map((rawRow, rowIndex) => ({
+          data: columns.reduce<RowData>((row, column, columnIndex) => {
+            row[column.key] =
+              column.key === "Sno" ? rawRow[columnIndex] || rowIndex + 1 : rawRow[columnIndex] ?? "";
+            return row;
+          }, {}),
+          row_number: rowIndex + 1
+        }));
 
-    if (!response.ok) {
-      setMessage(result.error ?? "Could not import GSTAT data.");
+      if (!nextRows.length) {
+        setMessage("No GSTAT rows found in the selected Excel file.");
+        event.target.value = "";
+        return;
+      }
+
+      setRows(normalizeRows(nextRows));
+
+      const response = await fetch("/api/gstat", {
+        body: JSON.stringify({ rows: nextRows }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST"
+      });
+      const result = (await response.json()) as { error?: string; rows?: AppealRow[] };
+
+      if (!response.ok) {
+        setMessage(
+          `${nextRows.length} row${nextRows.length === 1 ? "" : "s"} imported for preview, but not saved: ${
+            result.error ?? "database save failed"
+          }`
+        );
+        event.target.value = "";
+        return;
+      }
+
+      setRows(result.rows?.length ? normalizeRows(result.rows) : normalizeRows(nextRows));
+      setMessage(`${nextRows.length} row${nextRows.length === 1 ? "" : "s"} imported from ${file.name}. Audit log updated.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not read the selected Excel file.");
+    } finally {
       event.target.value = "";
-      return;
     }
-
-    setRows(result.rows?.length ? normalizeRows(result.rows) : initialRows);
-    setMessage(`${nextRows.length} row${nextRows.length === 1 ? "" : "s"} imported from ${file.name}. Audit log updated.`);
-    event.target.value = "";
   }
 
   function updateCell(rowIndex: number, field: string, value: string) {
@@ -446,17 +470,14 @@ function Metric({
   );
 }
 
-function findDataStart(rawRows: Array<Array<string | number>>) {
-  const firstRowText = rawRows[0]?.map(String).join(" ").toLowerCase() ?? "";
-  const secondRowText = rawRows[1]?.map(String).join(" ").toLowerCase() ?? "";
+function findHeaderRow(rawRows: Array<Array<string | number>>) {
+  const headerIndex = rawRows.findIndex((row) =>
+    row.some((value) => String(value).trim().toLowerCase() === "sno")
+  );
 
-  if (firstRowText.includes("sno") && secondRowText.includes("igst")) {
-    return 2;
+  if (headerIndex === -1) {
+    throw new Error("Could not find the GSTAT header row. Please make sure the Excel file has a Sno column.");
   }
 
-  if (firstRowText.includes("sno")) {
-    return 1;
-  }
-
-  return 0;
+  return headerIndex;
 }
