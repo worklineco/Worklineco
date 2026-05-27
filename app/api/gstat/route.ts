@@ -140,15 +140,16 @@ export async function PATCH(request: Request) {
     return auth.error;
   }
 
-  const { field, id, row, value } = (await request.json()) as {
+  const { field, id, row, rowData, value } = (await request.json()) as {
     field?: string;
     id?: string;
     row?: AppealRow;
+    rowData?: Record<string, string | number>;
     value?: string | number;
   };
 
-  if (!field || !row?.data) {
-    return NextResponse.json({ error: "Field and row data are required." }, { status: 400 });
+  if ((!field && !rowData) || !row?.data) {
+    return NextResponse.json({ error: "Row data is required." }, { status: 400 });
   }
 
   const admin = createAdminClient();
@@ -158,7 +159,7 @@ export async function PATCH(request: Request) {
       .from("gstat_appeals")
       .insert({
         created_by: auth.user.id,
-        data: { ...row.data, [field]: value ?? "" },
+        data: rowData ?? { ...row.data, [field!]: value ?? "" },
         organisation_code: organisationCode,
         row_number: row.row_number ?? 1,
         updated_by: auth.user.id
@@ -171,11 +172,11 @@ export async function PATCH(request: Request) {
     }
 
     await admin.from("gstat_audit_logs").insert({
-      action: "create",
+      action: rowData ? "create_row" : "create",
       actor_user_id: auth.user.id,
       appeal_id: inserted.data.id,
-      field_name: field,
-      new_value: value ?? "",
+      field_name: rowData ? "row" : field,
+      new_value: rowData ?? value ?? "",
       old_value: null,
       organisation_code: organisationCode
     });
@@ -194,8 +195,8 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: existing.error.message }, { status: 404 });
   }
 
-  const oldValue = existing.data.data?.[field] ?? "";
-  const nextData = { ...existing.data.data, [field]: value ?? "" };
+  const oldValue = field ? existing.data.data?.[field] ?? "" : existing.data.data;
+  const nextData = rowData ?? { ...existing.data.data, [field!]: value ?? "" };
 
   const updated = await admin
     .from("gstat_appeals")
@@ -212,13 +213,13 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: updated.error.message }, { status: 500 });
   }
 
-  if (String(oldValue) !== String(value ?? "")) {
+  if (JSON.stringify(oldValue) !== JSON.stringify(rowData ?? value ?? "")) {
     await admin.from("gstat_audit_logs").insert({
-      action: "update",
+      action: rowData ? "update_row" : "update",
       actor_user_id: auth.user.id,
       appeal_id: id,
-      field_name: field,
-      new_value: value ?? "",
+      field_name: rowData ? "row" : field,
+      new_value: rowData ?? value ?? "",
       old_value: oldValue,
       organisation_code: organisationCode
     });

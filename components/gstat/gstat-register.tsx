@@ -1,8 +1,8 @@
 "use client";
 
-import { ArrowLeft, Download, Expand, FileSpreadsheet, Plus, Scale, ShieldCheck, Trash2, Upload } from "lucide-react";
+import { ArrowLeft, Download, Expand, FileSpreadsheet, Pencil, Plus, Scale, ShieldCheck, Trash2, Upload, X } from "lucide-react";
 import Link from "next/link";
-import { ChangeEvent, FocusEvent, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 
 type Column = { group?: string; key: string; label: string };
@@ -13,6 +13,7 @@ type AppealRow = {
   row_number: number;
   updated_at?: string;
 };
+type EditorState = { draft: RowData; row: AppealRow; rowIndex: number };
 
 const baseColumns: Column[] = [
   "Sno",
@@ -64,12 +65,79 @@ const demandColumns: Column[] = groupedColumns.flatMap((group) =>
 );
 const finalColumns: Column[] = [{ key: "Pre Deposit Workings", label: "Pre Deposit Workings" }];
 const columns = [...baseColumns, ...demandColumns, ...finalColumns];
+const editorSections = [
+  {
+    fields: [
+      "Sno",
+      "Person handling",
+      "Status",
+      "Entity Group",
+      "Entity Name",
+      "State Name",
+      "FY",
+      "Appellant"
+    ],
+    title: "Basic details"
+  },
+  {
+    fields: [
+      "OIO No",
+      "OIO Date",
+      "DRC 07 No",
+      "DRC 07 Date",
+      "OIA No",
+      "OIA Date",
+      "APL 04 No",
+      "APL 04 Date",
+      "ARN of First Appeal",
+      "EL status"
+    ],
+    title: "Order and appeal"
+  },
+  {
+    fields: [
+      "Favourablle/Against",
+      "Additional 10% compliances",
+      "Undertaking Requirement",
+      "Matter pending at high court",
+      "Issue in brief",
+      "Section No.",
+      "Document Link",
+      "Remark"
+    ],
+    title: "Compliance and notes"
+  },
+  {
+    fields: [
+      "Determined Tax Amount",
+      "Determined Interest Amount",
+      "Determined Penalty Amount",
+      "Refund / Fees",
+      "Tax Demand - IGST",
+      "Tax Demand - CGST",
+      "Tax Demand - SGST",
+      "Penalty Demand - IGST",
+      "Penalty Demand - CGST",
+      "Penalty Demand - SGST",
+      "Pre Deposit Amount - IGST",
+      "Pre Deposit Amount - CGST",
+      "Pre Deposit Amount - SGST",
+      "Pre Deposit Workings"
+    ],
+    title: "Demand and deposit"
+  },
+  {
+    fields: ["GSTAT Login ID", "GSTAT Login Password"],
+    title: "GSTAT login"
+  }
+];
 
 const initialRows = createEmptyRows(12);
 
 export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }) {
   const [rows, setRows] = useState<AppealRow[]>(initialRows);
   const [filters, setFilters] = useState<Record<string, string>>({});
+  const [editor, setEditor] = useState<EditorState | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [message, setMessage] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -224,7 +292,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
     ]);
 
     setRows(nextRows);
-    await saveRowOperation("row_insert", rowIndex, `Inserted row ${rowIndex + 2}. Audit log updated.`);
+    await saveRowOperation("row_insert", rowIndex, `Inserted row ${rowIndex + 2}. Audit log updated.`, true);
   }
 
   async function deleteRow(rowIndex: number) {
@@ -242,7 +310,12 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
     await saveRowOperation("row_delete", rowIndex, `Deleted row ${rowLabel}. Audit log updated.`);
   }
 
-  async function saveRowOperation(action: "row_insert" | "row_delete", rowIndex: number, successMessage: string) {
+  async function saveRowOperation(
+    action: "row_insert" | "row_delete",
+    rowIndex: number,
+    successMessage: string,
+    openInsertedRow = false
+  ) {
     setMessage(action === "row_insert" ? "Saving inserted row..." : "Deleting row...");
 
     const response = await fetch("/api/gstat", {
@@ -258,16 +331,48 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
       return;
     }
 
-    setRows(result.rows?.length ? normalizeRows(result.rows) : rows);
+    const savedRows = result.rows?.length ? normalizeRows(result.rows) : rows;
+    setRows(savedRows);
+    if (openInsertedRow) {
+      const insertedIndex = rowIndex + 1;
+      const insertedRow = savedRows[insertedIndex];
+
+      if (insertedRow) {
+        openEditor(insertedIndex, insertedRow);
+      }
+    }
     setMessage(successMessage);
   }
 
-  async function saveCell(
-    rowIndex: number,
-    column: Column,
-    event: FocusEvent<HTMLInputElement>
-  ) {
-    const value = event.target.value;
+  function openEditor(rowIndex: number, row = rows[rowIndex]) {
+    if (!row) {
+      return;
+    }
+
+    setEditor({
+      draft: { ...row.data },
+      row,
+      rowIndex
+    });
+  }
+
+  function updateDraft(field: string, value: string) {
+    setEditor((currentEditor) =>
+      currentEditor
+        ? {
+            ...currentEditor,
+            draft: { ...currentEditor.draft, [field]: value }
+          }
+        : currentEditor
+    );
+  }
+
+  async function saveEditor() {
+    if (!editor) {
+      return;
+    }
+
+    const rowIndex = editor.rowIndex;
     const row = rows[rowIndex];
 
     if (!row) {
@@ -276,10 +381,9 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
 
     const response = await fetch("/api/gstat", {
       body: JSON.stringify({
-        field: column.key,
         id: row.id,
-        row: { ...row, data: { ...row.data, [column.key]: value } },
-        value
+        row,
+        rowData: editor.draft
       }),
       headers: { "Content-Type": "application/json" },
       method: "PATCH"
@@ -296,7 +400,8 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
         index === rowIndex ? normalizeRow(result.row!, rowIndex) : currentRow
       )
     );
-    setMessage(`Saved ${column.label}. Audit log updated.`);
+    setEditor(null);
+    setMessage(`Saved row ${editor.draft.Sno || rowIndex + 1}. Audit log updated.`);
   }
 
   return (
@@ -488,6 +593,15 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                       <td className="h-8 whitespace-nowrap border-b border-r border-slate-200 px-1.5 py-1">
                         <div className="flex items-center gap-1">
                           <button
+                            aria-label={`Edit row ${row.data.Sno || visibleIndex + 1}`}
+                            className="inline-flex size-7 items-center justify-center rounded-md border border-sky-200 bg-white text-sky-700 transition hover:bg-sky-50"
+                            onClick={() => openEditor(originalIndex, row)}
+                            title="Edit row"
+                            type="button"
+                          >
+                            <Pencil className="size-3.5" />
+                          </button>
+                          <button
                             aria-label={`Insert row after ${row.data.Sno || visibleIndex + 1}`}
                             className="inline-flex size-7 items-center justify-center rounded-md border border-teal-200 bg-white text-teal-700 transition hover:bg-teal-50"
                             onClick={() => insertRowAfter(originalIndex)}
@@ -515,12 +629,9 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                           {column.key === "Sno" ? (
                             row.data[column.key] || visibleIndex + 1
                           ) : (
-                            <input
-                              key={`${row.id ?? originalIndex}-${column.key}-${row.data[column.key] ?? ""}`}
-                              className="h-7 min-w-24 rounded-md border border-transparent bg-transparent px-1.5 text-[11px] font-semibold outline-none transition focus:border-teal-300 focus:bg-white focus:ring-2 focus:ring-teal-100"
-                              defaultValue={row.data[column.key] ?? ""}
-                              onBlur={(event) => saveCell(originalIndex, column, event)}
-                            />
+                            <span className="block min-w-24 max-w-52 truncate px-1.5" title={String(row.data[column.key] ?? "")}>
+                              {row.data[column.key] ?? ""}
+                            </span>
                           )}
                         </td>
                       ))}
@@ -532,6 +643,68 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
           </div>
         </section>
       </section>
+      {editor ? (
+        <div className="fixed inset-0 z-50 flex justify-end bg-slate-950/30">
+          <button
+            aria-label="Close editor"
+            className="absolute inset-0 cursor-default"
+            onClick={() => setEditor(null)}
+            type="button"
+          />
+          <aside className="relative h-full w-full max-w-3xl overflow-y-auto border-l border-slate-950/10 bg-white shadow-2xl">
+            <div className="sticky top-0 z-10 border-b border-slate-200 bg-white/95 px-5 py-4 backdrop-blur">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-black uppercase tracking-[0.14em] text-teal-700">GSTAT row editor</p>
+                  <h3 className="mt-1 text-2xl font-black text-slate-950">Appeal {editor.draft.Sno || editor.rowIndex + 1}</h3>
+                </div>
+                <button
+                  className="inline-flex size-9 items-center justify-center rounded-xl border border-slate-200 text-slate-700 transition hover:bg-slate-50"
+                  onClick={() => setEditor(null)}
+                  type="button"
+                >
+                  <X className="size-4" />
+                </button>
+              </div>
+              <div className="mt-4 flex justify-end gap-2">
+                <button
+                  className="inline-flex h-10 items-center justify-center rounded-xl border border-slate-950/10 bg-white px-4 text-xs font-black uppercase text-slate-700 shadow-sm"
+                  onClick={() => setEditor(null)}
+                  type="button"
+                >
+                  Cancel
+                </button>
+                <button
+                  className="inline-flex h-10 items-center justify-center rounded-xl bg-slate-950 px-4 text-xs font-black uppercase text-white shadow-sm transition hover:bg-slate-800"
+                  onClick={saveEditor}
+                  type="button"
+                >
+                  Save Row
+                </button>
+              </div>
+            </div>
+            <div className="space-y-5 p-5">
+              {editorSections.map((section) => (
+                <section className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4" key={section.title}>
+                  <h4 className="text-sm font-black uppercase tracking-[0.12em] text-slate-600">{section.title}</h4>
+                  <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                    {section.fields.map((field) => (
+                      <label className="block" key={field}>
+                        <span className="text-[11px] font-black uppercase text-slate-500">{field}</span>
+                        <input
+                          className="mt-1 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-900 outline-none transition focus:border-teal-300 focus:ring-2 focus:ring-teal-100"
+                          onChange={(event) => updateDraft(field, event.target.value)}
+                          value={editor.draft[field] ?? ""}
+                        />
+                      </label>
+                    ))}
+                  </div>
+                </section>
+              ))}
+            </div>
+          </aside>
+        </div>
+      ) : null}
     </main>
   );
 }
