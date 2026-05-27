@@ -1,5 +1,4 @@
 import {
-  UserRound,
   ArrowRight,
   BarChart3,
   Building2,
@@ -19,8 +18,7 @@ const navigation = [
   { href: "/gst", icon: ClipboardCheck, label: "GST Tracker", target: "_blank", tone: "bg-amber-100 text-amber-800" },
   { href: "/gstat", icon: Scale, label: "GSTAT", target: "_blank", tone: "bg-fuchsia-100 text-fuchsia-800" },
   { href: "#records", icon: Building2, label: "Client Records", tone: "bg-sky-100 text-sky-800" },
-  { href: "#reports", icon: BarChart3, label: "Reports", tone: "bg-emerald-100 text-emerald-800" },
-  { href: "#profile", icon: UserRound, label: "Profile", tone: "bg-slate-100 text-slate-800" }
+  { href: "#reports", icon: BarChart3, label: "Reports", tone: "bg-emerald-100 text-emerald-800" }
 ];
 
 const productFocus = [
@@ -78,6 +76,7 @@ export default function Home() {
             {navigation.map((item) => (
               <NavItem item={item} key={item.label} />
             ))}
+            <ProfilePanel />
           </nav>
         </aside>
 
@@ -148,8 +147,6 @@ export default function Home() {
               })}
             </div>
           </section>
-
-          <ProfilePanel />
         </section>
       </div>
     </main>

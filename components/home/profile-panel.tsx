@@ -1,7 +1,7 @@
 "use client";
 
 import { supabase } from "@/lib/supabase/client";
-import { LogOut, UserRound } from "lucide-react";
+import { ChevronDown, LogOut, UserRound } from "lucide-react";
 import { useEffect, useState } from "react";
 
 type Profile = {
@@ -12,6 +12,7 @@ type Profile = {
 };
 
 export function ProfilePanel() {
+  const [isOpen, setIsOpen] = useState(false);
   const [profile, setProfile] = useState<Profile>({
     email: "",
     name: "",
@@ -41,47 +42,47 @@ export function ProfilePanel() {
   }
 
   return (
-    <section className="workline-frame mt-5 rounded-[26px] p-5 md:p-6" id="profile">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <div className="flex items-center gap-4">
-          <span className="flex size-12 items-center justify-center rounded-2xl bg-slate-950 text-white">
-            <UserRound className="size-6" />
-          </span>
-          <div>
-            <p className="text-xs font-black uppercase tracking-[0.16em] text-teal-700">Profile</p>
-            <h2 className="mt-1 text-2xl font-black text-slate-950">{profile.name || "WorkLine User"}</h2>
-          </div>
-        </div>
-        <button
-          className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 text-xs font-black uppercase text-white shadow-sm transition hover:bg-slate-800 disabled:bg-slate-500"
-          disabled={isSigningOut}
-          onClick={signOut}
-          type="button"
-        >
-          <LogOut className="size-4" />
-          {isSigningOut ? "Logging out" : "Logout"}
-        </button>
-      </div>
+    <div>
+      <button
+        className="group flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-bold text-slate-700 transition hover:bg-white hover:text-slate-950 hover:shadow-sm"
+        onClick={() => setIsOpen((current) => !current)}
+        type="button"
+      >
+        <span className="flex size-9 items-center justify-center rounded-xl bg-slate-100 text-slate-800">
+          <UserRound className="size-4" />
+        </span>
+        <span className="min-w-0 flex-1">Profile</span>
+        <ChevronDown className={`size-4 transition ${isOpen ? "rotate-180" : ""}`} />
+      </button>
 
-      <div className="mt-5 grid gap-3 md:grid-cols-3">
-        <ProfileField label="Name" value={profile.name || "-"} />
-        <ProfileField label="Team" value={profile.team || "-"} />
-        <ProfileField label="Email" value={profile.email || "-"} />
-      </div>
-      {profile.role ? (
-        <p className="mt-4 inline-flex rounded-full bg-slate-100 px-3 py-1.5 text-xs font-black uppercase text-slate-700">
-          {profile.role}
-        </p>
+      {isOpen ? (
+        <div className="mt-2 rounded-2xl border border-slate-950/10 bg-white p-3 shadow-sm ring-1 ring-white/70">
+          <p className="truncate text-sm font-black text-slate-950">{profile.name || "WorkLine User"}</p>
+          <div className="mt-3 space-y-2 text-xs font-bold text-slate-600">
+            <ProfileLine label="Team" value={profile.team || "-"} />
+            <ProfileLine label="Email" value={profile.email || "-"} />
+            {profile.role ? <ProfileLine label="Role" value={profile.role} /> : null}
+          </div>
+          <button
+            className="mt-3 inline-flex h-9 w-full items-center justify-center gap-2 rounded-xl bg-slate-950 px-3 text-xs font-black uppercase text-white transition hover:bg-slate-800 disabled:bg-slate-500"
+            disabled={isSigningOut}
+            onClick={signOut}
+            type="button"
+          >
+            <LogOut className="size-3.5" />
+            {isSigningOut ? "Logging out" : "Logout"}
+          </button>
+        </div>
       ) : null}
-    </section>
+    </div>
   );
 }
 
-function ProfileField({ label, value }: { label: string; value: string }) {
+function ProfileLine({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-2xl border border-slate-950/10 bg-white p-4 shadow-sm ring-1 ring-white/70">
-      <p className="text-xs font-black uppercase text-slate-500">{label}</p>
-      <p className="mt-2 break-words text-sm font-black text-slate-950">{value}</p>
+    <div>
+      <p className="text-[10px] font-black uppercase text-slate-400">{label}</p>
+      <p className="mt-0.5 break-words text-slate-800">{value}</p>
     </div>
   );
 }
