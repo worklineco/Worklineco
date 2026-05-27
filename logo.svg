@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 150" role="img" aria-labelledby="title desc">
+  <title id="title">Dhadda and Co logo</title>
+  <desc id="desc">White Dhadda and Co logo on a dark blue background.</desc>
+  <rect width="320" height="150" fill="#203b78"/>
+  <path d="M134 53l24-24 18 18 34-34 10 10-44 44-18-18-14 14z" fill="#fff"/>
+  <path d="M196 13h24v24h-10V23h-14z" fill="#fff"/>
+  <text x="160" y="100" text-anchor="middle" fill="#fff" font-family="Arial, Helvetica, sans-serif" font-size="32">Dhadda &amp; Co</text>
+  <text x="160" y="122" text-anchor="middle" fill="#d8e8ff" font-family="Arial, Helvetica, sans-serif" font-size="10" letter-spacing="3">CHARTERED ACCOUNTANTS</text>
+</svg>

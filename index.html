@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DCO Meeting Room Booking</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <section class="login-screen" id="loginScreen">
+    <form class="login-card" id="loginForm">
+      <div class="brand-logo">
+        <img src="logo.svg" alt="Dhadda & Co">
+      </div>
+      <h1>DCO Meeting Room Booking</h1>
+      <label>
+        Login ID
+        <input id="loginId" type="text" autocomplete="username" required>
+      </label>
+      <label>
+        Password
+        <input id="loginPassword" type="password" autocomplete="current-password" required>
+      </label>
+      <button type="submit" class="primary-button">Login</button>
+      <p class="form-message" id="loginMessage" role="status"></p>
+    </form>
+  </section>
+
+  <main class="app-shell is-hidden" id="appShell">
+    <section class="hero">
+      <div class="hero-main">
+        <div class="brand-logo">
+          <img src="logo.svg" alt="Dhadda & Co">
+        </div>
+        <div>
+          <p class="eyebrow">Office Scheduler</p>
+          <h1>DCO Meeting Room Booking</h1>
+          <p class="hero-copy">Book meeting rooms across 1st, 2nd, and 3rd floor for today or the next 7 days.</p>
+        </div>
+      </div>
+      <div class="hero-actions">
+        <div class="hero-clock" aria-live="polite">
+          <span id="todayLabel">Today</span>
+          <strong id="liveClock">--:-- AM</strong>
+        </div>
+        <button type="button" class="ghost-button" id="logoutButton">Logout</button>
+      </div>
+    </section>
+
+    <section class="booking-layout" aria-label="Meeting room booking workspace">
+      <form class="booking-form" id="bookingForm">
+        <div class="section-title">
+          <span id="formTitle">Book a Room</span>
+          <small>Max 2 hours</small>
+        </div>
+
+        <label>
+          Booking date
+          <input id="bookingDate" type="date" required>
+        </label>
+
+        <label>
+          Meeting room name
+          <select id="roomName" required>
+            <option value="">Select a room</option>
+            <optgroup label="3rd Floor">
+              <option value="Manthan" data-floor="3rd Floor">Manthan</option>
+            </optgroup>
+            <optgroup label="2nd Floor">
+              <option value="Darshan" data-floor="2nd Floor">Darshan</option>
+              <option value="Jnan" data-floor="2nd Floor">Jnan</option>
+              <option value="Charitra" data-floor="2nd Floor">Charitra</option>
+            </optgroup>
+            <optgroup label="1st Floor">
+              <option value="Setu" data-floor="1st Floor">Setu</option>
+              <option value="Samvad" data-floor="1st Floor">Samvad</option>
+            </optgroup>
+          </select>
+        </label>
+
+        <div class="time-row">
+          <label>
+            From
+            <span class="clock-inputs">
+              <select id="fromHour" aria-label="From hour" required></select>
+              <select id="fromMinute" aria-label="From minute" required></select>
+              <select id="fromMeridiem" aria-label="From AM or PM" required>
+                <option value="AM">AM</option>
+                <option value="PM">PM</option>
+              </select>
+            </span>
+          </label>
+          <label>
+            To
+            <span class="clock-inputs">
+              <select id="toHour" aria-label="To hour" required></select>
+              <select id="toMinute" aria-label="To minute" required></select>
+              <select id="toMeridiem" aria-label="To AM or PM" required>
+                <option value="AM">AM</option>
+                <option value="PM">PM</option>
+              </select>
+            </span>
+          </label>
+        </div>
+
+        <label>
+          Team name
+          <select id="teamName" required>
+            <option value="">Select team</option>
+          </select>
+        </label>
+
+        <label>
+          Purpose
+          <textarea id="purpose" rows="4" placeholder="Example: Weekly planning discussion" required></textarea>
+        </label>
+
+        <div class="form-actions">
+          <button type="submit" class="primary-button" id="submitButton">Add Booking</button>
+          <button type="button" class="secondary-button is-hidden" id="cancelEditButton">Cancel</button>
+        </div>
+        <p class="form-message" id="formMessage" role="status"></p>
+      </form>
+
+      <section class="schedule-panel">
+        <div class="schedule-header">
+          <div>
+            <p class="eyebrow">Booking Board</p>
+            <h2 id="scheduleTitle">Bookings</h2>
+          </div>
+          <label class="board-date">
+            View date
+            <input id="boardDate" type="date" required>
+          </label>
+        </div>
+
+        <div class="floor-tabs" role="tablist" aria-label="Filter rooms by floor">
+          <button type="button" class="floor-tab active" data-floor="All">All</button>
+          <button type="button" class="floor-tab" data-floor="3rd Floor">3rd Floor</button>
+          <button type="button" class="floor-tab" data-floor="2nd Floor">2nd Floor</button>
+          <button type="button" class="floor-tab" data-floor="1st Floor">1st Floor</button>
+        </div>
+
+        <div class="room-grid" id="roomGrid" aria-live="polite"></div>
+      </section>
+    </section>
+  </main>
+
+  <template id="roomCardTemplate">
+    <article class="room-card">
+      <div class="room-card-top">
+        <div>
+          <h3></h3>
+          <span class="floor-label"></span>
+        </div>
+        <span class="room-status"></span>
+      </div>
+      <div class="booking-list"></div>
+    </article>
+  </template>
+
+  <script src="app.js"></script>
+</body>
+</html>
