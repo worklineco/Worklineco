@@ -2,7 +2,7 @@
 
 import { ArrowLeft, Download, Expand, FileSpreadsheet, Pencil, Plus, Scale, ShieldCheck, Trash2, Upload, X } from "lucide-react";
 import Link from "next/link";
-import { ChangeEvent, PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 
 type Column = { group?: string; key: string; label: string };
@@ -65,10 +65,6 @@ const demandColumns: Column[] = groupedColumns.flatMap((group) =>
 );
 const finalColumns: Column[] = [{ key: "Pre Deposit Workings", label: "Pre Deposit Workings" }];
 const columns = [...baseColumns, ...demandColumns, ...finalColumns];
-const actionColumnKey = "__row_actions";
-const columnStorageKey = "workline-gstat-column-widths";
-const defaultColumnWidth = 160;
-const defaultActionColumnWidth = 94;
 const editorSections = [
   {
     fields: [
@@ -136,7 +132,6 @@ const initialRows = createEmptyRows(12);
 
 export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }) {
   const [rows, setRows] = useState<AppealRow[]>(initialRows);
-  const [columnWidths, setColumnWidths] = useState<Record<string, number>>({});
   const [filters, setFilters] = useState<Record<string, string>>({});
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -168,25 +163,9 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
         ),
     [filters, rows]
   );
-  const tableWidth = useMemo(
-    () => columnWidth(actionColumnKey) + columns.reduce((total, column) => total + columnWidth(column.key), 0),
-    [columnWidths]
-  );
 
   useEffect(() => {
     loadRows();
-  }, []);
-
-  useEffect(() => {
-    try {
-      const storedWidths = window.localStorage.getItem(columnStorageKey);
-
-      if (storedWidths) {
-        setColumnWidths(JSON.parse(storedWidths) as Record<string, number>);
-      }
-    } catch {
-      window.localStorage.removeItem(columnStorageKey);
-    }
   }, []);
 
   async function loadRows() {
@@ -412,39 +391,6 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
     setMessage(`Saved row ${editor.draft.Sno || rowIndex + 1}. Audit log updated.`);
   }
 
-  function columnWidth(columnKey: string) {
-    return columnWidths[columnKey] ?? (columnKey === actionColumnKey ? defaultActionColumnWidth : defaultColumnWidth);
-  }
-
-  function startColumnResize(columnKey: string, event: ReactPointerEvent<HTMLSpanElement>) {
-    event.preventDefault();
-    event.currentTarget.setPointerCapture(event.pointerId);
-    const startX = event.clientX;
-    const startWidth = columnWidth(columnKey);
-
-    function onPointerMove(moveEvent: PointerEvent) {
-      const nextWidth = Math.max(72, Math.round(startWidth + moveEvent.clientX - startX));
-
-      setColumnWidths((currentWidths) => {
-        const nextWidths = { ...currentWidths, [columnKey]: nextWidth };
-        window.localStorage.setItem(columnStorageKey, JSON.stringify(nextWidths));
-        return nextWidths;
-      });
-    }
-
-    function onPointerUp() {
-      document.body.style.cursor = "";
-      document.body.style.userSelect = "";
-      window.removeEventListener("pointermove", onPointerMove);
-      window.removeEventListener("pointerup", onPointerUp);
-    }
-
-    document.body.style.cursor = "col-resize";
-    document.body.style.userSelect = "none";
-    window.addEventListener("pointermove", onPointerMove);
-    window.addEventListener("pointerup", onPointerUp);
-  }
-
   return (
     <main className={`min-h-screen overflow-hidden bg-[#f7f3ea] text-slate-950 ${isMaximized ? "px-2 py-2" : "px-4 py-4 sm:px-6 lg:px-8"}`}>
       <div className="pointer-events-none fixed inset-0 -z-10">
@@ -549,33 +495,22 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
 
           <div className="overflow-hidden rounded-2xl border border-slate-950/10 bg-white">
             <div className={`${isMaximized ? "max-h-[calc(100vh-82px)]" : "max-h-[calc(100vh-285px)]"} overflow-auto`}>
-              <table
-                className="table-fixed border-separate border-spacing-0 text-left text-[11px]"
-                style={{ minWidth: tableWidth, width: tableWidth }}
-              >
-                <colgroup>
-                  <col style={{ width: columnWidth(actionColumnKey) }} />
-                  {columns.map((column) => (
-                    <col key={column.key} style={{ width: columnWidth(column.key) }} />
-                  ))}
-                </colgroup>
+              <table className="min-w-[3300px] table-fixed border-separate border-spacing-0 text-left text-[11px]">
                 <thead className="sticky top-0 z-10 bg-slate-950 text-white">
                   <tr>
                     <th
-                      className="relative border-b border-r border-white/15 px-2 py-2 align-bottom font-black"
+                      className="border-b border-r border-white/15 px-2 py-2 align-bottom font-black"
                       rowSpan={2}
                     >
                       Row
-                      <ResizeHandle columnKey={actionColumnKey} onResizeStart={startColumnResize} />
                     </th>
                     {baseColumns.map((column) => (
                       <th
-                        className="relative border-b border-r border-white/15 px-2 py-2 align-bottom font-black"
+                        className="border-b border-r border-white/15 px-2 py-2 align-bottom font-black"
                         key={column.key}
                         rowSpan={2}
                       >
                         {column.label}
-                        <ResizeHandle columnKey={column.key} onResizeStart={startColumnResize} />
                       </th>
                     ))}
                     {groupedColumns.map((group) => (
@@ -589,23 +524,21 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                     ))}
                     {finalColumns.map((column) => (
                       <th
-                        className="relative border-b border-r border-white/15 px-2 py-2 align-bottom font-black"
+                        className="border-b border-r border-white/15 px-2 py-2 align-bottom font-black"
                         key={column.key}
                         rowSpan={2}
                       >
                         {column.label}
-                        <ResizeHandle columnKey={column.key} onResizeStart={startColumnResize} />
                       </th>
                     ))}
                   </tr>
                   <tr>
                     {demandColumns.map((column) => (
                       <th
-                        className="relative border-b border-r border-white/15 px-2 py-2 text-center font-black"
+                        className="border-b border-r border-white/15 px-2 py-2 text-center font-black"
                         key={column.key}
                       >
                         {column.label}
-                        <ResizeHandle columnKey={column.key} onResizeStart={startColumnResize} />
                       </th>
                     ))}
                   </tr>
@@ -839,22 +772,6 @@ function Metric({
         </div>
       </div>
     </div>
-  );
-}
-
-function ResizeHandle({
-  columnKey,
-  onResizeStart
-}: {
-  columnKey: string;
-  onResizeStart: (columnKey: string, event: ReactPointerEvent<HTMLSpanElement>) => void;
-}) {
-  return (
-    <span
-      aria-hidden="true"
-      className="absolute right-0 top-0 z-20 h-full w-3 cursor-col-resize touch-none bg-white/0 transition hover:bg-teal-300/80"
-      onPointerDown={(event) => onResizeStart(columnKey, event)}
-    />
   );
 }
 
