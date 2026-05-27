@@ -2,7 +2,7 @@
 
 import { ArrowLeft, Download, Expand, FileSpreadsheet, Pencil, Plus, Scale, ShieldCheck, Trash2, Upload, X } from "lucide-react";
 import Link from "next/link";
-import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, MouseEvent as ReactMouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 
 type Column = { group?: string; key: string; label: string };
@@ -13,7 +13,7 @@ type AppealRow = {
   row_number: number;
   updated_at?: string;
 };
-type EditorState = { draft: RowData; row: AppealRow; rowIndex: number };
+type EditorState = { draft: RowData; isNew?: boolean; row: AppealRow; rowIndex: number };
 
 const baseColumns: Column[] = [
   "Sno",
@@ -65,6 +65,8 @@ const demandColumns: Column[] = groupedColumns.flatMap((group) =>
 );
 const finalColumns: Column[] = [{ key: "Pre Deposit Workings", label: "Pre Deposit Workings" }];
 const columns = [...baseColumns, ...demandColumns, ...finalColumns];
+const actionColumnKey = "__row_actions";
+const columnStorageKey = "workline-gstat-column-widths";
 const editorSections = [
   {
     fields: [
@@ -113,15 +115,6 @@ const editorSections = [
       "Determined Interest Amount",
       "Determined Penalty Amount",
       "Refund / Fees",
-      "Tax Demand - IGST",
-      "Tax Demand - CGST",
-      "Tax Demand - SGST",
-      "Penalty Demand - IGST",
-      "Penalty Demand - CGST",
-      "Penalty Demand - SGST",
-      "Pre Deposit Amount - IGST",
-      "Pre Deposit Amount - CGST",
-      "Pre Deposit Amount - SGST",
       "Pre Deposit Workings"
     ],
     title: "Demand and deposit"
@@ -131,11 +124,17 @@ const editorSections = [
     title: "GSTAT login"
   }
 ];
+const demandEditorGroups = [
+  { fields: ["Tax Demand - CGST", "Tax Demand - SGST", "Tax Demand - IGST"], title: "Tax Demand" },
+  { fields: ["Penalty Demand - CGST", "Penalty Demand - SGST", "Penalty Demand - IGST"], title: "Penalty Demand" },
+  { fields: ["Pre Deposit Amount - CGST", "Pre Deposit Amount - SGST", "Pre Deposit Amount - IGST"], title: "Pre Deposit Amount" }
+];
 
 const initialRows = createEmptyRows(12);
 
 export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }) {
   const [rows, setRows] = useState<AppealRow[]>(initialRows);
+  const [columnWidths, setColumnWidths] = useState<Record<string, number>>({});
   const [filters, setFilters] = useState<Record<string, string>>({});
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -170,6 +169,14 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
 
   useEffect(() => {
     loadRows();
+  }, []);
+
+  useEffect(() => {
+    const storedWidths = window.localStorage.getItem(columnStorageKey);
+
+    if (storedWidths) {
+      setColumnWidths(JSON.parse(storedWidths) as Record<string, number>);
+    }
   }, []);
 
   async function loadRows() {
@@ -284,17 +291,6 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
     }
   }
 
-  async function insertRowAfter(rowIndex: number) {
-    const nextRows = renumberRows([
-      ...rows.slice(0, rowIndex + 1),
-      createEmptyRow(rowIndex + 2),
-      ...rows.slice(rowIndex + 1)
-    ]);
-
-    setRows(nextRows);
-    await saveRowOperation("row_insert", rowIndex, `Inserted row ${rowIndex + 2}. Audit log updated.`, true);
-  }
-
   async function deleteRow(rowIndex: number) {
     const rowLabel = rows[rowIndex]?.data.Sno || rowIndex + 1;
 
@@ -310,13 +306,8 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
     await saveRowOperation("row_delete", rowIndex, `Deleted row ${rowLabel}. Audit log updated.`);
   }
 
-  async function saveRowOperation(
-    action: "row_insert" | "row_delete",
-    rowIndex: number,
-    successMessage: string,
-    openInsertedRow = false
-  ) {
-    setMessage(action === "row_insert" ? "Saving inserted row..." : "Deleting row...");
+  async function saveRowOperation(action: "row_delete", rowIndex: number, successMessage: string) {
+    setMessage("Deleting row...");
 
     const response = await fetch("/api/gstat", {
       body: JSON.stringify({ action, rowIndex }),
@@ -333,15 +324,18 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
 
     const savedRows = result.rows?.length ? normalizeRows(result.rows) : rows;
     setRows(savedRows);
-    if (openInsertedRow) {
-      const insertedIndex = rowIndex + 1;
-      const insertedRow = savedRows[insertedIndex];
-
-      if (insertedRow) {
-        openEditor(insertedIndex, insertedRow);
-      }
-    }
     setMessage(successMessage);
+  }
+
+  function openNewEditor() {
+    const row = createEmptyRow(rows.length + 1);
+
+    setEditor({
+      draft: { ...row.data },
+      isNew: true,
+      row,
+      rowIndex: rows.length
+    });
   }
 
   function openEditor(rowIndex: number, row = rows[rowIndex]) {
@@ -373,7 +367,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
     }
 
     const rowIndex = editor.rowIndex;
-    const row = rows[rowIndex];
+    const row = editor.isNew ? editor.row : rows[rowIndex];
 
     if (!row) {
       return;
@@ -391,17 +385,49 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
     const result = (await response.json()) as { error?: string; row?: AppealRow };
 
     if (!response.ok || !result.row) {
-      setMessage(result.error ?? "Could not save GSTAT cell.");
+      setMessage(result.error ?? "Could not save GSTAT row.");
       return;
     }
 
-    setRows((currentRows) =>
-      currentRows.map((currentRow, index) =>
+    setRows((currentRows) => {
+      if (editor.isNew) {
+        return normalizeRows([...currentRows, result.row!]);
+      }
+
+      return currentRows.map((currentRow, index) =>
         index === rowIndex ? normalizeRow(result.row!, rowIndex) : currentRow
-      )
-    );
+      );
+    });
     setEditor(null);
     setMessage(`Saved row ${editor.draft.Sno || rowIndex + 1}. Audit log updated.`);
+  }
+
+  function columnWidth(columnKey: string) {
+    return columnWidths[columnKey] ?? (columnKey === actionColumnKey ? 94 : 160);
+  }
+
+  function startColumnResize(columnKey: string, event: ReactMouseEvent<HTMLSpanElement>) {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = columnWidth(columnKey);
+
+    function onMouseMove(moveEvent: MouseEvent) {
+      const nextWidth = Math.max(72, startWidth + moveEvent.clientX - startX);
+
+      setColumnWidths((currentWidths) => {
+        const nextWidths = { ...currentWidths, [columnKey]: nextWidth };
+        window.localStorage.setItem(columnStorageKey, JSON.stringify(nextWidths));
+        return nextWidths;
+      });
+    }
+
+    function onMouseUp() {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    }
+
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
   }
 
   return (
@@ -508,22 +534,30 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
 
           <div className="overflow-hidden rounded-2xl border border-slate-950/10 bg-white">
             <div className={`${isMaximized ? "max-h-[calc(100vh-82px)]" : "max-h-[calc(100vh-285px)]"} overflow-auto`}>
-              <table className="min-w-[3300px] border-separate border-spacing-0 text-left text-[11px]">
+              <table className="min-w-[3300px] table-fixed border-separate border-spacing-0 text-left text-[11px]">
+                <colgroup>
+                  <col style={{ width: columnWidth(actionColumnKey) }} />
+                  {columns.map((column) => (
+                    <col key={column.key} style={{ width: columnWidth(column.key) }} />
+                  ))}
+                </colgroup>
                 <thead className="sticky top-0 z-10 bg-slate-950 text-white">
                   <tr>
                     <th
-                      className="border-b border-r border-white/15 px-2 py-2 align-bottom font-black"
+                      className="relative border-b border-r border-white/15 px-2 py-2 align-bottom font-black"
                       rowSpan={2}
                     >
                       Row
+                      <ResizeHandle columnKey={actionColumnKey} onResizeStart={startColumnResize} />
                     </th>
                     {baseColumns.map((column) => (
                       <th
-                        className="border-b border-r border-white/15 px-2 py-2 align-bottom font-black"
+                        className="relative border-b border-r border-white/15 px-2 py-2 align-bottom font-black"
                         key={column.key}
                         rowSpan={2}
                       >
                         {column.label}
+                        <ResizeHandle columnKey={column.key} onResizeStart={startColumnResize} />
                       </th>
                     ))}
                     {groupedColumns.map((group) => (
@@ -537,21 +571,23 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                     ))}
                     {finalColumns.map((column) => (
                       <th
-                        className="border-b border-r border-white/15 px-2 py-2 align-bottom font-black"
+                        className="relative border-b border-r border-white/15 px-2 py-2 align-bottom font-black"
                         key={column.key}
                         rowSpan={2}
                       >
                         {column.label}
+                        <ResizeHandle columnKey={column.key} onResizeStart={startColumnResize} />
                       </th>
                     ))}
                   </tr>
                   <tr>
                     {demandColumns.map((column) => (
                       <th
-                        className="border-b border-r border-white/15 px-2 py-2 text-center font-black"
+                        className="relative border-b border-r border-white/15 px-2 py-2 text-center font-black"
                         key={column.key}
                       >
                         {column.label}
+                        <ResizeHandle columnKey={column.key} onResizeStart={startColumnResize} />
                       </th>
                     ))}
                   </tr>
@@ -561,7 +597,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                     <td className="h-8 border-b border-r border-slate-200 bg-white px-1.5 py-1">
                       <button
                         className="inline-flex h-7 items-center justify-center gap-1 rounded-md border border-teal-200 bg-teal-50 px-2 text-[10px] font-black uppercase text-teal-800 transition hover:bg-teal-100"
-                        onClick={() => insertRowAfter(-1)}
+                        onClick={openNewEditor}
                         type="button"
                       >
                         <Plus className="size-3" />
@@ -575,7 +611,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                       >
                         <input
                           aria-label={`Filter ${column.label}`}
-                          className="h-7 min-w-20 rounded-md border border-slate-200 bg-slate-50 px-1.5 text-[11px] font-bold text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-teal-300 focus:bg-white focus:ring-2 focus:ring-teal-100"
+                          className="h-7 w-full min-w-0 rounded-md border border-slate-200 bg-slate-50 px-1.5 text-[11px] font-bold text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-teal-300 focus:bg-white focus:ring-2 focus:ring-teal-100"
                           onChange={(event) =>
                             setFilters((currentFilters) => ({
                               ...currentFilters,
@@ -602,15 +638,6 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                             <Pencil className="size-3.5" />
                           </button>
                           <button
-                            aria-label={`Insert row after ${row.data.Sno || visibleIndex + 1}`}
-                            className="inline-flex size-7 items-center justify-center rounded-md border border-teal-200 bg-white text-teal-700 transition hover:bg-teal-50"
-                            onClick={() => insertRowAfter(originalIndex)}
-                            title="Insert row below"
-                            type="button"
-                          >
-                            <Plus className="size-3.5" />
-                          </button>
-                          <button
                             aria-label={`Delete row ${row.data.Sno || visibleIndex + 1}`}
                             className="inline-flex size-7 items-center justify-center rounded-md border border-rose-200 bg-white text-rose-700 transition hover:bg-rose-50"
                             onClick={() => deleteRow(originalIndex)}
@@ -629,7 +656,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                           {column.key === "Sno" ? (
                             row.data[column.key] || visibleIndex + 1
                           ) : (
-                            <span className="block min-w-24 max-w-52 truncate px-1.5" title={String(row.data[column.key] ?? "")}>
+                            <span className="block w-full min-w-0 truncate px-1.5" title={String(row.data[column.key] ?? "")}>
                               {row.data[column.key] ?? ""}
                             </span>
                           )}
@@ -699,6 +726,31 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                       </label>
                     ))}
                   </div>
+                  {section.title === "Demand and deposit" ? (
+                    <div className="mt-5 space-y-4">
+                      {demandEditorGroups.map((group) => (
+                        <div key={group.title}>
+                          <p className="text-[11px] font-black uppercase tracking-[0.12em] text-slate-500">
+                            {group.title}
+                          </p>
+                          <div className="mt-2 grid gap-3 sm:grid-cols-3">
+                            {group.fields.map((field) => (
+                              <label className="block" key={field}>
+                                <span className="text-[11px] font-black uppercase text-slate-500">
+                                  {field.split(" - ").pop()}
+                                </span>
+                                <input
+                                  className="mt-1 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-900 outline-none transition focus:border-teal-300 focus:ring-2 focus:ring-teal-100"
+                                  onChange={(event) => updateDraft(field, event.target.value)}
+                                  value={editor.draft[field] ?? ""}
+                                />
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
                 </section>
               ))}
             </div>
@@ -769,6 +821,22 @@ function Metric({
         </div>
       </div>
     </div>
+  );
+}
+
+function ResizeHandle({
+  columnKey,
+  onResizeStart
+}: {
+  columnKey: string;
+  onResizeStart: (columnKey: string, event: ReactMouseEvent<HTMLSpanElement>) => void;
+}) {
+  return (
+    <span
+      aria-hidden="true"
+      className="absolute right-0 top-0 h-full w-1.5 cursor-col-resize touch-none bg-white/0 transition hover:bg-teal-300/80"
+      onMouseDown={(event) => onResizeStart(columnKey, event)}
+    />
   );
 }
 
