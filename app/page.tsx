@@ -2,7 +2,6 @@ import {
   ArrowRight,
   BarChart3,
   Building2,
-  CalendarDays,
   ClipboardCheck,
   FileText,
   Gavel,
@@ -12,6 +11,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import type { ComponentType } from "react";
+import { MonthCalendar } from "@/components/home/month-calendar";
 import { ProfilePanel } from "@/components/home/profile-panel";
 
 const navigation = [
@@ -49,14 +49,6 @@ const supportingAreas = [
   { icon: Building2, label: "Client Records", text: "A clean master for firm clients and identifiers." },
   { icon: FileText, label: "Documents", text: "Organised filing material and working papers." },
   { icon: Gavel, label: "Litigation", text: "Matter movement and responsibility tracking." }
-];
-
-const calendarDays = [
-  { day: "Mon", date: "25", note: "Returns" },
-  { day: "Tue", date: "26", note: "Review" },
-  { day: "Wed", date: "27", note: "GSTAT" },
-  { day: "Thu", date: "28", note: "Appeals" },
-  { day: "Fri", date: "29", note: "Filing" }
 ];
 
 export default function Home() {
@@ -123,26 +115,7 @@ export default function Home() {
             ))}
           </section>
 
-          <section className="workline-frame mt-5 rounded-[26px] p-5 md:p-6">
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-              <div>
-                <div className="inline-flex items-center gap-2 rounded-full bg-sky-100 px-3 py-1.5 text-xs font-black uppercase text-sky-800">
-                  <CalendarDays className="size-3.5" />
-                  Calendar
-                </div>
-                <h2 className="mt-3 text-2xl font-black text-slate-950">This Week</h2>
-              </div>
-              <div className="grid flex-1 gap-3 sm:grid-cols-5">
-                {calendarDays.map((item) => (
-                  <div className="rounded-2xl border border-slate-950/10 bg-white p-3 shadow-sm ring-1 ring-white/70" key={item.date}>
-                    <p className="text-xs font-black uppercase text-slate-500">{item.day}</p>
-                    <p className="mt-2 text-2xl font-black text-slate-950">{item.date}</p>
-                    <p className="mt-1 text-xs font-bold text-slate-600">{item.note}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </section>
+          <MonthCalendar />
 
           <section className="workline-frame mt-5 rounded-[26px] p-5 md:p-6">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
