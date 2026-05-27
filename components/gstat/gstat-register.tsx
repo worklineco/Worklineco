@@ -2,11 +2,17 @@
 
 import { ArrowLeft, Download, FileSpreadsheet, Scale, ShieldCheck, Upload } from "lucide-react";
 import Link from "next/link";
-import { ChangeEvent, useMemo, useRef, useState } from "react";
+import { ChangeEvent, FocusEvent, useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 
 type Column = { group?: string; key: string; label: string };
 type RowData = Record<string, string | number>;
+type AppealRow = {
+  data: RowData;
+  id?: string;
+  row_number: number;
+  updated_at?: string;
+};
 
 const baseColumns: Column[] = [
   "Sno",
@@ -59,21 +65,39 @@ const demandColumns: Column[] = groupedColumns.flatMap((group) =>
 const finalColumns: Column[] = [{ key: "Pre Deposit Workings", label: "Pre Deposit Workings" }];
 const columns = [...baseColumns, ...demandColumns, ...finalColumns];
 
-const initialRows = Array.from({ length: 12 }, (_, index) =>
-  columns.reduce<RowData>((row, column) => {
-    row[column.key] = column.key === "Sno" ? index + 1 : "";
-    return row;
-  }, {})
-);
+const initialRows = createEmptyRows(12);
 
 export function GstatRegister() {
-  const [rows, setRows] = useState<RowData[]>(initialRows);
+  const [rows, setRows] = useState<AppealRow[]>(initialRows);
+  const [isLoading, setIsLoading] = useState(true);
   const [message, setMessage] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const uniqueAppeals = useMemo(
-    () => rows.filter((row) => Object.values(row).some((value) => String(value).trim())).length,
+    () =>
+      rows.filter((row) =>
+        columns.some((column) => column.key !== "Sno" && String(row.data[column.key] ?? "").trim())
+      ).length,
     [rows]
   );
+
+  useEffect(() => {
+    loadRows();
+  }, []);
+
+  async function loadRows() {
+    setIsLoading(true);
+    const response = await fetch("/api/gstat");
+    const result = (await response.json()) as { error?: string; rows?: AppealRow[] };
+
+    if (!response.ok) {
+      setMessage(result.error ?? "Could not load GSTAT data.");
+      setIsLoading(false);
+      return;
+    }
+
+    setRows(result.rows?.length ? normalizeRows(result.rows) : initialRows);
+    setIsLoading(false);
+  }
 
   function exportExcel() {
     const headerRowOne = [
@@ -87,7 +111,7 @@ export function GstatRegister() {
       ...finalColumns.map(() => "")
     ];
     const dataRows = rows.map((row, index) =>
-      columns.map((column) => (column.key === "Sno" ? row[column.key] || index + 1 : row[column.key] ?? ""))
+      columns.map((column) => (column.key === "Sno" ? row.data[column.key] || index + 1 : row.data[column.key] ?? ""))
     );
     const worksheet = XLSX.utils.aoa_to_sheet([headerRowOne, headerRowTwo, ...dataRows]);
 
@@ -122,16 +146,75 @@ export function GstatRegister() {
       header: 1
     });
     const dataStartIndex = findDataStart(rawRows);
-    const nextRows = rawRows.slice(dataStartIndex).map((rawRow, rowIndex) =>
-      columns.reduce<RowData>((row, column, columnIndex) => {
+    const nextRows = rawRows.slice(dataStartIndex).map((rawRow, rowIndex) => ({
+      data: columns.reduce<RowData>((row, column, columnIndex) => {
         row[column.key] = column.key === "Sno" ? rawRow[columnIndex] || rowIndex + 1 : rawRow[columnIndex] ?? "";
         return row;
-      }, {})
-    );
+      }, {}),
+      row_number: rowIndex + 1
+    }));
 
-    setRows(nextRows.length ? nextRows : initialRows);
-    setMessage(`${nextRows.length} row${nextRows.length === 1 ? "" : "s"} imported from ${file.name}.`);
+    const response = await fetch("/api/gstat", {
+      body: JSON.stringify({ rows: nextRows }),
+      headers: { "Content-Type": "application/json" },
+      method: "POST"
+    });
+    const result = (await response.json()) as { error?: string; rows?: AppealRow[] };
+
+    if (!response.ok) {
+      setMessage(result.error ?? "Could not import GSTAT data.");
+      event.target.value = "";
+      return;
+    }
+
+    setRows(result.rows?.length ? normalizeRows(result.rows) : initialRows);
+    setMessage(`${nextRows.length} row${nextRows.length === 1 ? "" : "s"} imported from ${file.name}. Audit log updated.`);
     event.target.value = "";
+  }
+
+  function updateCell(rowIndex: number, field: string, value: string) {
+    setRows((currentRows) =>
+      currentRows.map((row, index) =>
+        index === rowIndex ? { ...row, data: { ...row.data, [field]: value } } : row
+      )
+    );
+  }
+
+  async function saveCell(
+    rowIndex: number,
+    column: Column,
+    event: FocusEvent<HTMLInputElement>
+  ) {
+    const value = event.target.value;
+    const row = rows[rowIndex];
+
+    if (!row) {
+      return;
+    }
+
+    const response = await fetch("/api/gstat", {
+      body: JSON.stringify({
+        field: column.key,
+        id: row.id,
+        row,
+        value
+      }),
+      headers: { "Content-Type": "application/json" },
+      method: "PATCH"
+    });
+    const result = (await response.json()) as { error?: string; row?: AppealRow };
+
+    if (!response.ok || !result.row) {
+      setMessage(result.error ?? "Could not save GSTAT cell.");
+      return;
+    }
+
+    setRows((currentRows) =>
+      currentRows.map((currentRow, index) =>
+        index === rowIndex ? normalizeRow(result.row!, rowIndex) : currentRow
+      )
+    );
+    setMessage(`Saved ${column.label}. Audit log updated.`);
   }
 
   return (
@@ -181,6 +264,7 @@ export function GstatRegister() {
             <div>
               <h2 className="text-xl font-black text-slate-950">Appeals Register</h2>
               {message ? <p className="mt-1 text-sm font-bold text-emerald-700">{message}</p> : null}
+              {isLoading ? <p className="mt-1 text-sm font-bold text-slate-500">Loading saved GSTAT data...</p> : null}
             </div>
             <div className="flex flex-wrap gap-2">
               <input
@@ -261,7 +345,16 @@ export function GstatRegister() {
                           className="h-12 border-b border-r border-slate-200 px-3 py-2 font-semibold text-slate-700"
                           key={`${rowIndex}-${column.key}`}
                         >
-                          {column.key === "Sno" ? row[column.key] || rowIndex + 1 : row[column.key]}
+                          {column.key === "Sno" ? (
+                            row.data[column.key] || rowIndex + 1
+                          ) : (
+                            <input
+                              className="h-9 min-w-36 rounded-lg border border-transparent bg-transparent px-2 text-xs font-semibold outline-none transition focus:border-teal-300 focus:bg-white focus:ring-2 focus:ring-teal-100"
+                              onBlur={(event) => saveCell(rowIndex, column, event)}
+                              onChange={(event) => updateCell(rowIndex, column.key, event.target.value)}
+                              value={row.data[column.key] ?? ""}
+                            />
+                          )}
                         </td>
                       ))}
                     </tr>
@@ -274,6 +367,33 @@ export function GstatRegister() {
       </section>
     </main>
   );
+}
+
+function createEmptyRows(count: number): AppealRow[] {
+  return Array.from({ length: count }, (_, index) => ({
+    data: columns.reduce<RowData>((row, column) => {
+      row[column.key] = column.key === "Sno" ? index + 1 : "";
+      return row;
+    }, {}),
+    row_number: index + 1
+  }));
+}
+
+function normalizeRows(rows: AppealRow[]) {
+  return rows.map((row, index) => normalizeRow(row, index));
+}
+
+function normalizeRow(row: AppealRow, index: number): AppealRow {
+  const rowNumber = row.row_number ?? index + 1;
+
+  return {
+    ...row,
+    data: columns.reduce<RowData>((data, column) => {
+      data[column.key] = column.key === "Sno" ? row.data?.[column.key] || rowNumber : row.data?.[column.key] ?? "";
+      return data;
+    }, {}),
+    row_number: rowNumber
+  };
 }
 
 function Metric({
