@@ -40,11 +40,15 @@ export async function POST(request: Request) {
     return auth.error;
   }
 
-  const { rows } = (await request.json()) as { rows?: AppealRow[] };
+  const { action = "import", rows } = (await request.json()) as { action?: string; rows?: AppealRow[] };
 
   if (!Array.isArray(rows)) {
     return NextResponse.json({ error: "Rows are required." }, { status: 400 });
   }
+
+  const auditAction = ["import", "row_insert", "row_delete", "bulk_save"].includes(action)
+    ? action
+    : "bulk_save";
 
   const admin = createAdminClient();
   const previous = await admin
@@ -85,9 +89,9 @@ export async function POST(request: Request) {
   }
 
   await admin.from("gstat_audit_logs").insert({
-    action: "import",
+    action: auditAction,
     actor_user_id: auth.user.id,
-    field_name: "excel_import",
+    field_name: auditAction,
     new_value: { row_count: rows.length },
     old_value: { row_count: previous.data?.length ?? 0 },
     organisation_code: organisationCode

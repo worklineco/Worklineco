@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, Download, Expand, FileSpreadsheet, Scale, ShieldCheck, Upload } from "lucide-react";
+import { ArrowLeft, Download, Expand, FileSpreadsheet, Plus, Scale, ShieldCheck, Trash2, Upload } from "lucide-react";
 import Link from "next/link";
 import { ChangeEvent, FocusEvent, useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
@@ -191,7 +191,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
       setRows(normalizeRows(nextRows));
 
       const response = await fetch("/api/gstat", {
-        body: JSON.stringify({ rows: nextRows }),
+        body: JSON.stringify({ action: "import", rows: nextRows }),
         headers: { "Content-Type": "application/json" },
         method: "POST"
       });
@@ -222,6 +222,49 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
         index === rowIndex ? { ...row, data: { ...row.data, [field]: value } } : row
       )
     );
+  }
+
+  async function insertRowAfter(rowIndex: number) {
+    const nextRows = renumberRows([
+      ...rows.slice(0, rowIndex + 1),
+      createEmptyRow(rowIndex + 2),
+      ...rows.slice(rowIndex + 1)
+    ]);
+
+    setRows(nextRows);
+    await saveRows(nextRows, "row_insert", `Inserted row ${rowIndex + 2}. Audit log updated.`);
+  }
+
+  async function deleteRow(rowIndex: number) {
+    const rowLabel = rows[rowIndex]?.data.Sno || rowIndex + 1;
+
+    if (!window.confirm(`Delete row ${rowLabel}?`)) {
+      return;
+    }
+
+    const nextRows = renumberRows(
+      rows.length > 1 ? rows.filter((_, index) => index !== rowIndex) : [createEmptyRow(1)]
+    );
+
+    setRows(nextRows);
+    await saveRows(nextRows, "row_delete", `Deleted row ${rowLabel}. Audit log updated.`);
+  }
+
+  async function saveRows(nextRows: AppealRow[], action: string, successMessage: string) {
+    const response = await fetch("/api/gstat", {
+      body: JSON.stringify({ action, rows: nextRows }),
+      headers: { "Content-Type": "application/json" },
+      method: "POST"
+    });
+    const result = (await response.json()) as { error?: string; rows?: AppealRow[] };
+
+    if (!response.ok) {
+      setMessage(result.error ?? "Could not save GSTAT rows.");
+      return;
+    }
+
+    setRows(result.rows?.length ? normalizeRows(result.rows) : nextRows);
+    setMessage(successMessage);
   }
 
   async function saveCell(
@@ -368,6 +411,12 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
               <table className="min-w-[3300px] border-separate border-spacing-0 text-left text-[11px]">
                 <thead className="sticky top-0 z-10 bg-slate-950 text-white">
                   <tr>
+                    <th
+                      className="border-b border-r border-white/15 px-2 py-2 align-bottom font-black"
+                      rowSpan={2}
+                    >
+                      Row
+                    </th>
                     {baseColumns.map((column) => (
                       <th
                         className="border-b border-r border-white/15 px-2 py-2 align-bottom font-black"
@@ -409,6 +458,16 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                 </thead>
                 <tbody>
                   <tr className="bg-white shadow-[inset_0_-1px_0_rgba(15,23,42,0.10)]">
+                    <td className="h-8 border-b border-r border-slate-200 bg-white px-1.5 py-1">
+                      <button
+                        className="inline-flex h-7 items-center justify-center gap-1 rounded-md border border-teal-200 bg-teal-50 px-2 text-[10px] font-black uppercase text-teal-800 transition hover:bg-teal-100"
+                        onClick={() => insertRowAfter(-1)}
+                        type="button"
+                      >
+                        <Plus className="size-3" />
+                        Add
+                      </button>
+                    </td>
                     {columns.map((column) => (
                       <td
                         className="h-8 border-b border-r border-slate-200 bg-white px-1.5 py-1"
@@ -431,6 +490,28 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                   </tr>
                   {filteredRows.map(({ row, originalIndex }, visibleIndex) => (
                     <tr className="odd:bg-white even:bg-slate-50/80" key={row.id ?? originalIndex}>
+                      <td className="h-8 whitespace-nowrap border-b border-r border-slate-200 px-1.5 py-1">
+                        <div className="flex items-center gap-1">
+                          <button
+                            aria-label={`Insert row after ${row.data.Sno || visibleIndex + 1}`}
+                            className="inline-flex size-7 items-center justify-center rounded-md border border-teal-200 bg-white text-teal-700 transition hover:bg-teal-50"
+                            onClick={() => insertRowAfter(originalIndex)}
+                            title="Insert row below"
+                            type="button"
+                          >
+                            <Plus className="size-3.5" />
+                          </button>
+                          <button
+                            aria-label={`Delete row ${row.data.Sno || visibleIndex + 1}`}
+                            className="inline-flex size-7 items-center justify-center rounded-md border border-rose-200 bg-white text-rose-700 transition hover:bg-rose-50"
+                            onClick={() => deleteRow(originalIndex)}
+                            title="Delete row"
+                            type="button"
+                          >
+                            <Trash2 className="size-3.5" />
+                          </button>
+                        </div>
+                      </td>
                       {columns.map((column) => (
                         <td
                           className="h-8 border-b border-r border-slate-200 px-1.5 py-1 font-semibold text-slate-700"
@@ -461,11 +542,23 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
 }
 
 function createEmptyRows(count: number): AppealRow[] {
-  return Array.from({ length: count }, (_, index) => ({
+  return Array.from({ length: count }, (_, index) => createEmptyRow(index + 1));
+}
+
+function createEmptyRow(rowNumber: number): AppealRow {
+  return {
     data: columns.reduce<RowData>((row, column) => {
-      row[column.key] = column.key === "Sno" ? index + 1 : "";
+      row[column.key] = column.key === "Sno" ? rowNumber : "";
       return row;
     }, {}),
+    row_number: rowNumber
+  };
+}
+
+function renumberRows(rows: AppealRow[]) {
+  return rows.map((row, index) => ({
+    ...row,
+    data: { ...row.data, Sno: index + 1 },
     row_number: index + 1
   }));
 }
