@@ -237,19 +237,50 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: updated.error.message }, { status: 500 });
   }
 
-  if (JSON.stringify(oldValue) !== JSON.stringify(scopedRowData ?? value ?? "")) {
+  if (scopedRowData) {
+    const changes = changedFields(existing.data.data ?? {}, scopedRowData);
+
+    if (changes.length) {
+      await admin.from("gstat_audit_logs").insert(
+        changes.map((change) => ({
+          action: "update",
+          actor_user_id: auth.user.id,
+          appeal_id: id,
+          field_name: change.field,
+          new_value: change.newValue,
+          old_value: change.oldValue,
+          organisation_code: organisationCode
+        }))
+      );
+    }
+  } else if (JSON.stringify(oldValue) !== JSON.stringify(value ?? "")) {
     await admin.from("gstat_audit_logs").insert({
-      action: scopedRowData ? "update_row" : "update",
+      action: "update",
       actor_user_id: auth.user.id,
       appeal_id: id,
-      field_name: scopedRowData ? "row" : field,
-      new_value: scopedRowData ?? value ?? "",
+      field_name: field,
+      new_value: value ?? "",
       old_value: oldValue,
       organisation_code: organisationCode
     });
   }
 
   return NextResponse.json({ row: updated.data });
+}
+
+function changedFields(
+  oldData: Record<string, string | number>,
+  newData: Record<string, string | number>
+) {
+  const fields = Array.from(new Set([...Object.keys(oldData), ...Object.keys(newData)]));
+
+  return fields
+    .map((field) => ({
+      field,
+      newValue: newData[field] ?? "",
+      oldValue: oldData[field] ?? ""
+    }))
+    .filter((change) => String(change.oldValue) !== String(change.newValue));
 }
 
 function applyAccessToRowData(data: Record<string, string | number>, access: AccessScope) {

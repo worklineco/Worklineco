@@ -8,6 +8,7 @@ type AuditValue = Record<string, string | number> | string | number | null;
 type AuditLog = {
   action: string;
   actor_user_id: string | null;
+  actor_name?: string;
   appeal?: { data?: Record<string, string | number>; row_number?: number } | null;
   created_at: string;
   field_name: string | null;
@@ -87,7 +88,7 @@ export function GstatAuditTrail() {
               <table className="min-w-[1200px] border-separate border-spacing-0 text-left text-xs">
                 <thead className="sticky top-0 z-10 bg-slate-950 text-white">
                   <tr>
-                    {["Time", "Action", "Row", "Team", "Field", "Old", "New", "Actor"].map((heading) => (
+                    {["Time", "Action", "Row", "Team", "Changed Column", "Old Value", "New Value", "User"].map((heading) => (
                       <th className="border-b border-r border-white/15 px-3 py-3 font-black" key={heading}>
                         {heading}
                       </th>
@@ -123,7 +124,7 @@ export function GstatAuditTrail() {
                         </span>
                       </td>
                       <td className="border-b border-r border-slate-200 px-3 py-2 font-semibold text-slate-700">
-                        {log.actor_user_id?.slice(0, 8) ?? "-"}
+                        {log.actor_name ?? log.actor_user_id?.slice(0, 8) ?? "-"}
                       </td>
                     </tr>
                   ))}
