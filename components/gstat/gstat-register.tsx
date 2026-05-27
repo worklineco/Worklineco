@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, Download, FileSpreadsheet, Scale, ShieldCheck, Upload } from "lucide-react";
+import { ArrowLeft, Download, Expand, FileSpreadsheet, Scale, ShieldCheck, Upload } from "lucide-react";
 import Link from "next/link";
 import { ChangeEvent, FocusEvent, useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
@@ -67,7 +67,7 @@ const columns = [...baseColumns, ...demandColumns, ...finalColumns];
 
 const initialRows = createEmptyRows(12);
 
-export function GstatRegister() {
+export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }) {
   const [rows, setRows] = useState<AppealRow[]>(initialRows);
   const [isLoading, setIsLoading] = useState(true);
   const [message, setMessage] = useState("");
@@ -218,13 +218,14 @@ export function GstatRegister() {
   }
 
   return (
-    <main className="min-h-screen overflow-hidden bg-[#f7f3ea] px-4 py-4 text-slate-950 sm:px-6 lg:px-8">
+    <main className={`min-h-screen overflow-hidden bg-[#f7f3ea] text-slate-950 ${isMaximized ? "px-2 py-2" : "px-4 py-4 sm:px-6 lg:px-8"}`}>
       <div className="pointer-events-none fixed inset-0 -z-10">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_16%_12%,rgba(20,184,166,0.18),transparent_28%),radial-gradient(circle_at_82%_16%,rgba(217,70,239,0.16),transparent_26%),radial-gradient(circle_at_48%_92%,rgba(245,158,11,0.16),transparent_32%)]" />
         <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(15,23,42,0.04)_1px,transparent_1px),linear-gradient(180deg,rgba(15,23,42,0.04)_1px,transparent_1px)] bg-[size:48px_48px]" />
       </div>
 
-      <section className="mx-auto max-w-[1680px]">
+      <section className={isMaximized ? "mx-auto max-w-none" : "mx-auto max-w-[1680px]"}>
+        {!isMaximized ? (
         <header className="workline-frame rounded-[28px] p-5 md:p-6">
           <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
             <div>
@@ -258,11 +259,25 @@ export function GstatRegister() {
             </div>
           </div>
         </header>
+        ) : null}
 
-        <section className="workline-frame mt-5 rounded-[28px] p-3 md:p-4">
+        <section className={`workline-frame rounded-[28px] p-2 md:p-3 ${isMaximized ? "" : "mt-5"}`}>
           <div className="mb-3 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
-              <h2 className="text-xl font-black text-slate-950">Appeals Register</h2>
+              <div className="flex flex-wrap items-center gap-2">
+                {isMaximized ? (
+                  <Link
+                    className="inline-flex h-9 items-center gap-2 rounded-xl border border-slate-950/10 bg-white px-3 text-xs font-black uppercase text-slate-700 shadow-sm"
+                    href="/gstat"
+                  >
+                    <ArrowLeft className="size-3.5" />
+                    Back
+                  </Link>
+                ) : null}
+                <h2 className="text-xl font-black text-slate-950">
+                  {isMaximized ? "GSTAT Register" : "Appeals Register"}
+                </h2>
+              </div>
               {message ? <p className="mt-1 text-sm font-bold text-emerald-700">{message}</p> : null}
               {isLoading ? <p className="mt-1 text-sm font-bold text-slate-500">Loading saved GSTAT data...</p> : null}
             </div>
@@ -275,15 +290,26 @@ export function GstatRegister() {
                 type="file"
               />
               <button
-                className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-slate-950/10 bg-white px-4 text-sm font-black text-slate-800 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-950/10 bg-white px-3 text-xs font-black uppercase text-slate-800 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
                 onClick={() => fileInputRef.current?.click()}
                 type="button"
               >
                 <Upload className="size-4" />
                 Import Excel
               </button>
+              {!isMaximized ? (
+                <Link
+                  className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-950/10 bg-white px-3 text-xs font-black uppercase text-slate-800 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+                  href="/gstat/max"
+                  rel="noreferrer"
+                  target="_blank"
+                >
+                  <Expand className="size-4" />
+                  Maximise View
+                </Link>
+              ) : null}
               <button
-                className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 text-sm font-black text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-slate-800 hover:shadow-md"
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-slate-950 px-3 text-xs font-black uppercase text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-slate-800 hover:shadow-md"
                 onClick={exportExcel}
                 type="button"
               >
@@ -294,13 +320,13 @@ export function GstatRegister() {
           </div>
 
           <div className="overflow-hidden rounded-2xl border border-slate-950/10 bg-white">
-            <div className="max-h-[calc(100vh-285px)] overflow-auto">
-              <table className="min-w-[4200px] border-separate border-spacing-0 text-left text-xs">
+            <div className={`${isMaximized ? "max-h-[calc(100vh-82px)]" : "max-h-[calc(100vh-285px)]"} overflow-auto`}>
+              <table className="min-w-[3300px] border-separate border-spacing-0 text-left text-[11px]">
                 <thead className="sticky top-0 z-10 bg-slate-950 text-white">
                   <tr>
                     {baseColumns.map((column) => (
                       <th
-                        className="border-b border-r border-white/15 px-3 py-3 align-bottom font-black"
+                        className="border-b border-r border-white/15 px-2 py-2 align-bottom font-black"
                         key={column.key}
                         rowSpan={2}
                       >
@@ -309,7 +335,7 @@ export function GstatRegister() {
                     ))}
                     {groupedColumns.map((group) => (
                       <th
-                        className="border-b border-r border-white/15 px-3 py-3 text-center font-black"
+                        className="border-b border-r border-white/15 px-2 py-2 text-center font-black"
                         colSpan={group.columns.length}
                         key={group.label}
                       >
@@ -318,7 +344,7 @@ export function GstatRegister() {
                     ))}
                     {finalColumns.map((column) => (
                       <th
-                        className="border-b border-r border-white/15 px-3 py-3 align-bottom font-black"
+                        className="border-b border-r border-white/15 px-2 py-2 align-bottom font-black"
                         key={column.key}
                         rowSpan={2}
                       >
@@ -329,7 +355,7 @@ export function GstatRegister() {
                   <tr>
                     {demandColumns.map((column) => (
                       <th
-                        className="border-b border-r border-white/15 px-3 py-3 text-center font-black"
+                        className="border-b border-r border-white/15 px-2 py-2 text-center font-black"
                         key={column.key}
                       >
                         {column.label}
@@ -342,14 +368,14 @@ export function GstatRegister() {
                     <tr className="odd:bg-white even:bg-slate-50/80" key={rowIndex}>
                       {columns.map((column) => (
                         <td
-                          className="h-12 border-b border-r border-slate-200 px-3 py-2 font-semibold text-slate-700"
+                          className="h-8 border-b border-r border-slate-200 px-1.5 py-1 font-semibold text-slate-700"
                           key={`${rowIndex}-${column.key}`}
                         >
                           {column.key === "Sno" ? (
                             row.data[column.key] || rowIndex + 1
                           ) : (
                             <input
-                              className="h-9 min-w-36 rounded-lg border border-transparent bg-transparent px-2 text-xs font-semibold outline-none transition focus:border-teal-300 focus:bg-white focus:ring-2 focus:ring-teal-100"
+                              className="h-7 min-w-24 rounded-md border border-transparent bg-transparent px-1.5 text-[11px] font-semibold outline-none transition focus:border-teal-300 focus:bg-white focus:ring-2 focus:ring-teal-100"
                               onBlur={(event) => saveCell(rowIndex, column, event)}
                               onChange={(event) => updateCell(rowIndex, column.key, event.target.value)}
                               value={row.data[column.key] ?? ""}
