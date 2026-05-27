@@ -2,6 +2,7 @@ import {
   ArrowRight,
   BarChart3,
   Building2,
+  CalendarDays,
   ClipboardCheck,
   FileText,
   Gavel,
@@ -50,6 +51,14 @@ const supportingAreas = [
   { icon: Gavel, label: "Litigation", text: "Matter movement and responsibility tracking." }
 ];
 
+const calendarDays = [
+  { day: "Mon", date: "25", note: "Returns" },
+  { day: "Tue", date: "26", note: "Review" },
+  { day: "Wed", date: "27", note: "GSTAT" },
+  { day: "Thu", date: "28", note: "Appeals" },
+  { day: "Fri", date: "29", note: "Filing" }
+];
+
 export default function Home() {
   return (
     <main className="min-h-screen overflow-hidden bg-[#f7f3ea] text-slate-950">
@@ -88,13 +97,11 @@ export default function Home() {
                   <ShieldCheck className="size-3.5" />
                   WorkLine Co workspace
                 </div>
-                <h1 className="mt-4 max-w-4xl text-4xl font-black leading-tight text-slate-950 sm:text-5xl">
-                  Compliance work, client records, and tribunal matters in one calm workspace.
+                <h1 className="mt-4 max-w-3xl text-4xl font-black leading-tight text-slate-950 sm:text-5xl">
+                  GSTAT matters, filings, and responsibility in one workspace.
                 </h1>
-                <p className="mt-4 max-w-3xl text-base font-semibold leading-7 text-slate-600">
-                  Start with GST and GSTAT. Keep the firm focused on filings,
-                  hearings, documents, and responsibility without exposing internal
-                  build notes or administrative clutter.
+                <p className="mt-4 max-w-2xl text-base font-semibold leading-7 text-slate-600">
+                  Track appeals, documents, hearings, and team ownership without clutter.
                 </p>
               </div>
 
@@ -114,6 +121,27 @@ export default function Home() {
             {productFocus.map((item) => (
               <ProductCard item={item} key={item.title} />
             ))}
+          </section>
+
+          <section className="workline-frame mt-5 rounded-[26px] p-5 md:p-6">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <div className="inline-flex items-center gap-2 rounded-full bg-sky-100 px-3 py-1.5 text-xs font-black uppercase text-sky-800">
+                  <CalendarDays className="size-3.5" />
+                  Calendar
+                </div>
+                <h2 className="mt-3 text-2xl font-black text-slate-950">This Week</h2>
+              </div>
+              <div className="grid flex-1 gap-3 sm:grid-cols-5">
+                {calendarDays.map((item) => (
+                  <div className="rounded-2xl border border-slate-950/10 bg-white p-3 shadow-sm ring-1 ring-white/70" key={item.date}>
+                    <p className="text-xs font-black uppercase text-slate-500">{item.day}</p>
+                    <p className="mt-2 text-2xl font-black text-slate-950">{item.date}</p>
+                    <p className="mt-1 text-xs font-bold text-slate-600">{item.note}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
           </section>
 
           <section className="workline-frame mt-5 rounded-[26px] p-5 md:p-6">
@@ -209,7 +237,9 @@ function ProductCard({
         <div className={`flex size-14 items-center justify-center rounded-2xl bg-gradient-to-br ${item.tone} text-slate-950`}>
           <Icon className="size-7" />
         </div>
-        <span className="rounded-full bg-slate-100 px-3 py-1.5 text-xs font-black uppercase text-slate-700">
+        <span className={`rounded-full px-3 py-1.5 text-xs font-black uppercase ${
+          item.label === "Now live" ? "bg-emerald-100 text-emerald-800" : "bg-rose-100 text-rose-800"
+        }`}>
           {item.label}
         </span>
       </div>
