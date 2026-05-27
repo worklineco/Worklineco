@@ -2,7 +2,7 @@
 
 import { ArrowLeft, Download, Expand, FileSpreadsheet, Pencil, Plus, Scale, ShieldCheck, Trash2, Upload, X } from "lucide-react";
 import Link from "next/link";
-import { ChangeEvent, MouseEvent as ReactMouseEvent, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 
 type Column = { group?: string; key: string; label: string };
@@ -67,6 +67,8 @@ const finalColumns: Column[] = [{ key: "Pre Deposit Workings", label: "Pre Depos
 const columns = [...baseColumns, ...demandColumns, ...finalColumns];
 const actionColumnKey = "__row_actions";
 const columnStorageKey = "workline-gstat-column-widths";
+const defaultColumnWidth = 160;
+const defaultActionColumnWidth = 94;
 const editorSections = [
   {
     fields: [
@@ -166,16 +168,24 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
         ),
     [filters, rows]
   );
+  const tableWidth = useMemo(
+    () => columnWidth(actionColumnKey) + columns.reduce((total, column) => total + columnWidth(column.key), 0),
+    [columnWidths]
+  );
 
   useEffect(() => {
     loadRows();
   }, []);
 
   useEffect(() => {
-    const storedWidths = window.localStorage.getItem(columnStorageKey);
+    try {
+      const storedWidths = window.localStorage.getItem(columnStorageKey);
 
-    if (storedWidths) {
-      setColumnWidths(JSON.parse(storedWidths) as Record<string, number>);
+      if (storedWidths) {
+        setColumnWidths(JSON.parse(storedWidths) as Record<string, number>);
+      }
+    } catch {
+      window.localStorage.removeItem(columnStorageKey);
     }
   }, []);
 
@@ -403,16 +413,17 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
   }
 
   function columnWidth(columnKey: string) {
-    return columnWidths[columnKey] ?? (columnKey === actionColumnKey ? 94 : 160);
+    return columnWidths[columnKey] ?? (columnKey === actionColumnKey ? defaultActionColumnWidth : defaultColumnWidth);
   }
 
-  function startColumnResize(columnKey: string, event: ReactMouseEvent<HTMLSpanElement>) {
+  function startColumnResize(columnKey: string, event: ReactPointerEvent<HTMLSpanElement>) {
     event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
     const startX = event.clientX;
     const startWidth = columnWidth(columnKey);
 
-    function onMouseMove(moveEvent: MouseEvent) {
-      const nextWidth = Math.max(72, startWidth + moveEvent.clientX - startX);
+    function onPointerMove(moveEvent: PointerEvent) {
+      const nextWidth = Math.max(72, Math.round(startWidth + moveEvent.clientX - startX));
 
       setColumnWidths((currentWidths) => {
         const nextWidths = { ...currentWidths, [columnKey]: nextWidth };
@@ -421,13 +432,17 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
       });
     }
 
-    function onMouseUp() {
-      window.removeEventListener("mousemove", onMouseMove);
-      window.removeEventListener("mouseup", onMouseUp);
+    function onPointerUp() {
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
     }
 
-    window.addEventListener("mousemove", onMouseMove);
-    window.addEventListener("mouseup", onMouseUp);
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
   }
 
   return (
@@ -534,7 +549,10 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
 
           <div className="overflow-hidden rounded-2xl border border-slate-950/10 bg-white">
             <div className={`${isMaximized ? "max-h-[calc(100vh-82px)]" : "max-h-[calc(100vh-285px)]"} overflow-auto`}>
-              <table className="min-w-[3300px] table-fixed border-separate border-spacing-0 text-left text-[11px]">
+              <table
+                className="table-fixed border-separate border-spacing-0 text-left text-[11px]"
+                style={{ minWidth: tableWidth, width: tableWidth }}
+              >
                 <colgroup>
                   <col style={{ width: columnWidth(actionColumnKey) }} />
                   {columns.map((column) => (
@@ -829,13 +847,13 @@ function ResizeHandle({
   onResizeStart
 }: {
   columnKey: string;
-  onResizeStart: (columnKey: string, event: ReactMouseEvent<HTMLSpanElement>) => void;
+  onResizeStart: (columnKey: string, event: ReactPointerEvent<HTMLSpanElement>) => void;
 }) {
   return (
     <span
       aria-hidden="true"
-      className="absolute right-0 top-0 h-full w-1.5 cursor-col-resize touch-none bg-white/0 transition hover:bg-teal-300/80"
-      onMouseDown={(event) => onResizeStart(columnKey, event)}
+      className="absolute right-0 top-0 z-20 h-full w-3 cursor-col-resize touch-none bg-white/0 transition hover:bg-teal-300/80"
+      onPointerDown={(event) => onResizeStart(columnKey, event)}
     />
   );
 }
