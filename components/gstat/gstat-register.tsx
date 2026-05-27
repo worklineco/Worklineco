@@ -583,39 +583,18 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                         className="h-8 border-b border-r border-slate-200 bg-white px-1.5 py-1"
                         key={`filter-${column.key}`}
                       >
-                        {column.key === "Person handling" ? (
-                          <select
-                            aria-label="Filter Person handling"
-                            className="h-7 w-full min-w-0 rounded-md border border-slate-200 bg-slate-50 px-1.5 text-[11px] font-bold text-slate-800 outline-none transition focus:border-teal-300 focus:bg-white focus:ring-2 focus:ring-teal-100"
-                            onChange={(event) =>
-                              setFilters((currentFilters) => ({
-                                ...currentFilters,
-                                [column.key]: event.target.value
-                              }))
-                            }
-                            value={filters[column.key] ?? ""}
-                          >
-                            <option value="">All</option>
-                            {teamOptions.map((team) => (
-                              <option key={team} value={team}>
-                                {team}
-                              </option>
-                            ))}
-                          </select>
-                        ) : (
-                          <input
-                            aria-label={`Filter ${column.label}`}
-                            className="h-7 w-full min-w-0 rounded-md border border-slate-200 bg-slate-50 px-1.5 text-[11px] font-bold text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-teal-300 focus:bg-white focus:ring-2 focus:ring-teal-100"
-                            onChange={(event) =>
-                              setFilters((currentFilters) => ({
-                                ...currentFilters,
-                                [column.key]: event.target.value
-                              }))
-                            }
-                            placeholder="Filter"
-                            value={filters[column.key] ?? ""}
-                          />
-                        )}
+                        <input
+                          aria-label={`Filter ${column.label}`}
+                          className="h-7 w-full min-w-0 rounded-md border border-slate-200 bg-slate-50 px-1.5 text-[11px] font-bold text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-teal-300 focus:bg-white focus:ring-2 focus:ring-teal-100"
+                          onChange={(event) =>
+                            setFilters((currentFilters) => ({
+                              ...currentFilters,
+                              [column.key]: event.target.value
+                            }))
+                          }
+                          placeholder="Filter"
+                          value={filters[column.key] ?? ""}
+                        />
                       </td>
                     ))}
                   </tr>
