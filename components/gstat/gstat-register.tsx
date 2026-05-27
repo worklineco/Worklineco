@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, Download, Expand, FileSpreadsheet, History, Pencil, Plus, Scale, ShieldCheck, Trash2, Upload, X } from "lucide-react";
+import { ArrowLeft, Download, Expand, FileSpreadsheet, History, Pencil, Plus, Scale, Search, ShieldCheck, Trash2, Upload, X } from "lucide-react";
 import Link from "next/link";
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
@@ -154,12 +154,24 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
     [rows]
   );
   
+  const [globalSearch, setGlobalSearch] = useState("");
+
   const filteredRows = useMemo(
     () =>
       rows
         .map((row, index) => ({ row, originalIndex: index }))
-        .filter(({ row }) =>
-          columns.every((column) => {
+        .filter(({ row }) => {
+          const globalSearchLower = globalSearch.toLowerCase().trim();
+          if (globalSearchLower) {
+            const matchesGlobal = columns.some((column) =>
+              String(row.data[column.key] ?? "")
+                .toLowerCase()
+                .includes(globalSearchLower)
+            );
+            if (!matchesGlobal) return false;
+          }
+
+          return columns.every((column) => {
             const filter = filters[column.key]?.trim().toLowerCase();
 
             if (!filter) {
@@ -169,9 +181,9 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
             return String(row.data[column.key] ?? "")
               .toLowerCase()
               .includes(filter);
-          })
-        ),
-    [filters, rows]
+          });
+        }),
+    [filters, rows, globalSearch]
   );
   
   const filteredUniqueAppeals = useMemo(
@@ -538,6 +550,25 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                 Export Excel
               </button>
             </div>
+          </div>
+
+          <div className="mb-3 flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm">
+            <Search className="size-4 text-slate-400" />
+            <input
+              type="text"
+              placeholder="Search all fields... (OIA No, Entity Name, Status, etc.)"
+              value={globalSearch}
+              onChange={(e) => setGlobalSearch(e.target.value)}
+              className="flex-1 bg-transparent text-sm font-medium focus:outline-none"
+            />
+            {globalSearch && (
+              <button
+                onClick={() => setGlobalSearch("")}
+                className="text-slate-400 transition hover:text-slate-600"
+              >
+                <X className="size-4" />
+              </button>
+            )}
           </div>
 
           <div className="overflow-hidden rounded-2xl border border-slate-950/10 bg-white">
