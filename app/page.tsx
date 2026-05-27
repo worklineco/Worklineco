@@ -27,7 +27,7 @@ const productFocus = [
     description: "Track GSTINs, return periods, filing status, due dates, ARN details, and portal source in one focused workspace.",
     href: "/gst",
     icon: ClipboardCheck,
-    label: "Live workspace",
+    label: "Upcoming",
     target: "_blank",
     title: "GST Tracker",
     tone: "from-amber-300 via-orange-300 to-rose-300"
@@ -37,7 +37,7 @@ const productFocus = [
     description: "GSTAT matters, appeal stages, hearing dates, documents, and action ownership will sit here as the next priority.",
     href: "/gstat",
     icon: Scale,
-    label: "Now building",
+    label: "Now live",
     target: "_blank",
     title: "GSTAT",
     tone: "from-teal-300 via-sky-300 to-fuchsia-300"
@@ -102,7 +102,7 @@ export default function Home() {
                 <p className="text-xs font-black uppercase tracking-[0.16em] text-teal-200">
                   Current priority
                 </p>
-                <h2 className="mt-3 text-3xl font-black">GST + GSTAT</h2>
+                <h2 className="mt-3 text-3xl font-black">GSTAT</h2>
                 <p className="mt-3 text-sm font-semibold leading-6 text-slate-300">
                   The compliance and appeals workspace is the primary product surface.
                 </p>
