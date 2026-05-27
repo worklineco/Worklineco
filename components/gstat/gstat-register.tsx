@@ -460,16 +460,6 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
         ) : null}
 
         <section className={`workline-frame rounded-[28px] p-2 md:p-3 ${isMaximized ? "" : "mt-5"}`}>
-          {isMaximized && (
-            <div className="mb-4 flex justify-center">
-              <div className="inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-teal-50 to-cyan-50 px-4 py-2 shadow-sm border border-teal-200">
-                <FileSpreadsheet className="size-4 text-teal-700" />
-                <span className="text-sm font-black text-teal-700">
-                  Unique Appeals: {hasActiveFilters ? `${filteredUniqueAppeals} / ${uniqueAppeals}` : String(uniqueAppeals)}
-                </span>
-              </div>
-            </div>
-          )}
           <div className="mb-3 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
               <div className="flex flex-wrap items-center gap-2">
@@ -496,6 +486,12 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
               )}
             </div>
             <div className="flex flex-wrap gap-2">
+              {isMaximized && (
+                <div className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-950/10 bg-white px-3 text-xs font-black uppercase text-slate-800 shadow-sm">
+                  <FileSpreadsheet className="size-4" />
+                  Unique Appeals: {hasActiveFilters ? `${filteredUniqueAppeals} / ${uniqueAppeals}` : String(uniqueAppeals)}
+                </div>
+              )}
               <input
                 accept=".xlsx,.xls,.csv"
                 className="hidden"
