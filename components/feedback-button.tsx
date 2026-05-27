@@ -6,7 +6,6 @@ import { useRef, useState } from "react";
 export function FeedbackButton() {
   const [isOpen, setIsOpen] = useState(false);
   const [message, setMessage] = useState("");
-  const [email, setEmail] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitStatus, setSubmitStatus] = useState<"success" | "error" | null>(null);
@@ -15,7 +14,7 @@ export function FeedbackButton() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     
-    if (!message.trim() || !email.trim()) {
+    if (!message.trim()) {
       setSubmitStatus("error");
       return;
     }
@@ -25,7 +24,6 @@ export function FeedbackButton() {
     try {
       const formData = new FormData();
       formData.append("message", message);
-      formData.append("email", email);
       if (file) {
         formData.append("file", file);
       }
@@ -38,7 +36,6 @@ export function FeedbackButton() {
       if (response.ok) {
         setSubmitStatus("success");
         setMessage("");
-        setEmail("");
         setFile(null);
         setTimeout(() => {
           setIsOpen(false);
@@ -88,21 +85,6 @@ export function FeedbackButton() {
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4 p-6">
-            {/* Email Input */}
-            <div>
-              <label className="mb-2 block text-xs font-black uppercase text-slate-700">
-                Your Email
-              </label>
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@example.com"
-                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500/20"
-                required
-              />
-            </div>
-
             {/* Message Input */}
             <div>
               <label className="mb-2 block text-xs font-black uppercase text-slate-700">
