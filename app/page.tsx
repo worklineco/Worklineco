@@ -7,18 +7,21 @@ import {
   Gavel,
   LayoutDashboard,
   Scale,
-  ShieldCheck
+  ShieldCheck,
+  UsersRound
 } from "lucide-react";
 import Link from "next/link";
 import type { ComponentType } from "react";
 import { MonthCalendar } from "@/components/home/month-calendar";
 import { ProfilePanel } from "@/components/home/profile-panel";
+import { TeamsPanel } from "@/components/home/teams-panel";
 
 const navigation = [
   { href: "/", icon: LayoutDashboard, label: "Overview", tone: "bg-teal-100 text-teal-800" },
   { href: "/gst", icon: ClipboardCheck, label: "GST Tracker", target: "_blank", tone: "bg-amber-100 text-amber-800" },
   { href: "/gstat", icon: Scale, label: "GSTAT", target: "_blank", tone: "bg-fuchsia-100 text-fuchsia-800" },
   { href: "#records", icon: Building2, label: "Client Records", tone: "bg-sky-100 text-sky-800" },
+  { href: "#teams", icon: UsersRound, label: "Teams", tone: "bg-violet-100 text-violet-800" },
   { href: "#reports", icon: BarChart3, label: "Reports", tone: "bg-emerald-100 text-emerald-800" }
 ];
 
@@ -116,6 +119,8 @@ export default function Home() {
           </section>
 
           <MonthCalendar />
+
+          <TeamsPanel />
 
           <section className="workline-frame mt-5 rounded-[26px] p-5 md:p-6">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
