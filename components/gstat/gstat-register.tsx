@@ -460,6 +460,16 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
         ) : null}
 
         <section className={`workline-frame rounded-[28px] p-2 md:p-3 ${isMaximized ? "" : "mt-5"}`}>
+          {isMaximized && (
+            <div className="mb-4 flex justify-center">
+              <div className="inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-teal-50 to-cyan-50 px-4 py-2 shadow-sm border border-teal-200">
+                <FileSpreadsheet className="size-4 text-teal-700" />
+                <span className="text-sm font-black text-teal-700">
+                  Unique Appeals: {hasActiveFilters ? `${filteredUniqueAppeals} / ${uniqueAppeals}` : String(uniqueAppeals)}
+                </span>
+              </div>
+            </div>
+          )}
           <div className="mb-3 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
               <div className="flex flex-wrap items-center gap-2">
@@ -476,14 +486,6 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                   {isMaximized ? "GSTAT Register" : "Appeals Register"}
                 </h2>
               </div>
-              {isMaximized && (
-                <div className="mt-2 flex items-center gap-3">
-                  <span className="inline-flex items-center gap-1.5 rounded-lg bg-teal-50 px-2.5 py-1 text-xs font-black text-teal-700">
-                    <FileSpreadsheet className="size-3.5" />
-                    Unique Appeals: {hasActiveFilters ? `${filteredUniqueAppeals} / ${uniqueAppeals}` : String(uniqueAppeals)}
-                  </span>
-                </div>
-              )}
               {message ? <p className="mt-1 text-sm font-bold text-emerald-700">{message}</p> : null}
               {isLoading ? <p className="mt-1 text-sm font-bold text-slate-500">Loading saved GSTAT data...</p> : null}
               {hasActiveFilters && (
