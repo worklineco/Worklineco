@@ -216,14 +216,6 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
     }
   }
 
-  function updateCell(rowIndex: number, field: string, value: string) {
-    setRows((currentRows) =>
-      currentRows.map((row, index) =>
-        index === rowIndex ? { ...row, data: { ...row.data, [field]: value } } : row
-      )
-    );
-  }
-
   async function insertRowAfter(rowIndex: number) {
     const nextRows = renumberRows([
       ...rows.slice(0, rowIndex + 1),
@@ -232,7 +224,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
     ]);
 
     setRows(nextRows);
-    await saveRows(nextRows, "row_insert", `Inserted row ${rowIndex + 2}. Audit log updated.`);
+    await saveRowOperation("row_insert", rowIndex, `Inserted row ${rowIndex + 2}. Audit log updated.`);
   }
 
   async function deleteRow(rowIndex: number) {
@@ -247,12 +239,14 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
     );
 
     setRows(nextRows);
-    await saveRows(nextRows, "row_delete", `Deleted row ${rowLabel}. Audit log updated.`);
+    await saveRowOperation("row_delete", rowIndex, `Deleted row ${rowLabel}. Audit log updated.`);
   }
 
-  async function saveRows(nextRows: AppealRow[], action: string, successMessage: string) {
+  async function saveRowOperation(action: "row_insert" | "row_delete", rowIndex: number, successMessage: string) {
+    setMessage(action === "row_insert" ? "Saving inserted row..." : "Deleting row...");
+
     const response = await fetch("/api/gstat", {
-      body: JSON.stringify({ action, rows: nextRows }),
+      body: JSON.stringify({ action, rowIndex }),
       headers: { "Content-Type": "application/json" },
       method: "POST"
     });
@@ -260,10 +254,11 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
 
     if (!response.ok) {
       setMessage(result.error ?? "Could not save GSTAT rows.");
+      await loadRows();
       return;
     }
 
-    setRows(result.rows?.length ? normalizeRows(result.rows) : nextRows);
+    setRows(result.rows?.length ? normalizeRows(result.rows) : rows);
     setMessage(successMessage);
   }
 
@@ -283,7 +278,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
       body: JSON.stringify({
         field: column.key,
         id: row.id,
-        row,
+        row: { ...row, data: { ...row.data, [column.key]: value } },
         value
       }),
       headers: { "Content-Type": "application/json" },
@@ -521,10 +516,10 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                             row.data[column.key] || visibleIndex + 1
                           ) : (
                             <input
+                              key={`${row.id ?? originalIndex}-${column.key}-${row.data[column.key] ?? ""}`}
                               className="h-7 min-w-24 rounded-md border border-transparent bg-transparent px-1.5 text-[11px] font-semibold outline-none transition focus:border-teal-300 focus:bg-white focus:ring-2 focus:ring-teal-100"
+                              defaultValue={row.data[column.key] ?? ""}
                               onBlur={(event) => saveCell(originalIndex, column, event)}
-                              onChange={(event) => updateCell(originalIndex, column.key, event.target.value)}
-                              value={row.data[column.key] ?? ""}
                             />
                           )}
                         </td>

@@ -40,12 +40,11 @@ export async function POST(request: Request) {
     return auth.error;
   }
 
-  const { action = "import", rows } = (await request.json()) as { action?: string; rows?: AppealRow[] };
-
-  if (!Array.isArray(rows)) {
-    return NextResponse.json({ error: "Rows are required." }, { status: 400 });
-  }
-
+  const {
+    action = "import",
+    rowIndex,
+    rows
+  } = (await request.json()) as { action?: string; rowIndex?: number; rows?: AppealRow[] };
   const auditAction = ["import", "row_insert", "row_delete", "bulk_save"].includes(action)
     ? action
     : "bulk_save";
@@ -60,6 +59,40 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: previous.error.message }, { status: 500 });
   }
 
+  if (auditAction === "row_insert" || auditAction === "row_delete") {
+    const existingRows = (previous.data ?? [])
+      .sort((first, second) => (first.row_number ?? 0) - (second.row_number ?? 0))
+      .map((row) => ({ data: row.data ?? {}, row_number: row.row_number ?? 1 }));
+    const nextRows =
+      auditAction === "row_insert"
+        ? renumberRows([
+            ...existingRows.slice(0, (rowIndex ?? -1) + 1),
+            { data: {}, row_number: (rowIndex ?? -1) + 2 },
+            ...existingRows.slice((rowIndex ?? -1) + 1)
+          ])
+        : renumberRows(
+            existingRows.length > 1
+              ? existingRows.filter((_, index) => index !== rowIndex)
+              : [{ data: {}, row_number: 1 }]
+          );
+
+    return replaceRows(admin, auth.user.id, nextRows, auditAction, previous.data?.length ?? 0);
+  }
+
+  if (!Array.isArray(rows)) {
+    return NextResponse.json({ error: "Rows are required." }, { status: 400 });
+  }
+
+  return replaceRows(admin, auth.user.id, rows, auditAction, previous.data?.length ?? 0);
+}
+
+async function replaceRows(
+  admin: ReturnType<typeof createAdminClient>,
+  userId: string,
+  rows: AppealRow[],
+  auditAction: string,
+  previousRowCount: number
+) {
   const { error: deleteError } = await admin
     .from("gstat_appeals")
     .delete()
@@ -70,11 +103,11 @@ export async function POST(request: Request) {
   }
 
   const insertRows = rows.map((row, index) => ({
-    created_by: auth.user.id,
+    created_by: userId,
     data: row.data ?? {},
     organisation_code: organisationCode,
     row_number: index + 1,
-    updated_by: auth.user.id
+    updated_by: userId
   }));
 
   const inserted = insertRows.length
@@ -90,10 +123,10 @@ export async function POST(request: Request) {
 
   await admin.from("gstat_audit_logs").insert({
     action: auditAction,
-    actor_user_id: auth.user.id,
+    actor_user_id: userId,
     field_name: auditAction,
     new_value: { row_count: rows.length },
-    old_value: { row_count: previous.data?.length ?? 0 },
+    old_value: { row_count: previousRowCount },
     organisation_code: organisationCode
   });
 
@@ -208,6 +241,14 @@ function createAdminClient() {
       persistSession: false
     }
   });
+}
+
+function renumberRows(rows: AppealRow[]) {
+  return rows.map((row, index) => ({
+    ...row,
+    data: { ...row.data, Sno: index + 1 },
+    row_number: index + 1
+  }));
 }
 
 async function requireUser() {
