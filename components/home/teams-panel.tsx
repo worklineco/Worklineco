@@ -67,8 +67,9 @@ export function TeamsPanel() {
 
       <div className="mt-5 overflow-hidden rounded-2xl border border-slate-950/10 bg-white shadow-sm ring-1 ring-white/70">
         <div className="overflow-x-auto">
-          <div className="grid min-w-[680px] grid-cols-[1.2fr_1.4fr_1fr] gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3 text-xs font-black uppercase text-slate-500">
+          <div className="grid min-w-[780px] grid-cols-[1.1fr_0.65fr_1.4fr_1fr] gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3 text-xs font-black uppercase text-slate-500">
             <span>Name</span>
+            <span>Team No</span>
             <span>Email ID</span>
             <span>Designation</span>
           </div>
@@ -87,13 +88,13 @@ export function TeamsPanel() {
 
           {!isLoading && !message && members.map((member) => (
             <div
-              className="grid min-w-[680px] grid-cols-[1.2fr_1.4fr_1fr] gap-3 border-b border-slate-100 px-4 py-3 text-sm last:border-b-0"
+              className="grid min-w-[780px] grid-cols-[1.1fr_0.65fr_1.4fr_1fr] gap-3 border-b border-slate-100 px-4 py-3 text-sm last:border-b-0"
               key={member.id}
             >
               <div className="min-w-0">
                 <p className="truncate font-black text-slate-950">{member.name}</p>
-                {member.team ? <p className="mt-0.5 truncate text-xs font-bold text-slate-500">{member.team}</p> : null}
               </div>
+              <p className="truncate font-bold text-slate-600">{member.team || "-"}</p>
               <div className="flex min-w-0 items-center gap-2 font-semibold text-slate-700">
                 <Mail className="size-4 shrink-0 text-slate-400" />
                 <span className="truncate">{member.email}</span>

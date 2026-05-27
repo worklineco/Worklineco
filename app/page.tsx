@@ -1,3 +1,5 @@
+"use client";
+
 import {
   ArrowRight,
   BarChart3,
@@ -12,6 +14,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import type { ComponentType } from "react";
+import { useRef, useState } from "react";
 import { MonthCalendar } from "@/components/home/month-calendar";
 import { ProfilePanel } from "@/components/home/profile-panel";
 import { TeamsPanel } from "@/components/home/teams-panel";
@@ -21,7 +24,6 @@ const navigation = [
   { href: "/gst", icon: ClipboardCheck, label: "GST Tracker", target: "_blank", tone: "bg-amber-100 text-amber-800" },
   { href: "/gstat", icon: Scale, label: "GSTAT", target: "_blank", tone: "bg-fuchsia-100 text-fuchsia-800" },
   { href: "#records", icon: Building2, label: "Client Records", tone: "bg-sky-100 text-sky-800" },
-  { href: "#teams", icon: UsersRound, label: "Teams", tone: "bg-violet-100 text-violet-800" },
   { href: "#reports", icon: BarChart3, label: "Reports", tone: "bg-emerald-100 text-emerald-800" }
 ];
 
@@ -55,6 +57,23 @@ const supportingAreas = [
 ];
 
 export default function Home() {
+  const [isTeamsVisible, setIsTeamsVisible] = useState(false);
+  const teamsPanelRef = useRef<HTMLDivElement>(null);
+
+  function toggleTeams() {
+    setIsTeamsVisible((current) => {
+      const next = !current;
+
+      if (next) {
+        window.setTimeout(() => {
+          teamsPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+        }, 0);
+      }
+
+      return next;
+    });
+  }
+
   return (
     <main className="min-h-screen overflow-hidden bg-[#f7f3ea] text-slate-950">
       <div className="pointer-events-none fixed inset-0 -z-10">
@@ -80,6 +99,13 @@ export default function Home() {
             {navigation.map((item) => (
               <NavItem item={item} key={item.label} />
             ))}
+            <NavButton
+              icon={UsersRound}
+              isActive={isTeamsVisible}
+              label="Teams"
+              onClick={toggleTeams}
+              tone="bg-violet-100 text-violet-800"
+            />
             <ProfilePanel />
           </nav>
         </aside>
@@ -120,7 +146,11 @@ export default function Home() {
 
           <MonthCalendar />
 
-          <TeamsPanel />
+          {isTeamsVisible ? (
+            <div ref={teamsPanelRef}>
+              <TeamsPanel />
+            </div>
+          ) : null}
 
           <section className="workline-frame mt-5 rounded-[26px] p-5 md:p-6">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
@@ -156,6 +186,35 @@ export default function Home() {
         </section>
       </div>
     </main>
+  );
+}
+
+function NavButton({
+  icon: Icon,
+  isActive,
+  label,
+  onClick,
+  tone
+}: {
+  icon: ComponentType<{ className?: string }>;
+  isActive: boolean;
+  label: string;
+  onClick: () => void;
+  tone: string;
+}) {
+  return (
+    <button
+      className={`group flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-bold transition hover:bg-white hover:text-slate-950 hover:shadow-sm ${
+        isActive ? "bg-white text-slate-950 shadow-sm" : "text-slate-700"
+      }`}
+      onClick={onClick}
+      type="button"
+    >
+      <span className={`flex size-9 items-center justify-center rounded-xl ${tone}`}>
+        <Icon className="size-4" />
+      </span>
+      <span>{label}</span>
+    </button>
   );
 }
 
