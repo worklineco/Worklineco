@@ -69,6 +69,7 @@ const initialRows = createEmptyRows(12);
 
 export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }) {
   const [rows, setRows] = useState<AppealRow[]>(initialRows);
+  const [filters, setFilters] = useState<Record<string, string>>({});
   const [isLoading, setIsLoading] = useState(true);
   const [message, setMessage] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -78,6 +79,25 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
         columns.some((column) => column.key !== "Sno" && String(row.data[column.key] ?? "").trim())
       ).length,
     [rows]
+  );
+  const filteredRows = useMemo(
+    () =>
+      rows
+        .map((row, index) => ({ row, originalIndex: index }))
+        .filter(({ row }) =>
+          columns.every((column) => {
+            const filter = filters[column.key]?.trim().toLowerCase();
+
+            if (!filter) {
+              return true;
+            }
+
+            return String(row.data[column.key] ?? "")
+              .toLowerCase()
+              .includes(filter);
+          })
+        ),
+    [filters, rows]
   );
 
   useEffect(() => {
@@ -388,20 +408,41 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map((row, rowIndex) => (
-                    <tr className="odd:bg-white even:bg-slate-50/80" key={rowIndex}>
+                  <tr className="bg-white shadow-[inset_0_-1px_0_rgba(15,23,42,0.10)]">
+                    {columns.map((column) => (
+                      <td
+                        className="h-8 border-b border-r border-slate-200 bg-white px-1.5 py-1"
+                        key={`filter-${column.key}`}
+                      >
+                        <input
+                          aria-label={`Filter ${column.label}`}
+                          className="h-7 min-w-20 rounded-md border border-slate-200 bg-slate-50 px-1.5 text-[11px] font-bold text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-teal-300 focus:bg-white focus:ring-2 focus:ring-teal-100"
+                          onChange={(event) =>
+                            setFilters((currentFilters) => ({
+                              ...currentFilters,
+                              [column.key]: event.target.value
+                            }))
+                          }
+                          placeholder="Filter"
+                          value={filters[column.key] ?? ""}
+                        />
+                      </td>
+                    ))}
+                  </tr>
+                  {filteredRows.map(({ row, originalIndex }, visibleIndex) => (
+                    <tr className="odd:bg-white even:bg-slate-50/80" key={row.id ?? originalIndex}>
                       {columns.map((column) => (
                         <td
                           className="h-8 border-b border-r border-slate-200 px-1.5 py-1 font-semibold text-slate-700"
-                          key={`${rowIndex}-${column.key}`}
+                          key={`${originalIndex}-${column.key}`}
                         >
                           {column.key === "Sno" ? (
-                            row.data[column.key] || rowIndex + 1
+                            row.data[column.key] || visibleIndex + 1
                           ) : (
                             <input
                               className="h-7 min-w-24 rounded-md border border-transparent bg-transparent px-1.5 text-[11px] font-semibold outline-none transition focus:border-teal-300 focus:bg-white focus:ring-2 focus:ring-teal-100"
-                              onBlur={(event) => saveCell(rowIndex, column, event)}
-                              onChange={(event) => updateCell(rowIndex, column.key, event.target.value)}
+                              onBlur={(event) => saveCell(originalIndex, column, event)}
+                              onChange={(event) => updateCell(originalIndex, column.key, event.target.value)}
                               value={row.data[column.key] ?? ""}
                             />
                           )}
