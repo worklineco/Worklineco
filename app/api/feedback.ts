@@ -7,19 +7,14 @@ type CookieToSet = { name: string; options: CookieOptions; value: string };
 
 export async function POST(request: NextRequest) {
   try {
-    const auth = await requireUser();
-
-    if ("error" in auth) {
-      return auth.error;
-    }
-
+    const auth = await getUser();
     const formData = await request.formData();
     const message = formData.get("message") as string;
+    const submittedEmail = String(formData.get("email") ?? "").trim();
     const file = formData.get("file") as File | null;
-    const email =
-      auth.user.email ??
-      String(auth.user.user_metadata?.email ?? auth.user.user_metadata?.login_email ?? "").trim();
-    const sender = email || auth.user.id;
+    const metadataEmail = String(auth?.user_metadata?.email ?? auth?.user_metadata?.login_email ?? "").trim();
+    const email = auth?.email || metadataEmail || submittedEmail;
+    const sender = email || submittedEmail || auth?.id || "Unknown user";
 
     if (!message) {
       return NextResponse.json(
@@ -103,7 +98,7 @@ function escapeHtml(value: string) {
     .replace(/'/g, "&#39;");
 }
 
-async function requireUser() {
+async function getUser() {
   const cookieStore = await cookies();
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -127,8 +122,8 @@ async function requireUser() {
   } = await supabase.auth.getUser();
 
   if (error || !user) {
-    return { error: NextResponse.json({ error: "Not authenticated." }, { status: 401 }) };
+    return null;
   }
 
-  return { user };
+  return user;
 }

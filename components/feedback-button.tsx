@@ -1,5 +1,6 @@
 "use client";
 
+import { supabase } from "@/lib/supabase/client";
 import { MessageCircle, X, Send, Upload } from "lucide-react";
 import { useRef, useState } from "react";
 
@@ -22,8 +23,12 @@ export function FeedbackButton() {
     setIsSubmitting(true);
     
     try {
+      const { data } = await supabase.auth.getUser();
       const formData = new FormData();
       formData.append("message", message);
+      if (data.user?.email) {
+        formData.append("email", data.user.email);
+      }
       if (file) {
         formData.append("file", file);
       }
