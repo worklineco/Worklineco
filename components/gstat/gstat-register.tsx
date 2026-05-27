@@ -150,10 +150,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
   const [message, setMessage] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const uniqueAppeals = useMemo(
-    () =>
-      rows.filter((row) =>
-        columns.some((column) => column.key !== "Sno" && String(row.data[column.key] ?? "").trim())
-      ).length,
+    () => new Set(rows.map((row) => String(row.data["OIA No"] ?? "").trim()).filter(Boolean)).size,
     [rows]
   );
   const filteredRows = useMemo(
