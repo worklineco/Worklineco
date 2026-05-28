@@ -577,11 +577,11 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                 <thead className="sticky top-0 z-10 bg-slate-950 text-white">
                   <tr>
                     <th
-  className="sticky left-0 z-20 border-b border-r border-white/15 bg-[#0f172a] px-2 py-2 align-bottom font-black"
-  rowSpan={2}
->
-  Row
-</th>
+                      className="border-b border-r border-white/15 px-2 py-2 align-bottom font-black"
+                      rowSpan={2}
+                    >
+                      Row
+                    </th>
                     {baseColumns.map((column) => (
                       <th
                         className="border-b border-r border-white/15 px-2 py-2 align-bottom font-black"
@@ -623,7 +623,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                 </thead>
                 <tbody>
                   <tr className="bg-white shadow-[inset_0_-1px_0_rgba(15,23,42,0.10)]">
-                    <td className="sticky left-0 z-10 h-8 whitespace-nowrap border-b border-r border-slate-200 bg-white px-1.5 py-1">
+                    <td className="h-8 border-b border-r border-slate-200 bg-white px-1.5 py-1">
                       <button
                         className="inline-flex h-7 items-center justify-center gap-1 rounded-md border border-teal-200 bg-teal-50 px-2 text-[10px] font-black uppercase text-teal-800 transition hover:bg-teal-100"
                         onClick={openNewEditor}
@@ -655,7 +655,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                   </tr>
                   {filteredRows.map(({ row, originalIndex }, visibleIndex) => (
                     <tr className="odd:bg-white even:bg-slate-50/80" key={row.id ?? originalIndex}>
-                      <td className="sticky left-0 z-10 h-8 whitespace-nowrap border-b border-r border-slate-200 bg-white px-1.5 py-1">
+                      <td className="h-8 whitespace-nowrap border-b border-r border-slate-200 px-1.5 py-1">
                         <div className="flex items-center gap-1">
                           <button
                             aria-label={`Edit row ${row.data.Sno || visibleIndex + 1}`}
