@@ -655,7 +655,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                   </tr>
                   {filteredRows.map(({ row, originalIndex }, visibleIndex) => (
                     <tr className="odd:bg-white even:bg-slate-50/80" key={row.id ?? originalIndex}>
-                      <td className="h-8 whitespace-nowrap border-b border-r border-slate-200 px-1.5 py-1">
+                      <td className="sticky left-0 z-10 h-8 whitespace-nowrap border-b border-r border-slate-200 bg-white px-1.5 py-1">
                         <div className="flex items-center gap-1">
                           <button
                             aria-label={`Edit row ${row.data.Sno || visibleIndex + 1}`}
