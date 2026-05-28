@@ -31,7 +31,7 @@ const baseColumns: Column[] = [
   "OIA Date",
   "APL 04 No",
   "APL 04 Date",
-  "Favourablle/Against",
+  "Favourable/Against",
   "Additional 10% compliances",
   "Undertaking Requirement",
   "Matter pending at high court",
@@ -108,7 +108,7 @@ const editorSections = [
   },
   {
     fields: [
-      "Favourablle/Against",
+      "Favourable/Against",
       "Additional 10% compliances",
       "Undertaking Requirement",
       "Matter pending at high court",
