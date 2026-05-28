@@ -577,11 +577,11 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                 <thead className="sticky top-0 z-10 bg-slate-950 text-white">
                   <tr>
                     <th
-                      className="border-b border-r border-white/15 px-2 py-2 align-bottom font-black"
-                      rowSpan={2}
-                    >
-                      Row
-                    </th>
+  className="sticky left-0 z-20 border-b border-r border-white/15 bg-[#0f172a] px-2 py-2 align-bottom font-black"
+  rowSpan={2}
+>
+  Row
+</th>
                     {baseColumns.map((column) => (
                       <th
                         className="border-b border-r border-white/15 px-2 py-2 align-bottom font-black"
