@@ -623,7 +623,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                 </thead>
                 <tbody>
                   <tr className="bg-white shadow-[inset_0_-1px_0_rgba(15,23,42,0.10)]">
-                    <td className="h-8 border-b border-r border-slate-200 bg-white px-1.5 py-1">
+                    <td className="sticky left-0 z-10 h-8 whitespace-nowrap border-b border-r border-slate-200 bg-white px-1.5 py-1">
                       <button
                         className="inline-flex h-7 items-center justify-center gap-1 rounded-md border border-teal-200 bg-teal-50 px-2 text-[10px] font-black uppercase text-teal-800 transition hover:bg-teal-100"
                         onClick={openNewEditor}
