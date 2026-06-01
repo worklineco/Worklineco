@@ -1,5 +1,6 @@
 "use client";
 
+import { supabase } from "@/lib/supabase/client";
 import { ArrowLeft, Download, Expand, FileSpreadsheet, History, Pencil, Plus, Scale, Search, ShieldCheck, Trash2, Upload, X } from "lucide-react";
 import Link from "next/link";
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
@@ -14,6 +15,7 @@ type AppealRow = {
   updated_at?: string;
 };
 type EditorState = { draft: RowData; isNew?: boolean; row: AppealRow; rowIndex: number };
+type UserAccess = { isPartner: boolean; team: string };
 
 const baseColumns: Column[] = [
   "Sno",
@@ -23,6 +25,7 @@ const baseColumns: Column[] = [
   "Entity Name",
   "State Name",
   "FY",
+  "State/Centre",
   "OIO No",
   "OIO Date",
   "DRC 07 No",
@@ -87,6 +90,7 @@ const editorSections = [
       "Entity Name",
       "State Name",
       "FY",
+      "State/Centre",
       "Appellant"
     ],
     title: "Basic details"
@@ -148,6 +152,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [message, setMessage] = useState("");
+  const [userAccess, setUserAccess] = useState<UserAccess>({ isPartner: false, team: "" });
   const fileInputRef = useRef<HTMLInputElement>(null);
   const uniqueAppeals = useMemo(
     () => new Set(rows.map((row) => String(row.data["OIA No"] ?? "").trim()).filter(Boolean)).size,
@@ -197,8 +202,20 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
   );
 
   useEffect(() => {
+    loadUserAccess();
     loadRows();
   }, []);
+
+  async function loadUserAccess() {
+    const { data } = await supabase.auth.getUser();
+    const metadata = data.user?.user_metadata ?? {};
+    const role = String(metadata.role ?? "").trim().toLowerCase();
+
+    setUserAccess({
+      isPartner: role === "partner",
+      team: String(metadata.team ?? "").trim()
+    });
+  }
 
   async function loadRows() {
     setIsLoading(true);
@@ -350,11 +367,12 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
 
   function openNewEditor() {
     const row = createEmptyRow(rows.length + 1);
+    const draft = applyPersonHandlingForAccess(row.data, userAccess);
 
     setEditor({
-      draft: { ...row.data },
+      draft,
       isNew: true,
-      row,
+      row: { ...row, data: draft },
       rowIndex: rows.length
     });
   }
@@ -365,13 +383,17 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
     }
 
     setEditor({
-      draft: { ...row.data },
+      draft: applyPersonHandlingForAccess(row.data, userAccess),
       row,
       rowIndex
     });
   }
 
   function updateDraft(field: string, value: string) {
+    if (isPersonHandlingLocked(userAccess) && field === "Person handling") {
+      return;
+    }
+
     setEditor((currentEditor) =>
       currentEditor
         ? {
@@ -389,6 +411,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
 
     const rowIndex = editor.rowIndex;
     const row = editor.isNew ? editor.row : rows[rowIndex];
+    const draft = applyPersonHandlingForAccess(editor.draft, userAccess);
 
     if (!row) {
       return;
@@ -398,7 +421,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
       body: JSON.stringify({
         id: row.id,
         row,
-        rowData: editor.draft
+        rowData: draft
       }),
       headers: { "Content-Type": "application/json" },
       method: "PATCH"
@@ -420,7 +443,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
       );
     });
     setEditor(null);
-    setMessage(`Saved row ${editor.draft.Sno || rowIndex + 1}. Audit log updated.`);
+    setMessage(`Saved row ${draft.Sno || rowIndex + 1}. Audit log updated.`);
   }
 
   return (
@@ -573,11 +596,11 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
 
           <div className="overflow-hidden rounded-2xl border border-slate-950/10 bg-white">
             <div className={`${isMaximized ? "max-h-[calc(100vh-82px)]" : "max-h-[calc(100vh-285px)]"} overflow-auto`}>
-              <table className="min-w-[3300px] table-fixed border-separate border-spacing-0 text-left text-[11px]">
+              <table className="min-w-[3400px] table-fixed border-separate border-spacing-0 text-left text-[11px]">
                 <thead className="sticky top-0 z-10 bg-slate-950 text-white">
                   <tr>
                     <th
-                      className="border-b border-r border-white/15 px-2 py-2 align-bottom font-black"
+                      className="sticky left-0 z-30 border-b border-r border-white/15 bg-slate-950 px-2 py-2 align-bottom font-black"
                       rowSpan={2}
                     >
                       Row
@@ -622,8 +645,8 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                   </tr>
                 </thead>
                 <tbody>
-                  <tr className="bg-white shadow-[inset_0_-1px_0_rgba(15,23,42,0.10)]">
-                    <td className="h-8 border-b border-r border-slate-200 bg-white px-1.5 py-1">
+                  <tr className="sticky top-[58px] z-20 bg-white shadow-[inset_0_-1px_0_rgba(15,23,42,0.10)]">
+                    <td className="sticky left-0 z-30 h-8 border-b border-r border-slate-200 bg-white px-1.5 py-1">
                       <button
                         className="inline-flex h-7 items-center justify-center gap-1 rounded-md border border-teal-200 bg-teal-50 px-2 text-[10px] font-black uppercase text-teal-800 transition hover:bg-teal-100"
                         onClick={openNewEditor}
@@ -655,7 +678,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                   </tr>
                   {filteredRows.map(({ row, originalIndex }, visibleIndex) => (
                     <tr className="odd:bg-white even:bg-slate-50/80" key={row.id ?? originalIndex}>
-                      <td className="h-8 whitespace-nowrap border-b border-r border-slate-200 px-1.5 py-1">
+                      <td className="sticky left-0 z-10 h-8 whitespace-nowrap border-b border-r border-slate-200 bg-inherit px-1.5 py-1">
                         <div className="flex items-center gap-1">
                           <button
                             aria-label={`Edit row ${row.data.Sno || visibleIndex + 1}`}
@@ -749,7 +772,8 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                         <span className="text-[11px] font-black uppercase text-slate-500">{field}</span>
                         {field === "Person handling" ? (
                           <select
-                            className="mt-1 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-900 outline-none transition focus:border-teal-300 focus:ring-2 focus:ring-teal-100"
+                            className="mt-1 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-900 outline-none transition disabled:bg-slate-100 disabled:text-slate-600 focus:border-teal-300 focus:ring-2 focus:ring-teal-100"
+                            disabled={isPersonHandlingLocked(userAccess)}
                             onChange={(event) => updateDraft(field, event.target.value)}
                             value={editor.draft[field] ?? ""}
                           >
@@ -842,6 +866,18 @@ function normalizeRow(row: AppealRow, index: number): AppealRow {
     }, {}),
     row_number: rowNumber
   };
+}
+
+function isPersonHandlingLocked(access: UserAccess) {
+  return !access.isPartner && Boolean(access.team);
+}
+
+function applyPersonHandlingForAccess(data: RowData, access: UserAccess): RowData {
+  if (!isPersonHandlingLocked(access)) {
+    return { ...data };
+  }
+
+  return { ...data, "Person handling": access.team };
 }
 
 function Metric({
