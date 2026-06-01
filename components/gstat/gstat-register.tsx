@@ -597,10 +597,10 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
           <div className="overflow-hidden rounded-2xl border border-slate-950/10 bg-white">
             <div className={`${isMaximized ? "max-h-[calc(100vh-82px)]" : "max-h-[calc(100vh-285px)]"} overflow-auto`}>
               <table className="min-w-[3400px] table-fixed border-separate border-spacing-0 text-left text-[11px]">
-                <thead className="sticky top-0 z-10 bg-slate-950 text-white">
+                <thead className="sticky top-0 z-30 bg-slate-950 text-white">
                   <tr>
                     <th
-                      className="sticky left-0 z-30 border-b border-r border-white/15 bg-slate-950 px-2 py-2 align-bottom font-black"
+                      className="sticky left-0 z-50 w-[92px] border-b border-r border-white/15 bg-slate-950 px-2 py-2 align-bottom font-black"
                       rowSpan={2}
                     >
                       Row
@@ -643,10 +643,8 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                       </th>
                     ))}
                   </tr>
-                </thead>
-                <tbody>
-                  <tr className="sticky top-[58px] z-20 bg-white shadow-[inset_0_-1px_0_rgba(15,23,42,0.10)]">
-                    <td className="sticky left-0 z-30 h-8 border-b border-r border-slate-200 bg-white px-1.5 py-1">
+                  <tr className="bg-white text-slate-800 shadow-[inset_0_-1px_0_rgba(15,23,42,0.10)]">
+                    <th className="sticky left-0 z-50 h-10 w-[92px] border-b border-r border-slate-200 bg-white px-1.5 py-1">
                       <button
                         className="inline-flex h-7 items-center justify-center gap-1 rounded-md border border-teal-200 bg-teal-50 px-2 text-[10px] font-black uppercase text-teal-800 transition hover:bg-teal-100"
                         onClick={openNewEditor}
@@ -655,10 +653,10 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                         <Plus className="size-3" />
                         Add
                       </button>
-                    </td>
+                    </th>
                     {columns.map((column) => (
-                      <td
-                        className="h-8 border-b border-r border-slate-200 bg-white px-1.5 py-1"
+                      <th
+                        className="h-10 border-b border-r border-slate-200 bg-white px-1.5 py-1"
                         key={`filter-${column.key}`}
                       >
                         <input
@@ -673,12 +671,14 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                           placeholder="Filter"
                           value={filters[column.key] ?? ""}
                         />
-                      </td>
+                      </th>
                     ))}
                   </tr>
+                </thead>
+                <tbody>
                   {filteredRows.map(({ row, originalIndex }, visibleIndex) => (
                     <tr className="odd:bg-white even:bg-slate-50/80" key={row.id ?? originalIndex}>
-                      <td className="sticky left-0 z-10 h-8 whitespace-nowrap border-b border-r border-slate-200 bg-inherit px-1.5 py-1">
+                      <td className="sticky left-0 z-20 h-8 w-[92px] whitespace-nowrap border-b border-r border-slate-200 bg-inherit px-1.5 py-1">
                         <div className="flex items-center gap-1">
                           <button
                             aria-label={`Edit row ${row.data.Sno || visibleIndex + 1}`}
