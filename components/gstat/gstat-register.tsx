@@ -1,7 +1,7 @@
 "use client";
 
 import { supabase } from "@/lib/supabase/client";
-import { ArrowDown, ArrowLeft, ArrowUp, Download, Expand, FileSpreadsheet, History, Pencil, Plus, Scale, Search, ShieldCheck, Trash2, Upload, X } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowUp, Download, Expand, FileSpreadsheet, Filter, History, Pencil, Plus, Scale, Search, ShieldCheck, Trash2, Upload, X } from "lucide-react";
 import Link from "next/link";
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx-js-style";
@@ -19,8 +19,16 @@ type UserAccess = { isPartner: boolean; team: string };
 type CellStyle = NonNullable<XLSX.CellObject["s"]>;
 type SortDirection = "asc" | "desc";
 type SortState = { columnKey: string; direction: SortDirection } | null;
+type AdvancedFilterCondition = "includes" | "does_not_include";
+type AdvancedFilter = {
+  condition: AdvancedFilterCondition;
+  field: string;
+  id: string;
+  value: string;
+};
 
 const actionColumnWidth = 122;
+const blankAdvancedFilterValue = "__workline_blank__";
 
 const baseColumns: Column[] = [
   "Sno",
@@ -214,6 +222,8 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
   const [userAccess, setUserAccess] = useState<UserAccess>({ isPartner: false, team: "" });
   const [sortState, setSortState] = useState<SortState>(null);
   const [selectedRowKeys, setSelectedRowKeys] = useState<Set<string>>(() => new Set());
+  const [isMoreFiltersVisible, setIsMoreFiltersVisible] = useState(false);
+  const [advancedFilters, setAdvancedFilters] = useState<AdvancedFilter[]>(() => [createAdvancedFilter()]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const uniqueAppeals = useMemo(
     () => new Set(rows.map((row) => String(row.data["OIA No"] ?? "").trim()).filter(Boolean)).size,
@@ -235,6 +245,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
 
   const filteredRows = useMemo(
     () => {
+      const activeAdvancedFilters = advancedFilters.filter(isAdvancedFilterComplete);
       const visibleRows = rows
         .map((row, index) => ({ row, originalIndex: index }))
         .filter(({ row }) => {
@@ -257,7 +268,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
             matchesColumnFilter(row.data[column.key], column, filters[column.key], {
               duplicateOiaNumbers
             })
-          );
+          ) && activeAdvancedFilters.every((filter) => matchesAdvancedFilter(row, filter));
         });
 
       if (!sortState) {
@@ -272,7 +283,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
 
       return [...visibleRows].sort((left, right) => compareRowsForColumn(left, right, sortColumn, sortState.direction));
     },
-    [duplicateOiaNumbers, filters, rows, globalSearch, sortState]
+    [advancedFilters, duplicateOiaNumbers, filters, rows, globalSearch, sortState]
   );
   
   const filteredUniqueAppeals = useMemo(
@@ -281,8 +292,19 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
   );
   
   const hasActiveFilters = useMemo(
-    () => Object.values(filters).some((filter) => filter?.trim()),
-    [filters]
+    () =>
+      Boolean(globalSearch.trim()) ||
+      Object.values(filters).some((filter) => filter?.trim()) ||
+      advancedFilters.some(isAdvancedFilterComplete),
+    [advancedFilters, filters, globalSearch]
+  );
+  const advancedFilterOptionsByField = useMemo(
+    () =>
+      columns.reduce<Record<string, string[]>>((optionsByField, column) => {
+        optionsByField[column.key] = getUniqueColumnDisplayValues(rows, column);
+        return optionsByField;
+      }, {}),
+    [rows]
   );
   const selectedRowIndexes = useMemo(
     () =>
@@ -342,6 +364,40 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
 
       return nextKeys;
     });
+  }
+
+  function addAdvancedFilter() {
+    setAdvancedFilters((currentFilters) => [...currentFilters, createAdvancedFilter()]);
+    setIsMoreFiltersVisible(true);
+  }
+
+  function clearAdvancedFilters() {
+    setAdvancedFilters([createAdvancedFilter()]);
+  }
+
+  function removeAdvancedFilter(filterId: string) {
+    setAdvancedFilters((currentFilters) => {
+      const nextFilters = currentFilters.filter((filter) => filter.id !== filterId);
+      return nextFilters.length ? nextFilters : [createAdvancedFilter()];
+    });
+  }
+
+  function updateAdvancedFilter(filterId: string, patch: Partial<Omit<AdvancedFilter, "id">>) {
+    setAdvancedFilters((currentFilters) =>
+      currentFilters.map((filter) => {
+        if (filter.id !== filterId) {
+          return filter;
+        }
+
+        const nextFilter = { ...filter, ...patch };
+
+        if (patch.field !== undefined && patch.field !== filter.field) {
+          nextFilter.value = "";
+        }
+
+        return nextFilter;
+      })
+    );
   }
 
   useEffect(() => {
@@ -808,24 +864,131 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
             </div>
           </div>
 
-          <div className="mb-3 flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm">
-            <Search className="size-4 text-slate-400" />
-            <input
-              type="text"
-              placeholder="Search all fields... (OIA No, Entity Name, Status, etc.)"
-              value={globalSearch}
-              onChange={(e) => setGlobalSearch(e.target.value)}
-              className="flex-1 bg-transparent text-sm font-medium focus:outline-none"
-            />
-            {globalSearch && (
-              <button
-                onClick={() => setGlobalSearch("")}
-                className="text-slate-400 transition hover:text-slate-600"
-              >
-                <X className="size-4" />
-              </button>
-            )}
+          <div className="mb-3 flex flex-col gap-2 lg:flex-row">
+            <div className="flex min-w-0 flex-1 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm">
+              <Search className="size-4 text-slate-400" />
+              <input
+                type="text"
+                placeholder="Search all fields... (OIA No, Entity Name, Status, etc.)"
+                value={globalSearch}
+                onChange={(e) => setGlobalSearch(e.target.value)}
+                className="min-w-0 flex-1 bg-transparent text-sm font-medium focus:outline-none"
+              />
+              {globalSearch && (
+                <button
+                  onClick={() => setGlobalSearch("")}
+                  className="text-slate-400 transition hover:text-slate-600"
+                >
+                  <X className="size-4" />
+                </button>
+              )}
+            </div>
+            <button
+              className={`inline-flex h-10 items-center justify-center gap-2 rounded-xl border px-3 text-xs font-black uppercase shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${
+                isMoreFiltersVisible
+                  ? "border-sky-200 bg-sky-50 text-sky-800"
+                  : "border-slate-950/10 bg-white text-slate-800"
+              }`}
+              onClick={() => setIsMoreFiltersVisible((isVisible) => !isVisible)}
+              type="button"
+            >
+              <Filter className="size-4" />
+              More Filters
+            </button>
           </div>
+
+          {isMoreFiltersVisible ? (
+            <div className="mb-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+              <div className="flex flex-col gap-2">
+                {advancedFilters.map((filter, index) => {
+                  const valueOptions = filter.field ? advancedFilterOptionsByField[filter.field] ?? [] : [];
+
+                  return (
+                    <div
+                      className="grid gap-2 lg:grid-cols-[46px_minmax(180px,1fr)_180px_minmax(220px,1.2fr)_auto]"
+                      key={filter.id}
+                    >
+                      <div className="flex h-9 items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-sm font-black text-slate-500">
+                        {index + 1}
+                      </div>
+                      <select
+                        className="h-9 min-w-0 rounded-lg border border-slate-200 bg-white px-2 text-sm font-bold text-slate-800 outline-none transition focus:border-sky-300 focus:ring-2 focus:ring-sky-100"
+                        onChange={(event) => updateAdvancedFilter(filter.id, { field: event.target.value })}
+                        value={filter.field}
+                      >
+                        <option value="">Select a field</option>
+                        {columns.map((column) => (
+                          <option key={column.key} value={column.key}>
+                            {column.group ? `${column.group} - ${column.label}` : column.label}
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        className="h-9 min-w-0 rounded-lg border border-slate-200 bg-white px-2 text-sm font-bold text-slate-800 outline-none transition focus:border-sky-300 focus:ring-2 focus:ring-sky-100"
+                        onChange={(event) =>
+                          updateAdvancedFilter(filter.id, {
+                            condition: event.target.value as AdvancedFilterCondition
+                          })
+                        }
+                        value={filter.condition}
+                      >
+                        <option value="includes">Includes</option>
+                        <option value="does_not_include">Does not include</option>
+                      </select>
+                      <select
+                        className="h-9 min-w-0 rounded-lg border border-slate-200 bg-white px-2 text-sm font-bold text-slate-800 outline-none transition disabled:bg-slate-50 disabled:text-slate-400 focus:border-sky-300 focus:ring-2 focus:ring-sky-100"
+                        disabled={!filter.field}
+                        onChange={(event) => updateAdvancedFilter(filter.id, { value: event.target.value })}
+                        value={filter.value}
+                      >
+                        <option value="">Select a value</option>
+                        {valueOptions.map((value) => (
+                          <option key={value || blankAdvancedFilterValue} value={value || blankAdvancedFilterValue}>
+                            {value || "(Blank)"}
+                          </option>
+                        ))}
+                      </select>
+                      <div className="flex items-center gap-1">
+                        <button
+                          aria-label="Add filter"
+                          className="inline-flex size-9 items-center justify-center rounded-lg border border-sky-200 bg-sky-50 text-sky-700 transition hover:bg-sky-100"
+                          onClick={addAdvancedFilter}
+                          type="button"
+                        >
+                          <Plus className="size-4" />
+                        </button>
+                        <button
+                          aria-label="Remove filter"
+                          className="inline-flex size-9 items-center justify-center rounded-lg border border-rose-200 bg-rose-50 text-rose-700 transition hover:bg-rose-100"
+                          onClick={() => removeAdvancedFilter(filter.id)}
+                          type="button"
+                        >
+                          <Trash2 className="size-4" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <button
+                  className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 text-xs font-black uppercase text-sky-700 transition hover:bg-sky-100"
+                  onClick={addAdvancedFilter}
+                  type="button"
+                >
+                  <Plus className="size-4" />
+                  Add More
+                </button>
+                <button
+                  className="inline-flex h-9 items-center justify-center rounded-lg border border-slate-200 bg-white px-3 text-xs font-black uppercase text-slate-600 transition hover:bg-slate-50"
+                  onClick={clearAdvancedFilters}
+                  type="button"
+                >
+                  Clear
+                </button>
+              </div>
+            </div>
+          ) : null}
 
           <div className="overflow-hidden rounded-2xl border border-slate-950/10 bg-white">
             <div className={`${isMaximized ? "max-h-[calc(100vh-82px)]" : "max-h-[calc(100vh-285px)]"} overflow-auto`}>
@@ -1194,6 +1357,15 @@ function getRowSelectionKey(row: AppealRow | undefined, index: number) {
   return row?.id ? `id:${row.id}` : `index:${index}`;
 }
 
+function createAdvancedFilter(): AdvancedFilter {
+  return {
+    condition: "includes",
+    field: "",
+    id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    value: ""
+  };
+}
+
 function normalizeRows(rows: AppealRow[]) {
   return rows.map((row, index) => normalizeRow(row, index));
 }
@@ -1494,6 +1666,46 @@ function matchesColumnFilter(
   const displayValue = dateFields.has(column.key) ? formatDateForDisplay(value).toLowerCase() : "";
 
   return rawValue.includes(filter) || displayValue.includes(filter);
+}
+
+function isAdvancedFilterComplete(filter: AdvancedFilter) {
+  return Boolean(filter.field && filter.value !== "");
+}
+
+function matchesAdvancedFilter(row: AppealRow, filter: AdvancedFilter) {
+  const column = columns.find((item) => item.key === filter.field);
+
+  if (!column) {
+    return true;
+  }
+
+  const cellValue = getCellDisplayValue(row.data[column.key], column);
+  const filterValue = filter.value === blankAdvancedFilterValue ? "" : filter.value;
+  const matchesValue =
+    filter.value === blankAdvancedFilterValue
+      ? cellValue === ""
+      : cellValue.toLowerCase().includes(filterValue.toLowerCase());
+
+  return filter.condition === "includes" ? matchesValue : !matchesValue;
+}
+
+function getUniqueColumnDisplayValues(rows: AppealRow[], column: Column) {
+  return Array.from(
+    new Set(rows.map((row) => getCellDisplayValue(row.data[column.key], column)))
+  ).sort((left, right) =>
+    left.localeCompare(right, undefined, {
+      numeric: true,
+      sensitivity: "base"
+    })
+  );
+}
+
+function getCellDisplayValue(value: string | number | undefined, column: Column) {
+  if (column.key === "Sno") {
+    return String(value ?? "");
+  }
+
+  return dateFields.has(column.key) ? formatDateForDisplay(value) : String(value ?? "").trim();
 }
 
 function isGroupedOiaSearch(filter: string) {
