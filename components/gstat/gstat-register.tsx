@@ -28,7 +28,7 @@ type AdvancedFilter = {
   values: string[];
 };
 
-const actionColumnWidth = 204;
+const actionColumnWidth = 154;
 const blankAdvancedFilterValue = "__workline_blank__";
 const poaGptUrl = "https://chatgpt.com/g/g-6a1f3abf8d008191985119e155f67c5f-poa-vakalatnama-helper";
 
@@ -327,7 +327,6 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
         .map(({ index }) => index),
     [rows, selectedRowKeys]
   );
-  const selectedPoaRow = selectedRowIndexes.length === 1 ? rows[selectedRowIndexes[0]] : null;
   const visibleRowKeys = useMemo(
     () => filteredRows.map(({ row, originalIndex }) => getRowSelectionKey(row, originalIndex)),
     [filteredRows]
@@ -889,28 +888,6 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                 <ExternalLink className="size-4" />
                 Use GPT for drafting POA
               </a>
-              <button
-                className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 text-xs font-black uppercase text-emerald-800 shadow-sm transition hover:-translate-y-0.5 hover:bg-emerald-100 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:translate-y-0 disabled:hover:bg-emerald-50 disabled:hover:shadow-sm"
-                disabled={!selectedPoaRow}
-                onClick={() => {
-                  if (!selectedPoaRow) {
-                    return;
-                  }
-
-                  downloadGstatPoa(selectedPoaRow.data);
-                }}
-                title={
-                  selectedRowIndexes.length === 0
-                    ? "Select one GSTAT row to generate POA"
-                    : selectedRowIndexes.length > 1
-                      ? "Select only one row to generate a POA"
-                      : "Generate POA / Vakalatnama from the selected row"
-                }
-                type="button"
-              >
-                <FileText className="size-4" />
-                Generate POA
-              </button>
               {!isMaximized ? (
                 <Link
                   className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-950/10 bg-white px-3 text-xs font-black uppercase text-slate-800 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
@@ -1253,13 +1230,12 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                             </button>
                             <button
                               aria-label={`Generate POA for row ${row.data.Sno || visibleIndex + 1}`}
-                              className="inline-flex h-6 items-center justify-center gap-1 rounded-md border border-teal-200 bg-white px-1.5 text-[10px] font-black uppercase text-teal-700 transition hover:bg-teal-50"
+                              className="inline-flex size-6 items-center justify-center rounded-md border border-teal-200 bg-white text-teal-700 transition hover:bg-teal-50"
                               onClick={() => downloadGstatPoa(row.data)}
                               title="Generate POA / Vakalatnama"
                               type="button"
                             >
                               <FileText className="size-3" />
-                              POA
                             </button>
                             <button
                               aria-label={`Delete row ${row.data.Sno || visibleIndex + 1}`}
