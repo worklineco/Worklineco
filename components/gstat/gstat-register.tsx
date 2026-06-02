@@ -22,9 +22,12 @@ const baseColumns: Column[] = [
   "Sno",
   "Person handling",
   "Status",
+  "Proceedings Status",
+  "Next Hearing Date",
   "Entity Group",
   "Entity Name",
   "State Name",
+  "Due Date",
   "FY",
   "State/Centre",
   "OIO No",
@@ -93,9 +96,12 @@ const editorSections = [
       "Sno",
       "Person handling",
       "Status",
+      "Proceedings Status",
+      "Next Hearing Date",
       "Entity Group",
       "Entity Name",
       "State Name",
+      "Due Date",
       "FY",
       "State/Centre",
       "Appellant"
@@ -150,6 +156,7 @@ const demandEditorGroups = [
   { fields: ["Penalty Demand - CGST", "Penalty Demand - SGST", "Penalty Demand - IGST"], title: "Penalty Demand" },
   { fields: ["Pre Deposit Amount - CGST", "Pre Deposit Amount - SGST", "Pre Deposit Amount - IGST"], title: "Pre Deposit Amount" }
 ];
+const dateFields = new Set(["Next Hearing Date", "Due Date"]);
 
 const initialRows = createEmptyRows(12);
 
@@ -300,7 +307,12 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
         .filter((rawRow) => rawRow.some((value) => String(value).trim()))
         .map((rawRow, rowIndex) => ({
           data: columns.reduce<RowData>((row, column, columnIndex) => {
-            row[column.key] = column.key === "Sno" ? rowIndex + 1 : rawRow[columnIndex] ?? "";
+            row[column.key] =
+              column.key === "Sno"
+                ? rowIndex + 1
+                : dateFields.has(column.key)
+                  ? normalizeDateValue(rawRow[columnIndex])
+                  : rawRow[columnIndex] ?? "";
             return row;
           }, {}),
           row_number: rowIndex + 1
@@ -409,7 +421,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
       currentEditor
         ? {
             ...currentEditor,
-            draft: { ...currentEditor.draft, [field]: value }
+            draft: { ...currentEditor.draft, [field]: dateFields.has(field) ? normalizeDateValue(value) : value }
           }
         : currentEditor
     );
@@ -620,7 +632,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
 
           <div className="overflow-hidden rounded-2xl border border-slate-950/10 bg-white">
             <div className={`${isMaximized ? "max-h-[calc(100vh-82px)]" : "max-h-[calc(100vh-285px)]"} overflow-auto`}>
-              <table className="min-w-[3400px] table-fixed border-separate border-spacing-0 text-left text-[11px]">
+              <table className="min-w-[3700px] table-fixed border-separate border-spacing-0 text-left text-[11px]">
                 <thead className="sticky top-0 z-30 bg-slate-950 text-white">
                   <tr>
                     <th
@@ -847,6 +859,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                           <input
                             className="mt-1 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-900 outline-none transition focus:border-teal-300 focus:ring-2 focus:ring-teal-100"
                             onChange={(event) => updateDraft(field, event.target.value)}
+                            type={dateFields.has(field) ? "date" : "text"}
                             value={editor.draft[field] ?? ""}
                           />
                         )}
@@ -920,7 +933,12 @@ function normalizeRow(row: AppealRow, index: number): AppealRow {
   return {
     ...row,
     data: columns.reduce<RowData>((data, column) => {
-      data[column.key] = column.key === "Sno" ? index + 1 : row.data?.[column.key] ?? "";
+      data[column.key] =
+        column.key === "Sno"
+          ? index + 1
+          : dateFields.has(column.key)
+            ? normalizeDateValue(row.data?.[column.key])
+            : row.data?.[column.key] ?? "";
       return data;
     }, {}),
     row_number: rowNumber
@@ -1033,6 +1051,44 @@ function normalizeDuplicateValue(value: string | number | undefined) {
 
 function isBlankCell(value: string | number | undefined) {
   return String(value ?? "").trim() === "";
+}
+
+function normalizeDateValue(value: string | number | undefined) {
+  if (value === undefined || value === "") {
+    return "";
+  }
+
+  if (typeof value === "number") {
+    const parsed = XLSX.SSF.parse_date_code(value);
+
+    if (!parsed) {
+      return "";
+    }
+
+    return [
+      parsed.y,
+      String(parsed.m).padStart(2, "0"),
+      String(parsed.d).padStart(2, "0")
+    ].join("-");
+  }
+
+  const trimmedValue = value.trim();
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmedValue)) {
+    return trimmedValue;
+  }
+
+  const parsedDate = new Date(trimmedValue);
+
+  if (Number.isNaN(parsedDate.getTime())) {
+    return "";
+  }
+
+  return [
+    parsedDate.getFullYear(),
+    String(parsedDate.getMonth() + 1).padStart(2, "0"),
+    String(parsedDate.getDate()).padStart(2, "0")
+  ].join("-");
 }
 
 function matchesColumnFilter(value: string | number | undefined, column: Column, rawFilter?: string) {
