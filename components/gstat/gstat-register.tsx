@@ -240,11 +240,16 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
         .filter(({ row }) => {
           const globalSearchLower = globalSearch.toLowerCase().trim();
           if (globalSearchLower) {
-            const matchesGlobal = columns.some((column) =>
-              String(row.data[column.key] ?? "")
-                .toLowerCase()
-                .includes(globalSearchLower)
-            );
+            const matchesGroupedOiaSearch =
+              isGroupedOiaSearch(globalSearchLower) &&
+              duplicateOiaNumbers.has(normalizeDuplicateValue(row.data["OIA No"]));
+            const matchesGlobal =
+              matchesGroupedOiaSearch ||
+              columns.some((column) =>
+                String(row.data[column.key] ?? "")
+                  .toLowerCase()
+                  .includes(globalSearchLower)
+              );
             if (!matchesGlobal) return false;
           }
 
@@ -1481,7 +1486,7 @@ function matchesColumnFilter(
     return isRequiredBlank || (filter !== "required" && isBlankCell(value));
   }
 
-  if (column.key === "OIA No" && ["duplicate", "duplicates", "grouped"].includes(filter)) {
+  if (column.key === "OIA No" && isGroupedOiaSearch(filter)) {
     return context.duplicateOiaNumbers.has(normalizeDuplicateValue(value));
   }
 
@@ -1489,6 +1494,10 @@ function matchesColumnFilter(
   const displayValue = dateFields.has(column.key) ? formatDateForDisplay(value).toLowerCase() : "";
 
   return rawValue.includes(filter) || displayValue.includes(filter);
+}
+
+function isGroupedOiaSearch(filter: string) {
+  return ["duplicate", "duplicates", "grouped"].includes(filter);
 }
 
 function SortColumnHeader({
