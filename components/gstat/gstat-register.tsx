@@ -18,6 +18,8 @@ type EditorState = { draft: RowData; isNew?: boolean; row: AppealRow; rowIndex: 
 type UserAccess = { isPartner: boolean; team: string };
 type CellStyle = NonNullable<XLSX.CellObject["s"]>;
 
+const actionColumnWidth = 92;
+
 const baseColumns: Column[] = [
   "Sno",
   "Person handling",
@@ -72,6 +74,47 @@ const demandColumns: Column[] = groupedColumns.flatMap((group) =>
 );
 const finalColumns: Column[] = [{ key: "Pre Deposit Workings", label: "Pre Deposit Workings" }];
 const columns = [...baseColumns, ...demandColumns, ...finalColumns];
+const defaultColumnWidth = 92;
+const columnWidths: Record<string, number> = {
+  "Sno": 52,
+  "Person handling": 92,
+  "Status": 96,
+  "Proceedings Status": 132,
+  "Next Hearing Date": 116,
+  "Entity Group": 142,
+  "Entity Name": 214,
+  "State Name": 108,
+  "Due Date": 112,
+  "FY": 96,
+  "State/Centre": 106,
+  "OIO No": 190,
+  "OIO Date": 98,
+  "DRC 07 No": 176,
+  "DRC 07 Date": 106,
+  "OIA No": 184,
+  "OIA Date": 98,
+  "APL 04 No": 156,
+  "APL 04 Date": 106,
+  "Favourable/Against": 126,
+  "Additional 10% compliances": 142,
+  "Undertaking Requirement": 142,
+  "Matter pending at high court": 146,
+  "Issue in brief": 218,
+  "Determined Tax Amount": 128,
+  "Determined Interest Amount": 138,
+  "Determined Penalty Amount": 138,
+  "Refund / Fees": 116,
+  "Section No.": 112,
+  "Document Link": 132,
+  "Remark": 174,
+  "ARN of First Appeal": 160,
+  "EL status": 92,
+  "GSTAT Login ID": 132,
+  "GSTAT Login Password": 142,
+  "Appellant": 150,
+  "Pre Deposit Workings": 168
+};
+const tableWidth = actionColumnWidth + columns.reduce((total, column) => total + getColumnWidth(column), 0);
 const requiredBlankCheckColumns = baseColumns.filter(
   (column) =>
     column.key !== "Sno" &&
@@ -649,11 +692,20 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
 
           <div className="overflow-hidden rounded-2xl border border-slate-950/10 bg-white">
             <div className={`${isMaximized ? "max-h-[calc(100vh-82px)]" : "max-h-[calc(100vh-285px)]"} overflow-auto`}>
-              <table className="min-w-[3700px] table-fixed border-separate border-spacing-0 text-left text-[11px]">
+              <table
+                className="table-fixed border-separate border-spacing-0 text-left text-[11px]"
+                style={{ minWidth: tableWidth, width: tableWidth }}
+              >
+                <colgroup>
+                  <col style={{ width: actionColumnWidth }} />
+                  {columns.map((column) => (
+                    <col key={`width-${column.key}`} style={{ width: getColumnWidth(column) }} />
+                  ))}
+                </colgroup>
                 <thead className="sticky top-0 z-30 bg-slate-950 text-white">
                   <tr>
                     <th
-                      className="sticky left-0 z-50 w-[92px] border-b border-r border-white/15 bg-slate-950 px-2 py-2 align-bottom font-black"
+                      className="sticky left-0 z-50 border-b border-r border-white/15 bg-slate-950 px-2 py-2 align-bottom font-black"
                       rowSpan={2}
                     >
                       Row
@@ -697,7 +749,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                     ))}
                   </tr>
                   <tr className="bg-white text-slate-800 shadow-[inset_0_-1px_0_rgba(15,23,42,0.10)]">
-                    <th className="sticky left-0 z-50 h-10 w-[92px] border-b border-r border-slate-200 bg-white px-1.5 py-1">
+                    <th className="sticky left-0 z-50 h-10 border-b border-r border-slate-200 bg-white px-1.5 py-1">
                       <button
                         className="inline-flex h-7 items-center justify-center gap-1 rounded-md border border-teal-200 bg-teal-50 px-2 text-[10px] font-black uppercase text-teal-800 transition hover:bg-teal-100"
                         onClick={openNewEditor}
@@ -746,7 +798,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                         }
                         key={row.id ?? originalIndex}
                       >
-                        <td className={`sticky left-0 z-20 h-8 w-[92px] whitespace-nowrap border-b border-r px-1.5 py-1 ${
+                        <td className={`sticky left-0 z-20 h-8 whitespace-nowrap border-b border-r px-1.5 py-1 ${
                           hasDuplicateDrc07
                             ? "border-amber-200 bg-amber-50"
                             : hasDuplicateOia
@@ -1050,6 +1102,10 @@ function styleGstatWorksheet(
       );
     });
   });
+}
+
+function getColumnWidth(column: Column) {
+  return columnWidths[column.key] ?? defaultColumnWidth;
 }
 
 function setCellStyle(worksheet: XLSX.WorkSheet, rowIndex: number, columnIndex: number, style: CellStyle) {
