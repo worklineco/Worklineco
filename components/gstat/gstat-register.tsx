@@ -259,7 +259,13 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
       ...finalColumns.map(() => "")
     ];
     const dataRows = rows.map((row, index) =>
-      columns.map((column) => (column.key === "Sno" ? index + 1 : row.data[column.key] ?? ""))
+      columns.map((column) =>
+        column.key === "Sno"
+          ? index + 1
+          : dateFields.has(column.key)
+            ? formatDateForDisplay(row.data[column.key])
+            : row.data[column.key] ?? ""
+      )
     );
     const worksheet = XLSX.utils.aoa_to_sheet([headerRowOne, headerRowTwo, ...dataRows]);
 
@@ -747,6 +753,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                         </td>
                         {columns.map((column) => {
                           const cellValue = row.data[column.key];
+                          const displayValue = dateFields.has(column.key) ? formatDateForDisplay(cellValue) : cellValue;
                           const isDuplicateDrc07 = hasDuplicateDrc07 && column.key === "DRC 07 No";
                           const isRequiredBlank =
                             requiredBlankCheckColumns.some((requiredColumn) => requiredColumn.key === column.key) &&
@@ -775,10 +782,10 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                                       ? `Duplicate DRC 07 No.: ${cellValue}`
                                       : isRequiredBlank
                                         ? `${column.label} is blank`
-                                        : String(cellValue ?? "")
+                                        : String(displayValue ?? "")
                                   }
                                 >
-                                  {isRequiredBlank ? "Required" : cellValue ?? ""}
+                                  {isRequiredBlank ? "Required" : displayValue ?? ""}
                                 </span>
                               )}
                             </td>
@@ -1091,6 +1098,25 @@ function normalizeDateValue(value: string | number | undefined) {
   ].join("-");
 }
 
+function formatDateForDisplay(value: string | number | undefined) {
+  const normalizedValue = normalizeDateValue(value);
+
+  if (!normalizedValue) {
+    return "";
+  }
+
+  const [year, month, day] = normalizedValue.split("-");
+  const monthLabel = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][
+    Number(month) - 1
+  ];
+
+  if (!year || !monthLabel || !day) {
+    return "";
+  }
+
+  return `${day}-${monthLabel}-${year}`;
+}
+
 function matchesColumnFilter(value: string | number | undefined, column: Column, rawFilter?: string) {
   const filter = rawFilter?.trim().toLowerCase();
 
@@ -1106,9 +1132,10 @@ function matchesColumnFilter(value: string | number | undefined, column: Column,
     return isRequiredBlank || (filter !== "required" && isBlankCell(value));
   }
 
-  return String(value ?? "")
-    .toLowerCase()
-    .includes(filter);
+  const rawValue = String(value ?? "").toLowerCase();
+  const displayValue = dateFields.has(column.key) ? formatDateForDisplay(value).toLowerCase() : "";
+
+  return rawValue.includes(filter) || displayValue.includes(filter);
 }
 
 function Metric({
