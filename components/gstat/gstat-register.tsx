@@ -262,7 +262,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
       ...finalColumns.map(() => "")
     ];
     const dataRows = rows.map((row, index) =>
-      columns.map((column) => (column.key === "Sno" ? row.data[column.key] || index + 1 : row.data[column.key] ?? ""))
+      columns.map((column) => (column.key === "Sno" ? index + 1 : row.data[column.key] ?? ""))
     );
     const worksheet = XLSX.utils.aoa_to_sheet([headerRowOne, headerRowTwo, ...dataRows]);
 
@@ -310,8 +310,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
         .filter((rawRow) => rawRow.some((value) => String(value).trim()))
         .map((rawRow, rowIndex) => ({
           data: columns.reduce<RowData>((row, column, columnIndex) => {
-            row[column.key] =
-              column.key === "Sno" ? rawRow[columnIndex] || rowIndex + 1 : rawRow[columnIndex] ?? "";
+            row[column.key] = column.key === "Sno" ? rowIndex + 1 : rawRow[columnIndex] ?? "";
             return row;
           }, {}),
           row_number: rowIndex + 1
@@ -433,7 +432,10 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
 
     const rowIndex = editor.rowIndex;
     const row = editor.isNew ? editor.row : rows[rowIndex];
-    const draft = applyPersonHandlingForAccess(editor.draft, userAccess);
+    const draft = applyPersonHandlingForAccess(
+      { ...editor.draft, Sno: rowIndex + 1 },
+      userAccess
+    );
 
     if (!row) {
       return;
@@ -465,7 +467,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
       );
     });
     setEditor(null);
-    setMessage(`Saved row ${draft.Sno || rowIndex + 1}. Audit log updated.`);
+    setMessage(`Saved row ${rowIndex + 1}. Audit log updated.`);
   }
 
   return (
@@ -762,7 +764,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                               key={`${originalIndex}-${column.key}`}
                             >
                               {column.key === "Sno" ? (
-                                cellValue || visibleIndex + 1
+                                originalIndex + 1
                               ) : (
                                 <span
                                   className="block w-full min-w-0 truncate px-1.5"
@@ -928,7 +930,7 @@ function normalizeRow(row: AppealRow, index: number): AppealRow {
   return {
     ...row,
     data: columns.reduce<RowData>((data, column) => {
-      data[column.key] = column.key === "Sno" ? row.data?.[column.key] || rowNumber : row.data?.[column.key] ?? "";
+      data[column.key] = column.key === "Sno" ? index + 1 : row.data?.[column.key] ?? "";
       return data;
     }, {}),
     row_number: rowNumber

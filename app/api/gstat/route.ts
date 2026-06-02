@@ -122,7 +122,7 @@ async function replaceRows(
 
   const insertRows = rows.map((row, index) => ({
     created_by: userId,
-    data: row.data ?? {},
+    data: { ...(row.data ?? {}), Sno: index + 1 },
     organisation_code: organisationCode,
     row_number: index + 1,
     updated_by: userId
@@ -179,7 +179,10 @@ export async function PATCH(request: Request) {
       .from("gstat_appeals")
       .insert({
         created_by: auth.user.id,
-        data: scopedRowData ?? applyAccessToRowData({ ...row.data, [field!]: value ?? "" }, access),
+        data: {
+          ...(scopedRowData ?? applyAccessToRowData({ ...row.data, [field!]: value ?? "" }, access)),
+          Sno: row.row_number ?? 1
+        },
         organisation_code: organisationCode,
         row_number: row.row_number ?? 1,
         updated_by: auth.user.id
@@ -220,7 +223,10 @@ export async function PATCH(request: Request) {
   }
 
   const oldValue = field ? existing.data.data?.[field] ?? "" : existing.data.data;
-  const nextData = scopedRowData ?? applyAccessToRowData({ ...existing.data.data, [field!]: value ?? "" }, access);
+  const nextData = {
+    ...(scopedRowData ?? applyAccessToRowData({ ...existing.data.data, [field!]: value ?? "" }, access)),
+    Sno: existing.data.row_number ?? 1
+  };
 
   const updated = await admin
     .from("gstat_appeals")
