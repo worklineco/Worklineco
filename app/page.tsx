@@ -81,7 +81,7 @@ export default function Home() {
         <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(15,23,42,0.04)_1px,transparent_1px),linear-gradient(180deg,rgba(15,23,42,0.04)_1px,transparent_1px)] bg-[size:48px_48px]" />
       </div>
 
-      <div className="mx-auto grid w-full max-w-[1440px] gap-5 px-4 py-4 sm:px-6 lg:grid-cols-[280px_1fr] lg:px-8">
+      <div className="mx-auto grid w-full max-w-none gap-5 px-2 py-3 sm:px-3 lg:grid-cols-[300px_minmax(0,1fr)] lg:px-4">
         <aside className="workline-frame hidden rounded-[22px] p-4 lg:block">
           <div className="rounded-2xl border border-white/15 bg-slate-950 p-4 text-white">
             <div className="flex items-center gap-3">
