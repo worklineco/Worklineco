@@ -24,7 +24,7 @@ type AdvancedFilter = {
   condition: AdvancedFilterCondition;
   field: string;
   id: string;
-  value: string;
+  values: string[];
 };
 
 const actionColumnWidth = 122;
@@ -392,11 +392,35 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
         const nextFilter = { ...filter, ...patch };
 
         if (patch.field !== undefined && patch.field !== filter.field) {
-          nextFilter.value = "";
+          nextFilter.values = [];
         }
 
         return nextFilter;
       })
+    );
+  }
+
+  function addAdvancedFilterValue(filterId: string, value: string) {
+    if (!value) {
+      return;
+    }
+
+    setAdvancedFilters((currentFilters) =>
+      currentFilters.map((filter) =>
+        filter.id === filterId && !filter.values.includes(value)
+          ? { ...filter, values: [...filter.values, value] }
+          : filter
+      )
+    );
+  }
+
+  function removeAdvancedFilterValue(filterId: string, value: string) {
+    setAdvancedFilters((currentFilters) =>
+      currentFilters.map((filter) =>
+        filter.id === filterId
+          ? { ...filter, values: filter.values.filter((selectedValue) => selectedValue !== value) }
+          : filter
+      )
     );
   }
 
@@ -902,6 +926,9 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
               <div className="flex flex-col gap-2">
                 {advancedFilters.map((filter, index) => {
                   const valueOptions = filter.field ? advancedFilterOptionsByField[filter.field] ?? [] : [];
+                  const availableValueOptions = valueOptions.filter(
+                    (value) => !filter.values.includes(value || blankAdvancedFilterValue)
+                  );
 
                   return (
                     <div
@@ -935,19 +962,42 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                         <option value="includes">Includes</option>
                         <option value="does_not_include">Does not include</option>
                       </select>
-                      <select
-                        className="h-9 min-w-0 rounded-lg border border-slate-200 bg-white px-2 text-sm font-bold text-slate-800 outline-none transition disabled:bg-slate-50 disabled:text-slate-400 focus:border-sky-300 focus:ring-2 focus:ring-sky-100"
-                        disabled={!filter.field}
-                        onChange={(event) => updateAdvancedFilter(filter.id, { value: event.target.value })}
-                        value={filter.value}
-                      >
-                        <option value="">Select a value</option>
-                        {valueOptions.map((value) => (
-                          <option key={value || blankAdvancedFilterValue} value={value || blankAdvancedFilterValue}>
-                            {value || "(Blank)"}
-                          </option>
-                        ))}
-                      </select>
+                      <div className="min-w-0 rounded-lg border border-slate-200 bg-white p-1.5 transition focus-within:border-sky-300 focus-within:ring-2 focus-within:ring-sky-100">
+                        <div className="flex min-h-8 flex-wrap items-center gap-1.5">
+                          {filter.values.map((value) => (
+                            <span
+                              className="inline-flex max-w-full items-center gap-1 rounded-md bg-slate-100 px-2 py-1 text-xs font-black text-slate-700"
+                              key={value}
+                            >
+                              <span className="truncate">{getAdvancedFilterValueLabel(value)}</span>
+                              <button
+                                aria-label={`Remove ${getAdvancedFilterValueLabel(value)}`}
+                                className="text-slate-400 transition hover:text-rose-600"
+                                onClick={() => removeAdvancedFilterValue(filter.id, value)}
+                                type="button"
+                              >
+                                <X className="size-3" />
+                              </button>
+                            </span>
+                          ))}
+                          <select
+                            className="h-7 min-w-[150px] flex-1 bg-transparent px-1 text-sm font-bold text-slate-800 outline-none disabled:text-slate-400"
+                            disabled={!filter.field}
+                            onChange={(event) => {
+                              addAdvancedFilterValue(filter.id, event.target.value);
+                              event.target.value = "";
+                            }}
+                            value=""
+                          >
+                            <option value="">Select value</option>
+                            {availableValueOptions.map((value) => (
+                              <option key={value || blankAdvancedFilterValue} value={value || blankAdvancedFilterValue}>
+                                {value || "(Blank)"}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
                       <div className="flex items-center gap-1">
                         <button
                           aria-label="Add filter"
@@ -1362,7 +1412,7 @@ function createAdvancedFilter(): AdvancedFilter {
     condition: "includes",
     field: "",
     id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-    value: ""
+    values: []
   };
 }
 
@@ -1669,7 +1719,7 @@ function matchesColumnFilter(
 }
 
 function isAdvancedFilterComplete(filter: AdvancedFilter) {
-  return Boolean(filter.field && filter.value !== "");
+  return Boolean(filter.field && filter.values.length);
 }
 
 function matchesAdvancedFilter(row: AppealRow, filter: AdvancedFilter) {
@@ -1680,11 +1730,12 @@ function matchesAdvancedFilter(row: AppealRow, filter: AdvancedFilter) {
   }
 
   const cellValue = getCellDisplayValue(row.data[column.key], column);
-  const filterValue = filter.value === blankAdvancedFilterValue ? "" : filter.value;
-  const matchesValue =
-    filter.value === blankAdvancedFilterValue
+  const matchesValue = filter.values.some((value) => {
+    const filterValue = value === blankAdvancedFilterValue ? "" : value;
+    return value === blankAdvancedFilterValue
       ? cellValue === ""
       : cellValue.toLowerCase().includes(filterValue.toLowerCase());
+  });
 
   return filter.condition === "includes" ? matchesValue : !matchesValue;
 }
@@ -1706,6 +1757,10 @@ function getCellDisplayValue(value: string | number | undefined, column: Column)
   }
 
   return dateFields.has(column.key) ? formatDateForDisplay(value) : String(value ?? "").trim();
+}
+
+function getAdvancedFilterValueLabel(value: string) {
+  return value === blankAdvancedFilterValue ? "(Blank)" : value;
 }
 
 function isGroupedOiaSearch(filter: string) {
