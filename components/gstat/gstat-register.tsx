@@ -68,6 +68,12 @@ const demandColumns: Column[] = groupedColumns.flatMap((group) =>
 );
 const finalColumns: Column[] = [{ key: "Pre Deposit Workings", label: "Pre Deposit Workings" }];
 const columns = [...baseColumns, ...demandColumns, ...finalColumns];
+const requiredBlankCheckColumns = baseColumns.filter(
+  (column) =>
+    column.key !== "Sno" &&
+    baseColumns.findIndex((item) => item.key === column.key) <=
+      baseColumns.findIndex((item) => item.key === "GSTAT Login Password")
+);
 const teamOptions = [
   "Team 01",
   "Team 03",
@@ -159,6 +165,15 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
     [rows]
   );
   const duplicateDrc07Numbers = useMemo(() => findDuplicateValues(rows, "DRC 07 No"), [rows]);
+  const blankRequiredCellCount = useMemo(
+    () =>
+      rows.reduce(
+        (count, row) =>
+          count + requiredBlankCheckColumns.filter((column) => isBlankCell(row.data[column.key])).length,
+        0
+      ),
+    [rows]
+  );
   
   const [globalSearch, setGlobalSearch] = useState("");
 
@@ -525,6 +540,11 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                   {duplicateDrc07Numbers.size} duplicate DRC 07 No. value{duplicateDrc07Numbers.size === 1 ? "" : "s"} highlighted.
                 </p>
               ) : null}
+              {blankRequiredCellCount ? (
+                <p className="mt-1 text-sm font-bold text-rose-700">
+                  {blankRequiredCellCount} blank required cell{blankRequiredCellCount === 1 ? "" : "s"} highlighted up to GSTAT Login Password.
+                </p>
+              ) : null}
             </div>
             <div className="flex flex-wrap gap-2">
               {isMaximized && (
@@ -718,12 +738,17 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                         {columns.map((column) => {
                           const cellValue = row.data[column.key];
                           const isDuplicateDrc07 = hasDuplicateDrc07 && column.key === "DRC 07 No";
+                          const isRequiredBlank =
+                            requiredBlankCheckColumns.some((requiredColumn) => requiredColumn.key === column.key) &&
+                            isBlankCell(cellValue);
 
                           return (
                             <td
                               className={`h-8 border-b border-r px-1.5 py-1 font-semibold ${
                                 isDuplicateDrc07
                                   ? "border-amber-300 bg-amber-100 text-amber-950"
+                                  : isRequiredBlank
+                                    ? "border-rose-200 bg-rose-50 text-rose-900"
                                   : hasDuplicateDrc07
                                     ? "border-amber-200 bg-amber-50 text-slate-800"
                                     : "border-slate-200 text-slate-700"
@@ -735,9 +760,15 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                               ) : (
                                 <span
                                   className="block w-full min-w-0 truncate px-1.5"
-                                  title={isDuplicateDrc07 ? `Duplicate DRC 07 No.: ${cellValue}` : String(cellValue ?? "")}
+                                  title={
+                                    isDuplicateDrc07
+                                      ? `Duplicate DRC 07 No.: ${cellValue}`
+                                      : isRequiredBlank
+                                        ? `${column.label} is blank`
+                                        : String(cellValue ?? "")
+                                  }
                                 >
-                                  {cellValue ?? ""}
+                                  {isRequiredBlank ? "Required" : cellValue ?? ""}
                                 </span>
                               )}
                             </td>
@@ -932,6 +963,10 @@ function findDuplicateValues(rows: AppealRow[], field: string) {
 
 function normalizeDuplicateValue(value: string | number | undefined) {
   return String(value ?? "").trim().toLowerCase();
+}
+
+function isBlankCell(value: string | number | undefined) {
+  return String(value ?? "").trim() === "";
 }
 
 function Metric({
