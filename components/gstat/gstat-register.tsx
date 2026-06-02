@@ -158,6 +158,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
     () => new Set(rows.map((row) => String(row.data["OIA No"] ?? "").trim()).filter(Boolean)).size,
     [rows]
   );
+  const duplicateDrc07Numbers = useMemo(() => findDuplicateValues(rows, "DRC 07 No"), [rows]);
   
   const [globalSearch, setGlobalSearch] = useState("");
 
@@ -519,6 +520,11 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                   ({filteredUniqueAppeals} unique appeals) of <span className="font-black text-slate-700">{rows.length}</span> total
                 </p>
               )}
+              {duplicateDrc07Numbers.size ? (
+                <p className="mt-1 text-sm font-bold text-amber-700">
+                  {duplicateDrc07Numbers.size} duplicate DRC 07 No. value{duplicateDrc07Numbers.size === 1 ? "" : "s"} highlighted.
+                </p>
+              ) : null}
             </div>
             <div className="flex flex-wrap gap-2">
               {isMaximized && (
@@ -700,20 +706,34 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                           </button>
                         </div>
                       </td>
-                      {columns.map((column) => (
-                        <td
-                          className="h-8 border-b border-r border-slate-200 px-1.5 py-1 font-semibold text-slate-700"
-                          key={`${originalIndex}-${column.key}`}
-                        >
-                          {column.key === "Sno" ? (
-                            row.data[column.key] || visibleIndex + 1
-                          ) : (
-                            <span className="block w-full min-w-0 truncate px-1.5" title={String(row.data[column.key] ?? "")}>
-                              {row.data[column.key] ?? ""}
-                            </span>
-                          )}
-                        </td>
-                      ))}
+                      {columns.map((column) => {
+                        const cellValue = row.data[column.key];
+                        const isDuplicateDrc07 =
+                          column.key === "DRC 07 No" &&
+                          duplicateDrc07Numbers.has(normalizeDuplicateValue(cellValue));
+
+                        return (
+                          <td
+                            className={`h-8 border-b border-r px-1.5 py-1 font-semibold ${
+                              isDuplicateDrc07
+                                ? "border-amber-300 bg-amber-100 text-amber-950"
+                                : "border-slate-200 text-slate-700"
+                            }`}
+                            key={`${originalIndex}-${column.key}`}
+                          >
+                            {column.key === "Sno" ? (
+                              cellValue || visibleIndex + 1
+                            ) : (
+                              <span
+                                className="block w-full min-w-0 truncate px-1.5"
+                                title={isDuplicateDrc07 ? `Duplicate DRC 07 No.: ${cellValue}` : String(cellValue ?? "")}
+                              >
+                                {cellValue ?? ""}
+                              </span>
+                            )}
+                          </td>
+                        );
+                      })}
                     </tr>
                   ))}
                 </tbody>
@@ -878,6 +898,30 @@ function applyPersonHandlingForAccess(data: RowData, access: UserAccess): RowDat
   }
 
   return { ...data, "Person handling": access.team };
+}
+
+function findDuplicateValues(rows: AppealRow[], field: string) {
+  const counts = new Map<string, number>();
+
+  rows.forEach((row) => {
+    const value = normalizeDuplicateValue(row.data[field]);
+
+    if (!value) {
+      return;
+    }
+
+    counts.set(value, (counts.get(value) ?? 0) + 1);
+  });
+
+  return new Set(
+    Array.from(counts.entries())
+      .filter(([, count]) => count > 1)
+      .map(([value]) => value)
+  );
+}
+
+function normalizeDuplicateValue(value: string | number | undefined) {
+  return String(value ?? "").trim().toLowerCase();
 }
 
 function Metric({
