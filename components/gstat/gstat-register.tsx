@@ -4,7 +4,7 @@ import { supabase } from "@/lib/supabase/client";
 import { ArrowLeft, Download, Expand, FileSpreadsheet, History, Pencil, Plus, Scale, Search, ShieldCheck, Trash2, Upload, X } from "lucide-react";
 import Link from "next/link";
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
-import * as XLSX from "xlsx";
+import * as XLSX from "xlsx-js-style";
 
 type Column = { group?: string; key: string; label: string };
 type RowData = Record<string, string | number>;
@@ -16,6 +16,7 @@ type AppealRow = {
 };
 type EditorState = { draft: RowData; isNew?: boolean; row: AppealRow; rowIndex: number };
 type UserAccess = { isPartner: boolean; team: string };
+type CellStyle = NonNullable<XLSX.CellObject["s"]>;
 
 const baseColumns: Column[] = [
   "Sno",
@@ -249,6 +250,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
   }
 
   function exportExcel() {
+    const exportDuplicateDrc07Numbers = findDuplicateValues(rows, "DRC 07 No");
     const headerRowOne = [
       ...baseColumns.map((column) => column.label),
       ...groupedColumns.flatMap((group) => [group.label, "", ""]),
@@ -272,7 +274,11 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
       }),
       { e: { c: columns.length - 1, r: 1 }, s: { c: columns.length - 1, r: 0 } }
     ];
-    worksheet["!cols"] = columns.map((column) => ({ wch: Math.max(12, column.label.length + 3) }));
+    worksheet["!cols"] = columns.map((column) => ({ wch: Math.max(14, column.label.length + 3) }));
+    worksheet["!autofilter"] = { ref: XLSX.utils.encode_range({ e: { c: columns.length - 1, r: 1 }, s: { c: 0, r: 1 } }) };
+    worksheet["!freeze"] = { xSplit: 1, ySplit: 2 };
+
+    styleGstatWorksheet(worksheet, rows, exportDuplicateDrc07Numbers);
 
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "GSTAT");
@@ -939,6 +945,74 @@ function applyPersonHandlingForAccess(data: RowData, access: UserAccess): RowDat
   }
 
   return { ...data, "Person handling": access.team };
+}
+
+function styleGstatWorksheet(
+  worksheet: XLSX.WorkSheet,
+  exportRows: AppealRow[],
+  exportDuplicateDrc07Numbers: Set<string>
+) {
+  const headerStyle = createExcelCellStyle("0f172a", "ffffff", true);
+  const groupHeaderStyle = createExcelCellStyle("111827", "ffffff", true);
+  const baseCellStyle = createExcelCellStyle("ffffff", "334155");
+  const alternateCellStyle = createExcelCellStyle("f8fafc", "334155");
+  const duplicateRowStyle = createExcelCellStyle("fffbeb", "1e293b");
+  const duplicateDrcStyle = createExcelCellStyle("fef3c7", "78350f", true);
+  const blankRequiredStyle = createExcelCellStyle("fff1f2", "9f1239", true);
+
+  for (let rowIndex = 0; rowIndex < 2; rowIndex += 1) {
+    for (let columnIndex = 0; columnIndex < columns.length; columnIndex += 1) {
+      setCellStyle(worksheet, rowIndex, columnIndex, columnIndex < baseColumns.length ? headerStyle : groupHeaderStyle);
+    }
+  }
+
+  exportRows.forEach((row, rowIndex) => {
+    const worksheetRowIndex = rowIndex + 2;
+    const hasDuplicateDrc07 = exportDuplicateDrc07Numbers.has(normalizeDuplicateValue(row.data["DRC 07 No"]));
+    const rowStyle = hasDuplicateDrc07 ? duplicateRowStyle : rowIndex % 2 === 0 ? baseCellStyle : alternateCellStyle;
+
+    columns.forEach((column, columnIndex) => {
+      const cellValue = row.data[column.key];
+      const isDuplicateDrc07 = hasDuplicateDrc07 && column.key === "DRC 07 No";
+      const isRequiredBlank =
+        requiredBlankCheckColumns.some((requiredColumn) => requiredColumn.key === column.key) &&
+        isBlankCell(cellValue);
+
+      setCellStyle(
+        worksheet,
+        worksheetRowIndex,
+        columnIndex,
+        isDuplicateDrc07 ? duplicateDrcStyle : isRequiredBlank ? blankRequiredStyle : rowStyle
+      );
+    });
+  });
+}
+
+function setCellStyle(worksheet: XLSX.WorkSheet, rowIndex: number, columnIndex: number, style: CellStyle) {
+  const address = XLSX.utils.encode_cell({ c: columnIndex, r: rowIndex });
+  const cell = worksheet[address];
+
+  if (!cell || typeof cell === "string" || typeof cell === "number" || typeof cell === "boolean") {
+    return;
+  }
+
+  cell.s = style;
+}
+
+function createExcelCellStyle(fillColor: string, fontColor: string, isBold = false): CellStyle {
+  const border = {
+    bottom: { color: { rgb: "cbd5e1" }, style: "thin" },
+    left: { color: { rgb: "cbd5e1" }, style: "thin" },
+    right: { color: { rgb: "cbd5e1" }, style: "thin" },
+    top: { color: { rgb: "cbd5e1" }, style: "thin" }
+  };
+
+  return {
+    alignment: { vertical: "center", wrapText: true },
+    border,
+    fill: { fgColor: { rgb: fillColor }, patternType: "solid" },
+    font: { bold: isBold, color: { rgb: fontColor } }
+  };
 }
 
 function findDuplicateValues(rows: AppealRow[], field: string) {
