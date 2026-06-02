@@ -1,7 +1,8 @@
 "use client";
 
+import { downloadGstatPoa } from "@/lib/gstat/poa-document";
 import { supabase } from "@/lib/supabase/client";
-import { ArrowDown, ArrowLeft, ArrowUp, Download, Expand, FileSpreadsheet, Filter, History, Pencil, Plus, Scale, Search, ShieldCheck, Trash2, Upload, X } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowUp, Download, Expand, ExternalLink, FileSpreadsheet, FileText, Filter, History, Pencil, Plus, Scale, Search, ShieldCheck, Trash2, Upload, X } from "lucide-react";
 import Link from "next/link";
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx-js-style";
@@ -27,8 +28,9 @@ type AdvancedFilter = {
   values: string[];
 };
 
-const actionColumnWidth = 122;
+const actionColumnWidth = 154;
 const blankAdvancedFilterValue = "__workline_blank__";
+const poaGptUrl = "https://chatgpt.com/g/g-6a1f3abf8d008191985119e155f67c5f-poa-vakalatnama-helper";
 
 const baseColumns: Column[] = [
   "Sno",
@@ -877,6 +879,15 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                   Audit Trail
                 </Link>
               ) : null}
+              <a
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-teal-200 bg-teal-50 px-3 text-xs font-black uppercase text-teal-800 shadow-sm transition hover:-translate-y-0.5 hover:bg-teal-100 hover:shadow-md"
+                href={poaGptUrl}
+                rel="noreferrer"
+                target="_blank"
+              >
+                <ExternalLink className="size-4" />
+                Use GPT for drafting POA
+              </a>
               {!isMaximized ? (
                 <Link
                   className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-950/10 bg-white px-3 text-xs font-black uppercase text-slate-800 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
@@ -1216,6 +1227,15 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                               type="button"
                             >
                               <Pencil className="size-3" />
+                            </button>
+                            <button
+                              aria-label={`Generate POA for row ${row.data.Sno || visibleIndex + 1}`}
+                              className="inline-flex size-6 items-center justify-center rounded-md border border-teal-200 bg-white text-teal-700 transition hover:bg-teal-50"
+                              onClick={() => downloadGstatPoa(row.data)}
+                              title="Generate POA / Vakalatnama"
+                              type="button"
+                            >
+                              <FileText className="size-3" />
                             </button>
                             <button
                               aria-label={`Delete row ${row.data.Sno || visibleIndex + 1}`}
