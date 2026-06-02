@@ -542,7 +542,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
               ) : null}
               {blankRequiredCellCount ? (
                 <p className="mt-1 text-sm font-bold text-rose-700">
-                  {blankRequiredCellCount} blank required cell{blankRequiredCellCount === 1 ? "" : "s"} highlighted up to GSTAT Login Password.
+                  {blankRequiredCellCount} blank cell{blankRequiredCellCount === 1 ? "" : "s"} highlighted.
                 </p>
               ) : null}
             </div>
