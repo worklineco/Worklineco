@@ -1,7 +1,7 @@
 "use client";
 
 import { supabase } from "@/lib/supabase/client";
-import { ArrowLeft, Download, Expand, FileSpreadsheet, History, Pencil, Plus, Scale, Search, ShieldCheck, Trash2, Upload, X } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowUp, Download, Expand, FileSpreadsheet, History, Pencil, Plus, Scale, Search, ShieldCheck, Trash2, Upload, X } from "lucide-react";
 import Link from "next/link";
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx-js-style";
@@ -17,6 +17,8 @@ type AppealRow = {
 type EditorState = { draft: RowData; isNew?: boolean; row: AppealRow; rowIndex: number };
 type UserAccess = { isPartner: boolean; team: string };
 type CellStyle = NonNullable<XLSX.CellObject["s"]>;
+type SortDirection = "asc" | "desc";
+type SortState = { columnKey: string; direction: SortDirection } | null;
 
 const actionColumnWidth = 92;
 
@@ -210,6 +212,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
   const [isLoading, setIsLoading] = useState(true);
   const [message, setMessage] = useState("");
   const [userAccess, setUserAccess] = useState<UserAccess>({ isPartner: false, team: "" });
+  const [sortState, setSortState] = useState<SortState>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const uniqueAppeals = useMemo(
     () => new Set(rows.map((row) => String(row.data["OIA No"] ?? "").trim()).filter(Boolean)).size,
@@ -230,8 +233,8 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
   const [globalSearch, setGlobalSearch] = useState("");
 
   const filteredRows = useMemo(
-    () =>
-      rows
+    () => {
+      const visibleRows = rows
         .map((row, index) => ({ row, originalIndex: index }))
         .filter(({ row }) => {
           const globalSearchLower = globalSearch.toLowerCase().trim();
@@ -249,8 +252,21 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
               duplicateOiaNumbers
             })
           );
-        }),
-    [duplicateOiaNumbers, filters, rows, globalSearch]
+        });
+
+      if (!sortState) {
+        return visibleRows;
+      }
+
+      const sortColumn = columns.find((column) => column.key === sortState.columnKey);
+
+      if (!sortColumn) {
+        return visibleRows;
+      }
+
+      return [...visibleRows].sort((left, right) => compareRowsForColumn(left, right, sortColumn, sortState.direction));
+    },
+    [duplicateOiaNumbers, filters, rows, globalSearch, sortState]
   );
   
   const filteredUniqueAppeals = useMemo(
@@ -262,6 +278,20 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
     () => Object.values(filters).some((filter) => filter?.trim()),
     [filters]
   );
+
+  function toggleSort(column: Column) {
+    setSortState((currentSort) => {
+      if (currentSort?.columnKey !== column.key) {
+        return { columnKey: column.key, direction: "asc" };
+      }
+
+      if (currentSort.direction === "asc") {
+        return { columnKey: column.key, direction: "desc" };
+      }
+
+      return null;
+    });
+  }
 
   useEffect(() => {
     loadUserAccess();
@@ -715,8 +745,9 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                         className="border-b border-r border-white/15 px-2 py-2 align-bottom font-black"
                         key={column.key}
                         rowSpan={2}
+                        title={`Sort by ${column.label}`}
                       >
-                        {column.label}
+                        <SortColumnHeader column={column} onSort={toggleSort} sortState={sortState} />
                       </th>
                     ))}
                     {groupedColumns.map((group) => (
@@ -733,8 +764,9 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                         className="border-b border-r border-white/15 px-2 py-2 align-bottom font-black"
                         key={column.key}
                         rowSpan={2}
+                        title={`Sort by ${column.label}`}
                       >
-                        {column.label}
+                        <SortColumnHeader column={column} onSort={toggleSort} sortState={sortState} />
                       </th>
                     ))}
                   </tr>
@@ -743,8 +775,9 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                       <th
                         className="border-b border-r border-white/15 px-2 py-2 text-center font-black"
                         key={column.key}
+                        title={`Sort by ${column.group} ${column.label}`}
                       >
-                        {column.label}
+                        <SortColumnHeader column={column} isCentered onSort={toggleSort} sortState={sortState} />
                       </th>
                     ))}
                   </tr>
@@ -1108,6 +1141,70 @@ function getColumnWidth(column: Column) {
   return columnWidths[column.key] ?? defaultColumnWidth;
 }
 
+function compareRowsForColumn(
+  left: { row: AppealRow; originalIndex: number },
+  right: { row: AppealRow; originalIndex: number },
+  column: Column,
+  direction: SortDirection
+) {
+  const leftValue = column.key === "Sno" ? left.originalIndex + 1 : left.row.data[column.key];
+  const rightValue = column.key === "Sno" ? right.originalIndex + 1 : right.row.data[column.key];
+  const leftBlank = isBlankCell(leftValue);
+  const rightBlank = isBlankCell(rightValue);
+
+  if (leftBlank && rightBlank) {
+    return left.originalIndex - right.originalIndex;
+  }
+
+  if (leftBlank) {
+    return 1;
+  }
+
+  if (rightBlank) {
+    return -1;
+  }
+
+  const comparison = compareCellValues(leftValue, rightValue, column);
+
+  if (comparison === 0) {
+    return left.originalIndex - right.originalIndex;
+  }
+
+  return direction === "asc" ? comparison : -comparison;
+}
+
+function compareCellValues(leftValue: string | number | undefined, rightValue: string | number | undefined, column: Column) {
+  if (dateFields.has(column.key)) {
+    return normalizeDateValue(leftValue).localeCompare(normalizeDateValue(rightValue));
+  }
+
+  const leftNumber = parseSortableNumber(leftValue);
+  const rightNumber = parseSortableNumber(rightValue);
+
+  if (leftNumber !== null && rightNumber !== null) {
+    return leftNumber - rightNumber;
+  }
+
+  return String(leftValue ?? "").localeCompare(String(rightValue ?? ""), undefined, {
+    numeric: true,
+    sensitivity: "base"
+  });
+}
+
+function parseSortableNumber(value: string | number | undefined) {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
+
+  const normalizedValue = String(value ?? "").replace(/,/g, "").trim();
+
+  if (!/^-?\d+(\.\d+)?$/.test(normalizedValue)) {
+    return null;
+  }
+
+  return Number(normalizedValue);
+}
+
 function setCellStyle(worksheet: XLSX.WorkSheet, rowIndex: number, columnIndex: number, style: CellStyle) {
   const address = XLSX.utils.encode_cell({ c: columnIndex, r: rowIndex });
   const cell = worksheet[address];
@@ -1248,6 +1345,39 @@ function matchesColumnFilter(
   const displayValue = dateFields.has(column.key) ? formatDateForDisplay(value).toLowerCase() : "";
 
   return rawValue.includes(filter) || displayValue.includes(filter);
+}
+
+function SortColumnHeader({
+  column,
+  isCentered = false,
+  onSort,
+  sortState
+}: {
+  column: Column;
+  isCentered?: boolean;
+  onSort: (column: Column) => void;
+  sortState: SortState;
+}) {
+  const isAscending = sortState?.columnKey === column.key && sortState.direction === "asc";
+  const isDescending = sortState?.columnKey === column.key && sortState.direction === "desc";
+  const sortLabel = column.group ? `${column.group} ${column.label}` : column.label;
+
+  return (
+    <button
+      aria-label={`Sort by ${sortLabel}`}
+      className={`flex w-full min-w-0 items-center gap-1 ${
+        isCentered ? "justify-center" : "justify-between text-left"
+      }`}
+      onClick={() => onSort(column)}
+      type="button"
+    >
+      <span className="min-w-0 truncate">{column.label}</span>
+      <span className="flex shrink-0 flex-col leading-none">
+        <ArrowUp className={`size-3 ${isAscending ? "text-cyan-200" : "text-white/35"}`} />
+        <ArrowDown className={`-mt-1 size-3 ${isDescending ? "text-cyan-200" : "text-white/35"}`} />
+      </span>
+    </button>
+  );
 }
 
 function Metric({
