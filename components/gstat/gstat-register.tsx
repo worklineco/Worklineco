@@ -461,15 +461,15 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
   }
 
   return (
-    <main className={`min-h-screen overflow-hidden bg-[#f7f3ea] text-slate-950 ${isMaximized ? "px-2 py-2" : "px-4 py-4 sm:px-6 lg:px-8"}`}>
+    <main className={`min-h-screen overflow-hidden bg-[#f7f3ea] text-slate-950 ${isMaximized ? "px-2 py-2" : "px-2 py-3 sm:px-3 lg:px-4"}`}>
       <div className="pointer-events-none fixed inset-0 -z-10">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_16%_12%,rgba(20,184,166,0.18),transparent_28%),radial-gradient(circle_at_82%_16%,rgba(217,70,239,0.16),transparent_26%),radial-gradient(circle_at_48%_92%,rgba(245,158,11,0.16),transparent_32%)]" />
         <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(15,23,42,0.04)_1px,transparent_1px),linear-gradient(180deg,rgba(15,23,42,0.04)_1px,transparent_1px)] bg-[size:48px_48px]" />
       </div>
 
-      <section className={isMaximized ? "mx-auto max-w-none" : "mx-auto max-w-[1680px]"}>
+      <section className="mx-auto w-full max-w-none">
         {!isMaximized ? (
-        <header className="workline-frame rounded-[28px] p-5 md:p-6">
+        <header className="workline-frame rounded-[20px] p-4 md:p-5">
           <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <Link
@@ -508,7 +508,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
         </header>
         ) : null}
 
-        <section className={`workline-frame rounded-[28px] p-2 md:p-3 ${isMaximized ? "" : "mt-5"}`}>
+        <section className={`workline-frame rounded-[20px] p-1.5 md:p-2 ${isMaximized ? "" : "mt-4"}`}>
           <div className="mb-3 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
               <div className="flex flex-wrap items-center gap-2">
