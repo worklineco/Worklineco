@@ -63,7 +63,7 @@ export function FeedbackButton() {
       <button
         onClick={() => setIsOpen(true)}
         className="fixed bottom-6 right-6 z-40 flex items-center justify-center rounded-full bg-gradient-to-br from-teal-500 to-cyan-600 p-4 shadow-lg transition hover:scale-110 hover:shadow-xl"
-        aria-label="Send feedback"
+        aria-label="Help and feedback"
       >
         <MessageCircle className="size-6 text-white" />
       </button>
@@ -80,7 +80,7 @@ export function FeedbackButton() {
       {isOpen && (
         <div className="fixed bottom-24 right-6 z-50 w-96 rounded-2xl bg-white shadow-2xl">
           <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
-            <h3 className="text-lg font-black text-slate-950">Send Feedback</h3>
+            <h3 className="text-lg font-black text-slate-950">Help and Feedback</h3>
             <button
               onClick={() => setIsOpen(false)}
               className="text-slate-400 transition hover:text-slate-600"
@@ -98,7 +98,7 @@ export function FeedbackButton() {
               <textarea
                 value={message}
                 onChange={(e) => setMessage(e.target.value)}
-                placeholder="Describe your feedback or issue..."
+                placeholder="Describe your question, feedback, or issue..."
                 rows={4}
                 className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500/20"
                 required
@@ -158,7 +158,7 @@ export function FeedbackButton() {
               ) : (
                 <span className="flex items-center justify-center gap-2">
                   <Send className="size-4" />
-                  Send Feedback
+                  Send Help and Feedback
                 </span>
               )}
             </button>
