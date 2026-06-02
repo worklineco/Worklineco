@@ -20,7 +20,7 @@ type CellStyle = NonNullable<XLSX.CellObject["s"]>;
 type SortDirection = "asc" | "desc";
 type SortState = { columnKey: string; direction: SortDirection } | null;
 
-const actionColumnWidth = 92;
+const actionColumnWidth = 122;
 
 const baseColumns: Column[] = [
   "Sno",
@@ -213,6 +213,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
   const [message, setMessage] = useState("");
   const [userAccess, setUserAccess] = useState<UserAccess>({ isPartner: false, team: "" });
   const [sortState, setSortState] = useState<SortState>(null);
+  const [selectedRowKeys, setSelectedRowKeys] = useState<Set<string>>(() => new Set());
   const fileInputRef = useRef<HTMLInputElement>(null);
   const uniqueAppeals = useMemo(
     () => new Set(rows.map((row) => String(row.data["OIA No"] ?? "").trim()).filter(Boolean)).size,
@@ -278,6 +279,21 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
     () => Object.values(filters).some((filter) => filter?.trim()),
     [filters]
   );
+  const selectedRowIndexes = useMemo(
+    () =>
+      rows
+        .map((row, index) => ({ index, key: getRowSelectionKey(row, index) }))
+        .filter(({ key }) => selectedRowKeys.has(key))
+        .map(({ index }) => index),
+    [rows, selectedRowKeys]
+  );
+  const visibleRowKeys = useMemo(
+    () => filteredRows.map(({ row, originalIndex }) => getRowSelectionKey(row, originalIndex)),
+    [filteredRows]
+  );
+  const selectedVisibleRowCount = visibleRowKeys.filter((key) => selectedRowKeys.has(key)).length;
+  const areAllVisibleRowsSelected = visibleRowKeys.length > 0 && selectedVisibleRowCount === visibleRowKeys.length;
+  const areSomeVisibleRowsSelected = selectedVisibleRowCount > 0 && !areAllVisibleRowsSelected;
 
   function toggleSort(column: Column) {
     setSortState((currentSort) => {
@@ -290,6 +306,36 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
       }
 
       return null;
+    });
+  }
+
+  function toggleRowSelection(row: AppealRow, rowIndex: number) {
+    const rowKey = getRowSelectionKey(row, rowIndex);
+
+    setSelectedRowKeys((currentKeys) => {
+      const nextKeys = new Set(currentKeys);
+
+      if (nextKeys.has(rowKey)) {
+        nextKeys.delete(rowKey);
+      } else {
+        nextKeys.add(rowKey);
+      }
+
+      return nextKeys;
+    });
+  }
+
+  function toggleVisibleRowSelection() {
+    setSelectedRowKeys((currentKeys) => {
+      const nextKeys = new Set(currentKeys);
+
+      if (areAllVisibleRowsSelected) {
+        visibleRowKeys.forEach((key) => nextKeys.delete(key));
+      } else {
+        visibleRowKeys.forEach((key) => nextKeys.add(key));
+      }
+
+      return nextKeys;
     });
   }
 
@@ -321,6 +367,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
     }
 
     setRows(result.rows?.length ? normalizeRows(result.rows) : initialRows);
+    setSelectedRowKeys(new Set());
     setIsLoading(false);
   }
 
@@ -410,6 +457,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
       }
 
       setRows(normalizeRows(nextRows));
+      setSelectedRowKeys(new Set());
 
       const response = await fetch("/api/gstat", {
         body: JSON.stringify({ action: "import", rows: nextRows }),
@@ -429,6 +477,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
       }
 
       setRows(result.rows?.length ? normalizeRows(result.rows) : normalizeRows(nextRows));
+      setSelectedRowKeys(new Set());
       setMessage(`${nextRows.length} row${nextRows.length === 1 ? "" : "s"} imported from ${file.name}. Audit log updated.`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Could not read the selected Excel file.");
@@ -449,7 +498,37 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
     );
 
     setRows(nextRows);
+    setSelectedRowKeys((currentKeys) => {
+      const nextKeys = new Set(currentKeys);
+      nextKeys.delete(getRowSelectionKey(rows[rowIndex], rowIndex));
+      return nextKeys;
+    });
     await saveRowOperation("row_delete", rowIndex, `Deleted row ${rowLabel}. Audit log updated.`);
+  }
+
+  async function deleteSelectedRows() {
+    if (!selectedRowIndexes.length) {
+      return;
+    }
+
+    if (
+      !window.confirm(
+        `Delete ${selectedRowIndexes.length} selected row${selectedRowIndexes.length === 1 ? "" : "s"}?`
+      )
+    ) {
+      return;
+    }
+
+    const selectedIndexes = new Set(selectedRowIndexes);
+    const nextRows = renumberRows(
+      rows.length > selectedIndexes.size
+        ? rows.filter((_, index) => !selectedIndexes.has(index))
+        : [createEmptyRow(1)]
+    );
+
+    setRows(nextRows);
+    setSelectedRowKeys(new Set());
+    await saveBulkDeleteOperation(selectedRowIndexes, selectedRowIndexes.length);
   }
 
   async function saveRowOperation(action: "row_delete", rowIndex: number, successMessage: string) {
@@ -470,7 +549,30 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
 
     const savedRows = result.rows?.length ? normalizeRows(result.rows) : rows;
     setRows(savedRows);
+    setSelectedRowKeys(new Set());
     setMessage(successMessage);
+  }
+
+  async function saveBulkDeleteOperation(rowIndexes: number[], deletedCount: number) {
+    setMessage(`Deleting ${deletedCount} selected row${deletedCount === 1 ? "" : "s"}...`);
+
+    const response = await fetch("/api/gstat", {
+      body: JSON.stringify({ action: "bulk_delete", rowIndexes }),
+      headers: { "Content-Type": "application/json" },
+      method: "POST"
+    });
+    const result = (await response.json()) as { error?: string; rows?: AppealRow[] };
+
+    if (!response.ok) {
+      setMessage(result.error ?? "Could not delete selected GSTAT rows.");
+      await loadRows();
+      return;
+    }
+
+    const savedRows = result.rows?.length ? normalizeRows(result.rows) : rows;
+    setRows(savedRows);
+    setSelectedRowKeys(new Set());
+    setMessage(`Deleted ${deletedCount} selected row${deletedCount === 1 ? "" : "s"}. Audit log updated.`);
   }
 
   function openNewEditor() {
@@ -783,14 +885,43 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                   </tr>
                   <tr className="bg-white text-slate-800 shadow-[inset_0_-1px_0_rgba(15,23,42,0.10)]">
                     <th className="sticky left-0 z-50 h-10 border-b border-r border-slate-200 bg-white px-1.5 py-1">
-                      <button
-                        className="inline-flex h-7 items-center justify-center gap-1 rounded-md border border-teal-200 bg-teal-50 px-2 text-[10px] font-black uppercase text-teal-800 transition hover:bg-teal-100"
-                        onClick={openNewEditor}
-                        type="button"
-                      >
-                        <Plus className="size-3" />
-                        Add
-                      </button>
+                      <div className="flex items-center gap-1">
+                        <input
+                          aria-label="Select visible rows"
+                          checked={areAllVisibleRowsSelected}
+                          className="size-4 rounded border-slate-300 accent-teal-600"
+                          onChange={toggleVisibleRowSelection}
+                          ref={(input) => {
+                            if (input) {
+                              input.indeterminate = areSomeVisibleRowsSelected;
+                            }
+                          }}
+                          title="Select visible rows"
+                          type="checkbox"
+                        />
+                        <button
+                          className="inline-flex h-7 items-center justify-center gap-1 rounded-md border border-teal-200 bg-teal-50 px-1.5 text-[10px] font-black uppercase text-teal-800 transition hover:bg-teal-100"
+                          onClick={openNewEditor}
+                          type="button"
+                        >
+                          <Plus className="size-3" />
+                          Add
+                        </button>
+                        <button
+                          aria-label="Delete selected rows"
+                          className="inline-flex size-7 items-center justify-center rounded-md border border-rose-200 bg-rose-50 text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-40"
+                          disabled={!selectedRowIndexes.length}
+                          onClick={deleteSelectedRows}
+                          title={
+                            selectedRowIndexes.length
+                              ? `Delete ${selectedRowIndexes.length} selected row${selectedRowIndexes.length === 1 ? "" : "s"}`
+                              : "Select rows to delete"
+                          }
+                          type="button"
+                        >
+                          <Trash2 className="size-3.5" />
+                        </button>
+                      </div>
                     </th>
                     {columns.map((column) => (
                       <th
@@ -819,6 +950,8 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                     const hasDuplicateDrc07 = duplicateDrc07Numbers.has(duplicateDrc07Value);
                     const duplicateOiaValue = normalizeDuplicateValue(row.data["OIA No"]);
                     const hasDuplicateOia = duplicateOiaNumbers.has(duplicateOiaValue);
+                    const rowSelectionKey = getRowSelectionKey(row, originalIndex);
+                    const isSelected = selectedRowKeys.has(rowSelectionKey);
 
                     return (
                       <tr
@@ -839,23 +972,30 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                               : "border-slate-200 bg-inherit"
                         }`}>
                           <div className="flex items-center gap-1">
+                            <input
+                              aria-label={`Select row ${row.data.Sno || visibleIndex + 1}`}
+                              checked={isSelected}
+                              className="size-4 shrink-0 rounded border-slate-300 accent-teal-600"
+                              onChange={() => toggleRowSelection(row, originalIndex)}
+                              type="checkbox"
+                            />
                             <button
                               aria-label={`Edit row ${row.data.Sno || visibleIndex + 1}`}
-                              className="inline-flex size-7 items-center justify-center rounded-md border border-sky-200 bg-white text-sky-700 transition hover:bg-sky-50"
+                              className="inline-flex size-6 items-center justify-center rounded-md border border-sky-200 bg-white text-sky-700 transition hover:bg-sky-50"
                               onClick={() => openEditor(originalIndex, row)}
                               title="Edit row"
                               type="button"
                             >
-                              <Pencil className="size-3.5" />
+                              <Pencil className="size-3" />
                             </button>
                             <button
                               aria-label={`Delete row ${row.data.Sno || visibleIndex + 1}`}
-                              className="inline-flex size-7 items-center justify-center rounded-md border border-rose-200 bg-white text-rose-700 transition hover:bg-rose-50"
+                              className="inline-flex size-6 items-center justify-center rounded-md border border-rose-200 bg-white text-rose-700 transition hover:bg-rose-50"
                               onClick={() => deleteRow(originalIndex)}
                               title="Delete row"
                               type="button"
                             >
-                              <Trash2 className="size-3.5" />
+                              <Trash2 className="size-3" />
                             </button>
                           </div>
                         </td>
@@ -1043,6 +1183,10 @@ function renumberRows(rows: AppealRow[]) {
     data: { ...row.data, Sno: index + 1 },
     row_number: index + 1
   }));
+}
+
+function getRowSelectionKey(row: AppealRow | undefined, index: number) {
+  return row?.id ? `id:${row.id}` : `index:${index}`;
 }
 
 function normalizeRows(rows: AppealRow[]) {

@@ -48,9 +48,10 @@ export async function POST(request: Request) {
   const {
     action = "import",
     rowIndex,
+    rowIndexes,
     rows
-  } = (await request.json()) as { action?: string; rowIndex?: number; rows?: AppealRow[] };
-  const auditAction = ["import", "row_insert", "row_delete", "bulk_save"].includes(action)
+  } = (await request.json()) as { action?: string; rowIndex?: number; rowIndexes?: number[]; rows?: AppealRow[] };
+  const auditAction = ["import", "row_insert", "row_delete", "bulk_delete", "bulk_save"].includes(action)
     ? action
     : "bulk_save";
 
@@ -65,10 +66,13 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: previous.error.message }, { status: 500 });
   }
 
-  if (auditAction === "row_insert" || auditAction === "row_delete") {
+  if (auditAction === "row_insert" || auditAction === "row_delete" || auditAction === "bulk_delete") {
     const existingRows = filterRowsForAccess(previous.data ?? [], access)
       .sort((first, second) => (first.row_number ?? 0) - (second.row_number ?? 0))
       .map((row) => ({ data: row.data ?? {}, row_number: row.row_number ?? 1 }));
+    const selectedRowIndexes = new Set(
+      (Array.isArray(rowIndexes) ? rowIndexes : []).filter((index) => Number.isInteger(index) && index >= 0)
+    );
     const nextRows =
       auditAction === "row_insert"
         ? renumberRows([
@@ -76,7 +80,13 @@ export async function POST(request: Request) {
             { data: {}, row_number: (rowIndex ?? -1) + 2 },
             ...existingRows.slice((rowIndex ?? -1) + 1)
           ])
-        : renumberRows(
+        : auditAction === "bulk_delete"
+          ? renumberRows(
+              existingRows.length > selectedRowIndexes.size
+                ? existingRows.filter((_, index) => !selectedRowIndexes.has(index))
+                : [{ data: {}, row_number: 1 }]
+            )
+          : renumberRows(
             existingRows.length > 1
               ? existingRows.filter((_, index) => index !== rowIndex)
               : [{ data: {}, row_number: 1 }]
