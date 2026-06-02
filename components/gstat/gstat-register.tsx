@@ -298,14 +298,25 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
       advancedFilters.some(isAdvancedFilterComplete),
     [advancedFilters, filters, globalSearch]
   );
-  const advancedFilterOptionsByField = useMemo(
-    () =>
-      columns.reduce<Record<string, string[]>>((optionsByField, column) => {
-        optionsByField[column.key] = getUniqueColumnDisplayValues(rows, column);
-        return optionsByField;
-      }, {}),
-    [rows]
+  const selectedAdvancedFilterFields = useMemo(
+    () => Array.from(new Set(advancedFilters.map((filter) => filter.field).filter(Boolean))),
+    [advancedFilters]
   );
+  const advancedFilterOptionsByField = useMemo(() => {
+    if (!isMoreFiltersVisible || !selectedAdvancedFilterFields.length) {
+      return {};
+    }
+
+    return selectedAdvancedFilterFields.reduce<Record<string, string[]>>((optionsByField, field) => {
+      const column = columns.find((item) => item.key === field);
+
+      if (column) {
+        optionsByField[field] = getUniqueColumnDisplayValues(rows, column);
+      }
+
+      return optionsByField;
+    }, {});
+  }, [isMoreFiltersVisible, rows, selectedAdvancedFilterFields]);
   const selectedRowIndexes = useMemo(
     () =>
       rows
