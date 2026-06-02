@@ -173,6 +173,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
     [rows]
   );
   const duplicateDrc07Numbers = useMemo(() => findDuplicateValues(rows, "DRC 07 No"), [rows]);
+  const duplicateOiaNumbers = useMemo(() => findDuplicateValues(rows, "OIA No"), [rows]);
   const blankRequiredCellCount = useMemo(
     () =>
       rows.reduce(
@@ -200,9 +201,13 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
             if (!matchesGlobal) return false;
           }
 
-          return columns.every((column) => matchesColumnFilter(row.data[column.key], column, filters[column.key]));
+          return columns.every((column) =>
+            matchesColumnFilter(row.data[column.key], column, filters[column.key], {
+              duplicateOiaNumbers
+            })
+          );
         }),
-    [filters, rows, globalSearch]
+    [duplicateOiaNumbers, filters, rows, globalSearch]
   );
   
   const filteredUniqueAppeals = useMemo(
@@ -248,6 +253,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
 
   function exportExcel() {
     const exportDuplicateDrc07Numbers = findDuplicateValues(rows, "DRC 07 No");
+    const exportDuplicateOiaNumbers = findDuplicateValues(rows, "OIA No");
     const headerRowOne = [
       ...baseColumns.map((column) => column.label),
       ...groupedColumns.flatMap((group) => [group.label, "", ""]),
@@ -281,7 +287,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
     worksheet["!autofilter"] = { ref: XLSX.utils.encode_range({ e: { c: columns.length - 1, r: 1 }, s: { c: 0, r: 1 } }) };
     worksheet["!freeze"] = { xSplit: 1, ySplit: 2 };
 
-    styleGstatWorksheet(worksheet, rows, exportDuplicateDrc07Numbers);
+    styleGstatWorksheet(worksheet, rows, exportDuplicateDrc07Numbers, exportDuplicateOiaNumbers);
 
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "GSTAT");
@@ -556,6 +562,11 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                   {duplicateDrc07Numbers.size} duplicate DRC 07 No. value{duplicateDrc07Numbers.size === 1 ? "" : "s"} highlighted.
                 </p>
               ) : null}
+              {duplicateOiaNumbers.size ? (
+                <p className="mt-1 text-sm font-bold text-sky-700">
+                  {duplicateOiaNumbers.size} grouped OIA No. value{duplicateOiaNumbers.size === 1 ? "" : "s"} highlighted.
+                </p>
+              ) : null}
               {blankRequiredCellCount ? (
                 <p className="mt-1 text-sm font-bold text-rose-700">
                   {blankRequiredCellCount} blank cell{blankRequiredCellCount === 1 ? "" : "s"} highlighted.
@@ -721,14 +732,26 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                   {filteredRows.map(({ row, originalIndex }, visibleIndex) => {
                     const duplicateDrc07Value = normalizeDuplicateValue(row.data["DRC 07 No"]);
                     const hasDuplicateDrc07 = duplicateDrc07Numbers.has(duplicateDrc07Value);
+                    const duplicateOiaValue = normalizeDuplicateValue(row.data["OIA No"]);
+                    const hasDuplicateOia = duplicateOiaNumbers.has(duplicateOiaValue);
 
                     return (
                       <tr
-                        className={hasDuplicateDrc07 ? "bg-amber-50" : "odd:bg-white even:bg-slate-50/80"}
+                        className={
+                          hasDuplicateDrc07
+                            ? "bg-amber-50"
+                            : hasDuplicateOia
+                              ? "bg-sky-50"
+                              : "odd:bg-white even:bg-slate-50/80"
+                        }
                         key={row.id ?? originalIndex}
                       >
                         <td className={`sticky left-0 z-20 h-8 w-[92px] whitespace-nowrap border-b border-r px-1.5 py-1 ${
-                          hasDuplicateDrc07 ? "border-amber-200 bg-amber-50" : "border-slate-200 bg-inherit"
+                          hasDuplicateDrc07
+                            ? "border-amber-200 bg-amber-50"
+                            : hasDuplicateOia
+                              ? "border-sky-200 bg-sky-50"
+                              : "border-slate-200 bg-inherit"
                         }`}>
                           <div className="flex items-center gap-1">
                             <button
@@ -755,6 +778,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                           const cellValue = row.data[column.key];
                           const displayValue = dateFields.has(column.key) ? formatDateForDisplay(cellValue) : cellValue;
                           const isDuplicateDrc07 = hasDuplicateDrc07 && column.key === "DRC 07 No";
+                          const isDuplicateOia = hasDuplicateOia && column.key === "OIA No";
                           const isRequiredBlank =
                             requiredBlankCheckColumns.some((requiredColumn) => requiredColumn.key === column.key) &&
                             isBlankCell(cellValue);
@@ -764,10 +788,14 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                               className={`h-8 border-b border-r px-1.5 py-1 font-semibold ${
                                 isDuplicateDrc07
                                   ? "border-amber-300 bg-amber-100 text-amber-950"
+                                  : isDuplicateOia
+                                    ? "border-sky-300 bg-sky-100 text-sky-950"
                                   : isRequiredBlank
                                     ? "border-rose-200 bg-rose-50 text-rose-900"
                                   : hasDuplicateDrc07
                                     ? "border-amber-200 bg-amber-50 text-slate-800"
+                                    : hasDuplicateOia
+                                      ? "border-sky-200 bg-sky-50 text-slate-800"
                                     : "border-slate-200 text-slate-700"
                               }`}
                               key={`${originalIndex}-${column.key}`}
@@ -780,6 +808,8 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                                   title={
                                     isDuplicateDrc07
                                       ? `Duplicate DRC 07 No.: ${cellValue}`
+                                      : isDuplicateOia
+                                        ? `Grouped OIA No.: ${cellValue}`
                                       : isRequiredBlank
                                         ? `${column.label} is blank`
                                         : String(displayValue ?? "")
@@ -967,7 +997,8 @@ function applyPersonHandlingForAccess(data: RowData, access: UserAccess): RowDat
 function styleGstatWorksheet(
   worksheet: XLSX.WorkSheet,
   exportRows: AppealRow[],
-  exportDuplicateDrc07Numbers: Set<string>
+  exportDuplicateDrc07Numbers: Set<string>,
+  exportDuplicateOiaNumbers: Set<string>
 ) {
   const headerStyle = createExcelCellStyle("0f172a", "ffffff", true);
   const groupHeaderStyle = createExcelCellStyle("111827", "ffffff", true);
@@ -975,6 +1006,8 @@ function styleGstatWorksheet(
   const alternateCellStyle = createExcelCellStyle("f8fafc", "334155");
   const duplicateRowStyle = createExcelCellStyle("fffbeb", "1e293b");
   const duplicateDrcStyle = createExcelCellStyle("fef3c7", "78350f", true);
+  const groupedOiaRowStyle = createExcelCellStyle("f0f9ff", "1e293b");
+  const groupedOiaStyle = createExcelCellStyle("e0f2fe", "0c4a6e", true);
   const blankRequiredStyle = createExcelCellStyle("fff1f2", "9f1239", true);
 
   for (let rowIndex = 0; rowIndex < 2; rowIndex += 1) {
@@ -986,11 +1019,19 @@ function styleGstatWorksheet(
   exportRows.forEach((row, rowIndex) => {
     const worksheetRowIndex = rowIndex + 2;
     const hasDuplicateDrc07 = exportDuplicateDrc07Numbers.has(normalizeDuplicateValue(row.data["DRC 07 No"]));
-    const rowStyle = hasDuplicateDrc07 ? duplicateRowStyle : rowIndex % 2 === 0 ? baseCellStyle : alternateCellStyle;
+    const hasDuplicateOia = exportDuplicateOiaNumbers.has(normalizeDuplicateValue(row.data["OIA No"]));
+    const rowStyle = hasDuplicateDrc07
+      ? duplicateRowStyle
+      : hasDuplicateOia
+        ? groupedOiaRowStyle
+        : rowIndex % 2 === 0
+          ? baseCellStyle
+          : alternateCellStyle;
 
     columns.forEach((column, columnIndex) => {
       const cellValue = row.data[column.key];
       const isDuplicateDrc07 = hasDuplicateDrc07 && column.key === "DRC 07 No";
+      const isDuplicateOia = hasDuplicateOia && column.key === "OIA No";
       const isRequiredBlank =
         requiredBlankCheckColumns.some((requiredColumn) => requiredColumn.key === column.key) &&
         isBlankCell(cellValue);
@@ -999,7 +1040,13 @@ function styleGstatWorksheet(
         worksheet,
         worksheetRowIndex,
         columnIndex,
-        isDuplicateDrc07 ? duplicateDrcStyle : isRequiredBlank ? blankRequiredStyle : rowStyle
+        isDuplicateDrc07
+          ? duplicateDrcStyle
+          : isDuplicateOia
+            ? groupedOiaStyle
+            : isRequiredBlank
+              ? blankRequiredStyle
+              : rowStyle
       );
     });
   });
@@ -1117,7 +1164,12 @@ function formatDateForDisplay(value: string | number | undefined) {
   return `${day}-${monthLabel}-${year}`;
 }
 
-function matchesColumnFilter(value: string | number | undefined, column: Column, rawFilter?: string) {
+function matchesColumnFilter(
+  value: string | number | undefined,
+  column: Column,
+  rawFilter: string | undefined,
+  context: { duplicateOiaNumbers: Set<string> }
+) {
   const filter = rawFilter?.trim().toLowerCase();
 
   if (!filter) {
@@ -1130,6 +1182,10 @@ function matchesColumnFilter(value: string | number | undefined, column: Column,
 
   if (["blank", "empty", "required"].includes(filter)) {
     return isRequiredBlank || (filter !== "required" && isBlankCell(value));
+  }
+
+  if (column.key === "OIA No" && ["duplicate", "duplicates", "grouped"].includes(filter)) {
+    return context.duplicateOiaNumbers.has(normalizeDuplicateValue(value));
   }
 
   const rawValue = String(value ?? "").toLowerCase();
