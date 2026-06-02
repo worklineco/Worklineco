@@ -682,60 +682,70 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredRows.map(({ row, originalIndex }, visibleIndex) => (
-                    <tr className="odd:bg-white even:bg-slate-50/80" key={row.id ?? originalIndex}>
-                      <td className="sticky left-0 z-20 h-8 w-[92px] whitespace-nowrap border-b border-r border-slate-200 bg-inherit px-1.5 py-1">
-                        <div className="flex items-center gap-1">
-                          <button
-                            aria-label={`Edit row ${row.data.Sno || visibleIndex + 1}`}
-                            className="inline-flex size-7 items-center justify-center rounded-md border border-sky-200 bg-white text-sky-700 transition hover:bg-sky-50"
-                            onClick={() => openEditor(originalIndex, row)}
-                            title="Edit row"
-                            type="button"
-                          >
-                            <Pencil className="size-3.5" />
-                          </button>
-                          <button
-                            aria-label={`Delete row ${row.data.Sno || visibleIndex + 1}`}
-                            className="inline-flex size-7 items-center justify-center rounded-md border border-rose-200 bg-white text-rose-700 transition hover:bg-rose-50"
-                            onClick={() => deleteRow(originalIndex)}
-                            title="Delete row"
-                            type="button"
-                          >
-                            <Trash2 className="size-3.5" />
-                          </button>
-                        </div>
-                      </td>
-                      {columns.map((column) => {
-                        const cellValue = row.data[column.key];
-                        const isDuplicateDrc07 =
-                          column.key === "DRC 07 No" &&
-                          duplicateDrc07Numbers.has(normalizeDuplicateValue(cellValue));
+                  {filteredRows.map(({ row, originalIndex }, visibleIndex) => {
+                    const duplicateDrc07Value = normalizeDuplicateValue(row.data["DRC 07 No"]);
+                    const hasDuplicateDrc07 = duplicateDrc07Numbers.has(duplicateDrc07Value);
 
-                        return (
-                          <td
-                            className={`h-8 border-b border-r px-1.5 py-1 font-semibold ${
-                              isDuplicateDrc07
-                                ? "border-amber-300 bg-amber-100 text-amber-950"
-                                : "border-slate-200 text-slate-700"
-                            }`}
-                            key={`${originalIndex}-${column.key}`}
-                          >
-                            {column.key === "Sno" ? (
-                              cellValue || visibleIndex + 1
-                            ) : (
-                              <span
-                                className="block w-full min-w-0 truncate px-1.5"
-                                title={isDuplicateDrc07 ? `Duplicate DRC 07 No.: ${cellValue}` : String(cellValue ?? "")}
-                              >
-                                {cellValue ?? ""}
-                              </span>
-                            )}
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  ))}
+                    return (
+                      <tr
+                        className={hasDuplicateDrc07 ? "bg-amber-50" : "odd:bg-white even:bg-slate-50/80"}
+                        key={row.id ?? originalIndex}
+                      >
+                        <td className={`sticky left-0 z-20 h-8 w-[92px] whitespace-nowrap border-b border-r px-1.5 py-1 ${
+                          hasDuplicateDrc07 ? "border-amber-200 bg-amber-50" : "border-slate-200 bg-inherit"
+                        }`}>
+                          <div className="flex items-center gap-1">
+                            <button
+                              aria-label={`Edit row ${row.data.Sno || visibleIndex + 1}`}
+                              className="inline-flex size-7 items-center justify-center rounded-md border border-sky-200 bg-white text-sky-700 transition hover:bg-sky-50"
+                              onClick={() => openEditor(originalIndex, row)}
+                              title="Edit row"
+                              type="button"
+                            >
+                              <Pencil className="size-3.5" />
+                            </button>
+                            <button
+                              aria-label={`Delete row ${row.data.Sno || visibleIndex + 1}`}
+                              className="inline-flex size-7 items-center justify-center rounded-md border border-rose-200 bg-white text-rose-700 transition hover:bg-rose-50"
+                              onClick={() => deleteRow(originalIndex)}
+                              title="Delete row"
+                              type="button"
+                            >
+                              <Trash2 className="size-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                        {columns.map((column) => {
+                          const cellValue = row.data[column.key];
+                          const isDuplicateDrc07 = hasDuplicateDrc07 && column.key === "DRC 07 No";
+
+                          return (
+                            <td
+                              className={`h-8 border-b border-r px-1.5 py-1 font-semibold ${
+                                isDuplicateDrc07
+                                  ? "border-amber-300 bg-amber-100 text-amber-950"
+                                  : hasDuplicateDrc07
+                                    ? "border-amber-200 bg-amber-50 text-slate-800"
+                                    : "border-slate-200 text-slate-700"
+                              }`}
+                              key={`${originalIndex}-${column.key}`}
+                            >
+                              {column.key === "Sno" ? (
+                                cellValue || visibleIndex + 1
+                              ) : (
+                                <span
+                                  className="block w-full min-w-0 truncate px-1.5"
+                                  title={isDuplicateDrc07 ? `Duplicate DRC 07 No.: ${cellValue}` : String(cellValue ?? "")}
+                                >
+                                  {cellValue ?? ""}
+                                </span>
+                              )}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
