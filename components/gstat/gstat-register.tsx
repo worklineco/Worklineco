@@ -193,17 +193,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
             if (!matchesGlobal) return false;
           }
 
-          return columns.every((column) => {
-            const filter = filters[column.key]?.trim().toLowerCase();
-
-            if (!filter) {
-              return true;
-            }
-
-            return String(row.data[column.key] ?? "")
-              .toLowerCase()
-              .includes(filter);
-          });
+          return columns.every((column) => matchesColumnFilter(row.data[column.key], column, filters[column.key]));
         }),
     [filters, rows, globalSearch]
   );
@@ -702,7 +692,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                               [column.key]: event.target.value
                             }))
                           }
-                          placeholder="Filter"
+                          placeholder="Filter / blank"
                           value={filters[column.key] ?? ""}
                         />
                       </th>
@@ -1043,6 +1033,26 @@ function normalizeDuplicateValue(value: string | number | undefined) {
 
 function isBlankCell(value: string | number | undefined) {
   return String(value ?? "").trim() === "";
+}
+
+function matchesColumnFilter(value: string | number | undefined, column: Column, rawFilter?: string) {
+  const filter = rawFilter?.trim().toLowerCase();
+
+  if (!filter) {
+    return true;
+  }
+
+  const isRequiredBlank =
+    requiredBlankCheckColumns.some((requiredColumn) => requiredColumn.key === column.key) &&
+    isBlankCell(value);
+
+  if (["blank", "empty", "required"].includes(filter)) {
+    return isRequiredBlank || (filter !== "required" && isBlankCell(value));
+  }
+
+  return String(value ?? "")
+    .toLowerCase()
+    .includes(filter);
 }
 
 function Metric({
