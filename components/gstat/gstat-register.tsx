@@ -15,6 +15,7 @@ type AppealRow = {
   row_number: number;
   updated_at?: string;
 };
+type ExportRow = { displayIndex: number; row: AppealRow };
 type EditorState = { draft: RowData; isNew?: boolean; row: AppealRow; rowIndex: number };
 type UserAccess = { isPartner: boolean; team: string };
 type CellStyle = NonNullable<XLSX.CellObject["s"]>;
@@ -470,9 +471,19 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
     setIsLoading(false);
   }
 
-  function exportExcel() {
-    const exportDuplicateDrc07Numbers = findDuplicateValues(rows, "DRC 07 No");
-    const exportDuplicateOiaNumbers = findDuplicateValues(rows, "OIA No");
+  function exportExcel(scope: "all" | "current") {
+    const exportRows =
+      scope === "current"
+        ? filteredRows.map(({ originalIndex, row }) => ({ displayIndex: originalIndex + 1, row }))
+        : rows.map((row, index) => ({ displayIndex: index + 1, row }));
+    const exportDuplicateDrc07Numbers = findDuplicateValues(
+      exportRows.map(({ row }) => row),
+      "DRC 07 No"
+    );
+    const exportDuplicateOiaNumbers = findDuplicateValues(
+      exportRows.map(({ row }) => row),
+      "OIA No"
+    );
     const headerRowOne = [
       ...baseColumns.map((column) => column.label),
       ...groupedColumns.flatMap((group) => [group.label, "", ""]),
@@ -483,10 +494,10 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
       ...groupedColumns.flatMap((group) => group.columns),
       ...finalColumns.map(() => "")
     ];
-    const dataRows = rows.map((row, index) =>
+    const dataRows = exportRows.map(({ displayIndex, row }) =>
       columns.map((column) =>
         column.key === "Sno"
-          ? index + 1
+          ? displayIndex
           : dateFields.has(column.key)
             ? formatDateForDisplay(row.data[column.key])
             : row.data[column.key] ?? ""
@@ -506,11 +517,14 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
     worksheet["!autofilter"] = { ref: XLSX.utils.encode_range({ e: { c: columns.length - 1, r: 1 }, s: { c: 0, r: 1 } }) };
     worksheet["!freeze"] = { xSplit: 1, ySplit: 2 };
 
-    styleGstatWorksheet(worksheet, rows, exportDuplicateDrc07Numbers, exportDuplicateOiaNumbers);
+    styleGstatWorksheet(worksheet, exportRows, exportDuplicateDrc07Numbers, exportDuplicateOiaNumbers);
 
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "GSTAT");
-    XLSX.writeFile(workbook, "workline-gstat-register.xlsx");
+    XLSX.writeFile(
+      workbook,
+      scope === "current" ? "workline-gstat-current-view.xlsx" : "workline-gstat-full-table.xlsx"
+    );
   }
 
   async function importExcel(event: ChangeEvent<HTMLInputElement>) {
@@ -922,14 +936,27 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                   Maximise View
                 </Link>
               ) : null}
-              <button
-                className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-slate-950 px-3 text-xs font-black uppercase text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-slate-800 hover:shadow-md"
-                onClick={exportExcel}
-                type="button"
-              >
-                <Download className="size-4" />
-                Export Excel
-              </button>
+              <div className="flex overflow-hidden rounded-xl shadow-sm">
+                <button
+                  className="inline-flex h-10 items-center justify-center gap-2 bg-slate-950 px-3 text-xs font-black uppercase text-white transition hover:bg-slate-800"
+                  onClick={() => exportExcel("all")}
+                  title="Export every GSTAT row"
+                  type="button"
+                >
+                  <Download className="size-4" />
+                  Full Table
+                </button>
+                <button
+                  className="inline-flex h-10 items-center justify-center gap-2 border-l border-white/15 bg-slate-800 px-3 text-xs font-black uppercase text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-45"
+                  disabled={!filteredRows.length}
+                  onClick={() => exportExcel("current")}
+                  title="Export the currently filtered and sorted GSTAT rows"
+                  type="button"
+                >
+                  <Filter className="size-4" />
+                  Current View
+                </button>
+              </div>
             </div>
           </div>
 
@@ -1497,7 +1524,7 @@ function applyPersonHandlingForAccess(data: RowData, access: UserAccess): RowDat
 
 function styleGstatWorksheet(
   worksheet: XLSX.WorkSheet,
-  exportRows: AppealRow[],
+  exportRows: ExportRow[],
   exportDuplicateDrc07Numbers: Set<string>,
   exportDuplicateOiaNumbers: Set<string>
 ) {
@@ -1517,7 +1544,7 @@ function styleGstatWorksheet(
     }
   }
 
-  exportRows.forEach((row, rowIndex) => {
+  exportRows.forEach(({ row }, rowIndex) => {
     const worksheetRowIndex = rowIndex + 2;
     const hasDuplicateDrc07 = exportDuplicateDrc07Numbers.has(normalizeDuplicateValue(row.data["DRC 07 No"]));
     const hasDuplicateOia = exportDuplicateOiaNumbers.has(normalizeDuplicateValue(row.data["OIA No"]));
