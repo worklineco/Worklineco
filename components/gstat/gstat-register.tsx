@@ -227,7 +227,8 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
   const [sortState, setSortState] = useState<SortState>(null);
   const [selectedRowKeys, setSelectedRowKeys] = useState<Set<string>>(() => new Set());
   const [isMoreFiltersVisible, setIsMoreFiltersVisible] = useState(false);
-  const [advancedFilters, setAdvancedFilters] = useState<AdvancedFilter[]>(() => [createAdvancedFilter()]);
+  const [appliedAdvancedFilters, setAppliedAdvancedFilters] = useState<AdvancedFilter[]>(() => [createAdvancedFilter()]);
+  const [draftAdvancedFilters, setDraftAdvancedFilters] = useState<AdvancedFilter[]>(() => [createAdvancedFilter()]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const uniqueAppeals = useMemo(
     () => new Set(rows.map((row) => String(row.data["OIA No"] ?? "").trim()).filter(Boolean)).size,
@@ -246,7 +247,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
   );
   
   const [globalSearch, setGlobalSearch] = useState("");
-  const deferredAdvancedFilters = useDeferredValue(advancedFilters);
+  const deferredAdvancedFilters = useDeferredValue(appliedAdvancedFilters);
   const deferredFilters = useDeferredValue(filters);
   const deferredGlobalSearch = useDeferredValue(globalSearch);
   const rowSearchText = useMemo(
@@ -311,12 +312,12 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
     () =>
       Boolean(globalSearch.trim()) ||
       Object.values(filters).some((filter) => filter?.trim()) ||
-      advancedFilters.some(isAdvancedFilterComplete),
-    [advancedFilters, filters, globalSearch]
+      appliedAdvancedFilters.some(isAdvancedFilterComplete),
+    [appliedAdvancedFilters, filters, globalSearch]
   );
   const selectedAdvancedFilterFields = useMemo(
-    () => Array.from(new Set(advancedFilters.map((filter) => filter.field).filter(Boolean))),
-    [advancedFilters]
+    () => Array.from(new Set(draftAdvancedFilters.map((filter) => filter.field).filter(Boolean))),
+    [draftAdvancedFilters]
   );
   const advancedFilterOptionsByField = useMemo(() => {
     if (!isMoreFiltersVisible || !selectedAdvancedFilterFields.length) {
@@ -395,23 +396,29 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
   }
 
   function addAdvancedFilter() {
-    setAdvancedFilters((currentFilters) => [...currentFilters, createAdvancedFilter()]);
+    setDraftAdvancedFilters((currentFilters) => [...currentFilters, createAdvancedFilter()]);
     setIsMoreFiltersVisible(true);
   }
 
   function clearAdvancedFilters() {
-    setAdvancedFilters([createAdvancedFilter()]);
+    const blankFilter = createAdvancedFilter();
+    setAppliedAdvancedFilters([blankFilter]);
+    setDraftAdvancedFilters([createAdvancedFilter()]);
+  }
+
+  function runAdvancedFilters() {
+    setAppliedAdvancedFilters(cloneAdvancedFilters(draftAdvancedFilters));
   }
 
   function removeAdvancedFilter(filterId: string) {
-    setAdvancedFilters((currentFilters) => {
+    setDraftAdvancedFilters((currentFilters) => {
       const nextFilters = currentFilters.filter((filter) => filter.id !== filterId);
       return nextFilters.length ? nextFilters : [createAdvancedFilter()];
     });
   }
 
   function updateAdvancedFilter(filterId: string, patch: Partial<Omit<AdvancedFilter, "id">>) {
-    setAdvancedFilters((currentFilters) =>
+    setDraftAdvancedFilters((currentFilters) =>
       currentFilters.map((filter) => {
         if (filter.id !== filterId) {
           return filter;
@@ -433,7 +440,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
       return;
     }
 
-    setAdvancedFilters((currentFilters) =>
+    setDraftAdvancedFilters((currentFilters) =>
       currentFilters.map((filter) =>
         filter.id === filterId && !filter.values.includes(value)
           ? { ...filter, values: [...filter.values, value] }
@@ -443,7 +450,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
   }
 
   function removeAdvancedFilterValue(filterId: string, value: string) {
-    setAdvancedFilters((currentFilters) =>
+    setDraftAdvancedFilters((currentFilters) =>
       currentFilters.map((filter) =>
         filter.id === filterId
           ? { ...filter, values: filter.values.filter((selectedValue) => selectedValue !== value) }
@@ -1009,7 +1016,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
           {isMoreFiltersVisible ? (
             <div className="mb-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
               <div className="flex flex-col gap-2">
-                {advancedFilters.map((filter, index) => {
+                {draftAdvancedFilters.map((filter, index) => {
                   const valueOptions = filter.field ? advancedFilterOptionsByField[filter.field] ?? [] : [];
                   const availableValueOptions = valueOptions.filter(
                     (value) => !filter.values.includes(value || blankAdvancedFilterValue)
@@ -1120,6 +1127,14 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                   type="button"
                 >
                   Clear
+                </button>
+                <button
+                  className="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-slate-950 px-3 text-xs font-black uppercase text-white transition hover:bg-slate-800"
+                  onClick={runAdvancedFilters}
+                  type="button"
+                >
+                  <Filter className="size-4" />
+                  Run
                 </button>
               </div>
             </div>
@@ -1499,6 +1514,13 @@ function createAdvancedFilter(): AdvancedFilter {
     id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
     values: []
   };
+}
+
+function cloneAdvancedFilters(filters: AdvancedFilter[]) {
+  return filters.map((filter) => ({
+    ...filter,
+    values: [...filter.values]
+  }));
 }
 
 function normalizeRows(rows: AppealRow[]) {
