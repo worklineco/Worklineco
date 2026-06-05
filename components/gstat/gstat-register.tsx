@@ -4,7 +4,7 @@ import { downloadGstatPoa } from "@/lib/gstat/poa-document";
 import { supabase } from "@/lib/supabase/client";
 import { ArrowDown, ArrowLeft, ArrowUp, Download, Expand, ExternalLink, FileSpreadsheet, FileText, Filter, History, Pencil, Plus, Scale, Search, ShieldCheck, Trash2, Upload, X } from "lucide-react";
 import Link from "next/link";
-import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx-js-style";
 
 type Column = { group?: string; key: string; label: string };
@@ -30,6 +30,7 @@ type AdvancedFilter = {
 };
 
 const actionColumnWidth = 122;
+const advancedFilterOptionLimit = 250;
 const blankAdvancedFilterValue = "__workline_blank__";
 const poaGptUrl = "https://chatgpt.com/g/g-6a1f3abf8d008191985119e155f67c5f-poa-vakalatnama-helper";
 
@@ -245,30 +246,42 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
   );
   
   const [globalSearch, setGlobalSearch] = useState("");
+  const deferredAdvancedFilters = useDeferredValue(advancedFilters);
+  const deferredFilters = useDeferredValue(filters);
+  const deferredGlobalSearch = useDeferredValue(globalSearch);
+  const rowSearchText = useMemo(
+    () =>
+      rows.map((row) =>
+        columns
+          .map((column) => String(row.data[column.key] ?? ""))
+          .join(" ")
+          .toLowerCase()
+      ),
+    [rows]
+  );
 
   const filteredRows = useMemo(
     () => {
-      const activeAdvancedFilters = advancedFilters.filter(isAdvancedFilterComplete);
+      const activeAdvancedFilters = deferredAdvancedFilters.filter(isAdvancedFilterComplete);
+      const activeColumnFilters = columns
+        .map((column) => ({ column, rawFilter: deferredFilters[column.key] }))
+        .filter(({ rawFilter }) => rawFilter?.trim());
+      const globalSearchLower = deferredGlobalSearch.toLowerCase().trim();
       const visibleRows = rows
         .map((row, index) => ({ row, originalIndex: index }))
-        .filter(({ row }) => {
-          const globalSearchLower = globalSearch.toLowerCase().trim();
+        .filter(({ row, originalIndex }) => {
           if (globalSearchLower) {
             const matchesGroupedOiaSearch =
               isGroupedOiaSearch(globalSearchLower) &&
               duplicateOiaNumbers.has(normalizeDuplicateValue(row.data["OIA No"]));
             const matchesGlobal =
               matchesGroupedOiaSearch ||
-              columns.some((column) =>
-                String(row.data[column.key] ?? "")
-                  .toLowerCase()
-                  .includes(globalSearchLower)
-              );
+              rowSearchText[originalIndex]?.includes(globalSearchLower);
             if (!matchesGlobal) return false;
           }
 
-          return columns.every((column) =>
-            matchesColumnFilter(row.data[column.key], column, filters[column.key], {
+          return activeColumnFilters.every(({ column, rawFilter }) =>
+            matchesColumnFilter(row.data[column.key], column, rawFilter, {
               duplicateOiaNumbers
             })
           ) && activeAdvancedFilters.every((filter) => matchesAdvancedFilter(row, filter));
@@ -286,7 +299,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
 
       return [...visibleRows].sort((left, right) => compareRowsForColumn(left, right, sortColumn, sortState.direction));
     },
-    [advancedFilters, duplicateOiaNumbers, filters, rows, globalSearch, sortState]
+    [deferredAdvancedFilters, deferredFilters, deferredGlobalSearch, duplicateOiaNumbers, rows, rowSearchText, sortState]
   );
   
   const filteredUniqueAppeals = useMemo(
@@ -314,7 +327,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
       const column = columns.find((item) => item.key === field);
 
       if (column) {
-        optionsByField[field] = getUniqueColumnDisplayValues(rows, column);
+        optionsByField[field] = getUniqueColumnDisplayValues(rows, column, advancedFilterOptionLimit);
       }
 
       return optionsByField;
@@ -1812,10 +1825,18 @@ function matchesAdvancedFilter(row: AppealRow, filter: AdvancedFilter) {
   return filter.condition === "includes" ? matchesValue : !matchesValue;
 }
 
-function getUniqueColumnDisplayValues(rows: AppealRow[], column: Column) {
-  return Array.from(
-    new Set(rows.map((row) => getCellDisplayValue(row.data[column.key], column)))
-  ).sort((left, right) =>
+function getUniqueColumnDisplayValues(rows: AppealRow[], column: Column, limit?: number) {
+  const values = new Set<string>();
+
+  for (const row of rows) {
+    values.add(getCellDisplayValue(row.data[column.key], column));
+
+    if (limit && values.size >= limit) {
+      break;
+    }
+  }
+
+  return Array.from(values).sort((left, right) =>
     left.localeCompare(right, undefined, {
       numeric: true,
       sensitivity: "base"
