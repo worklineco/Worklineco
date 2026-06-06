@@ -480,6 +480,12 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
     closeColumnFilter();
   }
 
+  function clearAllFilters() {
+    setGlobalSearch("");
+    setColumnValueFilters({});
+    closeColumnFilter();
+  }
+
   useEffect(() => {
     loadUserAccess();
     loadRows();
@@ -1141,6 +1147,16 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                 </button>
               )}
             </div>
+            <button
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-950/10 bg-white px-3 text-xs font-black uppercase text-slate-800 shadow-sm transition hover:-translate-y-0.5 hover:bg-slate-50 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:translate-y-0 disabled:hover:bg-white disabled:hover:shadow-sm"
+              disabled={!hasActiveFilters}
+              onClick={clearAllFilters}
+              title="Clear search and every column filter"
+              type="button"
+            >
+              <X className="size-4" />
+              Clear All Filters
+            </button>
           </div>
 
           <div className="overflow-hidden rounded-2xl border border-slate-950/10 bg-white">
