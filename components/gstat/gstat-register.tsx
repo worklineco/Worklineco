@@ -224,6 +224,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
   const [filterSearch, setFilterSearch] = useState("");
   const [draftFilterValues, setDraftFilterValues] = useState<string[]>([]);
   const [editor, setEditor] = useState<EditorState | null>(null);
+  const [editorSectionIndex, setEditorSectionIndex] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [isSavingEditor, setIsSavingEditor] = useState(false);
   const [message, setMessage] = useState("");
@@ -731,6 +732,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
     const row = createEmptyRow(rows.length + 1);
     const draft = applyPersonHandlingForAccess(row.data, userAccess);
 
+    setEditorSectionIndex(0);
     setEditor({
       draft,
       isNew: true,
@@ -744,6 +746,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
       return;
     }
 
+    setEditorSectionIndex(0);
     setEditor({
       draft: applyPersonHandlingForAccess(row.data, userAccess),
       row,
@@ -1322,99 +1325,119 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
             onClick={() => setEditor(null)}
             type="button"
           />
-          <aside className="relative h-full w-full max-w-3xl overflow-y-auto border-l border-slate-950/10 bg-white shadow-2xl">
-            <div className="sticky top-0 z-10 border-b border-slate-200 bg-white/95 px-5 py-4 backdrop-blur">
-              <div className="flex items-center justify-between gap-3">
+          <aside className="relative flex h-full w-full max-w-6xl flex-col border-l border-slate-950/10 bg-white shadow-2xl">
+            <div className="shrink-0 border-b border-slate-200 bg-white/95 px-5 py-4 backdrop-blur">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                 <div>
                   <p className="text-xs font-black uppercase tracking-[0.14em] text-teal-700">GSTAT row editor</p>
                   <h3 className="mt-1 text-2xl font-black text-slate-950">Appeal {editor.draft.Sno || editor.rowIndex + 1}</h3>
                 </div>
-                <button
-                  className="inline-flex size-9 items-center justify-center rounded-xl border border-slate-200 text-slate-700 transition hover:bg-slate-50"
-                  onClick={() => setEditor(null)}
-                  type="button"
-                >
-                  <X className="size-4" />
-                </button>
+                <div className="flex shrink-0 items-center justify-end gap-2">
+                  <button
+                    className="inline-flex h-10 items-center justify-center rounded-xl border border-slate-950/10 bg-white px-4 text-xs font-black uppercase text-slate-700 shadow-sm"
+                    onClick={() => setEditor(null)}
+                    type="button"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    className="inline-flex h-10 items-center justify-center rounded-xl bg-slate-950 px-4 text-xs font-black uppercase text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                    disabled={isSavingEditor}
+                    onClick={saveEditor}
+                    type="button"
+                  >
+                    {isSavingEditor ? "Saving..." : "Save Row"}
+                  </button>
+                  <button
+                    className="inline-flex size-10 items-center justify-center rounded-xl border border-slate-200 text-slate-700 transition hover:bg-slate-50"
+                    onClick={() => setEditor(null)}
+                    type="button"
+                  >
+                    <X className="size-4" />
+                  </button>
+                </div>
               </div>
-              <div className="mt-4 flex justify-end gap-2">
-                <button
-                  className="inline-flex h-10 items-center justify-center rounded-xl border border-slate-950/10 bg-white px-4 text-xs font-black uppercase text-slate-700 shadow-sm"
-                  onClick={() => setEditor(null)}
-                  type="button"
-                >
-                  Cancel
-                </button>
-                <button
-                  className="inline-flex h-10 items-center justify-center rounded-xl bg-slate-950 px-4 text-xs font-black uppercase text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
-                  disabled={isSavingEditor}
-                  onClick={saveEditor}
-                  type="button"
-                >
-                  {isSavingEditor ? "Saving..." : "Save Row"}
-                </button>
+              <div className="mt-4 flex gap-2 overflow-x-auto pb-1">
+                {editorSections.map((section, index) => (
+                  <button
+                    className={`inline-flex h-9 shrink-0 items-center justify-center rounded-lg border px-3 text-xs font-black uppercase transition ${
+                      editorSectionIndex === index
+                        ? "border-slate-950 bg-slate-950 text-white"
+                        : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                    }`}
+                    key={section.title}
+                    onClick={() => setEditorSectionIndex(index)}
+                    type="button"
+                  >
+                    {section.title}
+                  </button>
+                ))}
               </div>
             </div>
-            <div className="space-y-5 p-5">
-              {editorSections.map((section) => (
-                <section className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4" key={section.title}>
-                  <h4 className="text-sm font-black uppercase tracking-[0.12em] text-slate-600">{section.title}</h4>
-                  <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                    {section.fields.map((field) => (
-                      <label className="block" key={field}>
-                        <span className="text-[11px] font-black uppercase text-slate-500">{field}</span>
-                        {field === "Person handling" ? (
-                          <select
-                            className="mt-1 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-900 outline-none transition disabled:bg-slate-100 disabled:text-slate-600 focus:border-teal-300 focus:ring-2 focus:ring-teal-100"
-                            disabled={isPersonHandlingLocked(userAccess)}
-                            onChange={(event) => updateDraft(field, event.target.value)}
-                            value={editor.draft[field] ?? ""}
-                          >
-                            <option value="">Select team</option>
-                            {teamOptions.map((team) => (
-                              <option key={team} value={team}>
-                                {team}
-                              </option>
-                            ))}
-                          </select>
-                        ) : (
-                          <input
-                            className="mt-1 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-900 outline-none transition focus:border-teal-300 focus:ring-2 focus:ring-teal-100"
-                            onChange={(event) => updateDraft(field, event.target.value)}
-                            type={dateFields.has(field) ? "date" : "text"}
-                            value={editor.draft[field] ?? ""}
-                          />
-                        )}
-                      </label>
-                    ))}
-                  </div>
-                  {section.title === "Demand and deposit" ? (
-                    <div className="mt-5 space-y-4">
-                      {demandEditorGroups.map((group) => (
-                        <div key={group.title}>
-                          <p className="text-[11px] font-black uppercase tracking-[0.12em] text-slate-500">
-                            {group.title}
-                          </p>
-                          <div className="mt-2 grid gap-3 sm:grid-cols-3">
-                            {group.fields.map((field) => (
-                              <label className="block" key={field}>
-                                <span className="text-[11px] font-black uppercase text-slate-500">
-                                  {field.split(" - ").pop()}
-                                </span>
-                                <input
-                                  className="mt-1 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-900 outline-none transition focus:border-teal-300 focus:ring-2 focus:ring-teal-100"
-                                  onChange={(event) => updateDraft(field, event.target.value)}
-                                  value={editor.draft[field] ?? ""}
-                                />
-                              </label>
-                            ))}
-                          </div>
-                        </div>
+            <div className="min-h-0 flex-1 overflow-y-auto p-5">
+              {(() => {
+                const section = editorSections[editorSectionIndex] ?? editorSections[0];
+
+                return (
+                  <section className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+                    <h4 className="text-sm font-black uppercase tracking-[0.12em] text-slate-600">{section.title}</h4>
+                    <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                      {section.fields.map((field) => (
+                        <label className="block" key={field}>
+                          <span className="text-[11px] font-black uppercase text-slate-500">{field}</span>
+                          {field === "Person handling" ? (
+                            <select
+                              className="mt-1 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-900 outline-none transition disabled:bg-slate-100 disabled:text-slate-600 focus:border-teal-300 focus:ring-2 focus:ring-teal-100"
+                              disabled={isPersonHandlingLocked(userAccess)}
+                              onChange={(event) => updateDraft(field, event.target.value)}
+                              value={editor.draft[field] ?? ""}
+                            >
+                              <option value="">Select team</option>
+                              {teamOptions.map((team) => (
+                                <option key={team} value={team}>
+                                  {team}
+                                </option>
+                              ))}
+                            </select>
+                          ) : (
+                            <input
+                              className="mt-1 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-900 outline-none transition focus:border-teal-300 focus:ring-2 focus:ring-teal-100"
+                              onChange={(event) => updateDraft(field, event.target.value)}
+                              type={dateFields.has(field) ? "date" : "text"}
+                              value={editor.draft[field] ?? ""}
+                            />
+                          )}
+                        </label>
                       ))}
                     </div>
-                  ) : null}
-                </section>
-              ))}
+                    {section.title === "Demand and deposit" ? (
+                      <div className="mt-5 grid gap-3 xl:grid-cols-3">
+                        {demandEditorGroups.map((group) => (
+                          <div className="rounded-xl border border-slate-200 bg-white p-3" key={group.title}>
+                            <p className="text-[11px] font-black uppercase tracking-[0.12em] text-slate-500">
+                              {group.title}
+                            </p>
+                            <div className="mt-2 grid gap-3">
+                              {group.fields.map((field) => (
+                                <label className="block" key={field}>
+                                  <span className="text-[11px] font-black uppercase text-slate-500">
+                                    {field.split(" - ").pop()}
+                                  </span>
+                                  <input
+                                    className="mt-1 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-900 outline-none transition focus:border-teal-300 focus:ring-2 focus:ring-teal-100"
+                                    onChange={(event) => updateDraft(field, event.target.value)}
+                                    value={editor.draft[field] ?? ""}
+                                  />
+                                </label>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                  </section>
+                );
+              })()}
             </div>
           </aside>
         </div>
