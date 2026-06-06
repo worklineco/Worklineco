@@ -1202,34 +1202,41 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                         </div>
                       </div>
                     </th>
-                    {baseColumns.map((column) => (
-                      <th
-                        className="relative border-b border-r border-white/15 px-2 py-2 align-bottom font-black"
-                        key={column.key}
-                        rowSpan={2}
-                      >
-                        <ExcelColumnHeader
-                          column={column}
-                          columnValueFilters={columnValueFilters}
-                          draftFilterValues={draftFilterValues}
-                          filterSearch={filterSearch}
-                          isOpen={openFilterColumnKey === column.key}
-                          menuPosition={filterMenuPosition}
-                          onApplyFilter={applyColumnFilter}
-                          onClearFilter={clearColumnFilter}
-                          onCloseFilter={closeColumnFilter}
-                          onFilterSearchChange={setFilterSearch}
-                          onOpenFilter={openColumnFilter}
-                          onSetSort={setColumnSort}
-                          onSort={toggleSort}
-                          onToggleDraftFilterValue={toggleDraftFilterValue}
-                          onToggleVisibleDraftFilterValues={toggleVisibleDraftFilterValues}
-                          options={openFilterColumnKey === column.key ? openColumnFilterOptions : []}
-                          sortState={sortState}
-                          visibleOptions={openFilterColumnKey === column.key ? visibleColumnFilterOptions : []}
-                        />
-                      </th>
-                    ))}
+                    {baseColumns.map((column) => {
+                      const isSnoColumn = column.key === "Sno";
+
+                      return (
+                        <th
+                          className={`relative border-b border-r border-white/15 px-2 py-2 align-bottom font-black ${
+                            isSnoColumn ? "sticky z-40 bg-slate-950" : ""
+                          }`}
+                          key={column.key}
+                          rowSpan={2}
+                          style={isSnoColumn ? { left: actionColumnWidth } : undefined}
+                        >
+                          <ExcelColumnHeader
+                            column={column}
+                            columnValueFilters={columnValueFilters}
+                            draftFilterValues={draftFilterValues}
+                            filterSearch={filterSearch}
+                            isOpen={openFilterColumnKey === column.key}
+                            menuPosition={filterMenuPosition}
+                            onApplyFilter={applyColumnFilter}
+                            onClearFilter={clearColumnFilter}
+                            onCloseFilter={closeColumnFilter}
+                            onFilterSearchChange={setFilterSearch}
+                            onOpenFilter={openColumnFilter}
+                            onSetSort={setColumnSort}
+                            onSort={toggleSort}
+                            onToggleDraftFilterValue={toggleDraftFilterValue}
+                            onToggleVisibleDraftFilterValues={toggleVisibleDraftFilterValues}
+                            options={openFilterColumnKey === column.key ? openColumnFilterOptions : []}
+                            sortState={sortState}
+                            visibleOptions={openFilterColumnKey === column.key ? visibleColumnFilterOptions : []}
+                          />
+                        </th>
+                      );
+                    })}
                     {groupedColumns.map((group) => (
                       <th
                         className="border-b border-r border-white/15 px-2 py-2 text-center font-black"
@@ -1329,6 +1336,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                         {columns.map((column) => {
                           const cellValue = row.data[column.key];
                           const displayValue = dateFields.has(column.key) ? formatDateForDisplay(cellValue) : cellValue;
+                          const isSnoColumn = column.key === "Sno";
                           const isInlineEditable = canInlineEdit(column.key, userAccess);
                           const isInlineEditing =
                             inlineEditor?.rowIndex === originalIndex && inlineEditor.columnKey === column.key;
@@ -1343,6 +1351,8 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                           return (
                             <td
                               className={`h-8 border-b border-r px-1.5 py-1 font-semibold ${
+                                isSnoColumn ? "sticky z-10 bg-inherit" : ""
+                              } ${
                                 isDuplicateDrc07
                                   ? "border-amber-300 bg-amber-100 text-amber-950"
                                   : isDuplicateOia
@@ -1356,6 +1366,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                                     : "border-slate-200 text-slate-700"
                               }`}
                               key={`${originalIndex}-${column.key}`}
+                              style={isSnoColumn ? { left: actionColumnWidth } : undefined}
                             >
                               {column.key === "Sno" ? (
                                 originalIndex + 1
