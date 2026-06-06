@@ -214,16 +214,6 @@ const demandEditorGroups = [
   { fields: ["Pre Deposit Amount - CGST", "Pre Deposit Amount - SGST", "Pre Deposit Amount - IGST"], title: "Pre Deposit Amount" }
 ];
 const dateFields = new Set(["Next Hearing Date", "Due Date"]);
-const inlineEditableFields = new Set([
-  "Status",
-  "Proceedings Status",
-  "Next Hearing Date",
-  "Due Date",
-  "Remark",
-  "Person handling",
-  "State/Centre",
-  "Pre Deposit/Court Fees Mail"
-]);
 
 const initialRows = createEmptyRows(12);
 
@@ -1404,59 +1394,28 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                               {column.key === "Sno" ? (
                                 originalIndex + 1
                               ) : isInlineEditing ? (
-                                column.key === "Person handling" ? (
-                                  <select
-                                    autoFocus
-                                    className="h-7 w-full rounded-md border border-teal-300 bg-white px-1.5 text-[11px] font-bold text-slate-950 outline-none ring-2 ring-teal-100"
-                                    onBlur={saveInlineEditor}
-                                    onChange={(event) =>
-                                      setInlineEditor((currentEditor) =>
-                                        currentEditor ? { ...currentEditor, value: event.target.value } : currentEditor
-                                      )
+                                <input
+                                  autoFocus
+                                  className="h-7 w-full rounded-md border border-teal-300 bg-white px-1.5 text-[11px] font-bold text-slate-950 outline-none ring-2 ring-teal-100"
+                                  onBlur={saveInlineEditor}
+                                  onChange={(event) =>
+                                    setInlineEditor((currentEditor) =>
+                                      currentEditor ? { ...currentEditor, value: event.target.value } : currentEditor
+                                    )
+                                  }
+                                  onKeyDown={(event) => {
+                                    if (event.key === "Escape") {
+                                      event.preventDefault();
+                                      cancelInlineEditor();
                                     }
-                                    onKeyDown={(event) => {
-                                      if (event.key === "Escape") {
-                                        event.preventDefault();
-                                        cancelInlineEditor();
-                                      }
-                                      if (event.key === "Enter") {
-                                        event.preventDefault();
-                                        saveInlineEditor();
-                                      }
-                                    }}
-                                    value={inlineEditor.value}
-                                  >
-                                    <option value="">Select team</option>
-                                    {teamOptions.map((team) => (
-                                      <option key={team} value={team}>
-                                        {team}
-                                      </option>
-                                    ))}
-                                  </select>
-                                ) : (
-                                  <input
-                                    autoFocus
-                                    className="h-7 w-full rounded-md border border-teal-300 bg-white px-1.5 text-[11px] font-bold text-slate-950 outline-none ring-2 ring-teal-100"
-                                    onBlur={saveInlineEditor}
-                                    onChange={(event) =>
-                                      setInlineEditor((currentEditor) =>
-                                        currentEditor ? { ...currentEditor, value: event.target.value } : currentEditor
-                                      )
+                                    if (event.key === "Enter") {
+                                      event.preventDefault();
+                                      saveInlineEditor();
                                     }
-                                    onKeyDown={(event) => {
-                                      if (event.key === "Escape") {
-                                        event.preventDefault();
-                                        cancelInlineEditor();
-                                      }
-                                      if (event.key === "Enter") {
-                                        event.preventDefault();
-                                        saveInlineEditor();
-                                      }
-                                    }}
-                                    type={dateFields.has(column.key) ? "date" : "text"}
-                                    value={inlineEditor.value}
-                                  />
-                                )
+                                  }}
+                                  type={dateFields.has(column.key) ? "date" : "text"}
+                                  value={inlineEditor.value}
+                                />
                               ) : (
                                 <button
                                   className={`block w-full min-w-0 truncate rounded px-1.5 text-left ${
@@ -1658,8 +1617,8 @@ function isPersonHandlingLocked(access: UserAccess) {
   return !access.isPartner && Boolean(access.team);
 }
 
-function canInlineEdit(field: string, access: UserAccess) {
-  return inlineEditableFields.has(field) && !(field === "Person handling" && isPersonHandlingLocked(access));
+function canInlineEdit(field: string, _access: UserAccess) {
+  return field !== "Sno" && field !== "Person handling";
 }
 
 function applyPersonHandlingForAccess(data: RowData, access: UserAccess): RowData {
