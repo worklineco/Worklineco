@@ -1961,9 +1961,12 @@ function SortColumnHeader({
         isCentered ? "justify-center" : "justify-between text-left"
       }`}
       onClick={() => onSort(column)}
+      title={sortLabel}
       type="button"
     >
-      <span className="min-w-0 truncate">{column.label}</span>
+      <span className={`min-w-0 whitespace-normal break-words leading-tight ${isCentered ? "text-center" : "text-left"}`}>
+        {column.label}
+      </span>
       <span className="flex shrink-0 flex-col leading-none">
         <ArrowUp className={`size-3 ${isAscending ? "text-cyan-200" : "text-white/35"}`} />
         <ArrowDown className={`-mt-1 size-3 ${isDescending ? "text-cyan-200" : "text-white/35"}`} />
@@ -2020,30 +2023,35 @@ function ExcelColumnHeader({
   const selectedVisibleCount = visibleValueKeys.filter((value) => draftFilterValues.includes(value)).length;
   const areAllVisibleValuesSelected = visibleValueKeys.length > 0 && selectedVisibleCount === visibleValueKeys.length;
   const areSomeVisibleValuesSelected = selectedVisibleCount > 0 && !areAllVisibleValuesSelected;
+  const headerLabel = column.group ? `${column.group} ${column.label}` : column.label;
 
   return (
     <div className="relative">
       <div className={`flex min-w-0 items-center gap-1 ${isCentered ? "justify-center" : "justify-between text-left"}`}>
         <button
-          aria-label={`Sort by ${column.group ? `${column.group} ${column.label}` : column.label}`}
+          aria-label={`Sort by ${headerLabel}`}
           className={`flex min-w-0 flex-1 items-center gap-1 ${isCentered ? "justify-center" : "justify-between text-left"}`}
           onClick={() => onSort(column)}
+          title={headerLabel}
           type="button"
         >
-          <span className="min-w-0 truncate">{column.label}</span>
+          <span className={`min-w-0 whitespace-normal break-words leading-tight ${isCentered ? "text-center" : "text-left"}`}>
+            {column.label}
+          </span>
           <span className="flex shrink-0 flex-col leading-none">
             <ArrowUp className={`size-3 ${isAscending ? "text-cyan-200" : "text-white/35"}`} />
             <ArrowDown className={`-mt-1 size-3 ${isDescending ? "text-cyan-200" : "text-white/35"}`} />
           </span>
         </button>
         <button
-          aria-label={`Open filter for ${column.label}`}
+          aria-label={`Open filter for ${headerLabel}`}
           className={`inline-flex size-5 shrink-0 items-center justify-center rounded border transition ${
             hasFilter
               ? "border-cyan-200 bg-cyan-200 text-slate-950"
               : "border-white/15 bg-white/10 text-white hover:bg-white/20"
           }`}
           onClick={(event) => onOpenFilter(column, event.currentTarget)}
+          title={`Filter ${headerLabel}`}
           type="button"
         >
           <Filter className="size-3" />
