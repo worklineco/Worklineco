@@ -536,7 +536,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
     const dataRows = exportRows.map(({ displayIndex, row }) =>
       columns.map((column) =>
         column.key === "Sno"
-          ? displayIndex
+          ? row.row_number || row.data.Sno || displayIndex
           : dateFields.has(column.key)
             ? formatDateForDisplay(row.data[column.key])
             : row.data[column.key] ?? ""
@@ -816,7 +816,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
       {
         ...row.data,
         [inlineEditor.columnKey]: nextValue,
-        Sno: inlineEditor.rowIndex + 1
+        Sno: row.row_number || inlineEditor.rowIndex + 1
       },
       userAccess
     );
@@ -870,7 +870,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
     const rowIndex = editor.rowIndex;
     const row = editor.isNew ? editor.row : rows[rowIndex];
     const draft = applyPersonHandlingForAccess(
-      { ...editor.draft, Sno: rowIndex + 1 },
+      { ...editor.draft, Sno: row.row_number || rowIndex + 1 },
       userAccess
     );
 
@@ -1369,7 +1369,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                               style={isSnoColumn ? { left: actionColumnWidth } : undefined}
                             >
                               {column.key === "Sno" ? (
-                                originalIndex + 1
+                                row.row_number || row.data.Sno || originalIndex + 1
                               ) : isInlineEditing ? (
                                 <input
                                   autoFocus
@@ -1580,7 +1580,7 @@ function normalizeRow(row: AppealRow, index: number): AppealRow {
     data: columns.reduce<RowData>((data, column) => {
       data[column.key] =
         column.key === "Sno"
-          ? index + 1
+          ? rowNumber
           : dateFields.has(column.key)
             ? normalizeDateValue(row.data?.[column.key])
             : row.data?.[column.key] ?? "";
@@ -1674,8 +1674,8 @@ function compareRowsForColumn(
   column: Column,
   direction: SortDirection
 ) {
-  const leftValue = column.key === "Sno" ? left.originalIndex + 1 : left.row.data[column.key];
-  const rightValue = column.key === "Sno" ? right.originalIndex + 1 : right.row.data[column.key];
+  const leftValue = column.key === "Sno" ? left.row.row_number : left.row.data[column.key];
+  const rightValue = column.key === "Sno" ? right.row.row_number : right.row.data[column.key];
   const leftBlank = isBlankCell(leftValue);
   const rightBlank = isBlankCell(rightValue);
 

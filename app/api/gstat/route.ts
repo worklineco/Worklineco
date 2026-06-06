@@ -73,24 +73,33 @@ export async function POST(request: Request) {
     const selectedRowIndexes = new Set(
       (Array.isArray(rowIndexes) ? rowIndexes : []).filter((index) => Number.isInteger(index) && index >= 0)
     );
+    const shouldRenumberRows = access.isPartner || !access.team;
+    const fallbackRow = { data: {}, row_number: shouldRenumberRows ? 1 : await getNextRowNumber(admin) };
+    const insertedRow = { data: {}, row_number: shouldRenumberRows ? (rowIndex ?? -1) + 2 : await getNextRowNumber(admin) };
+    const insertedRows =
+      auditAction === "row_insert"
+        ? [
+            ...existingRows.slice(0, (rowIndex ?? -1) + 1),
+            insertedRow,
+            ...existingRows.slice((rowIndex ?? -1) + 1)
+          ]
+        : [];
+    const deletedRows =
+      auditAction === "bulk_delete"
+        ? existingRows.length > selectedRowIndexes.size
+          ? existingRows.filter((_, index) => !selectedRowIndexes.has(index))
+          : [fallbackRow]
+        : existingRows.length > 1
+          ? existingRows.filter((_, index) => index !== rowIndex)
+          : [fallbackRow];
     const nextRows =
       auditAction === "row_insert"
-        ? renumberRows([
-            ...existingRows.slice(0, (rowIndex ?? -1) + 1),
-            { data: {}, row_number: (rowIndex ?? -1) + 2 },
-            ...existingRows.slice((rowIndex ?? -1) + 1)
-          ])
-        : auditAction === "bulk_delete"
-          ? renumberRows(
-              existingRows.length > selectedRowIndexes.size
-                ? existingRows.filter((_, index) => !selectedRowIndexes.has(index))
-                : [{ data: {}, row_number: 1 }]
-            )
-          : renumberRows(
-            existingRows.length > 1
-              ? existingRows.filter((_, index) => index !== rowIndex)
-              : [{ data: {}, row_number: 1 }]
-          );
+        ? shouldRenumberRows
+          ? renumberRows(insertedRows)
+          : insertedRows
+        : shouldRenumberRows
+          ? renumberRows(deletedRows)
+          : deletedRows;
 
     return replaceRows(admin, auth.user.id, nextRows, auditAction, previous.data?.length ?? 0, access);
   }
@@ -130,13 +139,17 @@ async function replaceRows(
     return NextResponse.json({ error: deleteError.message }, { status: 500 });
   }
 
-  const insertRows = rows.map((row, index) => ({
-    created_by: userId,
-    data: { ...(row.data ?? {}), Sno: index + 1 },
-    organisation_code: organisationCode,
-    row_number: index + 1,
-    updated_by: userId
-  }));
+  const insertRows = rows.map((row, index) => {
+    const rowNumber = row.row_number ?? index + 1;
+
+    return {
+      created_by: userId,
+      data: { ...(row.data ?? {}), Sno: rowNumber },
+      organisation_code: organisationCode,
+      row_number: rowNumber,
+      updated_by: userId
+    };
+  });
 
   const inserted = insertRows.length
     ? await admin
@@ -185,16 +198,17 @@ export async function PATCH(request: Request) {
   const scopedRowData = rowData ? applyAccessToRowData(rowData, access) : undefined;
 
   if (!id) {
+    const nextRowNumber = await getNextRowNumber(admin);
     const inserted = await admin
       .from("gstat_appeals")
       .insert({
         created_by: auth.user.id,
         data: {
           ...(scopedRowData ?? applyAccessToRowData({ ...row.data, [field!]: value ?? "" }, access)),
-          Sno: row.row_number ?? 1
+          Sno: nextRowNumber
         },
         organisation_code: organisationCode,
-        row_number: row.row_number ?? 1,
+        row_number: nextRowNumber,
         updated_by: auth.user.id
       })
       .select("id,row_number,data,updated_at")
@@ -334,6 +348,22 @@ function getAccessScope(user: { user_metadata?: Record<string, unknown> }): Acce
     isPartner: role === "partner",
     team
   };
+}
+
+async function getNextRowNumber(admin: ReturnType<typeof createAdminClient>) {
+  const { data, error } = await admin
+    .from("gstat_appeals")
+    .select("row_number")
+    .eq("organisation_code", organisationCode)
+    .order("row_number", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return (data?.row_number ?? 0) + 1;
 }
 
 function createAdminClient() {
