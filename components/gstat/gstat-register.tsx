@@ -21,17 +21,12 @@ type UserAccess = { isPartner: boolean; team: string };
 type CellStyle = NonNullable<XLSX.CellObject["s"]>;
 type SortDirection = "asc" | "desc";
 type SortState = { columnKey: string; direction: SortDirection } | null;
-type AdvancedFilterCondition = "includes" | "does_not_include";
-type AdvancedFilter = {
-  condition: AdvancedFilterCondition;
-  field: string;
-  id: string;
-  values: string[];
-};
+type ColumnValueFilters = Record<string, string[]>;
+type ColumnFilterOption = { key: string; label: string };
 
 const actionColumnWidth = 122;
-const advancedFilterOptionLimit = 250;
-const blankAdvancedFilterValue = "__workline_blank__";
+const columnFilterOptionLimit = 1000;
+const blankColumnFilterValue = "__workline_column_blank__";
 const poaGptUrl = "https://chatgpt.com/g/g-6a1f3abf8d008191985119e155f67c5f-poa-vakalatnama-helper";
 
 const baseColumns: Column[] = [
@@ -219,7 +214,10 @@ const initialRows = createEmptyRows(12);
 
 export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }) {
   const [rows, setRows] = useState<AppealRow[]>(initialRows);
-  const [filters, setFilters] = useState<Record<string, string>>({});
+  const [columnValueFilters, setColumnValueFilters] = useState<ColumnValueFilters>({});
+  const [openFilterColumnKey, setOpenFilterColumnKey] = useState<string | null>(null);
+  const [filterSearch, setFilterSearch] = useState("");
+  const [draftFilterValues, setDraftFilterValues] = useState<string[]>([]);
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSavingEditor, setIsSavingEditor] = useState(false);
@@ -227,9 +225,6 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
   const [userAccess, setUserAccess] = useState<UserAccess>({ isPartner: false, team: "" });
   const [sortState, setSortState] = useState<SortState>(null);
   const [selectedRowKeys, setSelectedRowKeys] = useState<Set<string>>(() => new Set());
-  const [isMoreFiltersVisible, setIsMoreFiltersVisible] = useState(false);
-  const [appliedAdvancedFilters, setAppliedAdvancedFilters] = useState<AdvancedFilter[]>(() => [createAdvancedFilter()]);
-  const [draftAdvancedFilters, setDraftAdvancedFilters] = useState<AdvancedFilter[]>(() => [createAdvancedFilter()]);
   const [, startRowsTransition] = useTransition();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const uniqueAppeals = useMemo(
@@ -249,9 +244,18 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
   );
   
   const [globalSearch, setGlobalSearch] = useState("");
-  const deferredAdvancedFilters = useDeferredValue(appliedAdvancedFilters);
-  const deferredFilters = useDeferredValue(filters);
+  const deferredColumnValueFilters = useDeferredValue(columnValueFilters);
   const deferredGlobalSearch = useDeferredValue(globalSearch);
+  const activeColumnFilterEntries = useMemo(
+    () =>
+      Object.entries(deferredColumnValueFilters)
+        .map(([columnKey, selectedValues]) => ({ column: columns.find((item) => item.key === columnKey), selectedValues }))
+        .filter(
+          (entry): entry is { column: Column; selectedValues: string[] } =>
+            Boolean(entry.column) && entry.selectedValues.length > 0
+        ),
+    [deferredColumnValueFilters]
+  );
   const rowSearchText = useMemo(
     () =>
       rows.map((row) =>
@@ -265,10 +269,6 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
 
   const filteredRows = useMemo(
     () => {
-      const activeAdvancedFilters = deferredAdvancedFilters.filter(isAdvancedFilterComplete);
-      const activeColumnFilters = columns
-        .map((column) => ({ column, rawFilter: deferredFilters[column.key] }))
-        .filter(({ rawFilter }) => rawFilter?.trim());
       const globalSearchLower = deferredGlobalSearch.toLowerCase().trim();
       const visibleRows = rows
         .map((row, index) => ({ row, originalIndex: index }))
@@ -283,11 +283,9 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
             if (!matchesGlobal) return false;
           }
 
-          return activeColumnFilters.every(({ column, rawFilter }) =>
-            matchesColumnFilter(row.data[column.key], column, rawFilter, {
-              duplicateOiaNumbers
-            })
-          ) && activeAdvancedFilters.every((filter) => matchesAdvancedFilter(row, filter));
+          return activeColumnFilterEntries.every(({ column, selectedValues }) =>
+            selectedValues.includes(getColumnFilterValueKey(row.data[column.key], column))
+          );
         });
 
       if (!sortState) {
@@ -302,7 +300,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
 
       return [...visibleRows].sort((left, right) => compareRowsForColumn(left, right, sortColumn, sortState.direction));
     },
-    [deferredAdvancedFilters, deferredFilters, deferredGlobalSearch, duplicateOiaNumbers, rows, rowSearchText, sortState]
+    [activeColumnFilterEntries, deferredGlobalSearch, duplicateOiaNumbers, rows, rowSearchText, sortState]
   );
   
   const filteredUniqueAppeals = useMemo(
@@ -313,29 +311,9 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
   const hasActiveFilters = useMemo(
     () =>
       Boolean(globalSearch.trim()) ||
-      Object.values(filters).some((filter) => filter?.trim()) ||
-      appliedAdvancedFilters.some(isAdvancedFilterComplete),
-    [appliedAdvancedFilters, filters, globalSearch]
+      Object.values(columnValueFilters).some((selectedValues) => selectedValues.length),
+    [columnValueFilters, globalSearch]
   );
-  const selectedAdvancedFilterFields = useMemo(
-    () => Array.from(new Set(draftAdvancedFilters.map((filter) => filter.field).filter(Boolean))),
-    [draftAdvancedFilters]
-  );
-  const advancedFilterOptionsByField = useMemo(() => {
-    if (!isMoreFiltersVisible || !selectedAdvancedFilterFields.length) {
-      return {};
-    }
-
-    return selectedAdvancedFilterFields.reduce<Record<string, string[]>>((optionsByField, field) => {
-      const column = columns.find((item) => item.key === field);
-
-      if (column) {
-        optionsByField[field] = getUniqueColumnDisplayValues(rows, column, advancedFilterOptionLimit);
-      }
-
-      return optionsByField;
-    }, {});
-  }, [isMoreFiltersVisible, rows, selectedAdvancedFilterFields]);
   const selectedRowIndexes = useMemo(
     () =>
       rows
@@ -352,6 +330,23 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
   const selectedVisibleRowCount = visibleRowKeys.filter((key) => selectedRowKeys.has(key)).length;
   const areAllVisibleRowsSelected = visibleRowKeys.length > 0 && selectedVisibleRowCount === visibleRowKeys.length;
   const areSomeVisibleRowsSelected = selectedVisibleRowCount > 0 && !areAllVisibleRowsSelected;
+  const openFilterColumn = openFilterColumnKey ? columns.find((column) => column.key === openFilterColumnKey) : null;
+  const openColumnFilterOptions = useMemo(
+    () =>
+      openFilterColumn
+        ? getUniqueColumnFilterOptions(rows, openFilterColumn, columnFilterOptionLimit)
+        : [],
+    [openFilterColumn, rows]
+  );
+  const visibleColumnFilterOptions = useMemo(() => {
+    const search = filterSearch.trim().toLowerCase();
+
+    if (!search) {
+      return openColumnFilterOptions;
+    }
+
+    return openColumnFilterOptions.filter((option) => option.label.toLowerCase().includes(search));
+  }, [filterSearch, openColumnFilterOptions]);
 
   function toggleSort(column: Column) {
     setSortState((currentSort) => {
@@ -397,68 +392,71 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
     });
   }
 
-  function addAdvancedFilter() {
-    setDraftAdvancedFilters((currentFilters) => [...currentFilters, createAdvancedFilter()]);
-    setIsMoreFiltersVisible(true);
+  function openColumnFilter(column: Column) {
+    const options = getUniqueColumnFilterOptions(rows, column, columnFilterOptionLimit);
+    const appliedValues = columnValueFilters[column.key];
+
+    setOpenFilterColumnKey(column.key);
+    setFilterSearch("");
+    setDraftFilterValues(appliedValues?.length ? appliedValues : options.map((option) => option.key));
   }
 
-  function clearAdvancedFilters() {
-    const blankFilter = createAdvancedFilter();
-    setAppliedAdvancedFilters([blankFilter]);
-    setDraftAdvancedFilters([createAdvancedFilter()]);
+  function closeColumnFilter() {
+    setOpenFilterColumnKey(null);
+    setFilterSearch("");
+    setDraftFilterValues([]);
   }
 
-  function runAdvancedFilters() {
-    setAppliedAdvancedFilters(cloneAdvancedFilters(draftAdvancedFilters));
+  function toggleDraftFilterValue(value: string) {
+    setDraftFilterValues((currentValues) =>
+      currentValues.includes(value)
+        ? currentValues.filter((currentValue) => currentValue !== value)
+        : [...currentValues, value]
+    );
   }
 
-  function removeAdvancedFilter(filterId: string) {
-    setDraftAdvancedFilters((currentFilters) => {
-      const nextFilters = currentFilters.filter((filter) => filter.id !== filterId);
-      return nextFilters.length ? nextFilters : [createAdvancedFilter()];
+  function toggleVisibleDraftFilterValues() {
+    const visibleValues = visibleColumnFilterOptions.map((option) => option.key);
+    const selectedVisibleValues = visibleValues.filter((value) => draftFilterValues.includes(value));
+
+    setDraftFilterValues((currentValues) => {
+      if (selectedVisibleValues.length === visibleValues.length) {
+        return currentValues.filter((value) => !visibleValues.includes(value));
+      }
+
+      return Array.from(new Set([...currentValues, ...visibleValues]));
     });
   }
 
-  function updateAdvancedFilter(filterId: string, patch: Partial<Omit<AdvancedFilter, "id">>) {
-    setDraftAdvancedFilters((currentFilters) =>
-      currentFilters.map((filter) => {
-        if (filter.id !== filterId) {
-          return filter;
-        }
-
-        const nextFilter = { ...filter, ...patch };
-
-        if (patch.field !== undefined && patch.field !== filter.field) {
-          nextFilter.values = [];
-        }
-
-        return nextFilter;
-      })
-    );
+  function setColumnSort(column: Column, direction: SortDirection) {
+    setSortState({ columnKey: column.key, direction });
   }
 
-  function addAdvancedFilterValue(filterId: string, value: string) {
-    if (!value) {
-      return;
-    }
+  function applyColumnFilter(column: Column) {
+    const allValues = openColumnFilterOptions.map((option) => option.key);
+    const selectedValues = allValues.filter((value) => draftFilterValues.includes(value));
 
-    setDraftAdvancedFilters((currentFilters) =>
-      currentFilters.map((filter) =>
-        filter.id === filterId && !filter.values.includes(value)
-          ? { ...filter, values: [...filter.values, value] }
-          : filter
-      )
-    );
+    setColumnValueFilters((currentFilters) => {
+      const nextFilters = { ...currentFilters };
+
+      if (!selectedValues.length || selectedValues.length === allValues.length) {
+        delete nextFilters[column.key];
+      } else {
+        nextFilters[column.key] = selectedValues;
+      }
+
+      return nextFilters;
+    });
+    closeColumnFilter();
   }
 
-  function removeAdvancedFilterValue(filterId: string, value: string) {
-    setDraftAdvancedFilters((currentFilters) =>
-      currentFilters.map((filter) =>
-        filter.id === filterId
-          ? { ...filter, values: filter.values.filter((selectedValue) => selectedValue !== value) }
-          : filter
-      )
-    );
+  function clearColumnFilter(column: Column) {
+    setColumnValueFilters((currentFilters) => {
+      const nextFilters = { ...currentFilters };
+      delete nextFilters[column.key];
+      return nextFilters;
+    });
+    closeColumnFilter();
   }
 
   useEffect(() => {
@@ -1028,146 +1026,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                 </button>
               )}
             </div>
-            <button
-              className={`inline-flex h-10 items-center justify-center gap-2 rounded-xl border px-3 text-xs font-black uppercase shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${
-                isMoreFiltersVisible
-                  ? "border-sky-200 bg-sky-50 text-sky-800"
-                  : "border-slate-950/10 bg-white text-slate-800"
-              }`}
-              onClick={() => setIsMoreFiltersVisible((isVisible) => !isVisible)}
-              type="button"
-            >
-              <Filter className="size-4" />
-              More Filters
-            </button>
           </div>
-
-          {isMoreFiltersVisible ? (
-            <div className="mb-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
-              <div className="flex flex-col gap-2">
-                {draftAdvancedFilters.map((filter, index) => {
-                  const valueOptions = filter.field ? advancedFilterOptionsByField[filter.field] ?? [] : [];
-                  const availableValueOptions = valueOptions.filter(
-                    (value) => !filter.values.includes(value || blankAdvancedFilterValue)
-                  );
-
-                  return (
-                    <div
-                      className="grid gap-2 lg:grid-cols-[46px_minmax(180px,1fr)_180px_minmax(220px,1.2fr)_auto]"
-                      key={filter.id}
-                    >
-                      <div className="flex h-9 items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-sm font-black text-slate-500">
-                        {index + 1}
-                      </div>
-                      <select
-                        className="h-9 min-w-0 rounded-lg border border-slate-200 bg-white px-2 text-sm font-bold text-slate-800 outline-none transition focus:border-sky-300 focus:ring-2 focus:ring-sky-100"
-                        onChange={(event) => updateAdvancedFilter(filter.id, { field: event.target.value })}
-                        value={filter.field}
-                      >
-                        <option value="">Select a field</option>
-                        {columns.map((column) => (
-                          <option key={column.key} value={column.key}>
-                            {column.group ? `${column.group} - ${column.label}` : column.label}
-                          </option>
-                        ))}
-                      </select>
-                      <select
-                        className="h-9 min-w-0 rounded-lg border border-slate-200 bg-white px-2 text-sm font-bold text-slate-800 outline-none transition focus:border-sky-300 focus:ring-2 focus:ring-sky-100"
-                        onChange={(event) =>
-                          updateAdvancedFilter(filter.id, {
-                            condition: event.target.value as AdvancedFilterCondition
-                          })
-                        }
-                        value={filter.condition}
-                      >
-                        <option value="includes">Includes</option>
-                        <option value="does_not_include">Does not include</option>
-                      </select>
-                      <div className="min-w-0 rounded-lg border border-slate-200 bg-white p-1.5 transition focus-within:border-sky-300 focus-within:ring-2 focus-within:ring-sky-100">
-                        <div className="flex min-h-8 flex-wrap items-center gap-1.5">
-                          {filter.values.map((value) => (
-                            <span
-                              className="inline-flex max-w-full items-center gap-1 rounded-md bg-slate-100 px-2 py-1 text-xs font-black text-slate-700"
-                              key={value}
-                            >
-                              <span className="truncate">{getAdvancedFilterValueLabel(value)}</span>
-                              <button
-                                aria-label={`Remove ${getAdvancedFilterValueLabel(value)}`}
-                                className="text-slate-400 transition hover:text-rose-600"
-                                onClick={() => removeAdvancedFilterValue(filter.id, value)}
-                                type="button"
-                              >
-                                <X className="size-3" />
-                              </button>
-                            </span>
-                          ))}
-                          <select
-                            className="h-7 min-w-[150px] flex-1 bg-transparent px-1 text-sm font-bold text-slate-800 outline-none disabled:text-slate-400"
-                            disabled={!filter.field}
-                            onChange={(event) => {
-                              addAdvancedFilterValue(filter.id, event.target.value);
-                              event.target.value = "";
-                            }}
-                            value=""
-                          >
-                            <option value="">Select value</option>
-                            {availableValueOptions.map((value) => (
-                              <option key={value || blankAdvancedFilterValue} value={value || blankAdvancedFilterValue}>
-                                {value || "(Blank)"}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <button
-                          aria-label="Add filter"
-                          className="inline-flex size-9 items-center justify-center rounded-lg border border-sky-200 bg-sky-50 text-sky-700 transition hover:bg-sky-100"
-                          onClick={addAdvancedFilter}
-                          type="button"
-                        >
-                          <Plus className="size-4" />
-                        </button>
-                        <button
-                          aria-label="Remove filter"
-                          className="inline-flex size-9 items-center justify-center rounded-lg border border-rose-200 bg-rose-50 text-rose-700 transition hover:bg-rose-100"
-                          onClick={() => removeAdvancedFilter(filter.id)}
-                          type="button"
-                        >
-                          <Trash2 className="size-4" />
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-              <div className="mt-3 flex flex-wrap items-center gap-2">
-                <button
-                  className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 text-xs font-black uppercase text-sky-700 transition hover:bg-sky-100"
-                  onClick={addAdvancedFilter}
-                  type="button"
-                >
-                  <Plus className="size-4" />
-                  Add More
-                </button>
-                <button
-                  className="inline-flex h-9 items-center justify-center rounded-lg border border-slate-200 bg-white px-3 text-xs font-black uppercase text-slate-600 transition hover:bg-slate-50"
-                  onClick={clearAdvancedFilters}
-                  type="button"
-                >
-                  Clear
-                </button>
-                <button
-                  className="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-slate-950 px-3 text-xs font-black uppercase text-white transition hover:bg-slate-800"
-                  onClick={runAdvancedFilters}
-                  type="button"
-                >
-                  <Filter className="size-4" />
-                  Run
-                </button>
-              </div>
-            </div>
-          ) : null}
 
           <div className="overflow-hidden rounded-2xl border border-slate-950/10 bg-white">
             <div className={`${isMaximized ? "max-h-[calc(100vh-82px)]" : "max-h-[calc(100vh-285px)]"} overflow-auto`}>
@@ -1187,16 +1046,72 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                       className="sticky left-0 z-50 border-b border-r border-white/15 bg-slate-950 px-2 py-2 align-bottom font-black"
                       rowSpan={2}
                     >
-                      Row
+                      <div className="space-y-2">
+                        <span className="block">Row</span>
+                        <div className="flex items-center gap-1">
+                          <input
+                            aria-label="Select visible rows"
+                            checked={areAllVisibleRowsSelected}
+                            className="size-4 rounded border-slate-300 accent-teal-600"
+                            onChange={toggleVisibleRowSelection}
+                            ref={(input) => {
+                              if (input) {
+                                input.indeterminate = areSomeVisibleRowsSelected;
+                              }
+                            }}
+                            title="Select visible rows"
+                            type="checkbox"
+                          />
+                          <button
+                            className="inline-flex h-7 items-center justify-center gap-1 rounded-md border border-teal-200 bg-teal-50 px-1.5 text-[10px] font-black uppercase text-teal-800 transition hover:bg-teal-100"
+                            onClick={openNewEditor}
+                            type="button"
+                          >
+                            <Plus className="size-3" />
+                            Add
+                          </button>
+                          <button
+                            aria-label="Delete selected rows"
+                            className="inline-flex size-7 items-center justify-center rounded-md border border-rose-200 bg-rose-50 text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-40"
+                            disabled={!selectedRowIndexes.length}
+                            onClick={deleteSelectedRows}
+                            title={
+                              selectedRowIndexes.length
+                                ? `Delete ${selectedRowIndexes.length} selected row${selectedRowIndexes.length === 1 ? "" : "s"}`
+                                : "Select rows to delete"
+                            }
+                            type="button"
+                          >
+                            <Trash2 className="size-3.5" />
+                          </button>
+                        </div>
+                      </div>
                     </th>
                     {baseColumns.map((column) => (
                       <th
-                        className="border-b border-r border-white/15 px-2 py-2 align-bottom font-black"
+                        className="relative border-b border-r border-white/15 px-2 py-2 align-bottom font-black"
                         key={column.key}
                         rowSpan={2}
-                        title={`Sort by ${column.label}`}
                       >
-                        <SortColumnHeader column={column} onSort={toggleSort} sortState={sortState} />
+                        <ExcelColumnHeader
+                          column={column}
+                          columnValueFilters={columnValueFilters}
+                          draftFilterValues={draftFilterValues}
+                          filterSearch={filterSearch}
+                          isOpen={openFilterColumnKey === column.key}
+                          onApplyFilter={applyColumnFilter}
+                          onClearFilter={clearColumnFilter}
+                          onCloseFilter={closeColumnFilter}
+                          onFilterSearchChange={setFilterSearch}
+                          onOpenFilter={openColumnFilter}
+                          onSetSort={setColumnSort}
+                          onSort={toggleSort}
+                          onToggleDraftFilterValue={toggleDraftFilterValue}
+                          onToggleVisibleDraftFilterValues={toggleVisibleDraftFilterValues}
+                          options={openFilterColumnKey === column.key ? openColumnFilterOptions : []}
+                          sortState={sortState}
+                          visibleOptions={openFilterColumnKey === column.key ? visibleColumnFilterOptions : []}
+                        />
                       </th>
                     ))}
                     {groupedColumns.map((group) => (
@@ -1210,82 +1125,57 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                     ))}
                     {finalColumns.map((column) => (
                       <th
-                        className="border-b border-r border-white/15 px-2 py-2 align-bottom font-black"
+                        className="relative border-b border-r border-white/15 px-2 py-2 align-bottom font-black"
                         key={column.key}
                         rowSpan={2}
-                        title={`Sort by ${column.label}`}
                       >
-                        <SortColumnHeader column={column} onSort={toggleSort} sortState={sortState} />
+                        <ExcelColumnHeader
+                          column={column}
+                          columnValueFilters={columnValueFilters}
+                          draftFilterValues={draftFilterValues}
+                          filterSearch={filterSearch}
+                          isOpen={openFilterColumnKey === column.key}
+                          onApplyFilter={applyColumnFilter}
+                          onClearFilter={clearColumnFilter}
+                          onCloseFilter={closeColumnFilter}
+                          onFilterSearchChange={setFilterSearch}
+                          onOpenFilter={openColumnFilter}
+                          onSetSort={setColumnSort}
+                          onSort={toggleSort}
+                          onToggleDraftFilterValue={toggleDraftFilterValue}
+                          onToggleVisibleDraftFilterValues={toggleVisibleDraftFilterValues}
+                          options={openFilterColumnKey === column.key ? openColumnFilterOptions : []}
+                          sortState={sortState}
+                          visibleOptions={openFilterColumnKey === column.key ? visibleColumnFilterOptions : []}
+                        />
                       </th>
                     ))}
                   </tr>
                   <tr>
                     {demandColumns.map((column) => (
                       <th
-                        className="border-b border-r border-white/15 px-2 py-2 text-center font-black"
+                        className="relative border-b border-r border-white/15 px-2 py-2 text-center font-black"
                         key={column.key}
-                        title={`Sort by ${column.group} ${column.label}`}
                       >
-                        <SortColumnHeader column={column} isCentered onSort={toggleSort} sortState={sortState} />
-                      </th>
-                    ))}
-                  </tr>
-                  <tr className="bg-white text-slate-800 shadow-[inset_0_-1px_0_rgba(15,23,42,0.10)]">
-                    <th className="sticky left-0 z-50 h-10 border-b border-r border-slate-200 bg-white px-1.5 py-1">
-                      <div className="flex items-center gap-1">
-                        <input
-                          aria-label="Select visible rows"
-                          checked={areAllVisibleRowsSelected}
-                          className="size-4 rounded border-slate-300 accent-teal-600"
-                          onChange={toggleVisibleRowSelection}
-                          ref={(input) => {
-                            if (input) {
-                              input.indeterminate = areSomeVisibleRowsSelected;
-                            }
-                          }}
-                          title="Select visible rows"
-                          type="checkbox"
-                        />
-                        <button
-                          className="inline-flex h-7 items-center justify-center gap-1 rounded-md border border-teal-200 bg-teal-50 px-1.5 text-[10px] font-black uppercase text-teal-800 transition hover:bg-teal-100"
-                          onClick={openNewEditor}
-                          type="button"
-                        >
-                          <Plus className="size-3" />
-                          Add
-                        </button>
-                        <button
-                          aria-label="Delete selected rows"
-                          className="inline-flex size-7 items-center justify-center rounded-md border border-rose-200 bg-rose-50 text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-40"
-                          disabled={!selectedRowIndexes.length}
-                          onClick={deleteSelectedRows}
-                          title={
-                            selectedRowIndexes.length
-                              ? `Delete ${selectedRowIndexes.length} selected row${selectedRowIndexes.length === 1 ? "" : "s"}`
-                              : "Select rows to delete"
-                          }
-                          type="button"
-                        >
-                          <Trash2 className="size-3.5" />
-                        </button>
-                      </div>
-                    </th>
-                    {columns.map((column) => (
-                      <th
-                        className="h-10 border-b border-r border-slate-200 bg-white px-1.5 py-1"
-                        key={`filter-${column.key}`}
-                      >
-                        <input
-                          aria-label={`Filter ${column.label}`}
-                          className="h-7 w-full min-w-0 rounded-md border border-slate-200 bg-slate-50 px-1.5 text-[11px] font-bold text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-teal-300 focus:bg-white focus:ring-2 focus:ring-teal-100"
-                          onChange={(event) =>
-                            setFilters((currentFilters) => ({
-                              ...currentFilters,
-                              [column.key]: event.target.value
-                            }))
-                          }
-                          placeholder="Filter / blank"
-                          value={filters[column.key] ?? ""}
+                        <ExcelColumnHeader
+                          column={column}
+                          columnValueFilters={columnValueFilters}
+                          draftFilterValues={draftFilterValues}
+                          filterSearch={filterSearch}
+                          isCentered
+                          isOpen={openFilterColumnKey === column.key}
+                          onApplyFilter={applyColumnFilter}
+                          onClearFilter={clearColumnFilter}
+                          onCloseFilter={closeColumnFilter}
+                          onFilterSearchChange={setFilterSearch}
+                          onOpenFilter={openColumnFilter}
+                          onSetSort={setColumnSort}
+                          onSort={toggleSort}
+                          onToggleDraftFilterValue={toggleDraftFilterValue}
+                          onToggleVisibleDraftFilterValues={toggleVisibleDraftFilterValues}
+                          options={openFilterColumnKey === column.key ? openColumnFilterOptions : []}
+                          sortState={sortState}
+                          visibleOptions={openFilterColumnKey === column.key ? visibleColumnFilterOptions : []}
                         />
                       </th>
                     ))}
@@ -1535,22 +1425,6 @@ function renumberRows(rows: AppealRow[]) {
 
 function getRowSelectionKey(row: AppealRow | undefined, index: number) {
   return row?.id ? `id:${row.id}` : `index:${index}`;
-}
-
-function createAdvancedFilter(): AdvancedFilter {
-  return {
-    condition: "includes",
-    field: "",
-    id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-    values: []
-  };
-}
-
-function cloneAdvancedFilters(filters: AdvancedFilter[]) {
-  return filters.map((filter) => ({
-    ...filter,
-    values: [...filter.values]
-  }));
 }
 
 function normalizeRows(rows: AppealRow[]) {
@@ -1855,47 +1729,6 @@ function matchesColumnFilter(
   return rawValue.includes(filter) || displayValue.includes(filter);
 }
 
-function isAdvancedFilterComplete(filter: AdvancedFilter) {
-  return Boolean(filter.field && filter.values.length);
-}
-
-function matchesAdvancedFilter(row: AppealRow, filter: AdvancedFilter) {
-  const column = columns.find((item) => item.key === filter.field);
-
-  if (!column) {
-    return true;
-  }
-
-  const cellValue = getCellDisplayValue(row.data[column.key], column);
-  const matchesValue = filter.values.some((value) => {
-    const filterValue = value === blankAdvancedFilterValue ? "" : value;
-    return value === blankAdvancedFilterValue
-      ? cellValue === ""
-      : cellValue.toLowerCase().includes(filterValue.toLowerCase());
-  });
-
-  return filter.condition === "includes" ? matchesValue : !matchesValue;
-}
-
-function getUniqueColumnDisplayValues(rows: AppealRow[], column: Column, limit?: number) {
-  const values = new Set<string>();
-
-  for (const row of rows) {
-    values.add(getCellDisplayValue(row.data[column.key], column));
-
-    if (limit && values.size >= limit) {
-      break;
-    }
-  }
-
-  return Array.from(values).sort((left, right) =>
-    left.localeCompare(right, undefined, {
-      numeric: true,
-      sensitivity: "base"
-    })
-  );
-}
-
 function getCellDisplayValue(value: string | number | undefined, column: Column) {
   if (column.key === "Sno") {
     return String(value ?? "");
@@ -1904,8 +1737,34 @@ function getCellDisplayValue(value: string | number | undefined, column: Column)
   return dateFields.has(column.key) ? formatDateForDisplay(value) : String(value ?? "").trim();
 }
 
-function getAdvancedFilterValueLabel(value: string) {
-  return value === blankAdvancedFilterValue ? "(Blank)" : value;
+function getColumnFilterValueKey(value: string | number | undefined, column: Column) {
+  const displayValue = getCellDisplayValue(value, column);
+  return displayValue ? displayValue : blankColumnFilterValue;
+}
+
+function getColumnFilterValueLabel(valueKey: string) {
+  return valueKey === blankColumnFilterValue ? "(Blank)" : valueKey;
+}
+
+function getUniqueColumnFilterOptions(rows: AppealRow[], column: Column, limit?: number): ColumnFilterOption[] {
+  const values = new Set<string>();
+
+  for (const row of rows) {
+    values.add(getColumnFilterValueKey(row.data[column.key], column));
+
+    if (limit && values.size >= limit) {
+      break;
+    }
+  }
+
+  return Array.from(values)
+    .sort((left, right) =>
+      getColumnFilterValueLabel(left).localeCompare(getColumnFilterValueLabel(right), undefined, {
+        numeric: true,
+        sensitivity: "base"
+      })
+    )
+    .map((value) => ({ key: value, label: getColumnFilterValueLabel(value) }));
 }
 
 function isGroupedOiaSearch(filter: string) {
@@ -1942,6 +1801,193 @@ function SortColumnHeader({
         <ArrowDown className={`-mt-1 size-3 ${isDescending ? "text-cyan-200" : "text-white/35"}`} />
       </span>
     </button>
+  );
+}
+
+function ExcelColumnHeader({
+  column,
+  columnValueFilters,
+  draftFilterValues,
+  filterSearch,
+  isCentered = false,
+  isOpen,
+  onApplyFilter,
+  onClearFilter,
+  onCloseFilter,
+  onFilterSearchChange,
+  onOpenFilter,
+  onSetSort,
+  onSort,
+  onToggleDraftFilterValue,
+  onToggleVisibleDraftFilterValues,
+  options,
+  sortState,
+  visibleOptions
+}: {
+  column: Column;
+  columnValueFilters: ColumnValueFilters;
+  draftFilterValues: string[];
+  filterSearch: string;
+  isCentered?: boolean;
+  isOpen: boolean;
+  onApplyFilter: (column: Column) => void;
+  onClearFilter: (column: Column) => void;
+  onCloseFilter: () => void;
+  onFilterSearchChange: (value: string) => void;
+  onOpenFilter: (column: Column) => void;
+  onSetSort: (column: Column, direction: SortDirection) => void;
+  onSort: (column: Column) => void;
+  onToggleDraftFilterValue: (value: string) => void;
+  onToggleVisibleDraftFilterValues: () => void;
+  options: ColumnFilterOption[];
+  sortState: SortState;
+  visibleOptions: ColumnFilterOption[];
+}) {
+  const isAscending = sortState?.columnKey === column.key && sortState.direction === "asc";
+  const isDescending = sortState?.columnKey === column.key && sortState.direction === "desc";
+  const hasFilter = Boolean(columnValueFilters[column.key]?.length);
+  const visibleValueKeys = visibleOptions.map((option) => option.key);
+  const selectedVisibleCount = visibleValueKeys.filter((value) => draftFilterValues.includes(value)).length;
+  const areAllVisibleValuesSelected = visibleValueKeys.length > 0 && selectedVisibleCount === visibleValueKeys.length;
+  const areSomeVisibleValuesSelected = selectedVisibleCount > 0 && !areAllVisibleValuesSelected;
+
+  return (
+    <div className="relative">
+      <div className={`flex min-w-0 items-center gap-1 ${isCentered ? "justify-center" : "justify-between text-left"}`}>
+        <button
+          aria-label={`Sort by ${column.group ? `${column.group} ${column.label}` : column.label}`}
+          className={`flex min-w-0 flex-1 items-center gap-1 ${isCentered ? "justify-center" : "justify-between text-left"}`}
+          onClick={() => onSort(column)}
+          type="button"
+        >
+          <span className="min-w-0 truncate">{column.label}</span>
+          <span className="flex shrink-0 flex-col leading-none">
+            <ArrowUp className={`size-3 ${isAscending ? "text-cyan-200" : "text-white/35"}`} />
+            <ArrowDown className={`-mt-1 size-3 ${isDescending ? "text-cyan-200" : "text-white/35"}`} />
+          </span>
+        </button>
+        <button
+          aria-label={`Open filter for ${column.label}`}
+          className={`inline-flex size-5 shrink-0 items-center justify-center rounded border transition ${
+            hasFilter
+              ? "border-cyan-200 bg-cyan-200 text-slate-950"
+              : "border-white/15 bg-white/10 text-white hover:bg-white/20"
+          }`}
+          onClick={() => onOpenFilter(column)}
+          type="button"
+        >
+          <Filter className="size-3" />
+        </button>
+      </div>
+
+      {isOpen ? (
+        <div className="absolute left-0 top-full z-[80] mt-2 w-72 rounded-lg border border-slate-300 bg-white p-2 text-left text-slate-900 shadow-2xl">
+          <div className="space-y-1 border-b border-slate-200 pb-2">
+            <button
+              className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm font-semibold transition hover:bg-slate-100"
+              onClick={() => {
+                onSetSort(column, "asc");
+                onCloseFilter();
+              }}
+              type="button"
+            >
+              <span className="flex w-8 items-center justify-center text-xs font-black text-sky-700">A-Z</span>
+              Sort A to Z
+            </button>
+            <button
+              className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm font-semibold transition hover:bg-slate-100"
+              onClick={() => {
+                onSetSort(column, "desc");
+                onCloseFilter();
+              }}
+              type="button"
+            >
+              <span className="flex w-8 items-center justify-center text-xs font-black text-sky-700">Z-A</span>
+              Sort Z to A
+            </button>
+          </div>
+
+          <button
+            className="mt-2 flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm font-semibold text-slate-500 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-300 disabled:hover:bg-white"
+            disabled={!hasFilter}
+            onClick={() => onClearFilter(column)}
+            type="button"
+          >
+            <X className="size-4" />
+            Clear Filter From "{column.label}"
+          </button>
+
+          <div className="mt-2 flex items-center gap-2 rounded-md border border-slate-300 px-2 py-1.5">
+            <Search className="size-4 text-slate-400" />
+            <input
+              className="min-w-0 flex-1 bg-transparent text-sm font-semibold outline-none placeholder:text-slate-400"
+              onChange={(event) => onFilterSearchChange(event.target.value)}
+              placeholder="Search"
+              value={filterSearch}
+            />
+          </div>
+
+          <div className="mt-2 max-h-64 overflow-y-auto border border-slate-200 bg-slate-50 p-2">
+            <label className="flex cursor-pointer items-center gap-2 text-sm font-semibold text-slate-950">
+              <input
+                checked={areAllVisibleValuesSelected}
+                className="size-4 accent-slate-950"
+                onChange={onToggleVisibleDraftFilterValues}
+                ref={(input) => {
+                  if (input) {
+                    input.indeterminate = areSomeVisibleValuesSelected;
+                  }
+                }}
+                type="checkbox"
+              />
+              (Select All)
+            </label>
+            <div className="mt-1 space-y-1">
+              {visibleOptions.length ? (
+                visibleOptions.map((option) => (
+                  <label className="flex cursor-pointer items-center gap-2 text-sm font-semibold text-slate-950" key={option.key}>
+                    <input
+                      checked={draftFilterValues.includes(option.key)}
+                      className="size-4 accent-slate-950"
+                      onChange={() => onToggleDraftFilterValue(option.key)}
+                      type="checkbox"
+                    />
+                    <span className="min-w-0 truncate" title={option.label}>
+                      {option.label}
+                    </span>
+                  </label>
+                ))
+              ) : (
+                <p className="py-6 text-center text-sm font-semibold text-slate-500">No values found</p>
+              )}
+            </div>
+          </div>
+
+          {options.length >= columnFilterOptionLimit ? (
+            <p className="mt-2 text-xs font-semibold text-amber-700">
+              Showing first {columnFilterOptionLimit} unique values.
+            </p>
+          ) : null}
+
+          <div className="mt-3 flex justify-end gap-2">
+            <button
+              className="inline-flex h-9 items-center justify-center rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+              onClick={onCloseFilter}
+              type="button"
+            >
+              Cancel
+            </button>
+            <button
+              className="inline-flex h-9 items-center justify-center rounded-md bg-slate-950 px-4 text-sm font-semibold text-white transition hover:bg-slate-800"
+              onClick={() => onApplyFilter(column)}
+              type="button"
+            >
+              OK
+            </button>
+          </div>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
