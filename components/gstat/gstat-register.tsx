@@ -84,8 +84,7 @@ const demandColumns: Column[] = groupedColumns.flatMap((group) =>
     label
   }))
 );
-const finalColumns: Column[] = [{ key: "Pre Deposit Workings", label: "Pre Deposit Workings" }];
-const columns = [...baseColumns, ...demandColumns, ...finalColumns];
+const columns = [...baseColumns, ...demandColumns];
 const defaultColumnWidth = 92;
 const columnWidths: Record<string, number> = {
   "Sno": 52,
@@ -124,8 +123,7 @@ const columnWidths: Record<string, number> = {
   "EL status": 92,
   "GSTAT Login ID": 132,
   "GSTAT Login Password": 142,
-  "Appellant": 150,
-  "Pre Deposit Workings": 168
+  "Appellant": 150
 };
 const tableWidth = actionColumnWidth + columns.reduce((total, column) => total + getColumnWidth(column), 0);
 const requiredBlankCheckColumns = baseColumns.filter(
@@ -198,8 +196,7 @@ const editorSections = [
       "Determined Tax Amount",
       "Determined Interest Amount",
       "Determined Penalty Amount",
-      "Refund / Fees",
-      "Pre Deposit Workings"
+      "Refund / Fees"
     ],
     title: "Demand and deposit"
   },
@@ -530,13 +527,11 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
     );
     const headerRowOne = [
       ...baseColumns.map((column) => column.label),
-      ...groupedColumns.flatMap((group) => [group.label, "", ""]),
-      ...finalColumns.map((column) => column.label)
+      ...groupedColumns.flatMap((group) => [group.label, "", ""])
     ];
     const headerRowTwo = [
       ...baseColumns.map(() => ""),
-      ...groupedColumns.flatMap((group) => group.columns),
-      ...finalColumns.map(() => "")
+      ...groupedColumns.flatMap((group) => group.columns)
     ];
     const dataRows = exportRows.map(({ displayIndex, row }) =>
       columns.map((column) =>
@@ -554,8 +549,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
       ...groupedColumns.map((_, index) => {
         const start = baseColumns.length + index * 3;
         return { e: { c: start + 2, r: 0 }, s: { c: start, r: 0 } };
-      }),
-      { e: { c: columns.length - 1, r: 1 }, s: { c: columns.length - 1, r: 0 } }
+      })
     ];
     worksheet["!cols"] = columns.map((column) => ({ wch: Math.max(14, column.label.length + 3) }));
     worksheet["!autofilter"] = { ref: XLSX.utils.encode_range({ e: { c: columns.length - 1, r: 1 }, s: { c: 0, r: 1 } }) };
@@ -1243,34 +1237,6 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                         key={group.label}
                       >
                         {group.label}
-                      </th>
-                    ))}
-                    {finalColumns.map((column) => (
-                      <th
-                        className="relative border-b border-r border-white/15 px-2 py-2 align-bottom font-black"
-                        key={column.key}
-                        rowSpan={2}
-                      >
-                        <ExcelColumnHeader
-                          column={column}
-                          columnValueFilters={columnValueFilters}
-                          draftFilterValues={draftFilterValues}
-                          filterSearch={filterSearch}
-                          isOpen={openFilterColumnKey === column.key}
-                          menuPosition={filterMenuPosition}
-                          onApplyFilter={applyColumnFilter}
-                          onClearFilter={clearColumnFilter}
-                          onCloseFilter={closeColumnFilter}
-                          onFilterSearchChange={setFilterSearch}
-                          onOpenFilter={openColumnFilter}
-                          onSetSort={setColumnSort}
-                          onSort={toggleSort}
-                          onToggleDraftFilterValue={toggleDraftFilterValue}
-                          onToggleVisibleDraftFilterValues={toggleVisibleDraftFilterValues}
-                          options={openFilterColumnKey === column.key ? openColumnFilterOptions : []}
-                          sortState={sortState}
-                          visibleOptions={openFilterColumnKey === column.key ? visibleColumnFilterOptions : []}
-                        />
                       </th>
                     ))}
                   </tr>
