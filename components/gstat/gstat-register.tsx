@@ -52,6 +52,7 @@ const baseColumns: Column[] = [
   "APL 04 Date",
   "Favourable/Against",
   "Additional 10% compliances",
+  "Pre Deposit/Court Fees Mail",
   "Undertaking Requirement",
   "Matter pending at high court",
   "Issue in brief",
@@ -107,6 +108,7 @@ const columnWidths: Record<string, number> = {
   "APL 04 Date": 106,
   "Favourable/Against": 126,
   "Additional 10% compliances": 142,
+  "Pre Deposit/Court Fees Mail": 156,
   "Undertaking Requirement": 142,
   "Matter pending at high court": 146,
   "Issue in brief": 218,
@@ -180,6 +182,7 @@ const editorSections = [
     fields: [
       "Favourable/Against",
       "Additional 10% compliances",
+      "Pre Deposit/Court Fees Mail",
       "Undertaking Requirement",
       "Matter pending at high court",
       "Issue in brief",
