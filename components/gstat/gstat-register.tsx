@@ -23,6 +23,7 @@ type SortDirection = "asc" | "desc";
 type SortState = { columnKey: string; direction: SortDirection } | null;
 type ColumnValueFilters = Record<string, string[]>;
 type ColumnFilterOption = { key: string; label: string };
+type FilterMenuPosition = { left: number; maxHeight: number; top: number };
 
 const actionColumnWidth = 122;
 const columnFilterOptionLimit = 1000;
@@ -216,6 +217,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
   const [rows, setRows] = useState<AppealRow[]>(initialRows);
   const [columnValueFilters, setColumnValueFilters] = useState<ColumnValueFilters>({});
   const [openFilterColumnKey, setOpenFilterColumnKey] = useState<string | null>(null);
+  const [filterMenuPosition, setFilterMenuPosition] = useState<FilterMenuPosition | null>(null);
   const [filterSearch, setFilterSearch] = useState("");
   const [draftFilterValues, setDraftFilterValues] = useState<string[]>([]);
   const [editor, setEditor] = useState<EditorState | null>(null);
@@ -392,17 +394,31 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
     });
   }
 
-  function openColumnFilter(column: Column) {
+  function openColumnFilter(column: Column, anchor: HTMLElement) {
     const options = getUniqueColumnFilterOptions(rows, column, columnFilterOptionLimit);
     const appliedValues = columnValueFilters[column.key];
+    const rect = anchor.getBoundingClientRect();
+    const menuWidth = 288;
+    const viewportPadding = 12;
+    const top = Math.min(rect.bottom + 8, window.innerHeight - 120);
+    const left = Math.min(
+      Math.max(viewportPadding, rect.left),
+      Math.max(viewportPadding, window.innerWidth - menuWidth - viewportPadding)
+    );
 
     setOpenFilterColumnKey(column.key);
+    setFilterMenuPosition({
+      left,
+      maxHeight: Math.max(260, window.innerHeight - top - viewportPadding),
+      top
+    });
     setFilterSearch("");
     setDraftFilterValues(appliedValues?.length ? appliedValues : options.map((option) => option.key));
   }
 
   function closeColumnFilter() {
     setOpenFilterColumnKey(null);
+    setFilterMenuPosition(null);
     setFilterSearch("");
     setDraftFilterValues([]);
   }
@@ -1099,6 +1115,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                           draftFilterValues={draftFilterValues}
                           filterSearch={filterSearch}
                           isOpen={openFilterColumnKey === column.key}
+                          menuPosition={filterMenuPosition}
                           onApplyFilter={applyColumnFilter}
                           onClearFilter={clearColumnFilter}
                           onCloseFilter={closeColumnFilter}
@@ -1135,6 +1152,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                           draftFilterValues={draftFilterValues}
                           filterSearch={filterSearch}
                           isOpen={openFilterColumnKey === column.key}
+                          menuPosition={filterMenuPosition}
                           onApplyFilter={applyColumnFilter}
                           onClearFilter={clearColumnFilter}
                           onCloseFilter={closeColumnFilter}
@@ -1164,6 +1182,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                           filterSearch={filterSearch}
                           isCentered
                           isOpen={openFilterColumnKey === column.key}
+                          menuPosition={filterMenuPosition}
                           onApplyFilter={applyColumnFilter}
                           onClearFilter={clearColumnFilter}
                           onCloseFilter={closeColumnFilter}
@@ -1811,6 +1830,7 @@ function ExcelColumnHeader({
   filterSearch,
   isCentered = false,
   isOpen,
+  menuPosition,
   onApplyFilter,
   onClearFilter,
   onCloseFilter,
@@ -1830,11 +1850,12 @@ function ExcelColumnHeader({
   filterSearch: string;
   isCentered?: boolean;
   isOpen: boolean;
+  menuPosition: FilterMenuPosition | null;
   onApplyFilter: (column: Column) => void;
   onClearFilter: (column: Column) => void;
   onCloseFilter: () => void;
   onFilterSearchChange: (value: string) => void;
-  onOpenFilter: (column: Column) => void;
+  onOpenFilter: (column: Column, anchor: HTMLElement) => void;
   onSetSort: (column: Column, direction: SortDirection) => void;
   onSort: (column: Column) => void;
   onToggleDraftFilterValue: (value: string) => void;
@@ -1873,15 +1894,22 @@ function ExcelColumnHeader({
               ? "border-cyan-200 bg-cyan-200 text-slate-950"
               : "border-white/15 bg-white/10 text-white hover:bg-white/20"
           }`}
-          onClick={() => onOpenFilter(column)}
+          onClick={(event) => onOpenFilter(column, event.currentTarget)}
           type="button"
         >
           <Filter className="size-3" />
         </button>
       </div>
 
-      {isOpen ? (
-        <div className="absolute left-0 top-full z-[80] mt-2 w-72 rounded-lg border border-slate-300 bg-white p-2 text-left text-slate-900 shadow-2xl">
+      {isOpen && menuPosition ? (
+        <div
+          className="fixed z-[1000] w-72 overflow-hidden rounded-lg border border-slate-300 bg-white p-2 text-left text-slate-900 shadow-2xl"
+          style={{
+            left: menuPosition.left,
+            maxHeight: menuPosition.maxHeight,
+            top: menuPosition.top
+          }}
+        >
           <div className="space-y-1 border-b border-slate-200 pb-2">
             <button
               className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm font-semibold transition hover:bg-slate-100"
@@ -1927,7 +1955,7 @@ function ExcelColumnHeader({
             />
           </div>
 
-          <div className="mt-2 max-h-64 overflow-y-auto border border-slate-200 bg-slate-50 p-2">
+          <div className="mt-2 overflow-y-auto border border-slate-200 bg-slate-50 p-2" style={{ maxHeight: Math.max(120, menuPosition.maxHeight - 196) }}>
             <label className="flex cursor-pointer items-center gap-2 text-sm font-semibold text-slate-950">
               <input
                 checked={areAllVisibleValuesSelected}
