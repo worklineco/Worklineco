@@ -4,7 +4,7 @@ import { downloadGstatPoa } from "@/lib/gstat/poa-document";
 import { supabase } from "@/lib/supabase/client";
 import { ArrowDown, ArrowLeft, ArrowUp, Download, Expand, ExternalLink, FileSpreadsheet, FileText, Filter, History, Pencil, Plus, Scale, Search, ShieldCheck, Trash2, Upload, X } from "lucide-react";
 import Link from "next/link";
-import { ChangeEvent, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, useDeferredValue, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import * as XLSX from "xlsx-js-style";
 
 type Column = { group?: string; key: string; label: string };
@@ -222,6 +222,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
   const [filters, setFilters] = useState<Record<string, string>>({});
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isSavingEditor, setIsSavingEditor] = useState(false);
   const [message, setMessage] = useState("");
   const [userAccess, setUserAccess] = useState<UserAccess>({ isPartner: false, team: "" });
   const [sortState, setSortState] = useState<SortState>(null);
@@ -229,6 +230,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
   const [isMoreFiltersVisible, setIsMoreFiltersVisible] = useState(false);
   const [appliedAdvancedFilters, setAppliedAdvancedFilters] = useState<AdvancedFilter[]>(() => [createAdvancedFilter()]);
   const [draftAdvancedFilters, setDraftAdvancedFilters] = useState<AdvancedFilter[]>(() => [createAdvancedFilter()]);
+  const [, startRowsTransition] = useTransition();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const uniqueAppeals = useMemo(
     () => new Set(rows.map((row) => String(row.data["OIA No"] ?? "").trim()).filter(Boolean)).size,
@@ -748,7 +750,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
   }
 
   async function saveEditor() {
-    if (!editor) {
+    if (!editor || isSavingEditor) {
       return;
     }
 
@@ -763,6 +765,27 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
       return;
     }
 
+    const optimisticRow = normalizeRow(
+      {
+        ...row,
+        data: draft
+      },
+      rowIndex
+    );
+
+    setIsSavingEditor(true);
+    setEditor(null);
+    setMessage(`Saving row ${rowIndex + 1}...`);
+    startRowsTransition(() => {
+      setRows((currentRows) => {
+        if (editor.isNew) {
+          return normalizeRows([...currentRows, optimisticRow]);
+        }
+
+        return currentRows.map((currentRow, index) => (index === rowIndex ? optimisticRow : currentRow));
+      });
+    });
+
     const response = await fetch("/api/gstat", {
       body: JSON.stringify({
         id: row.id,
@@ -776,19 +799,25 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
 
     if (!response.ok || !result.row) {
       setMessage(result.error ?? "Could not save GSTAT row.");
+      setIsSavingEditor(false);
+      await loadRows();
       return;
     }
 
-    setRows((currentRows) => {
-      if (editor.isNew) {
-        return normalizeRows([...currentRows, result.row!]);
-      }
+    startRowsTransition(() => {
+      setRows((currentRows) => {
+        if (editor.isNew) {
+          return currentRows.map((currentRow, index) =>
+            index === rowIndex ? normalizeRow(result.row!, rowIndex) : currentRow
+          );
+        }
 
-      return currentRows.map((currentRow, index) =>
-        index === rowIndex ? normalizeRow(result.row!, rowIndex) : currentRow
-      );
+        return currentRows.map((currentRow, index) =>
+          index === rowIndex ? normalizeRow(result.row!, rowIndex) : currentRow
+        );
+      });
     });
-    setEditor(null);
+    setIsSavingEditor(false);
     setMessage(`Saved row ${rowIndex + 1}. Audit log updated.`);
   }
 
@@ -1405,11 +1434,12 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                   Cancel
                 </button>
                 <button
-                  className="inline-flex h-10 items-center justify-center rounded-xl bg-slate-950 px-4 text-xs font-black uppercase text-white shadow-sm transition hover:bg-slate-800"
+                  className="inline-flex h-10 items-center justify-center rounded-xl bg-slate-950 px-4 text-xs font-black uppercase text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled={isSavingEditor}
                   onClick={saveEditor}
                   type="button"
                 >
-                  Save Row
+                  {isSavingEditor ? "Saving..." : "Save Row"}
                 </button>
               </div>
             </div>

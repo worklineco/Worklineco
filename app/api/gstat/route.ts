@@ -219,7 +219,7 @@ export async function PATCH(request: Request) {
 
   const existing = await admin
     .from("gstat_appeals")
-    .select("id,row_number,data")
+    .select("id,row_number,data,updated_at")
     .eq("id", id)
     .eq("organisation_code", organisationCode)
     .single();
@@ -237,6 +237,15 @@ export async function PATCH(request: Request) {
     ...(scopedRowData ?? applyAccessToRowData({ ...existing.data.data, [field!]: value ?? "" }, access)),
     Sno: existing.data.row_number ?? 1
   };
+  const rowChanges = scopedRowData ? changedFields(existing.data.data ?? {}, scopedRowData) : [];
+
+  if (scopedRowData && rowChanges.length === 0) {
+    return NextResponse.json({ row: existing.data });
+  }
+
+  if (!scopedRowData && JSON.stringify(oldValue) === JSON.stringify(value ?? "")) {
+    return NextResponse.json({ row: existing.data });
+  }
 
   const updated = await admin
     .from("gstat_appeals")
@@ -254,11 +263,9 @@ export async function PATCH(request: Request) {
   }
 
   if (scopedRowData) {
-    const changes = changedFields(existing.data.data ?? {}, scopedRowData);
-
-    if (changes.length) {
+    if (rowChanges.length) {
       await admin.from("gstat_audit_logs").insert(
-        changes.map((change) => ({
+        rowChanges.map((change) => ({
           action: "update",
           actor_user_id: auth.user.id,
           appeal_id: id,
