@@ -1948,6 +1948,23 @@ function ExcelColumnHeader({
             Clear Filter From "{column.label}"
           </button>
 
+          <div className="mt-2 flex justify-end gap-2">
+            <button
+              className="inline-flex h-9 items-center justify-center rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+              onClick={onCloseFilter}
+              type="button"
+            >
+              Cancel
+            </button>
+            <button
+              className="inline-flex h-9 items-center justify-center rounded-md bg-slate-950 px-4 text-sm font-semibold text-white transition hover:bg-slate-800"
+              onClick={() => onApplyFilter(column)}
+              type="button"
+            >
+              OK
+            </button>
+          </div>
+
           <div className="mt-2 flex items-center gap-2 rounded-md border border-slate-300 px-2 py-1.5">
             <Search className="size-4 text-slate-400" />
             <input
@@ -1999,23 +2016,6 @@ function ExcelColumnHeader({
               Showing first {columnFilterOptionLimit} unique values.
             </p>
           ) : null}
-
-          <div className="mt-3 flex justify-end gap-2">
-            <button
-              className="inline-flex h-9 items-center justify-center rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
-              onClick={onCloseFilter}
-              type="button"
-            >
-              Cancel
-            </button>
-            <button
-              className="inline-flex h-9 items-center justify-center rounded-md bg-slate-950 px-4 text-sm font-semibold text-white transition hover:bg-slate-800"
-              onClick={() => onApplyFilter(column)}
-              type="button"
-            >
-              OK
-            </button>
-          </div>
         </div>
       ) : null}
     </div>
