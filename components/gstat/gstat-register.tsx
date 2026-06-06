@@ -24,6 +24,7 @@ type SortState = { columnKey: string; direction: SortDirection } | null;
 type ColumnValueFilters = Record<string, string[]>;
 type ColumnFilterOption = { key: string; label: string };
 type FilterMenuPosition = { left: number; maxHeight: number; top: number };
+type InlineEditorState = { columnKey: string; rowIndex: number; value: string };
 
 const actionColumnWidth = 122;
 const columnFilterOptionLimit = 1000;
@@ -213,6 +214,16 @@ const demandEditorGroups = [
   { fields: ["Pre Deposit Amount - CGST", "Pre Deposit Amount - SGST", "Pre Deposit Amount - IGST"], title: "Pre Deposit Amount" }
 ];
 const dateFields = new Set(["Next Hearing Date", "Due Date"]);
+const inlineEditableFields = new Set([
+  "Status",
+  "Proceedings Status",
+  "Next Hearing Date",
+  "Due Date",
+  "Remark",
+  "Person handling",
+  "State/Centre",
+  "Pre Deposit/Court Fees Mail"
+]);
 
 const initialRows = createEmptyRows(12);
 
@@ -223,6 +234,8 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
   const [filterMenuPosition, setFilterMenuPosition] = useState<FilterMenuPosition | null>(null);
   const [filterSearch, setFilterSearch] = useState("");
   const [draftFilterValues, setDraftFilterValues] = useState<string[]>([]);
+  const [inlineEditor, setInlineEditor] = useState<InlineEditorState | null>(null);
+  const [savingInlineCell, setSavingInlineCell] = useState<{ columnKey: string; rowIndex: number } | null>(null);
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSavingEditor, setIsSavingEditor] = useState(false);
@@ -232,6 +245,8 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
   const [selectedRowKeys, setSelectedRowKeys] = useState<Set<string>>(() => new Set());
   const [, startRowsTransition] = useTransition();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const inlineSaveCancelledRef = useRef(false);
+  const inlineSaveInFlightRef = useRef(false);
   const uniqueAppeals = useMemo(
     () => new Set(rows.map((row) => String(row.data["OIA No"] ?? "").trim()).filter(Boolean)).size,
     [rows]
@@ -766,6 +781,103 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
     );
   }
 
+  function openInlineEditor(rowIndex: number, column: Column, value: string | number | undefined) {
+    if (!canInlineEdit(column.key, userAccess)) {
+      return;
+    }
+
+    inlineSaveCancelledRef.current = false;
+    setInlineEditor({
+      columnKey: column.key,
+      rowIndex,
+      value: dateFields.has(column.key) ? normalizeDateValue(value) : String(value ?? "")
+    });
+  }
+
+  function cancelInlineEditor() {
+    inlineSaveCancelledRef.current = true;
+    setInlineEditor(null);
+  }
+
+  async function saveInlineEditor() {
+    if (inlineSaveCancelledRef.current) {
+      inlineSaveCancelledRef.current = false;
+      return;
+    }
+
+    if (!inlineEditor || savingInlineCell || inlineSaveInFlightRef.current) {
+      return;
+    }
+
+    const row = rows[inlineEditor.rowIndex];
+
+    if (!row) {
+      setInlineEditor(null);
+      return;
+    }
+
+    const nextValue = dateFields.has(inlineEditor.columnKey)
+      ? normalizeDateValue(inlineEditor.value)
+      : inlineEditor.value;
+    const currentValue = dateFields.has(inlineEditor.columnKey)
+      ? normalizeDateValue(row.data[inlineEditor.columnKey])
+      : String(row.data[inlineEditor.columnKey] ?? "");
+
+    if (String(nextValue) === String(currentValue)) {
+      setInlineEditor(null);
+      return;
+    }
+
+    const nextData = applyPersonHandlingForAccess(
+      {
+        ...row.data,
+        [inlineEditor.columnKey]: nextValue,
+        Sno: inlineEditor.rowIndex + 1
+      },
+      userAccess
+    );
+    const optimisticRow = normalizeRow({ ...row, data: nextData }, inlineEditor.rowIndex);
+
+    inlineSaveInFlightRef.current = true;
+    setSavingInlineCell({ columnKey: inlineEditor.columnKey, rowIndex: inlineEditor.rowIndex });
+    setInlineEditor(null);
+    startRowsTransition(() => {
+      setRows((currentRows) =>
+        currentRows.map((currentRow, index) => (index === inlineEditor.rowIndex ? optimisticRow : currentRow))
+      );
+    });
+
+    const response = await fetch("/api/gstat", {
+      body: JSON.stringify({
+        id: row.id,
+        row,
+        rowData: nextData
+      }),
+      headers: { "Content-Type": "application/json" },
+      method: "PATCH"
+    });
+    const result = (await response.json()) as { error?: string; row?: AppealRow };
+
+    if (!response.ok || !result.row) {
+      setMessage(result.error ?? "Could not save GSTAT cell.");
+      inlineSaveInFlightRef.current = false;
+      setSavingInlineCell(null);
+      await loadRows();
+      return;
+    }
+
+    startRowsTransition(() => {
+      setRows((currentRows) =>
+        currentRows.map((currentRow, index) =>
+          index === inlineEditor.rowIndex ? normalizeRow(result.row!, inlineEditor.rowIndex) : currentRow
+        )
+      );
+    });
+    inlineSaveInFlightRef.current = false;
+    setSavingInlineCell(null);
+    setMessage(`Saved ${inlineEditor.columnKey} for row ${inlineEditor.rowIndex + 1}.`);
+  }
+
   async function saveEditor() {
     if (!editor || isSavingEditor) {
       return;
@@ -1261,6 +1373,11 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                         {columns.map((column) => {
                           const cellValue = row.data[column.key];
                           const displayValue = dateFields.has(column.key) ? formatDateForDisplay(cellValue) : cellValue;
+                          const isInlineEditable = canInlineEdit(column.key, userAccess);
+                          const isInlineEditing =
+                            inlineEditor?.rowIndex === originalIndex && inlineEditor.columnKey === column.key;
+                          const isSavingInline =
+                            savingInlineCell?.rowIndex === originalIndex && savingInlineCell.columnKey === column.key;
                           const isDuplicateDrc07 = hasDuplicateDrc07 && column.key === "DRC 07 No";
                           const isDuplicateOia = hasDuplicateOia && column.key === "OIA No";
                           const isRequiredBlank =
@@ -1286,9 +1403,67 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                             >
                               {column.key === "Sno" ? (
                                 originalIndex + 1
+                              ) : isInlineEditing ? (
+                                column.key === "Person handling" ? (
+                                  <select
+                                    autoFocus
+                                    className="h-7 w-full rounded-md border border-teal-300 bg-white px-1.5 text-[11px] font-bold text-slate-950 outline-none ring-2 ring-teal-100"
+                                    onBlur={saveInlineEditor}
+                                    onChange={(event) =>
+                                      setInlineEditor((currentEditor) =>
+                                        currentEditor ? { ...currentEditor, value: event.target.value } : currentEditor
+                                      )
+                                    }
+                                    onKeyDown={(event) => {
+                                      if (event.key === "Escape") {
+                                        event.preventDefault();
+                                        cancelInlineEditor();
+                                      }
+                                      if (event.key === "Enter") {
+                                        event.preventDefault();
+                                        saveInlineEditor();
+                                      }
+                                    }}
+                                    value={inlineEditor.value}
+                                  >
+                                    <option value="">Select team</option>
+                                    {teamOptions.map((team) => (
+                                      <option key={team} value={team}>
+                                        {team}
+                                      </option>
+                                    ))}
+                                  </select>
+                                ) : (
+                                  <input
+                                    autoFocus
+                                    className="h-7 w-full rounded-md border border-teal-300 bg-white px-1.5 text-[11px] font-bold text-slate-950 outline-none ring-2 ring-teal-100"
+                                    onBlur={saveInlineEditor}
+                                    onChange={(event) =>
+                                      setInlineEditor((currentEditor) =>
+                                        currentEditor ? { ...currentEditor, value: event.target.value } : currentEditor
+                                      )
+                                    }
+                                    onKeyDown={(event) => {
+                                      if (event.key === "Escape") {
+                                        event.preventDefault();
+                                        cancelInlineEditor();
+                                      }
+                                      if (event.key === "Enter") {
+                                        event.preventDefault();
+                                        saveInlineEditor();
+                                      }
+                                    }}
+                                    type={dateFields.has(column.key) ? "date" : "text"}
+                                    value={inlineEditor.value}
+                                  />
+                                )
                               ) : (
-                                <span
-                                  className="block w-full min-w-0 truncate px-1.5"
+                                <button
+                                  className={`block w-full min-w-0 truncate rounded px-1.5 text-left ${
+                                    isInlineEditable ? "cursor-text hover:bg-white/80 hover:ring-1 hover:ring-teal-200" : ""
+                                  }`}
+                                  disabled={!isInlineEditable || Boolean(isSavingInline)}
+                                  onClick={() => openInlineEditor(originalIndex, column, cellValue)}
                                   title={
                                     isDuplicateDrc07
                                       ? `Duplicate DRC 07 No.: ${cellValue}`
@@ -1298,9 +1473,10 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                                         ? `${column.label} is blank`
                                         : String(displayValue ?? "")
                                   }
+                                  type="button"
                                 >
-                                  {isRequiredBlank ? "Required" : displayValue ?? ""}
-                                </span>
+                                  {isSavingInline ? "Saving..." : isRequiredBlank ? "Required" : displayValue ?? ""}
+                                </button>
                               )}
                             </td>
                           );
@@ -1480,6 +1656,10 @@ function normalizeRow(row: AppealRow, index: number): AppealRow {
 
 function isPersonHandlingLocked(access: UserAccess) {
   return !access.isPartner && Boolean(access.team);
+}
+
+function canInlineEdit(field: string, access: UserAccess) {
+  return inlineEditableFields.has(field) && !(field === "Person handling" && isPersonHandlingLocked(access));
 }
 
 function applyPersonHandlingForAccess(data: RowData, access: UserAccess): RowData {
