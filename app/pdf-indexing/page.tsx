@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, FileSearch, FolderOpen, ListOrdered, Scissors, Shuffle } from "lucide-react";
+import { ArrowLeft, FileSearch, FolderOpen, ListOrdered, RefreshCw, Scissors, Shuffle } from "lucide-react";
 import Link from "next/link";
 import { ChangeEvent, useRef, useState } from "react";
 
@@ -14,20 +14,35 @@ type PdfFileRow = {
 
 export default function PdfIndexingPage() {
   const [pdfRows, setPdfRows] = useState<PdfFileRow[]>([]);
+  const [selectedRowIds, setSelectedRowIds] = useState<Set<string>>(() => new Set());
   const [folderName, setFolderName] = useState("");
   const [isReading, setIsReading] = useState(false);
   const [message, setMessage] = useState("");
   const folderInputRef = useRef<HTMLInputElement>(null);
+  const selectedFilesRef = useRef<File[]>([]);
   const totalSize = pdfRows.reduce((sum, row) => sum + row.size, 0);
   const totalPages = pdfRows.reduce((sum, row) => sum + (row.pages ?? 0), 0);
+  const areAllRowsSelected = pdfRows.length > 0 && selectedRowIds.size === pdfRows.length;
+  const areSomeRowsSelected = selectedRowIds.size > 0 && selectedRowIds.size < pdfRows.length;
 
   async function selectFolder(event: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.target.files ?? []);
     const pdfFiles = files.filter((file) => file.name.toLowerCase().endsWith(".pdf"));
 
+    selectedFilesRef.current = pdfFiles;
+    await loadPdfFiles(pdfFiles);
+    event.target.value = "";
+  }
+
+  async function refreshSelectedFolder() {
+    await loadPdfFiles(selectedFilesRef.current);
+  }
+
+  async function loadPdfFiles(pdfFiles: File[]) {
     setIsReading(true);
     setMessage(pdfFiles.length ? `Reading ${pdfFiles.length} PDF file${pdfFiles.length === 1 ? "" : "s"}...` : "");
     setPdfRows([]);
+    setSelectedRowIds(new Set());
 
     try {
       const rows: PdfFileRow[] = [];
@@ -60,8 +75,31 @@ export default function PdfIndexingPage() {
       setMessage(error instanceof Error ? error.message : "Could not read the selected folder.");
     } finally {
       setIsReading(false);
-      event.target.value = "";
     }
+  }
+
+  function toggleRowSelection(rowId: string) {
+    setSelectedRowIds((currentIds) => {
+      const nextIds = new Set(currentIds);
+
+      if (nextIds.has(rowId)) {
+        nextIds.delete(rowId);
+      } else {
+        nextIds.add(rowId);
+      }
+
+      return nextIds;
+    });
+  }
+
+  function toggleAllRows() {
+    setSelectedRowIds((currentIds) => {
+      if (currentIds.size === pdfRows.length) {
+        return new Set();
+      }
+
+      return new Set(pdfRows.map((row) => row.id));
+    });
   }
 
   return (
@@ -116,6 +154,16 @@ export default function PdfIndexingPage() {
                 <FolderOpen className="size-4" />
                 Select Folder
               </button>
+              <button
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-950/10 bg-white px-3 text-xs font-black uppercase text-slate-800 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:translate-y-0 disabled:hover:shadow-sm"
+                disabled={!selectedFilesRef.current.length || isReading}
+                onClick={refreshSelectedFolder}
+                title="Refresh the currently selected PDF file list"
+                type="button"
+              >
+                <RefreshCw className={`size-4 ${isReading ? "animate-spin" : ""}`} />
+                Refresh
+              </button>
             </div>
           </div>
         </header>
@@ -131,6 +179,7 @@ export default function PdfIndexingPage() {
             </div>
             <div className="flex flex-wrap gap-2">
               <Metric label="Files" value={String(pdfRows.length)} />
+              <Metric label="Selected" value={String(selectedRowIds.size)} />
               <Metric label="Pages" value={isReading ? "..." : String(totalPages)} />
               <Metric label="Size" value={formatFileSize(totalSize)} />
             </div>
@@ -138,12 +187,25 @@ export default function PdfIndexingPage() {
 
           <div className="mt-4 overflow-hidden rounded-2xl border border-slate-950/10 bg-white">
             <div className="max-h-[calc(100vh-285px)] overflow-auto">
-              <table className="w-full min-w-[760px] border-separate border-spacing-0 text-left text-sm">
+              <table className="w-full min-w-[720px] border-separate border-spacing-0 text-left text-sm">
                 <thead className="sticky top-0 z-10 bg-slate-950 text-white">
                   <tr>
+                    <th className="w-12 border-b border-r border-white/15 px-3 py-3">
+                      <input
+                        aria-label="Select all PDF files"
+                        checked={areAllRowsSelected}
+                        className="size-4 rounded border-slate-300 accent-teal-500"
+                        onChange={toggleAllRows}
+                        ref={(input) => {
+                          if (input) {
+                            input.indeterminate = areSomeRowsSelected;
+                          }
+                        }}
+                        type="checkbox"
+                      />
+                    </th>
                     <th className="w-16 border-b border-r border-white/15 px-3 py-3 text-xs font-black uppercase">Sno</th>
                     <th className="border-b border-r border-white/15 px-3 py-3 text-xs font-black uppercase">PDF Name</th>
-                    <th className="border-b border-r border-white/15 px-3 py-3 text-xs font-black uppercase">Location</th>
                     <th className="w-36 border-b border-r border-white/15 px-3 py-3 text-xs font-black uppercase">Size</th>
                     <th className="w-32 border-b border-white/15 px-3 py-3 text-xs font-black uppercase">Pages</th>
                   </tr>
@@ -152,14 +214,20 @@ export default function PdfIndexingPage() {
                   {pdfRows.length ? (
                     pdfRows.map((row, index) => (
                       <tr className="odd:bg-white even:bg-slate-50/80" key={row.id}>
+                        <td className="border-b border-r border-slate-200 px-3 py-2">
+                          <input
+                            aria-label={`Select ${row.name}`}
+                            checked={selectedRowIds.has(row.id)}
+                            className="size-4 rounded border-slate-300 accent-teal-600"
+                            onChange={() => toggleRowSelection(row.id)}
+                            type="checkbox"
+                          />
+                        </td>
                         <td className="border-b border-r border-slate-200 px-3 py-2 font-bold text-slate-700">
                           {index + 1}
                         </td>
                         <td className="border-b border-r border-slate-200 px-3 py-2 font-bold text-slate-950">
                           {row.name}
-                        </td>
-                        <td className="border-b border-r border-slate-200 px-3 py-2 font-semibold text-slate-600">
-                          {row.path}
                         </td>
                         <td className="border-b border-r border-slate-200 px-3 py-2 font-semibold text-slate-700">
                           {formatFileSize(row.size)}
@@ -210,9 +278,28 @@ function Metric({ label, value }: { label: string; value: string }) {
 async function getPdfPageCount(file: File) {
   const buffer = await file.arrayBuffer();
   const text = new TextDecoder("latin1").decode(buffer);
-  const pageMatches = text.match(/\/Type\s*\/Page\b/g);
+  const directPageMatches = text.match(/\/Type\s*\/Page\b(?!s)/g);
 
-  return pageMatches?.length ?? null;
+  if (directPageMatches?.length) {
+    return directPageMatches.length;
+  }
+
+  const countMatches = Array.from(text.matchAll(/\/Count\s+(\d+)/g))
+    .map((match) => Number(match[1]))
+    .filter((count) => Number.isFinite(count) && count > 0);
+
+  if (countMatches.length) {
+    return Math.max(...countMatches);
+  }
+
+  const kidsMatch = text.match(/\/Kids\s*\[([\s\S]*?)\]/);
+
+  if (kidsMatch?.[1]) {
+    const kids = kidsMatch[1].match(/\d+\s+\d+\s+R/g);
+    return kids?.length ?? null;
+  }
+
+  return null;
 }
 
 function getSelectedFolderName(rows: PdfFileRow[]) {
