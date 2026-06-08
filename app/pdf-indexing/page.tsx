@@ -1,7 +1,69 @@
-import { ArrowLeft, FileSearch } from "lucide-react";
+"use client";
+
+import { ArrowLeft, FileSearch, FolderOpen, ListOrdered, Scissors, Shuffle } from "lucide-react";
 import Link from "next/link";
+import { ChangeEvent, useRef, useState } from "react";
+
+type PdfFileRow = {
+  id: string;
+  name: string;
+  pages: number | null;
+  path: string;
+  size: number;
+};
 
 export default function PdfIndexingPage() {
+  const [pdfRows, setPdfRows] = useState<PdfFileRow[]>([]);
+  const [folderName, setFolderName] = useState("");
+  const [isReading, setIsReading] = useState(false);
+  const [message, setMessage] = useState("");
+  const folderInputRef = useRef<HTMLInputElement>(null);
+  const totalSize = pdfRows.reduce((sum, row) => sum + row.size, 0);
+  const totalPages = pdfRows.reduce((sum, row) => sum + (row.pages ?? 0), 0);
+
+  async function selectFolder(event: ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(event.target.files ?? []);
+    const pdfFiles = files.filter((file) => file.name.toLowerCase().endsWith(".pdf"));
+
+    setIsReading(true);
+    setMessage(pdfFiles.length ? `Reading ${pdfFiles.length} PDF file${pdfFiles.length === 1 ? "" : "s"}...` : "");
+    setPdfRows([]);
+
+    try {
+      const rows: PdfFileRow[] = [];
+
+      for (const file of pdfFiles) {
+        rows.push({
+          id: `${file.webkitRelativePath || file.name}-${file.size}-${file.lastModified}`,
+          name: file.name,
+          pages: await getPdfPageCount(file),
+          path: file.webkitRelativePath || file.name,
+          size: file.size
+        });
+      }
+
+      rows.sort((left, right) =>
+        left.path.localeCompare(right.path, undefined, {
+          numeric: true,
+          sensitivity: "base"
+        })
+      );
+
+      setFolderName(getSelectedFolderName(rows));
+      setPdfRows(rows);
+      setMessage(
+        rows.length
+          ? `Loaded ${rows.length} PDF file${rows.length === 1 ? "" : "s"}.`
+          : "No PDF files found in the selected folder."
+      );
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not read the selected folder.");
+    } finally {
+      setIsReading(false);
+      event.target.value = "";
+    }
+  }
+
   return (
     <main className="min-h-screen overflow-hidden bg-[#f7f3ea] px-2 py-3 text-slate-950 sm:px-3 lg:px-4">
       <div className="pointer-events-none fixed inset-0 -z-10">
@@ -11,26 +73,170 @@ export default function PdfIndexingPage() {
 
       <section className="mx-auto w-full max-w-none">
         <header className="workline-frame rounded-[20px] p-4 md:p-5">
-          <Link
-            className="inline-flex items-center gap-2 rounded-full border border-slate-950/10 bg-white px-3 py-1.5 text-xs font-black uppercase text-slate-700 shadow-sm"
-            href="/"
-          >
-            <ArrowLeft className="size-3.5" />
-            Workspace
-          </Link>
-          <div className="mt-5 flex flex-wrap items-center gap-3">
-            <span className="flex size-14 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-300 via-sky-300 to-teal-300 text-slate-950">
-              <FileSearch className="size-7" />
-            </span>
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <p className="text-xs font-black uppercase tracking-[0.16em] text-indigo-700">
-                Document workspace
-              </p>
-              <h1 className="mt-1 text-4xl font-black leading-tight text-slate-950">PDF & Indexing</h1>
+              <Link
+                className="inline-flex items-center gap-2 rounded-full border border-slate-950/10 bg-white px-3 py-1.5 text-xs font-black uppercase text-slate-700 shadow-sm"
+                href="/"
+              >
+                <ArrowLeft className="size-3.5" />
+                Workspace
+              </Link>
+              <div className="mt-5 flex flex-wrap items-center gap-3">
+                <span className="flex size-14 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-300 via-sky-300 to-teal-300 text-slate-950">
+                  <FileSearch className="size-7" />
+                </span>
+                <div>
+                  <p className="text-xs font-black uppercase tracking-[0.16em] text-indigo-700">
+                    Document workspace
+                  </p>
+                  <h1 className="mt-1 text-4xl font-black leading-tight text-slate-950">PDF & Indexing</h1>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <ToolButton icon={Shuffle} label="Merge" />
+              <ToolButton icon={Scissors} label="Split" />
+              <ToolButton icon={ListOrdered} label="Create Index" />
+              <input
+                accept="application/pdf,.pdf"
+                className="hidden"
+                multiple
+                onChange={selectFolder}
+                ref={folderInputRef}
+                type="file"
+                {...({ directory: "", webkitdirectory: "" } as Record<string, string>)}
+              />
+              <button
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 text-xs font-black uppercase text-white shadow-sm transition hover:bg-slate-800"
+                onClick={() => folderInputRef.current?.click()}
+                type="button"
+              >
+                <FolderOpen className="size-4" />
+                Select Folder
+              </button>
             </div>
           </div>
         </header>
+
+        <section className="workline-frame mt-4 rounded-[20px] p-3 md:p-4">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <h2 className="text-xl font-black text-slate-950">PDF Files</h2>
+              <p className="mt-1 text-sm font-semibold text-slate-600">
+                {folderName ? folderName : "Select a folder to load PDF files."}
+              </p>
+              {message ? <p className="mt-1 text-sm font-bold text-indigo-700">{message}</p> : null}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Metric label="Files" value={String(pdfRows.length)} />
+              <Metric label="Pages" value={isReading ? "..." : String(totalPages)} />
+              <Metric label="Size" value={formatFileSize(totalSize)} />
+            </div>
+          </div>
+
+          <div className="mt-4 overflow-hidden rounded-2xl border border-slate-950/10 bg-white">
+            <div className="max-h-[calc(100vh-285px)] overflow-auto">
+              <table className="w-full min-w-[760px] border-separate border-spacing-0 text-left text-sm">
+                <thead className="sticky top-0 z-10 bg-slate-950 text-white">
+                  <tr>
+                    <th className="w-16 border-b border-r border-white/15 px-3 py-3 text-xs font-black uppercase">Sno</th>
+                    <th className="border-b border-r border-white/15 px-3 py-3 text-xs font-black uppercase">PDF Name</th>
+                    <th className="border-b border-r border-white/15 px-3 py-3 text-xs font-black uppercase">Location</th>
+                    <th className="w-36 border-b border-r border-white/15 px-3 py-3 text-xs font-black uppercase">Size</th>
+                    <th className="w-32 border-b border-white/15 px-3 py-3 text-xs font-black uppercase">Pages</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pdfRows.length ? (
+                    pdfRows.map((row, index) => (
+                      <tr className="odd:bg-white even:bg-slate-50/80" key={row.id}>
+                        <td className="border-b border-r border-slate-200 px-3 py-2 font-bold text-slate-700">
+                          {index + 1}
+                        </td>
+                        <td className="border-b border-r border-slate-200 px-3 py-2 font-bold text-slate-950">
+                          {row.name}
+                        </td>
+                        <td className="border-b border-r border-slate-200 px-3 py-2 font-semibold text-slate-600">
+                          {row.path}
+                        </td>
+                        <td className="border-b border-r border-slate-200 px-3 py-2 font-semibold text-slate-700">
+                          {formatFileSize(row.size)}
+                        </td>
+                        <td className="border-b border-slate-200 px-3 py-2 font-semibold text-slate-700">
+                          {row.pages ?? "Could not read"}
+                        </td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td className="px-3 py-12 text-center text-sm font-bold text-slate-500" colSpan={5}>
+                        {isReading ? "Reading PDFs..." : "No PDF folder selected yet."}
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
       </section>
     </main>
   );
+}
+
+function ToolButton({ icon: Icon, label }: { icon: typeof Shuffle; label: string }) {
+  return (
+    <button
+      className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-950/10 bg-white px-3 text-xs font-black uppercase text-slate-800 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+      type="button"
+    >
+      <Icon className="size-4" />
+      {label}
+    </button>
+  );
+}
+
+function Metric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-950/10 bg-white px-3 text-xs font-black uppercase text-slate-800 shadow-sm">
+      <span className="text-slate-500">{label}</span>
+      <span>{value}</span>
+    </div>
+  );
+}
+
+async function getPdfPageCount(file: File) {
+  const buffer = await file.arrayBuffer();
+  const text = new TextDecoder("latin1").decode(buffer);
+  const pageMatches = text.match(/\/Type\s*\/Page\b/g);
+
+  return pageMatches?.length ?? null;
+}
+
+function getSelectedFolderName(rows: PdfFileRow[]) {
+  const firstPath = rows[0]?.path;
+
+  if (!firstPath || !firstPath.includes("/")) {
+    return "Selected folder";
+  }
+
+  return firstPath.split("/")[0] || "Selected folder";
+}
+
+function formatFileSize(size: number) {
+  if (size < 1024) {
+    return `${size} B`;
+  }
+
+  if (size < 1024 * 1024) {
+    return `${(size / 1024).toFixed(1)} KB`;
+  }
+
+  if (size < 1024 * 1024 * 1024) {
+    return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+  }
+
+  return `${(size / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }
