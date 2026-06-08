@@ -165,8 +165,21 @@ export default function PdfIndexingPage() {
       return;
     }
 
+    const rangeInput = window.prompt("Enter page range to split, for example 1-5 or 1,3-6.");
+
+    if (rangeInput === null) {
+      return;
+    }
+
+    const normalizedRange = rangeInput.trim();
+
+    if (!normalizedRange) {
+      setMessage("Enter a page range before splitting.");
+      return;
+    }
+
     setIsProcessing(true);
-    setMessage(`Splitting ${rows.length} PDF file${rows.length === 1 ? "" : "s"}...`);
+    setMessage(`Splitting page range ${normalizedRange} from ${rows.length} PDF file${rows.length === 1 ? "" : "s"}...`);
 
     try {
       const zip = new JSZip();
@@ -179,19 +192,17 @@ export default function PdfIndexingPage() {
         }
 
         const sourcePdf = await PDFDocument.load(await file.arrayBuffer(), { ignoreEncryption: true });
-        const folder = zip.folder(stripPdfExtension(row.name)) ?? zip;
+        const pageIndices = parsePageRange(normalizedRange, sourcePdf.getPageCount());
+        const rangePdf = await PDFDocument.create();
+        const copiedPages = await rangePdf.copyPages(sourcePdf, pageIndices);
 
-        for (const pageIndex of sourcePdf.getPageIndices()) {
-          const singlePagePdf = await PDFDocument.create();
-          const [copiedPage] = await singlePagePdf.copyPages(sourcePdf, [pageIndex]);
-          singlePagePdf.addPage(copiedPage);
-          folder.file(`page-${String(pageIndex + 1).padStart(3, "0")}.pdf`, await singlePagePdf.save());
-        }
+        copiedPages.forEach((page) => rangePdf.addPage(page));
+        zip.file(`${stripPdfExtension(row.name)}-pages-${formatRangeForFilename(normalizedRange)}.pdf`, await rangePdf.save());
       }
 
       const zipBlob = await zip.generateAsync({ type: "blob" });
       downloadBlob(zipBlob, "workline-split-pdfs.zip");
-      setMessage(`Split ${rows.length} PDF file${rows.length === 1 ? "" : "s"} into a ZIP.`);
+      setMessage(`Split page range ${normalizedRange} from ${rows.length} PDF file${rows.length === 1 ? "" : "s"} into a ZIP.`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Could not split selected PDFs.");
     } finally {
@@ -498,6 +509,44 @@ function createPdfBlob(bytes: Uint8Array) {
 
 function stripPdfExtension(filename: string) {
   return filename.replace(/\.pdf$/i, "");
+}
+
+function parsePageRange(input: string, pageCount: number) {
+  const pageIndices: number[] = [];
+  const seenPages = new Set<number>();
+  const rangeParts = input.split(",").map((part) => part.trim()).filter(Boolean);
+
+  if (!rangeParts.length) {
+    throw new Error("Enter at least one page number or range.");
+  }
+
+  for (const part of rangeParts) {
+    const match = part.match(/^(\d+)(?:\s*-\s*(\d+))?$/);
+
+    if (!match) {
+      throw new Error("Use a valid page range, for example 1-5 or 1,3-6.");
+    }
+
+    const startPage = Number(match[1]);
+    const endPage = Number(match[2] ?? match[1]);
+
+    if (startPage < 1 || endPage < startPage || endPage > pageCount) {
+      throw new Error(`Page range must be between 1 and ${pageCount}.`);
+    }
+
+    for (let page = startPage; page <= endPage; page += 1) {
+      if (!seenPages.has(page)) {
+        seenPages.add(page);
+        pageIndices.push(page - 1);
+      }
+    }
+  }
+
+  return pageIndices;
+}
+
+function formatRangeForFilename(input: string) {
+  return input.replace(/\s+/g, "").replace(/,/g, "_").replace(/[^0-9_-]/g, "");
 }
 
 function truncateText(value: string, maxLength: number) {
