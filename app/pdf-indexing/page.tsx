@@ -1,8 +1,10 @@
 "use client";
 
 import { ArrowLeft, FileSearch, FolderOpen, ListOrdered, RefreshCw, Scissors, Shuffle } from "lucide-react";
+import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import Link from "next/link";
 import { ChangeEvent, useRef, useState } from "react";
+import JSZip from "jszip";
 
 type PdfFileRow = {
   id: string;
@@ -16,9 +18,11 @@ export default function PdfIndexingPage() {
   const [pdfRows, setPdfRows] = useState<PdfFileRow[]>([]);
   const [selectedRowIds, setSelectedRowIds] = useState<Set<string>>(() => new Set());
   const [folderName, setFolderName] = useState("");
+  const [isProcessing, setIsProcessing] = useState(false);
   const [isReading, setIsReading] = useState(false);
   const [message, setMessage] = useState("");
   const folderInputRef = useRef<HTMLInputElement>(null);
+  const pdfFileMapRef = useRef<Map<string, File>>(new Map());
   const selectedFilesRef = useRef<File[]>([]);
   const totalSize = pdfRows.reduce((sum, row) => sum + row.size, 0);
   const totalPages = pdfRows.reduce((sum, row) => sum + (row.pages ?? 0), 0);
@@ -46,10 +50,14 @@ export default function PdfIndexingPage() {
 
     try {
       const rows: PdfFileRow[] = [];
+      const fileMap = new Map<string, File>();
 
       for (const file of pdfFiles) {
+        const id = `${file.webkitRelativePath || file.name}-${file.size}-${file.lastModified}`;
+
+        fileMap.set(id, file);
         rows.push({
-          id: `${file.webkitRelativePath || file.name}-${file.size}-${file.lastModified}`,
+          id,
           name: file.name,
           pages: await getPdfPageCount(file),
           path: file.webkitRelativePath || file.name,
@@ -65,6 +73,7 @@ export default function PdfIndexingPage() {
       );
 
       setFolderName(getSelectedFolderName(rows));
+      pdfFileMapRef.current = fileMap;
       setPdfRows(rows);
       setMessage(
         rows.length
@@ -102,6 +111,143 @@ export default function PdfIndexingPage() {
     });
   }
 
+  function getActionRows(requireSelection: boolean) {
+    if (requireSelection && selectedRowIds.size === 0) {
+      return [];
+    }
+
+    return selectedRowIds.size
+      ? pdfRows.filter((row) => selectedRowIds.has(row.id))
+      : pdfRows;
+  }
+
+  async function mergeSelectedPdfs() {
+    const rows = getActionRows(true);
+
+    if (rows.length < 2) {
+      setMessage("Select at least two PDF files to merge.");
+      return;
+    }
+
+    setIsProcessing(true);
+    setMessage(`Merging ${rows.length} PDF files...`);
+
+    try {
+      const mergedPdf = await PDFDocument.create();
+
+      for (const row of rows) {
+        const file = pdfFileMapRef.current.get(row.id);
+
+        if (!file) {
+          continue;
+        }
+
+        const sourcePdf = await PDFDocument.load(await file.arrayBuffer(), { ignoreEncryption: true });
+        const copiedPages = await mergedPdf.copyPages(sourcePdf, sourcePdf.getPageIndices());
+        copiedPages.forEach((page) => mergedPdf.addPage(page));
+      }
+
+      const bytes = await mergedPdf.save();
+      downloadBlob(createPdfBlob(bytes), "workline-merged.pdf");
+      setMessage(`Merged ${rows.length} PDF files.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not merge selected PDFs.");
+    } finally {
+      setIsProcessing(false);
+    }
+  }
+
+  async function splitSelectedPdfs() {
+    const rows = getActionRows(true);
+
+    if (!rows.length) {
+      setMessage("Select at least one PDF file to split.");
+      return;
+    }
+
+    setIsProcessing(true);
+    setMessage(`Splitting ${rows.length} PDF file${rows.length === 1 ? "" : "s"}...`);
+
+    try {
+      const zip = new JSZip();
+
+      for (const row of rows) {
+        const file = pdfFileMapRef.current.get(row.id);
+
+        if (!file) {
+          continue;
+        }
+
+        const sourcePdf = await PDFDocument.load(await file.arrayBuffer(), { ignoreEncryption: true });
+        const folder = zip.folder(stripPdfExtension(row.name)) ?? zip;
+
+        for (const pageIndex of sourcePdf.getPageIndices()) {
+          const singlePagePdf = await PDFDocument.create();
+          const [copiedPage] = await singlePagePdf.copyPages(sourcePdf, [pageIndex]);
+          singlePagePdf.addPage(copiedPage);
+          folder.file(`page-${String(pageIndex + 1).padStart(3, "0")}.pdf`, await singlePagePdf.save());
+        }
+      }
+
+      const zipBlob = await zip.generateAsync({ type: "blob" });
+      downloadBlob(zipBlob, "workline-split-pdfs.zip");
+      setMessage(`Split ${rows.length} PDF file${rows.length === 1 ? "" : "s"} into a ZIP.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not split selected PDFs.");
+    } finally {
+      setIsProcessing(false);
+    }
+  }
+
+  async function createPdfIndex() {
+    const rows = getActionRows(false);
+
+    if (!rows.length) {
+      setMessage("Select a folder before creating an index.");
+      return;
+    }
+
+    setIsProcessing(true);
+    setMessage(`Creating index for ${rows.length} PDF file${rows.length === 1 ? "" : "s"}...`);
+
+    try {
+      const indexPdf = await PDFDocument.create();
+      const font = await indexPdf.embedFont(StandardFonts.Helvetica);
+      const boldFont = await indexPdf.embedFont(StandardFonts.HelveticaBold);
+      let page = indexPdf.addPage([842, 595]);
+      let y = 540;
+
+      page.drawText("PDF Index", { color: rgb(0.02, 0.06, 0.18), font: boldFont, size: 22, x: 36, y });
+      y -= 32;
+      page.drawText(`Folder: ${folderName || "Selected folder"}`, { color: rgb(0.28, 0.33, 0.42), font, size: 10, x: 36, y });
+      y -= 26;
+      drawIndexHeader(page, boldFont, y);
+      y -= 20;
+
+      rows.forEach((row, index) => {
+        if (y < 42) {
+          page = indexPdf.addPage([842, 595]);
+          y = 540;
+          drawIndexHeader(page, boldFont, y);
+          y -= 20;
+        }
+
+        page.drawText(String(index + 1), { font, size: 9, x: 38, y });
+        page.drawText(truncateText(row.name, 72), { font, size: 9, x: 72, y });
+        page.drawText(formatFileSize(row.size), { font, size: 9, x: 610, y });
+        page.drawText(row.pages === null ? "Unreadable" : String(row.pages), { font, size: 9, x: 710, y });
+        y -= 17;
+      });
+
+      downloadBlob(createPdfBlob(await indexPdf.save()), "workline-pdf-index.pdf");
+      setMessage(`Created index for ${rows.length} PDF file${rows.length === 1 ? "" : "s"}.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not create PDF index.");
+    } finally {
+      setIsProcessing(false);
+    }
+  }
+
   return (
     <main className="min-h-screen overflow-hidden bg-[#f7f3ea] px-2 py-3 text-slate-950 sm:px-3 lg:px-4">
       <div className="pointer-events-none fixed inset-0 -z-10">
@@ -134,9 +280,9 @@ export default function PdfIndexingPage() {
             </div>
 
             <div className="flex flex-wrap gap-2">
-              <ToolButton icon={Shuffle} label="Merge" />
-              <ToolButton icon={Scissors} label="Split" />
-              <ToolButton icon={ListOrdered} label="Create Index" />
+              <ToolButton disabled={isProcessing || selectedRowIds.size < 2} icon={Shuffle} label="Merge" onClick={mergeSelectedPdfs} />
+              <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={Scissors} label="Split" onClick={splitSelectedPdfs} />
+              <ToolButton disabled={isProcessing || pdfRows.length === 0} icon={ListOrdered} label="Create Index" onClick={createPdfIndex} />
               <input
                 accept="application/pdf,.pdf"
                 className="hidden"
@@ -254,10 +400,22 @@ export default function PdfIndexingPage() {
   );
 }
 
-function ToolButton({ icon: Icon, label }: { icon: typeof Shuffle; label: string }) {
+function ToolButton({
+  disabled,
+  icon: Icon,
+  label,
+  onClick
+}: {
+  disabled?: boolean;
+  icon: typeof Shuffle;
+  label: string;
+  onClick: () => void;
+}) {
   return (
     <button
-      className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-950/10 bg-white px-3 text-xs font-black uppercase text-slate-800 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+      className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-950/10 bg-white px-3 text-xs font-black uppercase text-slate-800 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:translate-y-0 disabled:hover:shadow-sm"
+      disabled={disabled}
+      onClick={onClick}
       type="button"
     >
       <Icon className="size-4" />
@@ -277,6 +435,12 @@ function Metric({ label, value }: { label: string; value: string }) {
 
 async function getPdfPageCount(file: File) {
   const buffer = await file.arrayBuffer();
+  const loadedPdf = await PDFDocument.load(buffer.slice(0), { ignoreEncryption: true }).catch(() => null);
+
+  if (loadedPdf) {
+    return loadedPdf.getPageCount();
+  }
+
   const text = new TextDecoder("latin1").decode(buffer);
   const directPageMatches = text.match(/\/Type\s*\/Page\b(?!s)/g);
 
@@ -300,6 +464,44 @@ async function getPdfPageCount(file: File) {
   }
 
   return null;
+}
+
+function drawIndexHeader(page: ReturnType<PDFDocument["addPage"]>, font: Awaited<ReturnType<PDFDocument["embedFont"]>>, y: number) {
+  page.drawText("Sno", { font, size: 9, x: 38, y });
+  page.drawText("PDF Name", { font, size: 9, x: 72, y });
+  page.drawText("Size", { font, size: 9, x: 610, y });
+  page.drawText("Pages", { font, size: 9, x: 710, y });
+  page.drawLine({
+    color: rgb(0.82, 0.85, 0.9),
+    end: { x: 790, y: y - 6 },
+    start: { x: 36, y: y - 6 },
+    thickness: 1
+  });
+}
+
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function createPdfBlob(bytes: Uint8Array) {
+  const buffer = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(buffer).set(bytes);
+
+  return new Blob([buffer], { type: "application/pdf" });
+}
+
+function stripPdfExtension(filename: string) {
+  return filename.replace(/\.pdf$/i, "");
+}
+
+function truncateText(value: string, maxLength: number) {
+  return value.length > maxLength ? `${value.slice(0, maxLength - 1)}...` : value;
 }
 
 function getSelectedFolderName(rows: PdfFileRow[]) {
