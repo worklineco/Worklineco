@@ -5,6 +5,7 @@ import {
   BarChart3,
   Building2,
   ClipboardCheck,
+  FileSearch,
   FileText,
   Gavel,
   LayoutDashboard,
@@ -23,6 +24,7 @@ const navigation = [
   { href: "/", icon: LayoutDashboard, label: "Overview", tone: "bg-teal-100 text-teal-800" },
   { href: "/gst", icon: ClipboardCheck, label: "GST Tracker", target: "_blank", tone: "bg-amber-100 text-amber-800" },
   { href: "/gstat", icon: Scale, label: "GSTAT", target: "_blank", tone: "bg-fuchsia-100 text-fuchsia-800" },
+  { href: "/pdf-indexing", icon: FileSearch, label: "PDF & Indexing", target: "_blank", tone: "bg-indigo-100 text-indigo-800" },
   { href: "#records", icon: Building2, label: "Client Records", tone: "bg-sky-100 text-sky-800" },
   { href: "#reports", icon: BarChart3, label: "Reports", tone: "bg-emerald-100 text-emerald-800" }
 ];

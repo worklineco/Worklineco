@@ -2,6 +2,7 @@ export type WorkLineModuleKey =
   | "dashboard"
   | "client_master"
   | "gst_tracker"
+  | "pdf_indexing"
   | "attendance"
   | "team_master"
   | "task_allocation"
@@ -29,6 +30,7 @@ export const workLineModules: WorkLineModule[] = [
   { key: "dashboard", label: "Dashboard", stage: "foundation", permissionPrefix: "dashboard" },
   { key: "client_master", label: "Client Master", stage: "mvp", permissionPrefix: "client" },
   { key: "gst_tracker", label: "GST Tracker", stage: "planned", permissionPrefix: "gst" },
+  { key: "pdf_indexing", label: "PDF & Indexing", stage: "planned", permissionPrefix: "pdf" },
   { key: "attendance", label: "Attendance", stage: "planned", permissionPrefix: "attendance" },
   { key: "team_master", label: "Team Master", stage: "mvp", permissionPrefix: "team" },
   { key: "task_allocation", label: "Task & Work Allocation", stage: "mvp", permissionPrefix: "task" },
