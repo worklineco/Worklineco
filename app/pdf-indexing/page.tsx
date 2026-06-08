@@ -165,7 +165,7 @@ export default function PdfIndexingPage() {
       return;
     }
 
-    const rangeInput = window.prompt("Enter pages to split, for example 1-5 or 1,3-6.");
+    const rangeInput = window.prompt("Enter page range to extract into one PDF, for example 1-5 or 1,3-6.");
 
     if (rangeInput === null) {
       return;
@@ -179,7 +179,7 @@ export default function PdfIndexingPage() {
     }
 
     setIsProcessing(true);
-    setMessage(`Splitting pages ${normalizedRange} from ${rows.length} PDF file${rows.length === 1 ? "" : "s"}...`);
+    setMessage(`Extracting pages ${normalizedRange} from ${rows.length} PDF file${rows.length === 1 ? "" : "s"}...`);
 
     try {
       const zip = new JSZip();
@@ -193,20 +193,16 @@ export default function PdfIndexingPage() {
 
         const sourcePdf = await PDFDocument.load(await file.arrayBuffer(), { ignoreEncryption: true });
         const pageIndices = parsePageIndices(normalizedRange, sourcePdf.getPageCount(), row.name);
-        const folder = zip.folder(stripPdfExtension(row.name)) ?? zip;
+        const extractedPdf = await PDFDocument.create();
+        const copiedPages = await extractedPdf.copyPages(sourcePdf, pageIndices);
 
-        for (const pageIndex of pageIndices) {
-          const singlePagePdf = await PDFDocument.create();
-          const [copiedPage] = await singlePagePdf.copyPages(sourcePdf, [pageIndex]);
-
-          singlePagePdf.addPage(copiedPage);
-          folder.file(`page-${String(pageIndex + 1).padStart(3, "0")}.pdf`, await singlePagePdf.save());
-        }
+        copiedPages.forEach((page) => extractedPdf.addPage(page));
+        zip.file(`${stripPdfExtension(row.name)}-pages-${formatRangeForFilename(normalizedRange)}.pdf`, await extractedPdf.save());
       }
 
       const zipBlob = await zip.generateAsync({ type: "blob" });
       downloadBlob(zipBlob, "workline-split-pdfs.zip");
-      setMessage(`Split pages ${normalizedRange} from ${rows.length} PDF file${rows.length === 1 ? "" : "s"} into a ZIP.`);
+      setMessage(`Extracted pages ${normalizedRange} from ${rows.length} PDF file${rows.length === 1 ? "" : "s"} into a ZIP.`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Could not split selected PDFs.");
     } finally {
@@ -547,6 +543,10 @@ function parsePageIndices(input: string, pageCount: number, filename: string) {
   }
 
   return pageIndices;
+}
+
+function formatRangeForFilename(input: string) {
+  return input.replace(/\s+/g, "").replace(/,/g, "_").replace(/[^0-9_-]/g, "");
 }
 
 function truncateText(value: string, maxLength: number) {
