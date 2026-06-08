@@ -35,6 +35,9 @@ export default function PdfIndexingPage() {
   const selectedFilesRef = useRef<File[]>([]);
   const totalSize = pdfRows.reduce((sum, row) => sum + row.size, 0);
   const totalPages = pdfRows.reduce((sum, row) => sum + (row.pages ?? 0), 0);
+  const selectedRows = pdfRows.filter((row) => selectedRowIds.has(row.id));
+  const selectedSize = selectedRows.reduce((sum, row) => sum + row.size, 0);
+  const selectedPages = selectedRows.reduce((sum, row) => sum + (row.pages ?? 0), 0);
   const areAllRowsSelected = pdfRows.length > 0 && selectedRowIds.size === pdfRows.length;
   const areSomeRowsSelected = selectedRowIds.size > 0 && selectedRowIds.size < pdfRows.length;
 
@@ -384,8 +387,10 @@ export default function PdfIndexingPage() {
             <div className="flex flex-wrap gap-2">
               <Metric label="Files" value={String(pdfRows.length)} />
               <Metric label="Selected" value={String(selectedRowIds.size)} />
-              <Metric label="Pages" value={isReading ? "..." : String(totalPages)} />
-              <Metric label="Size" value={formatFileSize(totalSize)} />
+              <Metric label="Total Pages" value={isReading ? "..." : String(totalPages)} />
+              <Metric label="Selected Pages" value={isReading ? "..." : String(selectedPages)} />
+              <Metric label="Total Size" value={formatFileSize(totalSize)} />
+              <Metric label="Selected Size" value={formatFileSize(selectedSize)} />
             </div>
           </div>
 
