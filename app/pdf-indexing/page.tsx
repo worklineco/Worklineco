@@ -1,7 +1,8 @@
 "use client";
 
 import { ArrowLeft, FileSearch, FolderOpen, ListOrdered, RefreshCw, Scissors, Shuffle } from "lucide-react";
-import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
+import { AlignmentType, BorderStyle, Document, Packer, Paragraph, Table, TableCell, TableRow, TextRun, WidthType } from "docx";
+import { PDFDocument } from "pdf-lib";
 import Link from "next/link";
 import { ChangeEvent, useRef, useState } from "react";
 import JSZip from "jszip";
@@ -231,38 +232,49 @@ export default function PdfIndexingPage() {
     setMessage(`Creating index for ${rows.length} PDF file${rows.length === 1 ? "" : "s"}...`);
 
     try {
-      const indexPdf = await PDFDocument.create();
-      const font = await indexPdf.embedFont(StandardFonts.Helvetica);
-      const boldFont = await indexPdf.embedFont(StandardFonts.HelveticaBold);
-      let page = indexPdf.addPage([842, 595]);
-      let y = 540;
-
-      page.drawText("PDF Index", { color: rgb(0.02, 0.06, 0.18), font: boldFont, size: 22, x: 36, y });
-      y -= 32;
-      page.drawText(`Folder: ${folderName || "Selected folder"}`, { color: rgb(0.28, 0.33, 0.42), font, size: 10, x: 36, y });
-      y -= 26;
-      drawIndexHeader(page, boldFont, y);
-      y -= 20;
-
-      rows.forEach((row, index) => {
-        if (y < 42) {
-          page = indexPdf.addPage([842, 595]);
-          y = 540;
-          drawIndexHeader(page, boldFont, y);
-          y -= 20;
-        }
-
-        page.drawText(String(index + 1), { font, size: 9, x: 38, y });
-        page.drawText(truncateText(row.name, 72), { font, size: 9, x: 72, y });
-        page.drawText(formatFileSize(row.size), { font, size: 9, x: 610, y });
-        page.drawText(row.pages === null ? "Unreadable" : String(row.pages), { font, size: 9, x: 710, y });
-        y -= 17;
+      const indexDoc = new Document({
+        sections: [
+          {
+            children: [
+              new Paragraph({
+                children: [new TextRun({ bold: true, size: 32, text: "PDF Index" })],
+                spacing: { after: 240 }
+              }),
+              new Table({
+                rows: [
+                  new TableRow({
+                    children: [
+                      createIndexCell("Sno", { bold: true, width: 900 }),
+                      createIndexCell("PDF Name", { bold: true, width: 7600 }),
+                      createIndexCell("Pages", { alignment: AlignmentType.CENTER, bold: true, width: 1200 })
+                    ],
+                    tableHeader: true
+                  }),
+                  ...rows.map(
+                    (row, index) =>
+                      new TableRow({
+                        children: [
+                          createIndexCell(String(index + 1), { alignment: AlignmentType.CENTER, width: 900 }),
+                          createIndexCell(row.name, { width: 7600 }),
+                          createIndexCell(row.pages === null ? "Unreadable" : String(row.pages), {
+                            alignment: AlignmentType.CENTER,
+                            width: 1200
+                          })
+                        ]
+                      })
+                  )
+                ],
+                width: { size: 9700, type: WidthType.DXA }
+              })
+            ]
+          }
+        ]
       });
 
-      downloadBlob(createPdfBlob(await indexPdf.save()), "workline-pdf-index.pdf");
+      downloadBlob(await Packer.toBlob(indexDoc), "workline-pdf-index.docx");
       setMessage(`Created index for ${rows.length} PDF file${rows.length === 1 ? "" : "s"}.`);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Could not create PDF index.");
+      setMessage(error instanceof Error ? error.message : "Could not create Word index.");
     } finally {
       setIsProcessing(false);
     }
@@ -486,19 +498,6 @@ async function getPdfPageCount(file: File) {
   return null;
 }
 
-function drawIndexHeader(page: ReturnType<PDFDocument["addPage"]>, font: Awaited<ReturnType<PDFDocument["embedFont"]>>, y: number) {
-  page.drawText("Sno", { font, size: 9, x: 38, y });
-  page.drawText("PDF Name", { font, size: 9, x: 72, y });
-  page.drawText("Size", { font, size: 9, x: 610, y });
-  page.drawText("Pages", { font, size: 9, x: 710, y });
-  page.drawLine({
-    color: rgb(0.82, 0.85, 0.9),
-    end: { x: 790, y: y - 6 },
-    start: { x: 36, y: y - 6 },
-    thickness: 1
-  });
-}
-
 function downloadBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
@@ -518,6 +517,33 @@ function createPdfBlob(bytes: Uint8Array) {
 
 function stripPdfExtension(filename: string) {
   return filename.replace(/\.pdf$/i, "");
+}
+
+function createIndexCell(
+  text: string,
+  options: {
+    alignment?: (typeof AlignmentType)[keyof typeof AlignmentType];
+    bold?: boolean;
+    width: number;
+  }
+) {
+  return new TableCell({
+    borders: {
+      bottom: { color: "1F2937", size: 6, style: BorderStyle.SINGLE },
+      left: { color: "1F2937", size: 6, style: BorderStyle.SINGLE },
+      right: { color: "1F2937", size: 6, style: BorderStyle.SINGLE },
+      top: { color: "1F2937", size: 6, style: BorderStyle.SINGLE }
+    },
+    children: [
+      new Paragraph({
+        alignment: options.alignment,
+        children: [new TextRun({ bold: options.bold, size: 20, text })],
+        spacing: { after: 0, before: 0 }
+      })
+    ],
+    margins: { bottom: 120, left: 120, right: 120, top: 120 },
+    width: { size: options.width, type: WidthType.DXA }
+  });
 }
 
 function parsePageRanges(input: string, pageCount: number, filename: string): PageRange[] {
