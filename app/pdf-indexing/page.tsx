@@ -259,6 +259,7 @@ export default function PdfIndexingPage() {
     setMessage(`Creating index for ${rows.length} PDF file${rows.length === 1 ? "" : "s"}...`);
 
     try {
+      let cumulativePages = 0;
       const indexDoc = new Document({
         sections: [
           {
@@ -273,7 +274,7 @@ export default function PdfIndexingPage() {
                     children: [
                       createIndexCell("Sno", { bold: true, width: 900 }),
                       createIndexCell("Particulars", { bold: true, width: 6200 }),
-                      createIndexCell("Pages", { alignment: AlignmentType.CENTER, bold: true, width: 1100 }),
+                      createIndexCell("Page", { alignment: AlignmentType.CENTER, bold: true, width: 1100 }),
                       createIndexCell("Document", { alignment: AlignmentType.CENTER, bold: true, width: 1500 })
                     ],
                     tableHeader: true
@@ -284,7 +285,9 @@ export default function PdfIndexingPage() {
                         children: [
                           createIndexCell(String(index + 1), { alignment: AlignmentType.CENTER, width: 900 }),
                           createIndexCell(row.name, { width: 6200 }),
-                          createIndexCell(row.pages === null ? "Unreadable" : String(row.pages), {
+                          createIndexCell(getCumulativePageText(row.pages, () => cumulativePages, (pages) => {
+                            cumulativePages += pages;
+                          }), {
                             alignment: AlignmentType.CENTER,
                             width: 1100
                           }),
@@ -387,8 +390,8 @@ export default function PdfIndexingPage() {
             <div className="flex flex-wrap gap-2">
               <Metric label="Files" value={String(pdfRows.length)} />
               <Metric label="Selected" value={String(selectedRowIds.size)} />
-              <Metric label="Total Pages" value={isReading ? "..." : String(totalPages)} />
-              <Metric label="Selected Pages" value={isReading ? "..." : String(selectedPages)} />
+              <Metric label="Total Page" value={isReading ? "..." : String(totalPages)} />
+              <Metric label="Selected Page" value={isReading ? "..." : String(selectedPages)} />
               <Metric label="Total Size" value={formatFileSize(totalSize)} />
               <Metric label="Selected Size" value={formatFileSize(selectedSize)} />
             </div>
@@ -417,7 +420,7 @@ export default function PdfIndexingPage() {
                     <th className="w-16 border-b border-r border-white/15 px-3 py-3 text-xs font-black uppercase">Sno</th>
                     <th className="border-b border-r border-white/15 px-3 py-3 text-xs font-black uppercase">PDF Name</th>
                     <th className="w-36 border-b border-r border-white/15 px-3 py-3 text-xs font-black uppercase">Size</th>
-                    <th className="w-32 border-b border-r border-white/15 px-3 py-3 text-xs font-black uppercase">Pages</th>
+                    <th className="w-32 border-b border-r border-white/15 px-3 py-3 text-xs font-black uppercase">Page</th>
                     <th className="w-44 border-b border-white/15 px-3 py-3 text-xs font-black uppercase">Document</th>
                   </tr>
                 </thead>
@@ -589,6 +592,15 @@ function createPdfBlob(bytes: Uint8Array) {
 
 function stripPdfExtension(filename: string) {
   return filename.replace(/\.pdf$/i, "");
+}
+
+function getCumulativePageText(pages: number | null, getCurrentTotal: () => number, addPages: (pages: number) => void) {
+  if (pages === null) {
+    return "Unreadable";
+  }
+
+  addPages(pages);
+  return String(getCurrentTotal());
 }
 
 function createIndexCell(
