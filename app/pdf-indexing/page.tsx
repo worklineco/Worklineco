@@ -259,7 +259,7 @@ export default function PdfIndexingPage() {
     setMessage(`Creating index for ${rows.length} PDF file${rows.length === 1 ? "" : "s"}...`);
 
     try {
-      let cumulativePages = 0;
+      let nextStartPage = 1;
       const indexDoc = new Document({
         sections: [
           {
@@ -285,8 +285,8 @@ export default function PdfIndexingPage() {
                         children: [
                           createIndexCell(String(index + 1), { alignment: AlignmentType.CENTER, width: 900 }),
                           createIndexCell(row.name, { width: 6200 }),
-                          createIndexCell(getCumulativePageText(row.pages, () => cumulativePages, (pages) => {
-                            cumulativePages += pages;
+                          createIndexCell(getStartingPageText(row.pages, () => nextStartPage, (pages) => {
+                            nextStartPage += pages;
                           }), {
                             alignment: AlignmentType.CENTER,
                             width: 1100
@@ -594,13 +594,14 @@ function stripPdfExtension(filename: string) {
   return filename.replace(/\.pdf$/i, "");
 }
 
-function getCumulativePageText(pages: number | null, getCurrentTotal: () => number, addPages: (pages: number) => void) {
+function getStartingPageText(pages: number | null, getCurrentStartPage: () => number, addPages: (pages: number) => void) {
   if (pages === null) {
     return "Unreadable";
   }
 
+  const startPage = getCurrentStartPage();
   addPages(pages);
-  return String(getCurrentTotal());
+  return String(startPage);
 }
 
 function createIndexCell(
