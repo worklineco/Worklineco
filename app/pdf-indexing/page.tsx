@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, FileSearch, FolderOpen, ListOrdered, RefreshCw, Scissors, Shuffle } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowUp, FileSearch, FolderOpen, ListOrdered, RefreshCw, Scissors, Shuffle } from "lucide-react";
 import { AlignmentType, BorderStyle, Document, Packer, Paragraph, Table, TableCell, TableRow, TextRun, WidthType } from "docx";
 import { PDFDocument } from "pdf-lib";
 import Link from "next/link";
@@ -8,12 +8,15 @@ import { ChangeEvent, useRef, useState } from "react";
 import JSZip from "jszip";
 
 type PdfFileRow = {
+  documentType: string;
   id: string;
   name: string;
   pages: number | null;
   path: string;
   size: number;
 };
+
+const DOCUMENT_TYPES = ["POA", "SCN", "SCN Reply", "OIO", "Appeal", "Annexure"];
 
 type PageRange = {
   label: string;
@@ -63,6 +66,7 @@ export default function PdfIndexingPage() {
 
         fileMap.set(id, file);
         rows.push({
+          documentType: "",
           id,
           name: file.name,
           pages: await getPdfPageCount(file),
@@ -125,6 +129,26 @@ export default function PdfIndexingPage() {
     return selectedRowIds.size
       ? pdfRows.filter((row) => selectedRowIds.has(row.id))
       : pdfRows;
+  }
+
+  function movePdfRow(rowId: string, direction: -1 | 1) {
+    setPdfRows((currentRows) => {
+      const currentIndex = currentRows.findIndex((row) => row.id === rowId);
+      const nextIndex = currentIndex + direction;
+
+      if (currentIndex < 0 || nextIndex < 0 || nextIndex >= currentRows.length) {
+        return currentRows;
+      }
+
+      const nextRows = [...currentRows];
+      [nextRows[currentIndex], nextRows[nextIndex]] = [nextRows[nextIndex], nextRows[currentIndex]];
+
+      return nextRows;
+    });
+  }
+
+  function updateDocumentType(rowId: string, documentType: string) {
+    setPdfRows((currentRows) => currentRows.map((row) => (row.id === rowId ? { ...row, documentType } : row)));
   }
 
   async function mergeSelectedPdfs() {
@@ -245,8 +269,9 @@ export default function PdfIndexingPage() {
                   new TableRow({
                     children: [
                       createIndexCell("Sno", { bold: true, width: 900 }),
-                      createIndexCell("PDF Name", { bold: true, width: 7600 }),
-                      createIndexCell("Pages", { alignment: AlignmentType.CENTER, bold: true, width: 1200 })
+                      createIndexCell("Particulars", { bold: true, width: 6200 }),
+                      createIndexCell("Pages", { alignment: AlignmentType.CENTER, bold: true, width: 1100 }),
+                      createIndexCell("Document", { alignment: AlignmentType.CENTER, bold: true, width: 1500 })
                     ],
                     tableHeader: true
                   }),
@@ -255,11 +280,12 @@ export default function PdfIndexingPage() {
                       new TableRow({
                         children: [
                           createIndexCell(String(index + 1), { alignment: AlignmentType.CENTER, width: 900 }),
-                          createIndexCell(row.name, { width: 7600 }),
+                          createIndexCell(row.name, { width: 6200 }),
                           createIndexCell(row.pages === null ? "Unreadable" : String(row.pages), {
                             alignment: AlignmentType.CENTER,
-                            width: 1200
-                          })
+                            width: 1100
+                          }),
+                          createIndexCell(row.documentType || "", { alignment: AlignmentType.CENTER, width: 1500 })
                         ]
                       })
                   )
@@ -365,7 +391,7 @@ export default function PdfIndexingPage() {
 
           <div className="mt-4 overflow-hidden rounded-2xl border border-slate-950/10 bg-white">
             <div className="max-h-[calc(100vh-285px)] overflow-auto">
-              <table className="w-full min-w-[720px] border-separate border-spacing-0 text-left text-sm">
+              <table className="w-full min-w-[980px] border-separate border-spacing-0 text-left text-sm">
                 <thead className="sticky top-0 z-10 bg-slate-950 text-white">
                   <tr>
                     <th className="w-12 border-b border-r border-white/15 px-3 py-3">
@@ -382,10 +408,12 @@ export default function PdfIndexingPage() {
                         type="checkbox"
                       />
                     </th>
+                    <th className="w-24 border-b border-r border-white/15 px-3 py-3 text-xs font-black uppercase">Move</th>
                     <th className="w-16 border-b border-r border-white/15 px-3 py-3 text-xs font-black uppercase">Sno</th>
                     <th className="border-b border-r border-white/15 px-3 py-3 text-xs font-black uppercase">PDF Name</th>
                     <th className="w-36 border-b border-r border-white/15 px-3 py-3 text-xs font-black uppercase">Size</th>
-                    <th className="w-32 border-b border-white/15 px-3 py-3 text-xs font-black uppercase">Pages</th>
+                    <th className="w-32 border-b border-r border-white/15 px-3 py-3 text-xs font-black uppercase">Pages</th>
+                    <th className="w-44 border-b border-white/15 px-3 py-3 text-xs font-black uppercase">Document</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -401,6 +429,30 @@ export default function PdfIndexingPage() {
                             type="checkbox"
                           />
                         </td>
+                        <td className="border-b border-r border-slate-200 px-3 py-2">
+                          <div className="flex items-center gap-1">
+                            <button
+                              aria-label={`Move ${row.name} up`}
+                              className="flex size-8 items-center justify-center rounded-lg border border-slate-950/10 bg-white text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-35"
+                              disabled={index === 0 || isProcessing}
+                              onClick={() => movePdfRow(row.id, -1)}
+                              title="Move up"
+                              type="button"
+                            >
+                              <ArrowUp className="size-4" />
+                            </button>
+                            <button
+                              aria-label={`Move ${row.name} down`}
+                              className="flex size-8 items-center justify-center rounded-lg border border-slate-950/10 bg-white text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-35"
+                              disabled={index === pdfRows.length - 1 || isProcessing}
+                              onClick={() => movePdfRow(row.id, 1)}
+                              title="Move down"
+                              type="button"
+                            >
+                              <ArrowDown className="size-4" />
+                            </button>
+                          </div>
+                        </td>
                         <td className="border-b border-r border-slate-200 px-3 py-2 font-bold text-slate-700">
                           {index + 1}
                         </td>
@@ -410,14 +462,29 @@ export default function PdfIndexingPage() {
                         <td className="border-b border-r border-slate-200 px-3 py-2 font-semibold text-slate-700">
                           {formatFileSize(row.size)}
                         </td>
-                        <td className="border-b border-slate-200 px-3 py-2 font-semibold text-slate-700">
+                        <td className="border-b border-r border-slate-200 px-3 py-2 font-semibold text-slate-700">
                           {row.pages ?? "Could not read"}
+                        </td>
+                        <td className="border-b border-slate-200 px-3 py-2">
+                          <select
+                            aria-label={`Select document type for ${row.name}`}
+                            className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-xs font-bold text-slate-800 outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
+                            onChange={(event) => updateDocumentType(row.id, event.target.value)}
+                            value={row.documentType}
+                          >
+                            <option value="">Select</option>
+                            {DOCUMENT_TYPES.map((documentType) => (
+                              <option key={documentType} value={documentType}>
+                                {documentType}
+                              </option>
+                            ))}
+                          </select>
                         </td>
                       </tr>
                     ))
                   ) : (
                     <tr>
-                      <td className="px-3 py-12 text-center text-sm font-bold text-slate-500" colSpan={5}>
+                      <td className="px-3 py-12 text-center text-sm font-bold text-slate-500" colSpan={7}>
                         {isReading ? "Reading PDFs..." : "No PDF folder selected yet."}
                       </td>
                     </tr>
