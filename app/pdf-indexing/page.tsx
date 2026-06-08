@@ -14,6 +14,13 @@ type PdfFileRow = {
   size: number;
 };
 
+type PageRange = {
+  endPage: number;
+  label: string;
+  pageIndices: number[];
+  startPage: number;
+};
+
 export default function PdfIndexingPage() {
   const [pdfRows, setPdfRows] = useState<PdfFileRow[]>([]);
   const [selectedRowIds, setSelectedRowIds] = useState<Set<string>>(() => new Set());
@@ -165,7 +172,7 @@ export default function PdfIndexingPage() {
       return;
     }
 
-    const rangeInput = window.prompt("Enter page range to split, for example 1-5 or 1,3-6.");
+    const rangeInput = window.prompt("Enter page range to split, for example 1-5 or 1-5,6-10.");
 
     if (rangeInput === null) {
       return;
@@ -192,12 +199,16 @@ export default function PdfIndexingPage() {
         }
 
         const sourcePdf = await PDFDocument.load(await file.arrayBuffer(), { ignoreEncryption: true });
-        const pageIndices = parsePageRange(normalizedRange, sourcePdf.getPageCount());
-        const rangePdf = await PDFDocument.create();
-        const copiedPages = await rangePdf.copyPages(sourcePdf, pageIndices);
+        const pageRanges = parsePageRanges(normalizedRange, sourcePdf.getPageCount(), row.name);
+        const folder = zip.folder(stripPdfExtension(row.name)) ?? zip;
 
-        copiedPages.forEach((page) => rangePdf.addPage(page));
-        zip.file(`${stripPdfExtension(row.name)}-pages-${formatRangeForFilename(normalizedRange)}.pdf`, await rangePdf.save());
+        for (const pageRange of pageRanges) {
+          const rangePdf = await PDFDocument.create();
+          const copiedPages = await rangePdf.copyPages(sourcePdf, pageRange.pageIndices);
+
+          copiedPages.forEach((page) => rangePdf.addPage(page));
+          folder.file(`${stripPdfExtension(row.name)}-pages-${pageRange.label}.pdf`, await rangePdf.save());
+        }
       }
 
       const zipBlob = await zip.generateAsync({ type: "blob" });
@@ -511,9 +522,8 @@ function stripPdfExtension(filename: string) {
   return filename.replace(/\.pdf$/i, "");
 }
 
-function parsePageRange(input: string, pageCount: number) {
-  const pageIndices: number[] = [];
-  const seenPages = new Set<number>();
+function parsePageRanges(input: string, pageCount: number, filename: string): PageRange[] {
+  const pageRanges: PageRange[] = [];
   const rangeParts = input.split(",").map((part) => part.trim()).filter(Boolean);
 
   if (!rangeParts.length) {
@@ -524,29 +534,38 @@ function parsePageRange(input: string, pageCount: number) {
     const match = part.match(/^(\d+)(?:\s*-\s*(\d+))?$/);
 
     if (!match) {
-      throw new Error("Use a valid page range, for example 1-5 or 1,3-6.");
+      throw new Error("Use a valid page range, for example 1-5 or 1-5,6-10.");
     }
 
     const startPage = Number(match[1]);
     const endPage = Number(match[2] ?? match[1]);
 
     if (startPage < 1 || endPage < startPage || endPage > pageCount) {
-      throw new Error(`Page range must be between 1 and ${pageCount}.`);
+      throw new Error(`${filename}: page range must be between 1 and ${pageCount}.`);
     }
+
+    const pageIndices: number[] = [];
 
     for (let page = startPage; page <= endPage; page += 1) {
-      if (!seenPages.has(page)) {
-        seenPages.add(page);
-        pageIndices.push(page - 1);
-      }
+      pageIndices.push(page - 1);
     }
+
+    pageRanges.push({
+      endPage,
+      label: formatPageRangeLabel(startPage, endPage),
+      pageIndices,
+      startPage
+    });
   }
 
-  return pageIndices;
+  return pageRanges;
 }
 
-function formatRangeForFilename(input: string) {
-  return input.replace(/\s+/g, "").replace(/,/g, "_").replace(/[^0-9_-]/g, "");
+function formatPageRangeLabel(startPage: number, endPage: number) {
+  const startLabel = String(startPage).padStart(3, "0");
+  const endLabel = String(endPage).padStart(3, "0");
+
+  return startPage === endPage ? startLabel : `${startLabel}-${endLabel}`;
 }
 
 function truncateText(value: string, maxLength: number) {
