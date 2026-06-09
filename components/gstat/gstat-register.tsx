@@ -4,7 +4,7 @@ import { downloadGstatPoa } from "@/lib/gstat/poa-document";
 import { supabase } from "@/lib/supabase/client";
 import { ArrowDown, ArrowLeft, ArrowUp, Download, Expand, ExternalLink, FileSpreadsheet, FileText, Filter, History, Pencil, Plus, Scale, Search, Settings2, ShieldCheck, Trash2, Upload, X } from "lucide-react";
 import Link from "next/link";
-import { ChangeEvent, useDeferredValue, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { ChangeEvent, memo, useDeferredValue, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import * as XLSX from "xlsx-js-style";
 
 type Column = { group?: string; key: string; label: string };
@@ -90,6 +90,7 @@ const demandColumns: Column[] = groupedColumns.flatMap((group) =>
 );
 const columns = [...baseColumns, ...demandColumns];
 const defaultColumnOrder = columns.map((column) => column.key);
+const columnByKey = new Map(columns.map((column) => [column.key, column]));
 const defaultColumnWidth = 92;
 const columnWidths: Record<string, number> = {
   "Sno": 52,
@@ -262,7 +263,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
   const orderedColumns = useMemo(
     () =>
       columnOrder
-        .map((columnKey) => columns.find((column) => column.key === columnKey))
+        .map((columnKey) => columnByKey.get(columnKey))
         .filter((column): column is Column => Boolean(column)),
     [columnOrder]
   );
@@ -282,7 +283,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
   const activeColumnFilterEntries = useMemo(
     () =>
       Object.entries(deferredColumnValueFilters)
-        .map(([columnKey, selectedValues]) => ({ column: columns.find((item) => item.key === columnKey), selectedValues }))
+        .map(([columnKey, selectedValues]) => ({ column: columnByKey.get(columnKey), selectedValues }))
         .filter(
           (entry): entry is { column: Column; selectedValues: string[] } =>
             Boolean(entry.column) && entry.selectedValues.length > 0
@@ -292,7 +293,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
   const activeColumnTextFilterEntries = useMemo(
     () =>
       Object.entries(deferredColumnTextFilters)
-        .map(([columnKey, filter]) => ({ column: columns.find((item) => item.key === columnKey), filter }))
+        .map(([columnKey, filter]) => ({ column: columnByKey.get(columnKey), filter }))
         .filter(
           (entry): entry is { column: Column; filter: string } =>
             Boolean(entry.column) && Boolean(entry.filter.trim())
@@ -337,7 +338,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
         return visibleRows;
       }
 
-      const sortColumn = columns.find((column) => column.key === sortState.columnKey);
+      const sortColumn = columnByKey.get(sortState.columnKey);
 
       if (!sortColumn) {
         return visibleRows;
@@ -376,7 +377,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
   const selectedVisibleRowCount = visibleRowKeys.filter((key) => selectedRowKeys.has(key)).length;
   const areAllVisibleRowsSelected = visibleRowKeys.length > 0 && selectedVisibleRowCount === visibleRowKeys.length;
   const areSomeVisibleRowsSelected = selectedVisibleRowCount > 0 && !areAllVisibleRowsSelected;
-  const openFilterColumn = openFilterColumnKey ? columns.find((column) => column.key === openFilterColumnKey) : null;
+  const openFilterColumn = openFilterColumnKey ? columnByKey.get(openFilterColumnKey) ?? null : null;
   const openColumnFilterOptions = useMemo(
     () =>
       openFilterColumn
@@ -2329,10 +2330,17 @@ function ColumnOptionsPanel({
 }) {
   const [draftOrder, setDraftOrder] = useState<string[]>(() => orderedColumns.map((column) => column.key));
   const [draftHiddenColumnKeys, setDraftHiddenColumnKeys] = useState<Set<string>>(() => new Set(hiddenColumnKeys));
-  const draftColumns = draftOrder
-    .map((columnKey) => columns.find((column) => column.key === columnKey))
-    .filter((column): column is Column => Boolean(column));
-  const visibleCount = draftColumns.filter((column) => !draftHiddenColumnKeys.has(column.key)).length;
+  const draftColumns = useMemo(
+    () =>
+      draftOrder
+        .map((columnKey) => columnByKey.get(columnKey))
+        .filter((column): column is Column => Boolean(column)),
+    [draftOrder]
+  );
+  const visibleCount = useMemo(
+    () => draftColumns.filter((column) => !draftHiddenColumnKeys.has(column.key)).length,
+    [draftColumns, draftHiddenColumnKeys]
+  );
 
   function toggleDraftColumn(column: Column) {
     setDraftHiddenColumnKeys((currentKeys) => {
@@ -2409,47 +2417,17 @@ function ColumnOptionsPanel({
       <div className="max-h-[420px] overflow-y-auto p-2">
         {draftColumns.map((column, index) => {
           const isHidden = draftHiddenColumnKeys.has(column.key);
-          const label = column.group ? `${column.group} - ${column.label}` : column.label;
 
           return (
-            <div
-              className={`mb-1 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-xl border px-2 py-2 ${
-                isHidden ? "border-slate-200 bg-slate-50 text-slate-500" : "border-slate-200 bg-white text-slate-950"
-              }`}
+            <ColumnOptionsRow
+              column={column}
+              index={index}
+              isHidden={isHidden}
               key={column.key}
-            >
-              <label className="flex min-w-0 cursor-pointer items-center gap-2">
-                <input
-                  checked={!isHidden}
-                  className="size-4 accent-slate-950"
-                  onChange={() => toggleDraftColumn(column)}
-                  type="checkbox"
-                />
-                <span className="min-w-0 truncate text-xs font-black" title={label}>
-                  {label}
-                </span>
-              </label>
-              <div className="flex items-center gap-1">
-                <button
-                  aria-label={`Move ${label} up`}
-                  className="inline-flex size-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-35"
-                  disabled={index === 0}
-                  onClick={() => moveDraftColumn(column, "up")}
-                  type="button"
-                >
-                  <ArrowUp className="size-3.5" />
-                </button>
-                <button
-                  aria-label={`Move ${label} down`}
-                  className="inline-flex size-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-35"
-                  disabled={index === draftColumns.length - 1}
-                  onClick={() => moveDraftColumn(column, "down")}
-                  type="button"
-                >
-                  <ArrowDown className="size-3.5" />
-                </button>
-              </div>
-            </div>
+              onMove={moveDraftColumn}
+              onToggle={toggleDraftColumn}
+              totalColumns={draftColumns.length}
+            />
           );
         })}
       </div>
@@ -2472,6 +2450,64 @@ function ColumnOptionsPanel({
     </div>
   );
 }
+
+const ColumnOptionsRow = memo(function ColumnOptionsRow({
+  column,
+  index,
+  isHidden,
+  onMove,
+  onToggle,
+  totalColumns
+}: {
+  column: Column;
+  index: number;
+  isHidden: boolean;
+  onMove: (column: Column, direction: "up" | "down") => void;
+  onToggle: (column: Column) => void;
+  totalColumns: number;
+}) {
+  const label = column.group ? `${column.group} - ${column.label}` : column.label;
+
+  return (
+    <div
+      className={`mb-1 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-xl border px-2 py-2 ${
+        isHidden ? "border-slate-200 bg-slate-50 text-slate-500" : "border-slate-200 bg-white text-slate-950"
+      }`}
+    >
+      <label className="flex min-w-0 cursor-pointer items-center gap-2">
+        <input
+          checked={!isHidden}
+          className="size-4 accent-slate-950"
+          onChange={() => onToggle(column)}
+          type="checkbox"
+        />
+        <span className="min-w-0 truncate text-xs font-black" title={label}>
+          {label}
+        </span>
+      </label>
+      <div className="flex items-center gap-1">
+        <button
+          aria-label={`Move ${label} up`}
+          className="inline-flex size-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-35"
+          disabled={index === 0}
+          onClick={() => onMove(column, "up")}
+          type="button"
+        >
+          <ArrowUp className="size-3.5" />
+        </button>
+        <button
+          aria-label={`Move ${label} down`}
+          className="inline-flex size-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-35"
+          disabled={index === totalColumns - 1}
+          onClick={() => onMove(column, "down")}
+          type="button"
+        >
+          <ArrowDown className="size-3.5" />
+        </button>
+      </div>
+    </div>
+  );
+});
 
 function Metric({
   icon: Icon,
