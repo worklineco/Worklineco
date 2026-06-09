@@ -540,43 +540,11 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
     closeColumnFilter();
   }
 
-  function toggleColumnVisibility(column: Column) {
-    setHiddenColumnKeys((currentKeys) => {
-      const nextKeys = new Set(currentKeys);
-
-      if (nextKeys.has(column.key)) {
-        nextKeys.delete(column.key);
-      } else {
-        nextKeys.add(column.key);
-      }
-
-      return nextKeys;
-    });
-  }
-
-  function moveColumn(column: Column, direction: "up" | "down") {
-    setColumnOrder((currentOrder) => {
-      const currentIndex = currentOrder.indexOf(column.key);
-
-      if (currentIndex < 0) {
-        return currentOrder;
-      }
-
-      const nextIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1;
-
-      if (nextIndex < 0 || nextIndex >= currentOrder.length) {
-        return currentOrder;
-      }
-
-      const nextOrder = [...currentOrder];
-      [nextOrder[currentIndex], nextOrder[nextIndex]] = [nextOrder[nextIndex], nextOrder[currentIndex]];
-      return nextOrder;
-    });
-  }
-
-  function resetColumnLayout() {
-    setColumnOrder(defaultColumnOrder);
-    setHiddenColumnKeys(new Set());
+  function applyColumnLayout(layout: ColumnLayout) {
+    const normalizedLayout = normalizeColumnLayout(layout);
+    setColumnOrder(normalizedLayout.order);
+    setHiddenColumnKeys(new Set(normalizedLayout.hiddenColumnKeys));
+    setIsColumnOptionsOpen(false);
   }
 
   useEffect(() => {
@@ -1175,10 +1143,8 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                 {isColumnOptionsOpen ? (
                   <ColumnOptionsPanel
                     hiddenColumnKeys={hiddenColumnKeys}
+                    onApply={applyColumnLayout}
                     onClose={() => setIsColumnOptionsOpen(false)}
-                    onMoveColumn={moveColumn}
-                    onReset={resetColumnLayout}
-                    onToggleColumn={toggleColumnVisibility}
                     orderedColumns={orderedColumns}
                   />
                 ) : null}
@@ -2352,20 +2318,67 @@ function ExcelColumnTextFilter({
 
 function ColumnOptionsPanel({
   hiddenColumnKeys,
+  onApply,
   onClose,
-  onMoveColumn,
-  onReset,
-  onToggleColumn,
   orderedColumns
 }: {
   hiddenColumnKeys: Set<string>;
+  onApply: (layout: ColumnLayout) => void;
   onClose: () => void;
-  onMoveColumn: (column: Column, direction: "up" | "down") => void;
-  onReset: () => void;
-  onToggleColumn: (column: Column) => void;
   orderedColumns: Column[];
 }) {
-  const visibleCount = orderedColumns.filter((column) => !hiddenColumnKeys.has(column.key)).length;
+  const [draftOrder, setDraftOrder] = useState<string[]>(() => orderedColumns.map((column) => column.key));
+  const [draftHiddenColumnKeys, setDraftHiddenColumnKeys] = useState<Set<string>>(() => new Set(hiddenColumnKeys));
+  const draftColumns = draftOrder
+    .map((columnKey) => columns.find((column) => column.key === columnKey))
+    .filter((column): column is Column => Boolean(column));
+  const visibleCount = draftColumns.filter((column) => !draftHiddenColumnKeys.has(column.key)).length;
+
+  function toggleDraftColumn(column: Column) {
+    setDraftHiddenColumnKeys((currentKeys) => {
+      const nextKeys = new Set(currentKeys);
+
+      if (nextKeys.has(column.key)) {
+        nextKeys.delete(column.key);
+      } else {
+        nextKeys.add(column.key);
+      }
+
+      return nextKeys;
+    });
+  }
+
+  function moveDraftColumn(column: Column, direction: "up" | "down") {
+    setDraftOrder((currentOrder) => {
+      const currentIndex = currentOrder.indexOf(column.key);
+
+      if (currentIndex < 0) {
+        return currentOrder;
+      }
+
+      const nextIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1;
+
+      if (nextIndex < 0 || nextIndex >= currentOrder.length) {
+        return currentOrder;
+      }
+
+      const nextOrder = [...currentOrder];
+      [nextOrder[currentIndex], nextOrder[nextIndex]] = [nextOrder[nextIndex], nextOrder[currentIndex]];
+      return nextOrder;
+    });
+  }
+
+  function resetDraftLayout() {
+    setDraftOrder(defaultColumnOrder);
+    setDraftHiddenColumnKeys(new Set());
+  }
+
+  function saveDraftLayout() {
+    onApply({
+      hiddenColumnKeys: Array.from(draftHiddenColumnKeys),
+      order: draftOrder
+    });
+  }
 
   return (
     <div className="absolute right-0 top-12 z-[900] w-[360px] overflow-hidden rounded-2xl border border-slate-200 bg-white text-slate-950 shadow-2xl">
@@ -2377,7 +2390,7 @@ function ColumnOptionsPanel({
         <div className="flex items-center gap-1">
           <button
             className="inline-flex h-8 items-center rounded-lg border border-slate-200 bg-white px-2 text-[11px] font-black uppercase text-slate-700 transition hover:bg-slate-50"
-            onClick={onReset}
+            onClick={resetDraftLayout}
             type="button"
           >
             Reset
@@ -2394,8 +2407,8 @@ function ColumnOptionsPanel({
       </div>
 
       <div className="max-h-[420px] overflow-y-auto p-2">
-        {orderedColumns.map((column, index) => {
-          const isHidden = hiddenColumnKeys.has(column.key);
+        {draftColumns.map((column, index) => {
+          const isHidden = draftHiddenColumnKeys.has(column.key);
           const label = column.group ? `${column.group} - ${column.label}` : column.label;
 
           return (
@@ -2409,7 +2422,7 @@ function ColumnOptionsPanel({
                 <input
                   checked={!isHidden}
                   className="size-4 accent-slate-950"
-                  onChange={() => onToggleColumn(column)}
+                  onChange={() => toggleDraftColumn(column)}
                   type="checkbox"
                 />
                 <span className="min-w-0 truncate text-xs font-black" title={label}>
@@ -2421,7 +2434,7 @@ function ColumnOptionsPanel({
                   aria-label={`Move ${label} up`}
                   className="inline-flex size-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-35"
                   disabled={index === 0}
-                  onClick={() => onMoveColumn(column, "up")}
+                  onClick={() => moveDraftColumn(column, "up")}
                   type="button"
                 >
                   <ArrowUp className="size-3.5" />
@@ -2429,8 +2442,8 @@ function ColumnOptionsPanel({
                 <button
                   aria-label={`Move ${label} down`}
                   className="inline-flex size-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-35"
-                  disabled={index === orderedColumns.length - 1}
-                  onClick={() => onMoveColumn(column, "down")}
+                  disabled={index === draftColumns.length - 1}
+                  onClick={() => moveDraftColumn(column, "down")}
                   type="button"
                 >
                   <ArrowDown className="size-3.5" />
@@ -2439,6 +2452,22 @@ function ColumnOptionsPanel({
             </div>
           );
         })}
+      </div>
+      <div className="flex justify-end gap-2 border-t border-slate-200 bg-slate-50 px-3 py-2">
+        <button
+          className="inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-3 text-xs font-black uppercase text-slate-700 transition hover:bg-slate-50"
+          onClick={onClose}
+          type="button"
+        >
+          Cancel
+        </button>
+        <button
+          className="inline-flex h-9 items-center rounded-lg bg-slate-950 px-4 text-xs font-black uppercase text-white transition hover:bg-slate-800"
+          onClick={saveDraftLayout}
+          type="button"
+        >
+          Save
+        </button>
       </div>
     </div>
   );
