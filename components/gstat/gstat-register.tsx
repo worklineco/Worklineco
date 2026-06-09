@@ -22,6 +22,7 @@ type CellStyle = NonNullable<XLSX.CellObject["s"]>;
 type SortDirection = "asc" | "desc";
 type SortState = { columnKey: string; direction: SortDirection } | null;
 type ColumnValueFilters = Record<string, string[]>;
+type ColumnTextFilters = Record<string, string>;
 type ColumnFilterOption = { key: string; label: string };
 type FilterMenuPosition = { left: number; maxHeight: number; top: number };
 type InlineEditorState = { columnKey: string; rowIndex: number; value: string };
@@ -218,6 +219,7 @@ const initialRows = createEmptyRows(12);
 export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }) {
   const [rows, setRows] = useState<AppealRow[]>(initialRows);
   const [columnValueFilters, setColumnValueFilters] = useState<ColumnValueFilters>({});
+  const [columnTextFilters, setColumnTextFilters] = useState<ColumnTextFilters>({});
   const [openFilterColumnKey, setOpenFilterColumnKey] = useState<string | null>(null);
   const [filterMenuPosition, setFilterMenuPosition] = useState<FilterMenuPosition | null>(null);
   const [filterSearch, setFilterSearch] = useState("");
@@ -253,6 +255,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
   
   const [globalSearch, setGlobalSearch] = useState("");
   const deferredColumnValueFilters = useDeferredValue(columnValueFilters);
+  const deferredColumnTextFilters = useDeferredValue(columnTextFilters);
   const deferredGlobalSearch = useDeferredValue(globalSearch);
   const activeColumnFilterEntries = useMemo(
     () =>
@@ -263,6 +266,16 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
             Boolean(entry.column) && entry.selectedValues.length > 0
         ),
     [deferredColumnValueFilters]
+  );
+  const activeColumnTextFilterEntries = useMemo(
+    () =>
+      Object.entries(deferredColumnTextFilters)
+        .map(([columnKey, filter]) => ({ column: columns.find((item) => item.key === columnKey), filter }))
+        .filter(
+          (entry): entry is { column: Column; filter: string } =>
+            Boolean(entry.column) && Boolean(entry.filter.trim())
+        ),
+    [deferredColumnTextFilters]
   );
   const rowSearchText = useMemo(
     () =>
@@ -293,6 +306,8 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
 
           return activeColumnFilterEntries.every(({ column, selectedValues }) =>
             selectedValues.includes(getColumnFilterValueKey(row.data[column.key], column))
+          ) && activeColumnTextFilterEntries.every(({ column, filter }) =>
+            matchesColumnFilter(row.data[column.key], column, filter, { duplicateOiaNumbers })
           );
         });
 
@@ -308,7 +323,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
 
       return [...visibleRows].sort((left, right) => compareRowsForColumn(left, right, sortColumn, sortState.direction));
     },
-    [activeColumnFilterEntries, deferredGlobalSearch, duplicateOiaNumbers, rows, rowSearchText, sortState]
+    [activeColumnFilterEntries, activeColumnTextFilterEntries, deferredGlobalSearch, duplicateOiaNumbers, rows, rowSearchText, sortState]
   );
   
   const filteredUniqueAppeals = useMemo(
@@ -319,8 +334,9 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
   const hasActiveFilters = useMemo(
     () =>
       Boolean(globalSearch.trim()) ||
-      Object.values(columnValueFilters).some((selectedValues) => selectedValues.length),
-    [columnValueFilters, globalSearch]
+      Object.values(columnValueFilters).some((selectedValues) => selectedValues.length) ||
+      Object.values(columnTextFilters).some((filter) => filter.trim()),
+    [columnTextFilters, columnValueFilters, globalSearch]
   );
   const selectedRowIndexes = useMemo(
     () =>
@@ -481,9 +497,24 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
     closeColumnFilter();
   }
 
+  function updateColumnTextFilter(column: Column, value: string) {
+    setColumnTextFilters((currentFilters) => {
+      const nextFilters = { ...currentFilters };
+
+      if (value.trim()) {
+        nextFilters[column.key] = value;
+      } else {
+        delete nextFilters[column.key];
+      }
+
+      return nextFilters;
+    });
+  }
+
   function clearAllFilters() {
     setGlobalSearch("");
     setColumnValueFilters({});
+    setColumnTextFilters({});
     closeColumnFilter();
   }
 
@@ -1310,10 +1341,10 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                           key={`filter-${column.key}`}
                           style={isSnoColumn ? { left: actionColumnWidth } : undefined}
                         >
-                          <ExcelColumnFilterButton
+                          <ExcelColumnTextFilter
                             column={column}
-                            columnValueFilters={columnValueFilters}
-                            onOpenFilter={openColumnFilter}
+                            onChange={updateColumnTextFilter}
+                            value={columnTextFilters[column.key] ?? ""}
                           />
                         </th>
                       );
@@ -2195,34 +2226,27 @@ function ExcelColumnHeader({
   );
 }
 
-function ExcelColumnFilterButton({
+function ExcelColumnTextFilter({
   column,
-  columnValueFilters,
-  onOpenFilter
+  onChange,
+  value
 }: {
   column: Column;
-  columnValueFilters: ColumnValueFilters;
-  onOpenFilter: (column: Column, anchor: HTMLElement) => void;
+  onChange: (column: Column, value: string) => void;
+  value: string;
 }) {
-  const selectedCount = columnValueFilters[column.key]?.length ?? 0;
-  const hasFilter = selectedCount > 0;
   const headerLabel = column.group ? `${column.group} ${column.label}` : column.label;
 
   return (
-    <button
-      aria-label={`Filter ${headerLabel}`}
-      className={`flex h-8 w-full min-w-0 items-center justify-between gap-1 rounded-md border px-2 text-left text-[10px] font-black uppercase transition ${
-        hasFilter
-          ? "border-cyan-200 bg-cyan-200 text-slate-950"
-          : "border-white/15 bg-white/10 text-white/80 hover:bg-white/20 hover:text-white"
-      }`}
-      onClick={(event) => onOpenFilter(column, event.currentTarget)}
-      title={`Filter ${headerLabel}`}
-      type="button"
-    >
-      <span className="min-w-0 truncate">{hasFilter ? `${selectedCount} selected` : "Filter"}</span>
-      <Filter className="size-3 shrink-0" />
-    </button>
+    <input
+      aria-label={`Type to filter ${headerLabel}`}
+      className="h-8 w-full rounded-md border border-white/15 bg-white px-2 text-[11px] font-bold text-slate-950 outline-none placeholder:text-slate-400 focus:border-cyan-300 focus:ring-2 focus:ring-cyan-200"
+      onChange={(event) => onChange(column, event.target.value)}
+      placeholder="Filter"
+      title={`Type to filter ${headerLabel}`}
+      type="text"
+      value={value}
+    />
   );
 }
 
