@@ -2,7 +2,7 @@
 
 import { downloadGstatPoa } from "@/lib/gstat/poa-document";
 import { supabase } from "@/lib/supabase/client";
-import { ArrowDown, ArrowLeft, ArrowUp, Download, Expand, ExternalLink, FileSpreadsheet, FileText, Filter, History, Pencil, Plus, Scale, Search, ShieldCheck, Trash2, Upload, X } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowUp, Download, Expand, ExternalLink, FileSpreadsheet, FileText, Filter, History, Pencil, Plus, Scale, Search, Settings2, ShieldCheck, Trash2, Upload, X } from "lucide-react";
 import Link from "next/link";
 import { ChangeEvent, useDeferredValue, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import * as XLSX from "xlsx-js-style";
@@ -26,11 +26,13 @@ type ColumnTextFilters = Record<string, string>;
 type ColumnFilterOption = { key: string; label: string };
 type FilterMenuPosition = { left: number; maxHeight: number; top: number };
 type InlineEditorState = { columnKey: string; rowIndex: number; value: string };
+type ColumnLayout = { hiddenColumnKeys: string[]; order: string[] };
 
 const actionColumnWidth = 122;
 const columnFilterOptionLimit = 1000;
 const blankColumnFilterValue = "__workline_column_blank__";
 const maxBulkDeleteRows = 5;
+const columnLayoutStorageKey = "workline:gstat-column-layout:v1";
 const poaGptUrl = "https://chatgpt.com/g/g-6a1f3abf8d008191985119e155f67c5f-poa-vakalatnama-helper";
 
 const baseColumns: Column[] = [
@@ -87,6 +89,7 @@ const demandColumns: Column[] = groupedColumns.flatMap((group) =>
   }))
 );
 const columns = [...baseColumns, ...demandColumns];
+const defaultColumnOrder = columns.map((column) => column.key);
 const defaultColumnWidth = 92;
 const columnWidths: Record<string, number> = {
   "Sno": 52,
@@ -220,6 +223,10 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
   const [rows, setRows] = useState<AppealRow[]>(initialRows);
   const [columnValueFilters, setColumnValueFilters] = useState<ColumnValueFilters>({});
   const [columnTextFilters, setColumnTextFilters] = useState<ColumnTextFilters>({});
+  const [columnOrder, setColumnOrder] = useState<string[]>(defaultColumnOrder);
+  const [hiddenColumnKeys, setHiddenColumnKeys] = useState<Set<string>>(() => new Set());
+  const [hasLoadedColumnLayout, setHasLoadedColumnLayout] = useState(false);
+  const [isColumnOptionsOpen, setIsColumnOptionsOpen] = useState(false);
   const [openFilterColumnKey, setOpenFilterColumnKey] = useState<string | null>(null);
   const [filterMenuPosition, setFilterMenuPosition] = useState<FilterMenuPosition | null>(null);
   const [filterSearch, setFilterSearch] = useState("");
@@ -251,6 +258,21 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
         0
       ),
     [rows]
+  );
+  const orderedColumns = useMemo(
+    () =>
+      columnOrder
+        .map((columnKey) => columns.find((column) => column.key === columnKey))
+        .filter((column): column is Column => Boolean(column)),
+    [columnOrder]
+  );
+  const visibleColumns = useMemo(
+    () => orderedColumns.filter((column) => !hiddenColumnKeys.has(column.key)),
+    [hiddenColumnKeys, orderedColumns]
+  );
+  const visibleTableWidth = useMemo(
+    () => actionColumnWidth + visibleColumns.reduce((total, column) => total + getColumnWidth(column), 0),
+    [visibleColumns]
   );
   
   const [globalSearch, setGlobalSearch] = useState("");
@@ -518,10 +540,64 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
     closeColumnFilter();
   }
 
+  function toggleColumnVisibility(column: Column) {
+    setHiddenColumnKeys((currentKeys) => {
+      const nextKeys = new Set(currentKeys);
+
+      if (nextKeys.has(column.key)) {
+        nextKeys.delete(column.key);
+      } else {
+        nextKeys.add(column.key);
+      }
+
+      return nextKeys;
+    });
+  }
+
+  function moveColumn(column: Column, direction: "up" | "down") {
+    setColumnOrder((currentOrder) => {
+      const currentIndex = currentOrder.indexOf(column.key);
+
+      if (currentIndex < 0) {
+        return currentOrder;
+      }
+
+      const nextIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1;
+
+      if (nextIndex < 0 || nextIndex >= currentOrder.length) {
+        return currentOrder;
+      }
+
+      const nextOrder = [...currentOrder];
+      [nextOrder[currentIndex], nextOrder[nextIndex]] = [nextOrder[nextIndex], nextOrder[currentIndex]];
+      return nextOrder;
+    });
+  }
+
+  function resetColumnLayout() {
+    setColumnOrder(defaultColumnOrder);
+    setHiddenColumnKeys(new Set());
+  }
+
   useEffect(() => {
     loadUserAccess();
     loadRows();
+    const savedColumnLayout = getSavedColumnLayout();
+    setColumnOrder(savedColumnLayout.order);
+    setHiddenColumnKeys(new Set(savedColumnLayout.hiddenColumnKeys));
+    setHasLoadedColumnLayout(true);
   }, []);
+
+  useEffect(() => {
+    if (!hasLoadedColumnLayout) {
+      return;
+    }
+
+    saveColumnLayout({
+      hiddenColumnKeys: Array.from(hiddenColumnKeys),
+      order: columnOrder
+    });
+  }, [columnOrder, hasLoadedColumnLayout, hiddenColumnKeys]);
 
   async function loadUserAccess() {
     const { data } = await supabase.auth.getUser();
@@ -1087,6 +1163,26 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                 <Upload className="size-4" />
                 Import Excel
               </button>
+              <div className="relative">
+                <button
+                  className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-950/10 bg-white px-3 text-xs font-black uppercase text-slate-800 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+                  onClick={() => setIsColumnOptionsOpen((current) => !current)}
+                  type="button"
+                >
+                  <Settings2 className="size-4" />
+                  Column Options
+                </button>
+                {isColumnOptionsOpen ? (
+                  <ColumnOptionsPanel
+                    hiddenColumnKeys={hiddenColumnKeys}
+                    onClose={() => setIsColumnOptionsOpen(false)}
+                    onMoveColumn={moveColumn}
+                    onReset={resetColumnLayout}
+                    onToggleColumn={toggleColumnVisibility}
+                    orderedColumns={orderedColumns}
+                  />
+                ) : null}
+              </div>
               {!isMaximized ? (
                 <Link
                   className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-950/10 bg-white px-3 text-xs font-black uppercase text-slate-800 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
@@ -1199,11 +1295,11 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
             <div className={`${isMaximized ? "max-h-[calc(100vh-82px)]" : "max-h-[calc(100vh-285px)]"} overflow-auto`}>
               <table
                 className="table-fixed border-separate border-spacing-0 text-left text-[11px]"
-                style={{ minWidth: tableWidth, width: tableWidth }}
+                style={{ minWidth: visibleTableWidth, width: visibleTableWidth }}
               >
                 <colgroup>
                   <col style={{ width: actionColumnWidth }} />
-                  {columns.map((column) => (
+                  {visibleColumns.map((column) => (
                     <col key={`width-${column.key}`} style={{ width: getColumnWidth(column) }} />
                   ))}
                 </colgroup>
@@ -1211,7 +1307,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                   <tr>
                     <th
                       className="sticky left-0 z-50 border-b border-r border-white/15 bg-slate-950 px-2 py-2 align-bottom font-black"
-                      rowSpan={3}
+                      rowSpan={2}
                     >
                       <div className="space-y-2">
                         <span className="block">Row</span>
@@ -1254,7 +1350,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                         </div>
                       </div>
                     </th>
-                    {baseColumns.map((column) => {
+                    {visibleColumns.map((column) => {
                       const isSnoColumn = column.key === "Sno";
 
                       return (
@@ -1263,7 +1359,6 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                             isSnoColumn ? "sticky z-40 bg-slate-950" : ""
                           }`}
                           key={column.key}
-                          rowSpan={2}
                           style={isSnoColumn ? { left: actionColumnWidth } : undefined}
                         >
                           <ExcelColumnHeader
@@ -1289,48 +1384,9 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                         </th>
                       );
                     })}
-                    {groupedColumns.map((group) => (
-                      <th
-                        className="border-b border-r border-white/15 px-2 py-2 text-center font-black"
-                        colSpan={group.columns.length}
-                        key={group.label}
-                      >
-                        {group.label}
-                      </th>
-                    ))}
                   </tr>
                   <tr>
-                    {demandColumns.map((column) => (
-                      <th
-                        className="relative border-b border-r border-white/15 px-2 py-2 text-center font-black"
-                        key={column.key}
-                      >
-                        <ExcelColumnHeader
-                          column={column}
-                          columnValueFilters={columnValueFilters}
-                          draftFilterValues={draftFilterValues}
-                          filterSearch={filterSearch}
-                          isCentered
-                          isOpen={openFilterColumnKey === column.key}
-                          menuPosition={filterMenuPosition}
-                          onApplyFilter={applyColumnFilter}
-                          onClearFilter={clearColumnFilter}
-                          onCloseFilter={closeColumnFilter}
-                          onFilterSearchChange={setFilterSearch}
-                          onOpenFilter={openColumnFilter}
-                          onSetSort={setColumnSort}
-                          onSort={toggleSort}
-                          onToggleDraftFilterValue={toggleDraftFilterValue}
-                          onToggleVisibleDraftFilterValues={toggleVisibleDraftFilterValues}
-                          options={openFilterColumnKey === column.key ? openColumnFilterOptions : []}
-                          sortState={sortState}
-                          visibleOptions={openFilterColumnKey === column.key ? visibleColumnFilterOptions : []}
-                        />
-                      </th>
-                    ))}
-                  </tr>
-                  <tr>
-                    {columns.map((column) => {
+                    {visibleColumns.map((column) => {
                       const isSnoColumn = column.key === "Sno";
 
                       return (
@@ -1406,7 +1462,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                             </button>
                           </div>
                         </td>
-                        {columns.map((column) => {
+                        {visibleColumns.map((column) => {
                           const cellValue = row.data[column.key];
                           const displayValue = dateFields.has(column.key) ? formatDateForDisplay(cellValue) : cellValue;
                           const isSnoColumn = column.key === "Sno";
@@ -1739,6 +1795,43 @@ function styleGstatWorksheet(
 
 function getColumnWidth(column: Column) {
   return columnWidths[column.key] ?? defaultColumnWidth;
+}
+
+function getSavedColumnLayout(): ColumnLayout {
+  if (typeof window === "undefined") {
+    return { hiddenColumnKeys: [], order: defaultColumnOrder };
+  }
+
+  try {
+    const savedLayout = window.localStorage.getItem(columnLayoutStorageKey);
+
+    if (!savedLayout) {
+      return { hiddenColumnKeys: [], order: defaultColumnOrder };
+    }
+
+    return normalizeColumnLayout(JSON.parse(savedLayout) as Partial<ColumnLayout>);
+  } catch {
+    return { hiddenColumnKeys: [], order: defaultColumnOrder };
+  }
+}
+
+function saveColumnLayout(layout: ColumnLayout) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.localStorage.setItem(columnLayoutStorageKey, JSON.stringify(normalizeColumnLayout(layout)));
+}
+
+function normalizeColumnLayout(layout: Partial<ColumnLayout>): ColumnLayout {
+  const knownColumnKeys = new Set(defaultColumnOrder);
+  const savedOrder = Array.isArray(layout.order) ? layout.order.filter((key) => knownColumnKeys.has(key)) : [];
+  const order = [...savedOrder, ...defaultColumnOrder.filter((key) => !savedOrder.includes(key))];
+  const hiddenColumnKeys = Array.isArray(layout.hiddenColumnKeys)
+    ? layout.hiddenColumnKeys.filter((key) => knownColumnKeys.has(key))
+    : [];
+
+  return { hiddenColumnKeys, order };
 }
 
 function compareRowsForColumn(
@@ -2086,7 +2179,14 @@ function ExcelColumnHeader({
           type="button"
         >
           <span className={`min-w-0 whitespace-normal break-words leading-tight ${isCentered ? "text-center" : "text-left"}`}>
-            {column.label}
+            {column.group ? (
+              <>
+                <span className="block text-[9px] uppercase text-cyan-100/80">{column.group}</span>
+                <span className="block">{column.label}</span>
+              </>
+            ) : (
+              column.label
+            )}
           </span>
           <span className="flex shrink-0 flex-col leading-none">
             <ArrowUp className={`size-3 ${isAscending ? "text-cyan-200" : "text-white/35"}`} />
@@ -2247,6 +2347,100 @@ function ExcelColumnTextFilter({
       type="text"
       value={value}
     />
+  );
+}
+
+function ColumnOptionsPanel({
+  hiddenColumnKeys,
+  onClose,
+  onMoveColumn,
+  onReset,
+  onToggleColumn,
+  orderedColumns
+}: {
+  hiddenColumnKeys: Set<string>;
+  onClose: () => void;
+  onMoveColumn: (column: Column, direction: "up" | "down") => void;
+  onReset: () => void;
+  onToggleColumn: (column: Column) => void;
+  orderedColumns: Column[];
+}) {
+  const visibleCount = orderedColumns.filter((column) => !hiddenColumnKeys.has(column.key)).length;
+
+  return (
+    <div className="absolute right-0 top-12 z-[900] w-[360px] overflow-hidden rounded-2xl border border-slate-200 bg-white text-slate-950 shadow-2xl">
+      <div className="flex items-center justify-between border-b border-slate-200 px-3 py-2">
+        <div>
+          <p className="text-xs font-black uppercase text-slate-950">Column Options</p>
+          <p className="text-[11px] font-bold text-slate-500">{visibleCount} visible columns</p>
+        </div>
+        <div className="flex items-center gap-1">
+          <button
+            className="inline-flex h-8 items-center rounded-lg border border-slate-200 bg-white px-2 text-[11px] font-black uppercase text-slate-700 transition hover:bg-slate-50"
+            onClick={onReset}
+            type="button"
+          >
+            Reset
+          </button>
+          <button
+            aria-label="Close column options"
+            className="inline-flex size-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 transition hover:bg-slate-50"
+            onClick={onClose}
+            type="button"
+          >
+            <X className="size-4" />
+          </button>
+        </div>
+      </div>
+
+      <div className="max-h-[420px] overflow-y-auto p-2">
+        {orderedColumns.map((column, index) => {
+          const isHidden = hiddenColumnKeys.has(column.key);
+          const label = column.group ? `${column.group} - ${column.label}` : column.label;
+
+          return (
+            <div
+              className={`mb-1 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-xl border px-2 py-2 ${
+                isHidden ? "border-slate-200 bg-slate-50 text-slate-500" : "border-slate-200 bg-white text-slate-950"
+              }`}
+              key={column.key}
+            >
+              <label className="flex min-w-0 cursor-pointer items-center gap-2">
+                <input
+                  checked={!isHidden}
+                  className="size-4 accent-slate-950"
+                  onChange={() => onToggleColumn(column)}
+                  type="checkbox"
+                />
+                <span className="min-w-0 truncate text-xs font-black" title={label}>
+                  {label}
+                </span>
+              </label>
+              <div className="flex items-center gap-1">
+                <button
+                  aria-label={`Move ${label} up`}
+                  className="inline-flex size-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-35"
+                  disabled={index === 0}
+                  onClick={() => onMoveColumn(column, "up")}
+                  type="button"
+                >
+                  <ArrowUp className="size-3.5" />
+                </button>
+                <button
+                  aria-label={`Move ${label} down`}
+                  className="inline-flex size-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-35"
+                  disabled={index === orderedColumns.length - 1}
+                  onClick={() => onMoveColumn(column, "down")}
+                  type="button"
+                >
+                  <ArrowDown className="size-3.5" />
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
