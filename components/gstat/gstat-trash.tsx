@@ -18,6 +18,7 @@ export function GstatTrash() {
   const [rows, setRows] = useState<TrashRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [message, setMessage] = useState("");
+  const [setupRequired, setSetupRequired] = useState(false);
   const [restoringId, setRestoringId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -27,16 +28,18 @@ export function GstatTrash() {
   async function loadRows() {
     setIsLoading(true);
     const response = await fetch("/api/gstat/trash");
-    const result = (await response.json()) as { error?: string; rows?: TrashRow[] };
+    const result = (await response.json()) as { error?: string; message?: string; rows?: TrashRow[]; setupRequired?: boolean };
 
     if (!response.ok) {
       setMessage(result.error ?? "Could not load GSTAT trash.");
+      setSetupRequired(false);
       setIsLoading(false);
       return;
     }
 
     setRows(result.rows ?? []);
-    setMessage("");
+    setSetupRequired(Boolean(result.setupRequired));
+    setMessage(result.message ?? "");
     setIsLoading(false);
   }
 
@@ -102,7 +105,7 @@ export function GstatTrash() {
               Refresh
             </button>
           </div>
-          {message ? <p className="mt-4 text-sm font-bold text-emerald-700">{message}</p> : null}
+          {message ? <p className={`mt-4 text-sm font-bold ${setupRequired ? "text-amber-700" : "text-emerald-700"}`}>{message}</p> : null}
           {isLoading ? <p className="mt-4 text-sm font-bold text-slate-500">Loading deleted GSTAT rows...</p> : null}
         </header>
 
@@ -147,15 +150,19 @@ export function GstatTrash() {
                         {row.deleted_by_name ?? "-"}
                       </td>
                       <td className="border-b border-r border-slate-200 px-3 py-2">
-                        <button
-                          className="inline-flex h-9 items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 text-xs font-black uppercase text-emerald-800 shadow-sm transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
-                          disabled={restoringId === row.id}
-                          onClick={() => restoreRow(row)}
-                          type="button"
-                        >
-                          {restoringId === row.id ? <RefreshCw className="size-3.5 animate-spin" /> : <RotateCcw className="size-3.5" />}
-                          Restore
-                        </button>
+                        {setupRequired ? (
+                          <span className="text-xs font-bold text-slate-500">Setup pending</span>
+                        ) : (
+                          <button
+                            className="inline-flex h-9 items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 text-xs font-black uppercase text-emerald-800 shadow-sm transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
+                            disabled={restoringId === row.id}
+                            onClick={() => restoreRow(row)}
+                            type="button"
+                          >
+                            {restoringId === row.id ? <RefreshCw className="size-3.5 animate-spin" /> : <RotateCcw className="size-3.5" />}
+                            Restore
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))}

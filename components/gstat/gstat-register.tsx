@@ -1064,26 +1064,15 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                 Import Excel
               </button>
               {!isMaximized ? (
-                <>
-                  <Link
-                    className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-950/10 bg-white px-3 text-xs font-black uppercase text-slate-800 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
-                    href="/gstat/audit"
-                    rel="noreferrer"
-                    target="_blank"
-                  >
-                    <History className="size-4" />
-                    Audit Trail
-                  </Link>
-                  <Link
-                    className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 text-xs font-black uppercase text-emerald-800 shadow-sm transition hover:-translate-y-0.5 hover:bg-emerald-100 hover:shadow-md"
-                    href="/gstat/trash"
-                    rel="noreferrer"
-                    target="_blank"
-                  >
-                    <Trash2 className="size-4" />
-                    Trash
-                  </Link>
-                </>
+                <Link
+                  className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-950/10 bg-white px-3 text-xs font-black uppercase text-slate-800 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+                  href="/gstat/audit"
+                  rel="noreferrer"
+                  target="_blank"
+                >
+                  <History className="size-4" />
+                  Audit Trail
+                </Link>
               ) : null}
               <button
                 className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 text-xs font-black uppercase text-emerald-800 shadow-sm transition hover:-translate-y-0.5 hover:bg-emerald-100 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:translate-y-0 disabled:hover:bg-emerald-50 disabled:hover:shadow-sm"

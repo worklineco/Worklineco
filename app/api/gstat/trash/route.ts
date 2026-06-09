@@ -42,6 +42,14 @@ export async function GET() {
     .limit(1000);
 
   if (error) {
+    if (isMissingTrashTableError(error)) {
+      return NextResponse.json({
+        rows: [],
+        setupRequired: true,
+        message: "GSTAT Trash is not set up yet. Apply database/006_gstat_trash.sql in Supabase."
+      });
+    }
+
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
@@ -85,6 +93,13 @@ export async function POST(request: Request) {
     .in("id", ids);
 
   if (error) {
+    if (isMissingTrashTableError(error)) {
+      return NextResponse.json(
+        { error: "GSTAT Trash is not set up yet. Apply database/006_gstat_trash.sql in Supabase." },
+        { status: 400 }
+      );
+    }
+
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
@@ -136,6 +151,14 @@ function filterRowsForAccess<T extends TrashRow>(rows: T[], access: AccessScope)
   }
 
   return rows.filter((row) => String(row.data?.["Person handling"] ?? "") === access.team);
+}
+
+function isMissingTrashTableError(error: { code?: string; message?: string }) {
+  return (
+    error.code === "PGRST205" ||
+    error.code === "42P01" ||
+    String(error.message ?? "").includes("gstat_deleted_appeals")
+  );
 }
 
 function getAccessScope(user: { user_metadata?: Record<string, unknown> }): AccessScope {
