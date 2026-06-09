@@ -9,6 +9,7 @@ type AppealRow = {
   id?: string;
   row_number?: number;
 };
+type ExistingAppealRow = AppealRow & { id: string };
 type AccessScope = {
   isPartner: boolean;
   team: string;
@@ -68,9 +69,9 @@ export async function POST(request: Request) {
   }
 
   if (auditAction === "row_insert" || auditAction === "row_delete" || auditAction === "bulk_delete") {
-    const existingRows = filterRowsForAccess(previous.data ?? [], access)
+    const existingRows = filterRowsForAccess((previous.data ?? []) as ExistingAppealRow[], access)
       .sort((first, second) => (first.row_number ?? 0) - (second.row_number ?? 0))
-      .map((row) => ({ data: row.data ?? {}, row_number: row.row_number ?? 1 }));
+      .map((row) => ({ id: row.id, data: row.data ?? {}, row_number: row.row_number ?? 1 }));
     const selectedRowIndexes = new Set(
       (Array.isArray(rowIndexes) ? rowIndexes : []).filter((index) => Number.isInteger(index) && index >= 0)
     );
@@ -109,8 +110,14 @@ export async function POST(request: Request) {
         : shouldRenumberRows
           ? renumberRows(deletedRows)
           : deletedRows;
+    const trashRows =
+      auditAction === "bulk_delete"
+        ? existingRows.filter((_, index) => selectedRowIndexes.has(index))
+        : auditAction === "row_delete"
+          ? existingRows.filter((_, index) => index === rowIndex)
+          : [];
 
-    return replaceRows(admin, auth.user.id, nextRows, auditAction, previous.data?.length ?? 0, access);
+    return replaceRows(admin, auth.user.id, nextRows, auditAction, previous.data?.length ?? 0, access, trashRows);
   }
 
   if (!Array.isArray(rows)) {
@@ -122,7 +129,15 @@ export async function POST(request: Request) {
     data: applyAccessToRowData(row.data ?? {}, access)
   }));
 
-  return replaceRows(admin, auth.user.id, scopedRows, auditAction, previous.data?.length ?? 0, access);
+  return replaceRows(
+    admin,
+    auth.user.id,
+    scopedRows,
+    auditAction,
+    previous.data?.length ?? 0,
+    access,
+    filterRowsForAccess((previous.data ?? []) as ExistingAppealRow[], access)
+  );
 }
 
 async function replaceRows(
@@ -131,8 +146,15 @@ async function replaceRows(
   rows: AppealRow[],
   auditAction: string,
   previousRowCount: number,
-  access: AccessScope = { isPartner: true, team: "" }
+  access: AccessScope = { isPartner: true, team: "" },
+  trashRows: ExistingAppealRow[] = []
 ) {
+  const trashError = await saveRowsToTrash(admin, userId, auditAction, trashRows);
+
+  if (trashError) {
+    return NextResponse.json({ error: trashError.message }, { status: 500 });
+  }
+
   let deleteQuery = admin
     .from("gstat_appeals")
     .delete()
@@ -181,6 +203,32 @@ async function replaceRows(
   });
 
   return NextResponse.json({ rows: filterRowsForAccess(inserted.data ?? [], access) });
+}
+
+async function saveRowsToTrash(
+  admin: ReturnType<typeof createAdminClient>,
+  userId: string,
+  action: string,
+  rows: ExistingAppealRow[]
+) {
+  const uniqueRows = Array.from(new Map(rows.map((row) => [row.id, row])).values());
+
+  if (!uniqueRows.length) {
+    return null;
+  }
+
+  const { error } = await admin.from("gstat_deleted_appeals").insert(
+    uniqueRows.map((row) => ({
+      data: row.data ?? {},
+      delete_action: action,
+      deleted_by: userId,
+      original_appeal_id: row.id,
+      original_row_number: row.row_number ?? 1,
+      organisation_code: organisationCode
+    }))
+  );
+
+  return error;
 }
 
 export async function PATCH(request: Request) {

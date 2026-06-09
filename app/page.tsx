@@ -11,6 +11,7 @@ import {
   LayoutDashboard,
   Scale,
   ShieldCheck,
+  Trash2,
   UsersRound
 } from "lucide-react";
 import Link from "next/link";
@@ -33,7 +34,8 @@ const navigation = [
     tone: "bg-indigo-100 text-indigo-800"
   },
   { href: "#records", icon: Building2, label: "Client Records", tone: "bg-sky-100 text-sky-800" },
-  { href: "#reports", icon: BarChart3, label: "Reports", tone: "bg-emerald-100 text-emerald-800" }
+  { href: "#reports", icon: BarChart3, label: "Reports", tone: "bg-emerald-100 text-emerald-800" },
+  { href: "/gstat/trash", icon: Trash2, label: "Trash", target: "_blank", tone: "bg-emerald-100 text-emerald-800" }
 ];
 
 const productFocus = [
