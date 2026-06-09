@@ -1180,7 +1180,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                   <tr>
                     <th
                       className="sticky left-0 z-50 border-b border-r border-white/15 bg-slate-950 px-2 py-2 align-bottom font-black"
-                      rowSpan={2}
+                      rowSpan={3}
                     >
                       <div className="space-y-2">
                         <span className="block">Row</span>
@@ -1297,6 +1297,27 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                         />
                       </th>
                     ))}
+                  </tr>
+                  <tr>
+                    {columns.map((column) => {
+                      const isSnoColumn = column.key === "Sno";
+
+                      return (
+                        <th
+                          className={`border-b border-r border-white/15 bg-slate-900 px-1.5 py-1.5 ${
+                            isSnoColumn ? "sticky z-40" : ""
+                          }`}
+                          key={`filter-${column.key}`}
+                          style={isSnoColumn ? { left: actionColumnWidth } : undefined}
+                        >
+                          <ExcelColumnFilterButton
+                            column={column}
+                            columnValueFilters={columnValueFilters}
+                            onOpenFilter={openColumnFilter}
+                          />
+                        </th>
+                      );
+                    })}
                   </tr>
                 </thead>
                 <tbody>
@@ -2171,6 +2192,37 @@ function ExcelColumnHeader({
         </div>
       ) : null}
     </div>
+  );
+}
+
+function ExcelColumnFilterButton({
+  column,
+  columnValueFilters,
+  onOpenFilter
+}: {
+  column: Column;
+  columnValueFilters: ColumnValueFilters;
+  onOpenFilter: (column: Column, anchor: HTMLElement) => void;
+}) {
+  const selectedCount = columnValueFilters[column.key]?.length ?? 0;
+  const hasFilter = selectedCount > 0;
+  const headerLabel = column.group ? `${column.group} ${column.label}` : column.label;
+
+  return (
+    <button
+      aria-label={`Filter ${headerLabel}`}
+      className={`flex h-8 w-full min-w-0 items-center justify-between gap-1 rounded-md border px-2 text-left text-[10px] font-black uppercase transition ${
+        hasFilter
+          ? "border-cyan-200 bg-cyan-200 text-slate-950"
+          : "border-white/15 bg-white/10 text-white/80 hover:bg-white/20 hover:text-white"
+      }`}
+      onClick={(event) => onOpenFilter(column, event.currentTarget)}
+      title={`Filter ${headerLabel}`}
+      type="button"
+    >
+      <span className="min-w-0 truncate">{hasFilter ? `${selectedCount} selected` : "Filter"}</span>
+      <Filter className="size-3 shrink-0" />
+    </button>
   );
 }
 
