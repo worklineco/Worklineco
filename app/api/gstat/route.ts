@@ -129,6 +129,10 @@ export async function POST(request: Request) {
     data: applyAccessToRowData(row.data ?? {}, access)
   }));
 
+  if (auditAction === "import") {
+    return appendRows(admin, auth.user.id, scopedRows, previous.data?.length ?? 0, access);
+  }
+
   return replaceRows(
     admin,
     auth.user.id,
@@ -203,6 +207,59 @@ async function replaceRows(
   });
 
   return NextResponse.json({ rows: filterRowsForAccess(inserted.data ?? [], access) });
+}
+
+async function appendRows(
+  admin: ReturnType<typeof createAdminClient>,
+  userId: string,
+  rows: AppealRow[],
+  previousRowCount: number,
+  access: AccessScope
+) {
+  const nextRowNumber = await getNextRowNumber(admin);
+  const insertRows = rows.map((row, index) => {
+    const rowNumber = nextRowNumber + index;
+
+    return {
+      created_by: userId,
+      data: { ...(row.data ?? {}), Sno: rowNumber },
+      organisation_code: organisationCode,
+      row_number: rowNumber,
+      updated_by: userId
+    };
+  });
+
+  const inserted = insertRows.length
+    ? await admin
+        .from("gstat_appeals")
+        .insert(insertRows)
+        .select("id,row_number,data,updated_at")
+    : { data: [], error: null };
+
+  if (inserted.error) {
+    return NextResponse.json({ error: inserted.error.message }, { status: 500 });
+  }
+
+  await admin.from("gstat_audit_logs").insert({
+    action: "import",
+    actor_user_id: userId,
+    field_name: "import",
+    new_value: { added_row_count: rows.length, row_count: previousRowCount + rows.length },
+    old_value: { row_count: previousRowCount },
+    organisation_code: organisationCode
+  });
+
+  const current = await admin
+    .from("gstat_appeals")
+    .select("id,row_number,data,updated_at")
+    .eq("organisation_code", organisationCode)
+    .order("row_number", { ascending: true });
+
+  if (current.error) {
+    return NextResponse.json({ error: current.error.message }, { status: 500 });
+  }
+
+  return NextResponse.json({ rows: filterRowsForAccess(current.data ?? [], access) });
 }
 
 async function saveRowsToTrash(

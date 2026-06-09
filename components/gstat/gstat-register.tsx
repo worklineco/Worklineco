@@ -614,9 +614,6 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
         return;
       }
 
-      setRows(normalizeRows(nextRows));
-      setSelectedRowKeys(new Set());
-
       const response = await fetch("/api/gstat", {
         body: JSON.stringify({ action: "import", rows: nextRows }),
         headers: { "Content-Type": "application/json" },
@@ -625,18 +622,14 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
       const result = (await response.json()) as { error?: string; rows?: AppealRow[] };
 
       if (!response.ok) {
-        setMessage(
-          `${nextRows.length} row${nextRows.length === 1 ? "" : "s"} imported for preview, but not saved: ${
-            result.error ?? "database save failed"
-          }`
-        );
+        setMessage(`Could not import ${nextRows.length} row${nextRows.length === 1 ? "" : "s"}: ${result.error ?? "database save failed"}`);
         event.target.value = "";
         return;
       }
 
-      setRows(result.rows?.length ? normalizeRows(result.rows) : normalizeRows(nextRows));
+      setRows(result.rows?.length ? normalizeRows(result.rows) : rows);
       setSelectedRowKeys(new Set());
-      setMessage(`${nextRows.length} row${nextRows.length === 1 ? "" : "s"} imported from ${file.name}. Audit log updated.`);
+      setMessage(`${nextRows.length} row${nextRows.length === 1 ? "" : "s"} added from ${file.name}. Audit log updated.`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Could not read the selected Excel file.");
     } finally {
