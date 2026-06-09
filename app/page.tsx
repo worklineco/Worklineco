@@ -24,7 +24,14 @@ const navigation = [
   { href: "/", icon: LayoutDashboard, label: "Overview", tone: "bg-teal-100 text-teal-800" },
   { href: "/gst", icon: ClipboardCheck, label: "GST Tracker", target: "_blank", tone: "bg-amber-100 text-amber-800" },
   { href: "/gstat", icon: Scale, label: "GSTAT", target: "_blank", tone: "bg-fuchsia-100 text-fuchsia-800" },
-  { href: "/pdf-indexing", icon: FileSearch, label: "PDF & Indexing", target: "_blank", tone: "bg-indigo-100 text-indigo-800" },
+  {
+    href: "/pdf-indexing",
+    icon: FileSearch,
+    label: "PDF & Indexing",
+    status: "Now live",
+    target: "_blank",
+    tone: "bg-indigo-100 text-indigo-800"
+  },
   { href: "#records", icon: Building2, label: "Client Records", tone: "bg-sky-100 text-sky-800" },
   { href: "#reports", icon: BarChart3, label: "Reports", tone: "bg-emerald-100 text-emerald-800" }
 ];
@@ -227,6 +234,7 @@ function NavItem({
     href: string;
     icon: ComponentType<{ className?: string }>;
     label: string;
+    status?: string;
     target?: string;
     tone: string;
   };
@@ -243,7 +251,14 @@ function NavItem({
       <span className={`flex size-9 items-center justify-center rounded-xl ${item.tone}`}>
         <Icon className="size-4" />
       </span>
-      <span>{item.label}</span>
+      <span className="flex min-w-0 flex-1 items-center gap-2">
+        <span className="min-w-0 truncate">{item.label}</span>
+        {item.status ? (
+          <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-black uppercase leading-4 text-emerald-800 ring-1 ring-emerald-200">
+            {item.status}
+          </span>
+        ) : null}
+      </span>
     </Link>
   );
 }

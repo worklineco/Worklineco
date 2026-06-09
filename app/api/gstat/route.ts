@@ -15,6 +15,7 @@ type AccessScope = {
 };
 
 const organisationCode = "DCO1433";
+const maxBulkDeleteRows = 5;
 
 export async function GET() {
   const auth = await requireUser();
@@ -73,6 +74,14 @@ export async function POST(request: Request) {
     const selectedRowIndexes = new Set(
       (Array.isArray(rowIndexes) ? rowIndexes : []).filter((index) => Number.isInteger(index) && index >= 0)
     );
+
+    if (auditAction === "bulk_delete" && selectedRowIndexes.size > maxBulkDeleteRows) {
+      return NextResponse.json(
+        { error: `You can delete at most ${maxBulkDeleteRows} GSTAT rows at once.` },
+        { status: 400 }
+      );
+    }
+
     const shouldRenumberRows = access.isPartner || !access.team;
     const fallbackRow = { data: {}, row_number: shouldRenumberRows ? 1 : await getNextRowNumber(admin) };
     const insertedRow = { data: {}, row_number: shouldRenumberRows ? (rowIndex ?? -1) + 2 : await getNextRowNumber(admin) };

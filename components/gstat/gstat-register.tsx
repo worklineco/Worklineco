@@ -29,6 +29,7 @@ type InlineEditorState = { columnKey: string; rowIndex: number; value: string };
 const actionColumnWidth = 122;
 const columnFilterOptionLimit = 1000;
 const blankColumnFilterValue = "__workline_column_blank__";
+const maxBulkDeleteRows = 5;
 const poaGptUrl = "https://chatgpt.com/g/g-6a1f3abf8d008191985119e155f67c5f-poa-vakalatnama-helper";
 
 const baseColumns: Column[] = [
@@ -668,6 +669,11 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
       return;
     }
 
+    if (selectedRowIndexes.length > maxBulkDeleteRows) {
+      setMessage(`You can delete at most ${maxBulkDeleteRows} GSTAT rows at once. Select fewer rows and try again.`);
+      return;
+    }
+
     if (
       !window.confirm(
         `Delete ${selectedRowIndexes.length} selected row${selectedRowIndexes.length === 1 ? "" : "s"}?`
@@ -711,6 +717,12 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
   }
 
   async function saveBulkDeleteOperation(rowIndexes: number[], deletedCount: number) {
+    if (deletedCount > maxBulkDeleteRows) {
+      setMessage(`You can delete at most ${maxBulkDeleteRows} GSTAT rows at once.`);
+      await loadRows();
+      return;
+    }
+
     setMessage(`Deleting ${deletedCount} selected row${deletedCount === 1 ? "" : "s"}...`);
 
     const response = await fetch("/api/gstat", {
