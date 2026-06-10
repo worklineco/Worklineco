@@ -39,6 +39,11 @@ type BookmarkLevel = {
   lastRef: PDFRef;
 };
 
+type AnnexureStartLabel = {
+  pageIndex: number;
+  text: string;
+};
+
 type DpiIssue = {
   detail: string;
   filename: string;
@@ -479,6 +484,7 @@ export default function PdfIndexingPage() {
     try {
       const mergedPdf = await PDFDocument.create();
       const bookmarks: BookmarkNode[] = [];
+      const annexureStartLabels: AnnexureStartLabel[] = [];
       let annexureBookmark: BookmarkNode | null = null;
 
       for (const row of rows) {
@@ -502,6 +508,10 @@ export default function PdfIndexingPage() {
             pageIndex: startPageIndex,
             title: getAnnexureBookmarkTitle(row)
           });
+          annexureStartLabels.push({
+            pageIndex: startPageIndex,
+            text: getAnnexurePageLabel(row)
+          });
         } else {
           bookmarks.push({
             pageIndex: startPageIndex,
@@ -519,6 +529,8 @@ export default function PdfIndexingPage() {
       if (bookmarkShouldPaginate) {
         await drawPageNumbers(mergedPdf);
       }
+
+      await drawAnnexureStartLabels(mergedPdf, annexureStartLabels);
 
       downloadBlob(createPdfBlob(await mergedPdf.save()), "workline-bookmarked.pdf");
       setMessage(`Created bookmarked PDF from ${rows.length} files${bookmarkShouldPaginate ? " with page numbers" : ""}.`);
@@ -1009,6 +1021,16 @@ function getAnnexureBookmarkTitle(row: PdfFileRow) {
   return label ? `Annexure - ${label}` : stripPdfExtension(row.name);
 }
 
+function getAnnexurePageLabel(row: PdfFileRow) {
+  const label = row.annexureLabel.trim();
+
+  if (!label) {
+    return "Annexure";
+  }
+
+  return /^annexure\b/i.test(label) ? label : `Annexure ${label}`;
+}
+
 function createSmartMergeLots(rows: PdfFileRow[]) {
   const lots: SmartMergeLot[] = [];
   let currentLot: SmartMergeLot = { rows: [], size: 0 };
@@ -1312,6 +1334,28 @@ async function drawPageNumbers(pdf: PDFDocument) {
       size: PDF_PAGE_NUMBER_FONT_SIZE,
       x: width - PDF_PAGE_NUMBER_MARGIN - textWidth,
       y: height - PDF_PAGE_NUMBER_MARGIN - PDF_PAGE_NUMBER_FONT_SIZE
+    });
+  });
+}
+
+async function drawAnnexureStartLabels(pdf: PDFDocument, labels: AnnexureStartLabel[]) {
+  if (!labels.length) {
+    return;
+  }
+
+  const font = await pdf.embedFont(StandardFonts.Helvetica);
+
+  labels.forEach((label) => {
+    const page = pdf.getPage(label.pageIndex);
+    const { height, width } = page.getSize();
+    const textWidth = font.widthOfTextAtSize(label.text, PDF_PAGE_NUMBER_FONT_SIZE);
+
+    page.drawText(label.text, {
+      color: rgb(0, 0, 0),
+      font,
+      size: PDF_PAGE_NUMBER_FONT_SIZE,
+      x: width - PDF_PAGE_NUMBER_MARGIN - textWidth,
+      y: height - PDF_PAGE_NUMBER_MARGIN - PDF_PAGE_NUMBER_FONT_SIZE * 2 - 4
     });
   });
 }
