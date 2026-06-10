@@ -2,7 +2,7 @@
 
 import { ArrowDown, ArrowLeft, ArrowUp, BookMarked, Eye, FileSearch, FolderOpen, Hash, ListOrdered, RefreshCw, Scissors, Shuffle, X, type LucideIcon } from "lucide-react";
 import { AlignmentType, BorderStyle, Document, Packer, Paragraph, Table, TableCell, TableRow, TextRun, WidthType } from "docx";
-import { PDFDocument, PDFHexString, PDFName, type PDFRef, StandardFonts, degrees, rgb } from "pdf-lib";
+import { PDFDict, PDFDocument, PDFHexString, PDFName, PDFNumber, PDFRef, PDFStream, StandardFonts, degrees, rgb } from "pdf-lib";
 import Link from "next/link";
 import { ChangeEvent, useEffect, useRef, useState } from "react";
 import JSZip from "jszip";
@@ -36,6 +36,17 @@ type BookmarkLevel = {
   count: number;
   firstRef: PDFRef;
   lastRef: PDFRef;
+};
+
+type DpiIssue = {
+  detail: string;
+  filename: string;
+  pageNumber: number;
+};
+
+type ImageDimensions = {
+  height: number;
+  width: number;
 };
 
 type PdfPreview = {
@@ -375,6 +386,73 @@ export default function PdfIndexingPage() {
     }
   }
 
+  async function checkSelectedPdfDpi() {
+    const rows = getActionRows(true);
+
+    if (!rows.length) {
+      setMessage("Select at least one PDF file to check DPI.");
+      return;
+    }
+
+    setIsProcessing(true);
+    setMessage(`Checking 300 DPI on ${rows.length} PDF file${rows.length === 1 ? "" : "s"}...`);
+
+    try {
+      const lowDpiIssues: DpiIssue[] = [];
+      const unconfirmedIssues: DpiIssue[] = [];
+
+      for (const row of rows) {
+        const file = pdfFileMapRef.current.get(row.id);
+
+        if (!file) {
+          continue;
+        }
+
+        const pdf = await PDFDocument.load(await file.arrayBuffer(), { ignoreEncryption: true });
+
+        pdf.getPages().forEach((page, pageIndex) => {
+          const images = getPageImageDimensions(pdf, page.node.Resources());
+
+          if (!images.length) {
+            unconfirmedIssues.push({
+              detail: "No raster image found; DPI cannot be confirmed.",
+              filename: row.name,
+              pageNumber: pageIndex + 1
+            });
+            return;
+          }
+
+          const { height, width } = page.getSize();
+          const largestImage = images.reduce((largest, image) =>
+            image.width * image.height > largest.width * largest.height ? image : largest
+          );
+          const dpiX = largestImage.width / (width / 72);
+          const dpiY = largestImage.height / (height / 72);
+          const effectiveDpi = Math.floor(Math.min(dpiX, dpiY));
+
+          if (effectiveDpi < 300) {
+            lowDpiIssues.push({
+              detail: `Estimated ${effectiveDpi} DPI.`,
+              filename: row.name,
+              pageNumber: pageIndex + 1
+            });
+          }
+        });
+      }
+
+      showDpiCheckResult(lowDpiIssues, unconfirmedIssues);
+      setMessage(
+        lowDpiIssues.length
+          ? `DPI check found ${lowDpiIssues.length} page${lowDpiIssues.length === 1 ? "" : "s"} below 300 DPI.`
+          : "DPI check completed."
+      );
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not check PDF DPI.");
+    } finally {
+      setIsProcessing(false);
+    }
+  }
+
   async function createBookmarkedPdf() {
     const rows = getActionRows(true);
 
@@ -539,6 +617,7 @@ export default function PdfIndexingPage() {
               <ToolButton disabled={isProcessing || selectedRowIds.size < 2} icon={Shuffle} label="Merge" onClick={mergeSelectedPdfs} />
               <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={Scissors} label="Split" onClick={splitSelectedPdfs} />
               <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={Hash} label="Page No." onClick={addPageNumbersToPdfs} />
+              <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={FileSearch} label="Check DPI" onClick={checkSelectedPdfDpi} />
               <label className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-950/10 bg-white px-3 text-xs font-black uppercase text-slate-800 shadow-sm">
                 <input
                   checked={bookmarkShouldPaginate}
@@ -855,6 +934,82 @@ function getAnnexureBookmarkTitle(row: PdfFileRow) {
   const label = row.annexureLabel.trim();
 
   return label ? `Annexure - ${label}` : stripPdfExtension(row.name);
+}
+
+function getPageImageDimensions(pdf: PDFDocument, resources: PDFDict | undefined, visitedRefs = new Set<string>()): ImageDimensions[] {
+  const xObjects = resources?.lookupMaybe(PDFName.of("XObject"), PDFDict);
+
+  if (!xObjects) {
+    return [];
+  }
+
+  const images: ImageDimensions[] = [];
+
+  for (const [, object] of xObjects.entries()) {
+    const refKey = object instanceof PDFRef ? object.toString() : "";
+
+    if (refKey && visitedRefs.has(refKey)) {
+      continue;
+    }
+
+    if (refKey) {
+      visitedRefs.add(refKey);
+    }
+
+    const xObject = pdf.context.lookup(object);
+
+    if (!(xObject instanceof PDFStream)) {
+      continue;
+    }
+
+    const subtype = xObject.dict.lookupMaybe(PDFName.of("Subtype"), PDFName);
+
+    if (subtype?.asString() === "/Image") {
+      const width = xObject.dict.lookupMaybe(PDFName.of("Width"), PDFNumber)?.asNumber();
+      const height = xObject.dict.lookupMaybe(PDFName.of("Height"), PDFNumber)?.asNumber();
+
+      if (width && height) {
+        images.push({ height, width });
+      }
+
+      continue;
+    }
+
+    if (subtype?.asString() === "/Form") {
+      images.push(...getPageImageDimensions(pdf, xObject.dict.lookupMaybe(PDFName.of("Resources"), PDFDict), visitedRefs));
+    }
+  }
+
+  return images;
+}
+
+function showDpiCheckResult(lowDpiIssues: DpiIssue[], unconfirmedIssues: DpiIssue[]) {
+  if (!lowDpiIssues.length && !unconfirmedIssues.length) {
+    window.alert("300 DPI check passed. No selected PDF pages were found below 300 DPI.");
+    return;
+  }
+
+  const lines = ["300 DPI check result:"];
+
+  if (lowDpiIssues.length) {
+    lines.push("", "Pages below 300 DPI:");
+    lowDpiIssues.slice(0, 40).forEach((issue) => {
+      lines.push(`- ${issue.filename}, page ${issue.pageNumber}: ${issue.detail}`);
+    });
+  }
+
+  if (unconfirmedIssues.length) {
+    lines.push("", "Pages where DPI could not be confirmed:");
+    unconfirmedIssues.slice(0, 40).forEach((issue) => {
+      lines.push(`- ${issue.filename}, page ${issue.pageNumber}: ${issue.detail}`);
+    });
+  }
+
+  if (lowDpiIssues.length + unconfirmedIssues.length > 80) {
+    lines.push("", "Showing first 80 results only.");
+  }
+
+  window.alert(lines.join("\n"));
 }
 
 async function createPortraitPdf(sourcePdf: PDFDocument) {
