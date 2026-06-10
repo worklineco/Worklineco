@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowDown, ArrowLeft, ArrowUp, BookMarked, FileSearch, FolderOpen, Hash, ListOrdered, RefreshCw, Scissors, Shuffle, type LucideIcon } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowUp, BookMarked, Eye, FileSearch, FolderOpen, Hash, ListOrdered, RefreshCw, RotateCcw, RotateCw, Scissors, Shuffle, X, type LucideIcon } from "lucide-react";
 import { AlignmentType, BorderStyle, Document, Packer, Paragraph, Table, TableCell, TableRow, TextRun, WidthType } from "docx";
 import { PDFDocument, PDFHexString, PDFName, type PDFRef, StandardFonts, degrees, rgb } from "pdf-lib";
 import Link from "next/link";
@@ -11,11 +11,14 @@ type PdfFileRow = {
   annexureLabel: string;
   documentType: string;
   id: string;
+  manualRotation: PdfRotation;
   name: string;
   pages: number | null;
   path: string;
   size: number;
 };
+
+type PdfRotation = 0 | 90 | 180 | 270;
 
 const DOCUMENT_TYPES = ["POA", "SCN", "SCN Reply", "OIO", "Appeal", "Annexure"];
 const PDF_PAGE_NUMBER_FONT_SIZE = 12;
@@ -38,6 +41,11 @@ type BookmarkLevel = {
   lastRef: PDFRef;
 };
 
+type PdfPreview = {
+  name: string;
+  url: string;
+};
+
 export default function PdfIndexingPage() {
   const [pdfRows, setPdfRows] = useState<PdfFileRow[]>([]);
   const [selectedRowIds, setSelectedRowIds] = useState<Set<string>>(() => new Set());
@@ -46,6 +54,7 @@ export default function PdfIndexingPage() {
   const [isReading, setIsReading] = useState(false);
   const [bookmarkShouldPaginate, setBookmarkShouldPaginate] = useState(true);
   const [message, setMessage] = useState("");
+  const [pdfPreview, setPdfPreview] = useState<PdfPreview | null>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
   const pdfFileMapRef = useRef<Map<string, File>>(new Map());
   const selectedFilesRef = useRef<File[]>([]);
@@ -88,6 +97,7 @@ export default function PdfIndexingPage() {
           annexureLabel: "",
           documentType: "",
           id,
+          manualRotation: 0,
           name: file.name,
           pages: await getPdfPageCount(file),
           path: file.webkitRelativePath || file.name,
@@ -181,6 +191,46 @@ export default function PdfIndexingPage() {
     setPdfRows((currentRows) => currentRows.map((row) => (row.id === rowId ? { ...row, annexureLabel } : row)));
   }
 
+  function rotatePdfRow(rowId: string, direction: -1 | 1) {
+    setPdfRows((currentRows) =>
+      currentRows.map((row) =>
+        row.id === rowId
+          ? { ...row, manualRotation: normalizeManualRotation(row.manualRotation + direction * 90) }
+          : row
+      )
+    );
+  }
+
+  function previewPdfRow(row: PdfFileRow) {
+    const file = pdfFileMapRef.current.get(row.id);
+
+    if (!file) {
+      setMessage("Could not find the selected PDF file for preview.");
+      return;
+    }
+
+    setPdfPreview((currentPreview) => {
+      if (currentPreview) {
+        URL.revokeObjectURL(currentPreview.url);
+      }
+
+      return {
+        name: row.name,
+        url: URL.createObjectURL(file)
+      };
+    });
+  }
+
+  function closePdfPreview() {
+    setPdfPreview((currentPreview) => {
+      if (currentPreview) {
+        URL.revokeObjectURL(currentPreview.url);
+      }
+
+      return null;
+    });
+  }
+
   async function mergeSelectedPdfs() {
     const rows = getActionRows(true);
 
@@ -203,7 +253,7 @@ export default function PdfIndexingPage() {
         }
 
         const sourcePdf = await PDFDocument.load(await file.arrayBuffer(), { ignoreEncryption: true });
-        await appendPortraitPages(mergedPdf, sourcePdf);
+        await appendPortraitPages(mergedPdf, sourcePdf, row.manualRotation);
       }
 
       const bytes = await mergedPdf.save();
@@ -293,7 +343,7 @@ export default function PdfIndexingPage() {
         }
 
         const sourcePdf = await PDFDocument.load(await file.arrayBuffer(), { ignoreEncryption: true });
-        const numberedPdf = await createPortraitPdf(sourcePdf);
+        const numberedPdf = await createPortraitPdf(sourcePdf, rows[0].manualRotation);
         await drawPageNumbers(numberedPdf);
         downloadBlob(createPdfBlob(await numberedPdf.save()), `${stripPdfExtension(rows[0].name)}-page-numbered.pdf`);
         setMessage(`Added page numbers to ${rows[0].name}.`);
@@ -310,7 +360,7 @@ export default function PdfIndexingPage() {
         }
 
         const sourcePdf = await PDFDocument.load(await file.arrayBuffer(), { ignoreEncryption: true });
-        const numberedPdf = await createPortraitPdf(sourcePdf);
+        const numberedPdf = await createPortraitPdf(sourcePdf, row.manualRotation);
         await drawPageNumbers(numberedPdf);
         zip.file(`${stripPdfExtension(row.name)}-page-numbered.pdf`, await numberedPdf.save());
       }
@@ -349,7 +399,7 @@ export default function PdfIndexingPage() {
 
         const startPageIndex = mergedPdf.getPageCount();
         const sourcePdf = await PDFDocument.load(await file.arrayBuffer(), { ignoreEncryption: true });
-        await appendPortraitPages(mergedPdf, sourcePdf);
+        await appendPortraitPages(mergedPdf, sourcePdf, row.manualRotation);
 
         if (row.documentType === "Annexure") {
           if (!annexureBookmark) {
@@ -552,7 +602,7 @@ export default function PdfIndexingPage() {
 
           <div className="mt-4 overflow-hidden rounded-2xl border border-slate-950/10 bg-white">
             <div className="max-h-[calc(100vh-285px)] overflow-auto">
-              <table className="w-full min-w-[1120px] border-separate border-spacing-0 text-left text-sm">
+              <table className="w-full min-w-[1320px] border-separate border-spacing-0 text-left text-sm">
                 <thead className="sticky top-0 z-10 bg-slate-950 text-white">
                   <tr>
                     <th className="w-12 border-b border-r border-white/15 px-3 py-3">
@@ -571,6 +621,7 @@ export default function PdfIndexingPage() {
                     </th>
                     <th className="w-24 border-b border-r border-white/15 px-3 py-3 text-xs font-black uppercase">Move</th>
                     <th className="w-16 border-b border-r border-white/15 px-3 py-3 text-xs font-black uppercase">Sno</th>
+                    <th className="w-40 border-b border-r border-white/15 px-3 py-3 text-xs font-black uppercase">Preview</th>
                     <th className="border-b border-r border-white/15 px-3 py-3 text-xs font-black uppercase">PDF Name</th>
                     <th className="w-36 border-b border-r border-white/15 px-3 py-3 text-xs font-black uppercase">Size</th>
                     <th className="w-32 border-b border-r border-white/15 px-3 py-3 text-xs font-black uppercase">Page</th>
@@ -618,6 +669,40 @@ export default function PdfIndexingPage() {
                         <td className="border-b border-r border-slate-200 px-3 py-2 font-bold text-slate-700">
                           {index + 1}
                         </td>
+                        <td className="border-b border-r border-slate-200 px-3 py-2">
+                          <div className="flex items-center gap-1">
+                            <button
+                              aria-label={`Preview ${row.name}`}
+                              className="flex size-8 items-center justify-center rounded-lg border border-slate-950/10 bg-white text-slate-700 transition hover:bg-slate-100"
+                              onClick={() => previewPdfRow(row)}
+                              title="Preview PDF"
+                              type="button"
+                            >
+                              <Eye className="size-4" />
+                            </button>
+                            <button
+                              aria-label={`Rotate ${row.name} left`}
+                              className="flex size-8 items-center justify-center rounded-lg border border-slate-950/10 bg-white text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-35"
+                              disabled={isProcessing}
+                              onClick={() => rotatePdfRow(row.id, -1)}
+                              title="Rotate output left"
+                              type="button"
+                            >
+                              <RotateCcw className="size-4" />
+                            </button>
+                            <button
+                              aria-label={`Rotate ${row.name} right`}
+                              className="flex size-8 items-center justify-center rounded-lg border border-slate-950/10 bg-white text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-35"
+                              disabled={isProcessing}
+                              onClick={() => rotatePdfRow(row.id, 1)}
+                              title="Rotate output right"
+                              type="button"
+                            >
+                              <RotateCw className="size-4" />
+                            </button>
+                            <span className="min-w-9 text-center text-xs font-black text-slate-600">{row.manualRotation}°</span>
+                          </div>
+                        </td>
                         <td className="border-b border-r border-slate-200 px-3 py-2 font-bold text-slate-950">
                           {row.name}
                         </td>
@@ -656,7 +741,7 @@ export default function PdfIndexingPage() {
                     ))
                   ) : (
                     <tr>
-                      <td className="px-3 py-12 text-center text-sm font-bold text-slate-500" colSpan={8}>
+                      <td className="px-3 py-12 text-center text-sm font-bold text-slate-500" colSpan={9}>
                         {isReading ? "Reading PDFs..." : "No PDF folder selected yet."}
                       </td>
                     </tr>
@@ -667,6 +752,24 @@ export default function PdfIndexingPage() {
           </div>
         </section>
       </section>
+      {pdfPreview ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4">
+          <div className="flex h-[90vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+            <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
+              <p className="truncate text-sm font-black text-slate-950">{pdfPreview.name}</p>
+              <button
+                aria-label="Close PDF preview"
+                className="flex size-9 items-center justify-center rounded-lg border border-slate-950/10 bg-white text-slate-700 transition hover:bg-slate-100"
+                onClick={closePdfPreview}
+                type="button"
+              >
+                <X className="size-4" />
+              </button>
+            </div>
+            <iframe className="min-h-0 flex-1 bg-slate-100" src={pdfPreview.url} title={`Preview ${pdfPreview.name}`} />
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 }
@@ -768,15 +871,15 @@ function getAnnexureBookmarkTitle(row: PdfFileRow) {
   return label ? `Annexure - ${label}` : stripPdfExtension(row.name);
 }
 
-async function createPortraitPdf(sourcePdf: PDFDocument) {
+async function createPortraitPdf(sourcePdf: PDFDocument, manualRotation: PdfRotation) {
   const portraitPdf = await PDFDocument.create();
 
-  await appendPortraitPages(portraitPdf, sourcePdf);
+  await appendPortraitPages(portraitPdf, sourcePdf, manualRotation);
 
   return portraitPdf;
 }
 
-async function appendPortraitPages(targetPdf: PDFDocument, sourcePdf: PDFDocument) {
+async function appendPortraitPages(targetPdf: PDFDocument, sourcePdf: PDFDocument, manualRotation: PdfRotation) {
   for (const sourcePage of sourcePdf.getPages()) {
     const { height, width } = sourcePage.getSize();
     const rotation = normalizePageRotation(sourcePage.getRotation().angle);
@@ -791,20 +894,9 @@ async function appendPortraitPages(targetPdf: PDFDocument, sourcePdf: PDFDocumen
       const page = targetPdf.addPage([portraitWidth, portraitHeight]);
 
       if (width > height) {
-        page.drawPage(embeddedPage, {
-          height,
-          rotate: degrees(270),
-          width,
-          x: 0,
-          y: portraitHeight
-        });
+        drawRotatedEmbeddedPage(page, embeddedPage, width, height, normalizeManualRotation(270 + manualRotation));
       } else {
-        page.drawPage(embeddedPage, {
-          height: portraitHeight,
-          width: portraitWidth,
-          x: 0,
-          y: 0
-        });
+        drawRotatedEmbeddedPage(page, embeddedPage, portraitWidth, portraitHeight, manualRotation);
       }
 
       continue;
@@ -812,13 +904,56 @@ async function appendPortraitPages(targetPdf: PDFDocument, sourcePdf: PDFDocumen
 
     const page = targetPdf.addPage([width, height]);
 
+    drawRotatedEmbeddedPage(page, embeddedPage, width, height, manualRotation);
+  }
+}
+
+function drawRotatedEmbeddedPage(
+  page: ReturnType<PDFDocument["addPage"]>,
+  embeddedPage: Awaited<ReturnType<PDFDocument["embedPage"]>>,
+  width: number,
+  height: number,
+  rotation: PdfRotation
+) {
+  if (rotation === 90) {
     page.drawPage(embeddedPage, {
       height,
+      rotate: degrees(90),
       width,
-      x: 0,
+      x: height,
       y: 0
     });
+    return;
   }
+
+  if (rotation === 180) {
+    page.drawPage(embeddedPage, {
+      height,
+      rotate: degrees(180),
+      width,
+      x: width,
+      y: height
+    });
+    return;
+  }
+
+  if (rotation === 270) {
+    page.drawPage(embeddedPage, {
+      height,
+      rotate: degrees(270),
+      width,
+      x: 0,
+      y: width
+    });
+    return;
+  }
+
+  page.drawPage(embeddedPage, {
+    height,
+    width,
+    x: 0,
+    y: 0
+  });
 }
 
 async function drawPageNumbers(pdf: PDFDocument) {
@@ -842,6 +977,12 @@ async function drawPageNumbers(pdf: PDFDocument) {
 
 function normalizePageRotation(angle: number) {
   return ((angle % 360) + 360) % 360;
+}
+
+function normalizeManualRotation(angle: number): PdfRotation {
+  const normalizedAngle = normalizePageRotation(angle);
+
+  return (normalizedAngle === 90 || normalizedAngle === 180 || normalizedAngle === 270 ? normalizedAngle : 0) as PdfRotation;
 }
 
 function addPdfBookmarks(pdf: PDFDocument, bookmarks: BookmarkNode[]) {
