@@ -4,7 +4,7 @@ import { ArrowDown, ArrowLeft, ArrowUp, BookMarked, Eye, FileSearch, FolderOpen,
 import { AlignmentType, BorderStyle, Document, Packer, Paragraph, Table, TableCell, TableRow, TextRun, WidthType } from "docx";
 import { PDFDocument, PDFHexString, PDFName, type PDFRef, StandardFonts, degrees, rgb } from "pdf-lib";
 import Link from "next/link";
-import { ChangeEvent, useRef, useState } from "react";
+import { ChangeEvent, useEffect, useRef, useState } from "react";
 import JSZip from "jszip";
 
 type PdfFileRow = {
@@ -43,6 +43,7 @@ type BookmarkLevel = {
 
 type PdfPreview = {
   name: string;
+  rowId: string;
   url: string;
 };
 
@@ -65,6 +66,23 @@ export default function PdfIndexingPage() {
   const selectedPages = selectedRows.reduce((sum, row) => sum + (row.pages ?? 0), 0);
   const areAllRowsSelected = pdfRows.length > 0 && selectedRowIds.size === pdfRows.length;
   const areSomeRowsSelected = selectedRowIds.size > 0 && selectedRowIds.size < pdfRows.length;
+  const previewRow = pdfPreview ? pdfRows.find((row) => row.id === pdfPreview.rowId) : null;
+  const previewRotation = previewRow?.manualRotation ?? 0;
+
+  useEffect(() => {
+    if (!pdfPreview) {
+      return;
+    }
+
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        closePdfPreview();
+      }
+    }
+
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [pdfPreview]);
 
   async function selectFolder(event: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.target.files ?? []);
@@ -216,6 +234,7 @@ export default function PdfIndexingPage() {
 
       return {
         name: row.name,
+        rowId: row.id,
         url: URL.createObjectURL(file)
       };
     });
@@ -602,7 +621,7 @@ export default function PdfIndexingPage() {
 
           <div className="mt-4 overflow-hidden rounded-2xl border border-slate-950/10 bg-white">
             <div className="max-h-[calc(100vh-285px)] overflow-auto">
-              <table className="w-full min-w-[1320px] border-separate border-spacing-0 text-left text-sm">
+              <table className="w-full min-w-[1220px] border-separate border-spacing-0 text-left text-sm">
                 <thead className="sticky top-0 z-10 bg-slate-950 text-white">
                   <tr>
                     <th className="w-12 border-b border-r border-white/15 px-3 py-3">
@@ -621,7 +640,7 @@ export default function PdfIndexingPage() {
                     </th>
                     <th className="w-24 border-b border-r border-white/15 px-3 py-3 text-xs font-black uppercase">Move</th>
                     <th className="w-16 border-b border-r border-white/15 px-3 py-3 text-xs font-black uppercase">Sno</th>
-                    <th className="w-40 border-b border-r border-white/15 px-3 py-3 text-xs font-black uppercase">Preview</th>
+                    <th className="w-20 border-b border-r border-white/15 px-3 py-3 text-xs font-black uppercase">Preview</th>
                     <th className="border-b border-r border-white/15 px-3 py-3 text-xs font-black uppercase">PDF Name</th>
                     <th className="w-36 border-b border-r border-white/15 px-3 py-3 text-xs font-black uppercase">Size</th>
                     <th className="w-32 border-b border-r border-white/15 px-3 py-3 text-xs font-black uppercase">Page</th>
@@ -670,7 +689,7 @@ export default function PdfIndexingPage() {
                           {index + 1}
                         </td>
                         <td className="border-b border-r border-slate-200 px-3 py-2">
-                          <div className="flex items-center gap-1">
+                          <div className="flex items-center justify-center">
                             <button
                               aria-label={`Preview ${row.name}`}
                               className="flex size-8 items-center justify-center rounded-lg border border-slate-950/10 bg-white text-slate-700 transition hover:bg-slate-100"
@@ -680,27 +699,6 @@ export default function PdfIndexingPage() {
                             >
                               <Eye className="size-4" />
                             </button>
-                            <button
-                              aria-label={`Rotate ${row.name} left`}
-                              className="flex size-8 items-center justify-center rounded-lg border border-slate-950/10 bg-white text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-35"
-                              disabled={isProcessing}
-                              onClick={() => rotatePdfRow(row.id, -1)}
-                              title="Rotate output left"
-                              type="button"
-                            >
-                              <RotateCcw className="size-4" />
-                            </button>
-                            <button
-                              aria-label={`Rotate ${row.name} right`}
-                              className="flex size-8 items-center justify-center rounded-lg border border-slate-950/10 bg-white text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-35"
-                              disabled={isProcessing}
-                              onClick={() => rotatePdfRow(row.id, 1)}
-                              title="Rotate output right"
-                              type="button"
-                            >
-                              <RotateCw className="size-4" />
-                            </button>
-                            <span className="min-w-9 text-center text-xs font-black text-slate-600">{row.manualRotation}°</span>
                           </div>
                         </td>
                         <td className="border-b border-r border-slate-200 px-3 py-2 font-bold text-slate-950">
@@ -757,16 +755,46 @@ export default function PdfIndexingPage() {
           <div className="flex h-[90vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
             <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
               <p className="truncate text-sm font-black text-slate-950">{pdfPreview.name}</p>
-              <button
-                aria-label="Close PDF preview"
-                className="flex size-9 items-center justify-center rounded-lg border border-slate-950/10 bg-white text-slate-700 transition hover:bg-slate-100"
-                onClick={closePdfPreview}
-                type="button"
-              >
-                <X className="size-4" />
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  aria-label="Rotate preview left"
+                  className="flex size-9 items-center justify-center rounded-lg border border-slate-950/10 bg-white text-slate-700 transition hover:bg-slate-100"
+                  onClick={() => rotatePdfRow(pdfPreview.rowId, -1)}
+                  title="Rotate left"
+                  type="button"
+                >
+                  <RotateCcw className="size-4" />
+                </button>
+                <button
+                  aria-label="Rotate preview right"
+                  className="flex size-9 items-center justify-center rounded-lg border border-slate-950/10 bg-white text-slate-700 transition hover:bg-slate-100"
+                  onClick={() => rotatePdfRow(pdfPreview.rowId, 1)}
+                  title="Rotate right"
+                  type="button"
+                >
+                  <RotateCw className="size-4" />
+                </button>
+                <button
+                  aria-label="Close PDF preview"
+                  className="flex size-9 items-center justify-center rounded-lg border border-slate-950/10 bg-white text-slate-700 transition hover:bg-slate-100"
+                  onClick={closePdfPreview}
+                  type="button"
+                >
+                  <X className="size-4" />
+                </button>
+              </div>
             </div>
-            <iframe className="min-h-0 flex-1 bg-slate-100" src={pdfPreview.url} title={`Preview ${pdfPreview.name}`} />
+            <div className="min-h-0 flex-1 overflow-hidden bg-slate-100">
+              <iframe
+                className="h-full w-full bg-slate-100 transition-transform duration-200"
+                src={pdfPreview.url}
+                style={{
+                  transform: `rotate(${previewRotation}deg)`,
+                  transformOrigin: "center"
+                }}
+                title={`Preview ${pdfPreview.name}`}
+              />
+            </div>
           </div>
         </div>
       ) : null}
