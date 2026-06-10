@@ -1,13 +1,14 @@
 "use client";
 
-import { ArrowDown, ArrowLeft, ArrowUp, FileSearch, FolderOpen, Hash, ListOrdered, RefreshCw, Scissors, Shuffle, type LucideIcon } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowUp, BookMarked, FileSearch, FolderOpen, Hash, ListOrdered, RefreshCw, Scissors, Shuffle, type LucideIcon } from "lucide-react";
 import { AlignmentType, BorderStyle, Document, Packer, Paragraph, Table, TableCell, TableRow, TextRun, WidthType } from "docx";
-import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
+import { PDFDocument, PDFHexString, PDFName, type PDFRef, StandardFonts, rgb } from "pdf-lib";
 import Link from "next/link";
 import { ChangeEvent, useRef, useState } from "react";
 import JSZip from "jszip";
 
 type PdfFileRow = {
+  annexureLabel: string;
   documentType: string;
   id: string;
   name: string;
@@ -25,12 +26,25 @@ type PageRange = {
   pageIndices: number[];
 };
 
+type BookmarkNode = {
+  children?: BookmarkNode[];
+  pageIndex: number;
+  title: string;
+};
+
+type BookmarkLevel = {
+  count: number;
+  firstRef: PDFRef;
+  lastRef: PDFRef;
+};
+
 export default function PdfIndexingPage() {
   const [pdfRows, setPdfRows] = useState<PdfFileRow[]>([]);
   const [selectedRowIds, setSelectedRowIds] = useState<Set<string>>(() => new Set());
   const [folderName, setFolderName] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
   const [isReading, setIsReading] = useState(false);
+  const [bookmarkShouldPaginate, setBookmarkShouldPaginate] = useState(true);
   const [message, setMessage] = useState("");
   const folderInputRef = useRef<HTMLInputElement>(null);
   const pdfFileMapRef = useRef<Map<string, File>>(new Map());
@@ -71,6 +85,7 @@ export default function PdfIndexingPage() {
 
         fileMap.set(id, file);
         rows.push({
+          annexureLabel: "",
           documentType: "",
           id,
           name: file.name,
@@ -153,7 +168,17 @@ export default function PdfIndexingPage() {
   }
 
   function updateDocumentType(rowId: string, documentType: string) {
-    setPdfRows((currentRows) => currentRows.map((row) => (row.id === rowId ? { ...row, documentType } : row)));
+    setPdfRows((currentRows) =>
+      currentRows.map((row) =>
+        row.id === rowId
+          ? { ...row, annexureLabel: documentType === "Annexure" ? row.annexureLabel : "", documentType }
+          : row
+      )
+    );
+  }
+
+  function updateAnnexureLabel(rowId: string, annexureLabel: string) {
+    setPdfRows((currentRows) => currentRows.map((row) => (row.id === rowId ? { ...row, annexureLabel } : row)));
   }
 
   async function mergeSelectedPdfs() {
@@ -298,6 +323,72 @@ export default function PdfIndexingPage() {
     }
   }
 
+  async function createBookmarkedPdf() {
+    const rows = getActionRows(true);
+
+    if (rows.length < 2) {
+      setMessage("Select at least two PDF files to create a bookmarked PDF.");
+      return;
+    }
+
+    setIsProcessing(true);
+    setMessage(`Creating bookmarked PDF from ${rows.length} files...`);
+
+    try {
+      const mergedPdf = await PDFDocument.create();
+      const bookmarks: BookmarkNode[] = [];
+      let annexureBookmark: BookmarkNode | null = null;
+
+      for (const row of rows) {
+        const file = pdfFileMapRef.current.get(row.id);
+
+        if (!file) {
+          continue;
+        }
+
+        const startPageIndex = mergedPdf.getPageCount();
+        const sourcePdf = await PDFDocument.load(await file.arrayBuffer(), { ignoreEncryption: true });
+        const copiedPages = await mergedPdf.copyPages(sourcePdf, sourcePdf.getPageIndices());
+
+        copiedPages.forEach((page) => mergedPdf.addPage(page));
+
+        if (row.documentType === "Annexure") {
+          if (!annexureBookmark) {
+            annexureBookmark = { children: [], pageIndex: startPageIndex, title: "Annexure" };
+            bookmarks.push(annexureBookmark);
+          }
+
+          annexureBookmark.children?.push({
+            pageIndex: startPageIndex,
+            title: getAnnexureBookmarkTitle(row)
+          });
+        } else {
+          bookmarks.push({
+            pageIndex: startPageIndex,
+            title: getDocumentBookmarkTitle(row)
+          });
+        }
+      }
+
+      if (!mergedPdf.getPageCount()) {
+        throw new Error("Could not merge the selected PDF files.");
+      }
+
+      addPdfBookmarks(mergedPdf, bookmarks);
+
+      if (bookmarkShouldPaginate) {
+        await drawPageNumbers(mergedPdf);
+      }
+
+      downloadBlob(createPdfBlob(await mergedPdf.save()), "workline-bookmarked.pdf");
+      setMessage(`Created bookmarked PDF from ${rows.length} files${bookmarkShouldPaginate ? " with page numbers" : ""}.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not create bookmarked PDF.");
+    } finally {
+      setIsProcessing(false);
+    }
+  }
+
   async function createPdfIndex() {
     const rows = getActionRows(false);
 
@@ -398,6 +489,17 @@ export default function PdfIndexingPage() {
               <ToolButton disabled={isProcessing || selectedRowIds.size < 2} icon={Shuffle} label="Merge" onClick={mergeSelectedPdfs} />
               <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={Scissors} label="Split" onClick={splitSelectedPdfs} />
               <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={Hash} label="Page No." onClick={addPageNumbersToPdfs} />
+              <label className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-950/10 bg-white px-3 text-xs font-black uppercase text-slate-800 shadow-sm">
+                <input
+                  checked={bookmarkShouldPaginate}
+                  className="size-4 rounded border-slate-300 accent-teal-600"
+                  disabled={isProcessing}
+                  onChange={(event) => setBookmarkShouldPaginate(event.target.checked)}
+                  type="checkbox"
+                />
+                Pagination
+              </label>
+              <ToolButton disabled={isProcessing || selectedRowIds.size < 2} icon={BookMarked} label="Bookmarks" onClick={createBookmarkedPdf} />
               <ToolButton disabled={isProcessing || pdfRows.length === 0} icon={ListOrdered} label="Create Index" onClick={createPdfIndex} />
               <input
                 accept="application/pdf,.pdf"
@@ -451,7 +553,7 @@ export default function PdfIndexingPage() {
 
           <div className="mt-4 overflow-hidden rounded-2xl border border-slate-950/10 bg-white">
             <div className="max-h-[calc(100vh-285px)] overflow-auto">
-              <table className="w-full min-w-[980px] border-separate border-spacing-0 text-left text-sm">
+              <table className="w-full min-w-[1120px] border-separate border-spacing-0 text-left text-sm">
                 <thead className="sticky top-0 z-10 bg-slate-950 text-white">
                   <tr>
                     <th className="w-12 border-b border-r border-white/15 px-3 py-3">
@@ -473,7 +575,8 @@ export default function PdfIndexingPage() {
                     <th className="border-b border-r border-white/15 px-3 py-3 text-xs font-black uppercase">PDF Name</th>
                     <th className="w-36 border-b border-r border-white/15 px-3 py-3 text-xs font-black uppercase">Size</th>
                     <th className="w-32 border-b border-r border-white/15 px-3 py-3 text-xs font-black uppercase">Page</th>
-                    <th className="w-44 border-b border-white/15 px-3 py-3 text-xs font-black uppercase">Document</th>
+                    <th className="w-44 border-b border-r border-white/15 px-3 py-3 text-xs font-black uppercase">Document</th>
+                    <th className="w-48 border-b border-white/15 px-3 py-3 text-xs font-black uppercase">Annexure</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -525,7 +628,7 @@ export default function PdfIndexingPage() {
                         <td className="border-b border-r border-slate-200 px-3 py-2 font-semibold text-slate-700">
                           {row.pages ?? "Could not read"}
                         </td>
-                        <td className="border-b border-slate-200 px-3 py-2">
+                        <td className="border-b border-r border-slate-200 px-3 py-2">
                           <select
                             aria-label={`Select document type for ${row.name}`}
                             className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-xs font-bold text-slate-800 outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
@@ -540,11 +643,21 @@ export default function PdfIndexingPage() {
                             ))}
                           </select>
                         </td>
+                        <td className="border-b border-slate-200 px-3 py-2">
+                          <input
+                            aria-label={`Annexure number or text for ${row.name}`}
+                            className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-xs font-bold text-slate-800 outline-none transition placeholder:text-slate-400 disabled:bg-slate-100 disabled:text-transparent disabled:placeholder:text-transparent focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
+                            disabled={row.documentType !== "Annexure"}
+                            onChange={(event) => updateAnnexureLabel(row.id, event.target.value)}
+                            placeholder="No. / text"
+                            value={row.annexureLabel}
+                          />
+                        </td>
                       </tr>
                     ))
                   ) : (
                     <tr>
-                      <td className="px-3 py-12 text-center text-sm font-bold text-slate-500" colSpan={7}>
+                      <td className="px-3 py-12 text-center text-sm font-bold text-slate-500" colSpan={8}>
                         {isReading ? "Reading PDFs..." : "No PDF folder selected yet."}
                       </td>
                     </tr>
@@ -646,6 +759,16 @@ function stripPdfExtension(filename: string) {
   return filename.replace(/\.pdf$/i, "");
 }
 
+function getDocumentBookmarkTitle(row: PdfFileRow) {
+  return row.documentType || stripPdfExtension(row.name);
+}
+
+function getAnnexureBookmarkTitle(row: PdfFileRow) {
+  const label = row.annexureLabel.trim();
+
+  return label ? `Annexure - ${label}` : stripPdfExtension(row.name);
+}
+
 async function drawPageNumbers(pdf: PDFDocument) {
   const font = await pdf.embedFont(StandardFonts.Helvetica);
   const pages = pdf.getPages();
@@ -663,6 +786,72 @@ async function drawPageNumbers(pdf: PDFDocument) {
       y: height - PDF_PAGE_NUMBER_MARGIN - PDF_PAGE_NUMBER_FONT_SIZE
     });
   });
+}
+
+function addPdfBookmarks(pdf: PDFDocument, bookmarks: BookmarkNode[]) {
+  if (!bookmarks.length) {
+    return;
+  }
+
+  const rootRef = pdf.context.nextRef();
+  const rootLevel = createBookmarkLevel(pdf, bookmarks, rootRef);
+
+  pdf.context.assign(
+    rootRef,
+    pdf.context.obj({
+      Count: rootLevel.count,
+      First: rootLevel.firstRef,
+      Last: rootLevel.lastRef,
+      Type: PDFName.of("Outlines")
+    })
+  );
+  pdf.catalog.set(PDFName.of("Outlines"), rootRef);
+  pdf.catalog.set(PDFName.of("PageMode"), PDFName.of("UseOutlines"));
+}
+
+function createBookmarkLevel(pdf: PDFDocument, nodes: BookmarkNode[], parentRef: PDFRef): BookmarkLevel {
+  const refs = nodes.map(() => pdf.context.nextRef());
+  const childLevels: Array<BookmarkLevel | null> = nodes.map((node, index) =>
+    node.children?.length ? createBookmarkLevel(pdf, node.children, refs[index]) : null
+  );
+
+  nodes.forEach((node, index) => {
+    const page = pdf.getPage(Math.max(0, Math.min(node.pageIndex, pdf.getPageCount() - 1)));
+    const childLevel = childLevels[index];
+    const outlineItem = pdf.context.obj({
+      Dest: pdf.context.obj([page.ref, PDFName.of("Fit")]),
+      Parent: parentRef,
+      Title: PDFHexString.fromText(node.title)
+    });
+
+    if (index > 0) {
+      outlineItem.set(PDFName.of("Prev"), refs[index - 1]);
+    }
+
+    if (index < refs.length - 1) {
+      outlineItem.set(PDFName.of("Next"), refs[index + 1]);
+    }
+
+    if (childLevel) {
+      outlineItem.set(PDFName.of("First"), childLevel.firstRef);
+      outlineItem.set(PDFName.of("Last"), childLevel.lastRef);
+      outlineItem.set(PDFName.of("Count"), pdf.context.obj(node.title === "Annexure" ? -childLevel.count : childLevel.count));
+    }
+
+    pdf.context.assign(refs[index], outlineItem);
+  });
+
+  return {
+    count: nodes.length + childLevels.reduce((sum: number, childLevel, index) => {
+      if (!childLevel || nodes[index].title === "Annexure") {
+        return sum;
+      }
+
+      return sum + childLevel.count;
+    }, 0),
+    firstRef: refs[0],
+    lastRef: refs[refs.length - 1]
+  };
 }
 
 function getStartingPageText(pages: number | null, getCurrentStartPage: () => number, addPages: (pages: number) => void) {
