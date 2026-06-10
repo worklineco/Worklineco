@@ -20,7 +20,7 @@ type PdfFileRow = {
 const DOCUMENT_TYPES = ["POA", "SCN", "SCN Reply", "OIO", "Appeal", "Annexure"];
 const PDF_PAGE_NUMBER_FONT_SIZE = 12;
 const PDF_PAGE_NUMBER_MARGIN = 24;
-const SMART_MERGE_MAX_SIZE = 20 * 1024 * 1024;
+const SMART_MERGE_MAX_SIZE = 19.5 * 1024 * 1024;
 
 type PageRange = {
   label: string;
@@ -538,7 +538,7 @@ export default function PdfIndexingPage() {
     }
 
     setIsProcessing(true);
-    setMessage(`Smart merging ${rows.length} PDF file${rows.length === 1 ? "" : "s"} into 20 MB lots...`);
+    setMessage(`Smart merging ${rows.length} PDF file${rows.length === 1 ? "" : "s"} into 19.5 MB lots...`);
 
     try {
       const lots = createSmartMergeLots(rows);
