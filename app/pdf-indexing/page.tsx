@@ -203,8 +203,7 @@ export default function PdfIndexingPage() {
         }
 
         const sourcePdf = await PDFDocument.load(await file.arrayBuffer(), { ignoreEncryption: true });
-        const copiedPages = await mergedPdf.copyPages(sourcePdf, sourcePdf.getPageIndices());
-        copiedPages.forEach((page) => mergedPdf.addPage(page));
+        await appendPortraitPages(mergedPdf, sourcePdf);
       }
 
       const bytes = await mergedPdf.save();
@@ -293,7 +292,8 @@ export default function PdfIndexingPage() {
           throw new Error("Could not find the selected PDF file.");
         }
 
-        const numberedPdf = await PDFDocument.load(await file.arrayBuffer(), { ignoreEncryption: true });
+        const sourcePdf = await PDFDocument.load(await file.arrayBuffer(), { ignoreEncryption: true });
+        const numberedPdf = await createPortraitPdf(sourcePdf);
         await drawPageNumbers(numberedPdf);
         downloadBlob(createPdfBlob(await numberedPdf.save()), `${stripPdfExtension(rows[0].name)}-page-numbered.pdf`);
         setMessage(`Added page numbers to ${rows[0].name}.`);
@@ -309,7 +309,8 @@ export default function PdfIndexingPage() {
           continue;
         }
 
-        const numberedPdf = await PDFDocument.load(await file.arrayBuffer(), { ignoreEncryption: true });
+        const sourcePdf = await PDFDocument.load(await file.arrayBuffer(), { ignoreEncryption: true });
+        const numberedPdf = await createPortraitPdf(sourcePdf);
         await drawPageNumbers(numberedPdf);
         zip.file(`${stripPdfExtension(row.name)}-page-numbered.pdf`, await numberedPdf.save());
       }
@@ -348,9 +349,7 @@ export default function PdfIndexingPage() {
 
         const startPageIndex = mergedPdf.getPageCount();
         const sourcePdf = await PDFDocument.load(await file.arrayBuffer(), { ignoreEncryption: true });
-        const copiedPages = await mergedPdf.copyPages(sourcePdf, sourcePdf.getPageIndices());
-
-        copiedPages.forEach((page) => mergedPdf.addPage(page));
+        await appendPortraitPages(mergedPdf, sourcePdf);
 
         if (row.documentType === "Annexure") {
           if (!annexureBookmark) {
@@ -769,6 +768,59 @@ function getAnnexureBookmarkTitle(row: PdfFileRow) {
   return label ? `Annexure - ${label}` : stripPdfExtension(row.name);
 }
 
+async function createPortraitPdf(sourcePdf: PDFDocument) {
+  const portraitPdf = await PDFDocument.create();
+
+  await appendPortraitPages(portraitPdf, sourcePdf);
+
+  return portraitPdf;
+}
+
+async function appendPortraitPages(targetPdf: PDFDocument, sourcePdf: PDFDocument) {
+  for (const sourcePage of sourcePdf.getPages()) {
+    const { height, width } = sourcePage.getSize();
+    const rotation = normalizePageRotation(sourcePage.getRotation().angle);
+    const isLandscape = width > height || rotation === 90 || rotation === 270;
+
+    sourcePage.setRotation(degrees(0));
+    const embeddedPage = await targetPdf.embedPage(sourcePage);
+
+    if (isLandscape) {
+      const portraitWidth = Math.min(width, height);
+      const portraitHeight = Math.max(width, height);
+      const page = targetPdf.addPage([portraitWidth, portraitHeight]);
+
+      if (width > height) {
+        page.drawPage(embeddedPage, {
+          height,
+          rotate: degrees(90),
+          width,
+          x: portraitWidth,
+          y: 0
+        });
+      } else {
+        page.drawPage(embeddedPage, {
+          height: portraitHeight,
+          width: portraitWidth,
+          x: 0,
+          y: 0
+        });
+      }
+
+      continue;
+    }
+
+    const page = targetPdf.addPage([width, height]);
+
+    page.drawPage(embeddedPage, {
+      height,
+      width,
+      x: 0,
+      y: 0
+    });
+  }
+}
+
 async function drawPageNumbers(pdf: PDFDocument) {
   const font = await pdf.embedFont(StandardFonts.Helvetica);
   const pages = pdf.getPages();
@@ -776,74 +828,20 @@ async function drawPageNumbers(pdf: PDFDocument) {
   pages.forEach((page, index) => {
     const text = String(index + 1);
     const { height, width } = page.getSize();
-    const rotation = normalizePageRotation(page.getRotation().angle);
     const textWidth = font.widthOfTextAtSize(text, PDF_PAGE_NUMBER_FONT_SIZE);
-    const textHeight = PDF_PAGE_NUMBER_FONT_SIZE;
-    const pageNumberPosition = getPageNumberPosition({
-      height,
-      rotation,
-      textHeight,
-      textWidth,
-      width
-    });
 
     page.drawText(text, {
       color: rgb(0, 0, 0),
       font,
-      rotate: degrees(pageNumberPosition.textRotation),
       size: PDF_PAGE_NUMBER_FONT_SIZE,
-      x: pageNumberPosition.x,
-      y: pageNumberPosition.y
+      x: width - PDF_PAGE_NUMBER_MARGIN - textWidth,
+      y: height - PDF_PAGE_NUMBER_MARGIN - PDF_PAGE_NUMBER_FONT_SIZE
     });
   });
 }
 
 function normalizePageRotation(angle: number) {
   return ((angle % 360) + 360) % 360;
-}
-
-function getPageNumberPosition({
-  height,
-  rotation,
-  textHeight,
-  textWidth,
-  width
-}: {
-  height: number;
-  rotation: number;
-  textHeight: number;
-  textWidth: number;
-  width: number;
-}) {
-  if (rotation === 90) {
-    return {
-      textRotation: 270,
-      x: PDF_PAGE_NUMBER_MARGIN + textHeight,
-      y: height - PDF_PAGE_NUMBER_MARGIN - textWidth
-    };
-  }
-
-  if (rotation === 180) {
-    return {
-      textRotation: 180,
-      x: PDF_PAGE_NUMBER_MARGIN + textWidth,
-      y: PDF_PAGE_NUMBER_MARGIN + textHeight
-    };
-  }
-
-  if (rotation === 270) {
-    return {
-      textRotation: 90,
-      x: width - PDF_PAGE_NUMBER_MARGIN - textHeight,
-      y: PDF_PAGE_NUMBER_MARGIN + textWidth
-    };
-  }
-
-  return {
-    textRotation: 0,
-    x: width - PDF_PAGE_NUMBER_MARGIN - textWidth,
-    y: height - PDF_PAGE_NUMBER_MARGIN - textHeight
-  };
 }
 
 function addPdfBookmarks(pdf: PDFDocument, bookmarks: BookmarkNode[]) {
