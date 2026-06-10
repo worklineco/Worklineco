@@ -517,6 +517,15 @@ export default function PdfIndexingPage() {
     }
   }
 
+  function startSmartMerge() {
+    if (selectedRowIds.size === 0) {
+      setMessage("Select PDFs before using Smart Merge.");
+      return;
+    }
+
+    setMessage("Smart Merge is ready. Share the rules and I will wire this button next.");
+  }
+
   async function createPdfIndex() {
     const rows = getActionRows(false);
 
@@ -615,6 +624,7 @@ export default function PdfIndexingPage() {
 
             <div className="flex flex-wrap gap-2">
               <ToolButton disabled={isProcessing || selectedRowIds.size < 2} icon={Shuffle} label="Merge" onClick={mergeSelectedPdfs} />
+              <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={BookMarked} label="Smart Merge" onClick={startSmartMerge} />
               <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={Scissors} label="Split" onClick={splitSelectedPdfs} />
               <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={Hash} label="Page No." onClick={addPageNumbersToPdfs} />
               <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={FileSearch} label="Check DPI" onClick={checkSelectedPdfDpi} />
