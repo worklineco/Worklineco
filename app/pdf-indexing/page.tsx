@@ -1,8 +1,8 @@
 "use client";
 
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, FileSearch, FolderOpen, ListOrdered, RefreshCw, Scissors, Shuffle } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowUp, FileSearch, FolderOpen, Hash, ListOrdered, RefreshCw, Scissors, Shuffle, type LucideIcon } from "lucide-react";
 import { AlignmentType, BorderStyle, Document, Packer, Paragraph, Table, TableCell, TableRow, TextRun, WidthType } from "docx";
-import { PDFDocument } from "pdf-lib";
+import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import Link from "next/link";
 import { ChangeEvent, useRef, useState } from "react";
 import JSZip from "jszip";
@@ -17,7 +17,8 @@ type PdfFileRow = {
 };
 
 const DOCUMENT_TYPES = ["POA", "SCN", "SCN Reply", "OIO", "Appeal", "Annexure"];
-const PDF_ROWS_PER_PAGE = 12;
+const PDF_PAGE_NUMBER_FONT_SIZE = 12;
+const PDF_PAGE_NUMBER_MARGIN = 24;
 
 type PageRange = {
   label: string;
@@ -31,7 +32,6 @@ export default function PdfIndexingPage() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [isReading, setIsReading] = useState(false);
   const [message, setMessage] = useState("");
-  const [currentPage, setCurrentPage] = useState(1);
   const folderInputRef = useRef<HTMLInputElement>(null);
   const pdfFileMapRef = useRef<Map<string, File>>(new Map());
   const selectedFilesRef = useRef<File[]>([]);
@@ -42,10 +42,6 @@ export default function PdfIndexingPage() {
   const selectedPages = selectedRows.reduce((sum, row) => sum + (row.pages ?? 0), 0);
   const areAllRowsSelected = pdfRows.length > 0 && selectedRowIds.size === pdfRows.length;
   const areSomeRowsSelected = selectedRowIds.size > 0 && selectedRowIds.size < pdfRows.length;
-  const pageCount = Math.max(1, Math.ceil(pdfRows.length / PDF_ROWS_PER_PAGE));
-  const visiblePage = Math.min(currentPage, pageCount);
-  const pageStartIndex = (visiblePage - 1) * PDF_ROWS_PER_PAGE;
-  const paginatedRows = pdfRows.slice(pageStartIndex, pageStartIndex + PDF_ROWS_PER_PAGE);
 
   async function selectFolder(event: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.target.files ?? []);
@@ -65,7 +61,6 @@ export default function PdfIndexingPage() {
     setMessage(pdfFiles.length ? `Reading ${pdfFiles.length} PDF file${pdfFiles.length === 1 ? "" : "s"}...` : "");
     setPdfRows([]);
     setSelectedRowIds(new Set());
-    setCurrentPage(1);
 
     try {
       const rows: PdfFileRow[] = [];
@@ -95,7 +90,6 @@ export default function PdfIndexingPage() {
       setFolderName(getSelectedFolderName(rows));
       pdfFileMapRef.current = fileMap;
       setPdfRows(rows);
-      setCurrentPage(1);
       setMessage(
         rows.length
           ? `Loaded ${rows.length} PDF file${rows.length === 1 ? "" : "s"}.`
@@ -255,6 +249,55 @@ export default function PdfIndexingPage() {
     }
   }
 
+  async function addPageNumbersToPdfs() {
+    const rows = getActionRows(true);
+
+    if (!rows.length) {
+      setMessage("Select at least one PDF file to add page numbers.");
+      return;
+    }
+
+    setIsProcessing(true);
+    setMessage(`Adding page numbers to ${rows.length} PDF file${rows.length === 1 ? "" : "s"}...`);
+
+    try {
+      if (rows.length === 1) {
+        const file = pdfFileMapRef.current.get(rows[0].id);
+
+        if (!file) {
+          throw new Error("Could not find the selected PDF file.");
+        }
+
+        const numberedPdf = await PDFDocument.load(await file.arrayBuffer(), { ignoreEncryption: true });
+        await drawPageNumbers(numberedPdf);
+        downloadBlob(createPdfBlob(await numberedPdf.save()), `${stripPdfExtension(rows[0].name)}-page-numbered.pdf`);
+        setMessage(`Added page numbers to ${rows[0].name}.`);
+        return;
+      }
+
+      const zip = new JSZip();
+
+      for (const row of rows) {
+        const file = pdfFileMapRef.current.get(row.id);
+
+        if (!file) {
+          continue;
+        }
+
+        const numberedPdf = await PDFDocument.load(await file.arrayBuffer(), { ignoreEncryption: true });
+        await drawPageNumbers(numberedPdf);
+        zip.file(`${stripPdfExtension(row.name)}-page-numbered.pdf`, await numberedPdf.save());
+      }
+
+      downloadBlob(await zip.generateAsync({ type: "blob" }), "workline-page-numbered-pdfs.zip");
+      setMessage(`Added page numbers to ${rows.length} PDF files.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not add page numbers.");
+    } finally {
+      setIsProcessing(false);
+    }
+  }
+
   async function createPdfIndex() {
     const rows = getActionRows(false);
 
@@ -354,6 +397,7 @@ export default function PdfIndexingPage() {
             <div className="flex flex-wrap gap-2">
               <ToolButton disabled={isProcessing || selectedRowIds.size < 2} icon={Shuffle} label="Merge" onClick={mergeSelectedPdfs} />
               <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={Scissors} label="Split" onClick={splitSelectedPdfs} />
+              <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={Hash} label="Page No." onClick={addPageNumbersToPdfs} />
               <ToolButton disabled={isProcessing || pdfRows.length === 0} icon={ListOrdered} label="Create Index" onClick={createPdfIndex} />
               <input
                 accept="application/pdf,.pdf"
@@ -396,15 +440,6 @@ export default function PdfIndexingPage() {
               {message ? <p className="mt-1 text-sm font-bold text-indigo-700">{message}</p> : null}
             </div>
             <div className="flex flex-wrap gap-2">
-              <PaginationControl
-                currentPage={visiblePage}
-                disabled={isReading || pdfRows.length === 0}
-                pageCount={pageCount}
-                pageSize={PDF_ROWS_PER_PAGE}
-                totalRows={pdfRows.length}
-                onNext={() => setCurrentPage((page) => Math.min(page + 1, pageCount))}
-                onPrevious={() => setCurrentPage((page) => Math.max(page - 1, 1))}
-              />
               <Metric label="Files" value={String(pdfRows.length)} />
               <Metric label="Selected" value={String(selectedRowIds.size)} />
               <Metric label="Total Page" value={isReading ? "..." : String(totalPages)} />
@@ -443,10 +478,7 @@ export default function PdfIndexingPage() {
                 </thead>
                 <tbody>
                   {pdfRows.length ? (
-                    paginatedRows.map((row, pageIndex) => {
-                      const index = pageStartIndex + pageIndex;
-
-                      return (
+                    pdfRows.map((row, index) => (
                       <tr className="odd:bg-white even:bg-slate-50/80" key={row.id}>
                         <td className="border-b border-r border-slate-200 px-3 py-2">
                           <input
@@ -509,8 +541,7 @@ export default function PdfIndexingPage() {
                           </select>
                         </td>
                       </tr>
-                      );
-                    })
+                    ))
                   ) : (
                     <tr>
                       <td className="px-3 py-12 text-center text-sm font-bold text-slate-500" colSpan={7}>
@@ -535,7 +566,7 @@ function ToolButton({
   onClick
 }: {
   disabled?: boolean;
-  icon: typeof Shuffle;
+  icon: LucideIcon;
   label: string;
   onClick: () => void;
 }) {
@@ -549,53 +580,6 @@ function ToolButton({
       <Icon className="size-4" />
       {label}
     </button>
-  );
-}
-
-function PaginationControl({
-  currentPage,
-  disabled,
-  onNext,
-  onPrevious,
-  pageCount,
-  pageSize,
-  totalRows
-}: {
-  currentPage: number;
-  disabled?: boolean;
-  onNext: () => void;
-  onPrevious: () => void;
-  pageCount: number;
-  pageSize: number;
-  totalRows: number;
-}) {
-  return (
-    <div className="inline-flex h-10 items-center justify-center gap-1 rounded-xl border border-slate-950/10 bg-white px-2 text-[12px] font-black uppercase text-slate-800 shadow-sm">
-      <span className="px-1 text-slate-500">Size {pageSize}</span>
-      <button
-        aria-label="Previous PDF page"
-        className="flex size-7 items-center justify-center rounded-lg border border-slate-950/10 bg-white text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-35"
-        disabled={disabled || currentPage <= 1}
-        onClick={onPrevious}
-        title="Previous page"
-        type="button"
-      >
-        <ArrowLeft className="size-3.5" />
-      </button>
-      <span className="min-w-14 text-center">
-        {totalRows ? currentPage : 0}/{totalRows ? pageCount : 0}
-      </span>
-      <button
-        aria-label="Next PDF page"
-        className="flex size-7 items-center justify-center rounded-lg border border-slate-950/10 bg-white text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-35"
-        disabled={disabled || currentPage >= pageCount}
-        onClick={onNext}
-        title="Next page"
-        type="button"
-      >
-        <ArrowRight className="size-3.5" />
-      </button>
-    </div>
   );
 }
 
@@ -660,6 +644,25 @@ function createPdfBlob(bytes: Uint8Array) {
 
 function stripPdfExtension(filename: string) {
   return filename.replace(/\.pdf$/i, "");
+}
+
+async function drawPageNumbers(pdf: PDFDocument) {
+  const font = await pdf.embedFont(StandardFonts.Helvetica);
+  const pages = pdf.getPages();
+
+  pages.forEach((page, index) => {
+    const text = String(index + 1);
+    const { height, width } = page.getSize();
+    const textWidth = font.widthOfTextAtSize(text, PDF_PAGE_NUMBER_FONT_SIZE);
+
+    page.drawText(text, {
+      color: rgb(0, 0, 0),
+      font,
+      size: PDF_PAGE_NUMBER_FONT_SIZE,
+      x: width - PDF_PAGE_NUMBER_MARGIN - textWidth,
+      y: height - PDF_PAGE_NUMBER_MARGIN - PDF_PAGE_NUMBER_FONT_SIZE
+    });
+  });
 }
 
 function getStartingPageText(pages: number | null, getCurrentStartPage: () => number, addPages: (pages: number) => void) {
