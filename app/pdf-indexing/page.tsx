@@ -544,9 +544,15 @@ export default function PdfIndexingPage() {
       const lots = createSmartMergeLots(rows);
       const outputs: SmartMergeOutput[] = [];
 
-      for (const lot of lots) {
+      for (let lotIndex = 0; lotIndex < lots.length; lotIndex += 1) {
+        const lot = lots[lotIndex];
+        setMessage(
+          `Smart Merge: processing lot ${lotIndex + 1} of ${lots.length} (${lot.rows.length} PDF${lot.rows.length === 1 ? "" : "s"}, ${formatFileSize(lot.size)})...`
+        );
+        await waitForUiUpdate();
+
         if (lot.rows.length === 1 && lot.size > SMART_MERGE_MAX_SIZE) {
-          outputs.push(...await createSmartMergePartsForOversizedPdf(lot.rows[0], pdfFileMapRef.current));
+          outputs.push(...await createSmartMergePartsForOversizedPdf(lot.rows[0], pdfFileMapRef.current, setMessage));
           continue;
         }
 
@@ -1048,7 +1054,11 @@ async function createMergedPdfBytes(rows: PdfFileRow[], fileMap: Map<string, Fil
   return mergedPdf.save();
 }
 
-async function createSmartMergePartsForOversizedPdf(row: PdfFileRow, fileMap: Map<string, File>) {
+async function createSmartMergePartsForOversizedPdf(
+  row: PdfFileRow,
+  fileMap: Map<string, File>,
+  reportProgress: (message: string) => void
+) {
   const file = fileMap.get(row.id);
 
   if (!file) {
@@ -1067,6 +1077,10 @@ async function createSmartMergePartsForOversizedPdf(row: PdfFileRow, fileMap: Ma
     let singlePageWasTooLarge = false;
 
     while (endPageIndex < pageCount) {
+      reportProgress(
+        `Smart Merge: splitting ${row.name}, testing pages ${startPageIndex + 1}-${endPageIndex + 1} of ${pageCount}...`
+      );
+      await waitForUiUpdate();
       const candidateBytes = await createPdfBytesForPageRange(sourcePdf, startPageIndex, endPageIndex);
 
       if (candidateBytes.byteLength <= SMART_MERGE_MAX_SIZE) {
@@ -1094,6 +1108,10 @@ async function createSmartMergePartsForOversizedPdf(row: PdfFileRow, fileMap: Ma
       filename: `${stripPdfExtension(row.name)}-pages-${formatPageRangeLabel(startPageIndex + 1, bestEndPageIndex + 1)}.pdf`,
       isOverLimit: singlePageWasTooLarge || bestBytes.byteLength > SMART_MERGE_MAX_SIZE
     });
+    reportProgress(
+      `Smart Merge: created ${stripPdfExtension(row.name)} pages ${startPageIndex + 1}-${bestEndPageIndex + 1} (${formatFileSize(bestBytes.byteLength)}).`
+    );
+    await waitForUiUpdate();
     startPageIndex = bestEndPageIndex + 1;
   }
 
@@ -1184,6 +1202,10 @@ function showDpiCheckResult(lowDpiIssues: DpiIssue[], unconfirmedIssues: DpiIssu
   }
 
   window.alert(lines.join("\n"));
+}
+
+function waitForUiUpdate() {
+  return new Promise<void>((resolve) => window.setTimeout(resolve, 0));
 }
 
 async function createPortraitPdf(sourcePdf: PDFDocument) {
