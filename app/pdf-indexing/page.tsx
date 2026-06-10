@@ -2,7 +2,7 @@
 
 import { ArrowDown, ArrowLeft, ArrowUp, BookMarked, FileSearch, FolderOpen, Hash, ListOrdered, RefreshCw, Scissors, Shuffle, type LucideIcon } from "lucide-react";
 import { AlignmentType, BorderStyle, Document, Packer, Paragraph, Table, TableCell, TableRow, TextRun, WidthType } from "docx";
-import { PDFDocument, PDFHexString, PDFName, type PDFRef, StandardFonts, rgb } from "pdf-lib";
+import { PDFDocument, PDFHexString, PDFName, type PDFRef, StandardFonts, degrees, rgb } from "pdf-lib";
 import Link from "next/link";
 import { ChangeEvent, useRef, useState } from "react";
 import JSZip from "jszip";
@@ -776,16 +776,74 @@ async function drawPageNumbers(pdf: PDFDocument) {
   pages.forEach((page, index) => {
     const text = String(index + 1);
     const { height, width } = page.getSize();
+    const rotation = normalizePageRotation(page.getRotation().angle);
     const textWidth = font.widthOfTextAtSize(text, PDF_PAGE_NUMBER_FONT_SIZE);
+    const textHeight = PDF_PAGE_NUMBER_FONT_SIZE;
+    const pageNumberPosition = getPageNumberPosition({
+      height,
+      rotation,
+      textHeight,
+      textWidth,
+      width
+    });
 
     page.drawText(text, {
       color: rgb(0, 0, 0),
       font,
+      rotate: degrees(pageNumberPosition.textRotation),
       size: PDF_PAGE_NUMBER_FONT_SIZE,
-      x: width - PDF_PAGE_NUMBER_MARGIN - textWidth,
-      y: height - PDF_PAGE_NUMBER_MARGIN - PDF_PAGE_NUMBER_FONT_SIZE
+      x: pageNumberPosition.x,
+      y: pageNumberPosition.y
     });
   });
+}
+
+function normalizePageRotation(angle: number) {
+  return ((angle % 360) + 360) % 360;
+}
+
+function getPageNumberPosition({
+  height,
+  rotation,
+  textHeight,
+  textWidth,
+  width
+}: {
+  height: number;
+  rotation: number;
+  textHeight: number;
+  textWidth: number;
+  width: number;
+}) {
+  if (rotation === 90) {
+    return {
+      textRotation: 270,
+      x: PDF_PAGE_NUMBER_MARGIN + textHeight,
+      y: height - PDF_PAGE_NUMBER_MARGIN - textWidth
+    };
+  }
+
+  if (rotation === 180) {
+    return {
+      textRotation: 180,
+      x: PDF_PAGE_NUMBER_MARGIN + textWidth,
+      y: PDF_PAGE_NUMBER_MARGIN + textHeight
+    };
+  }
+
+  if (rotation === 270) {
+    return {
+      textRotation: 90,
+      x: width - PDF_PAGE_NUMBER_MARGIN - textHeight,
+      y: PDF_PAGE_NUMBER_MARGIN + textWidth
+    };
+  }
+
+  return {
+    textRotation: 0,
+    x: width - PDF_PAGE_NUMBER_MARGIN - textWidth,
+    y: height - PDF_PAGE_NUMBER_MARGIN - textHeight
+  };
 }
 
 function addPdfBookmarks(pdf: PDFDocument, bookmarks: BookmarkNode[]) {
