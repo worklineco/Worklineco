@@ -20,6 +20,7 @@ type PdfFileRow = {
 const DOCUMENT_TYPES = ["POA", "SCN", "SCN Reply", "OIO", "Appeal", "Annexure"];
 const PDF_PAGE_NUMBER_FONT_SIZE = 12;
 const PDF_PAGE_NUMBER_MARGIN = 24;
+const SMART_MERGE_MAX_SIZE = 20 * 1024 * 1024;
 
 type PageRange = {
   label: string;
@@ -47,6 +48,11 @@ type DpiIssue = {
 type ImageDimensions = {
   height: number;
   width: number;
+};
+
+type SmartMergeLot = {
+  rows: PdfFileRow[];
+  size: number;
 };
 
 type PdfPreview = {
@@ -517,13 +523,49 @@ export default function PdfIndexingPage() {
     }
   }
 
-  function startSmartMerge() {
-    if (selectedRowIds.size === 0) {
+  async function startSmartMerge() {
+    const rows = getActionRows(true);
+
+    if (!rows.length) {
       setMessage("Select PDFs before using Smart Merge.");
       return;
     }
 
-    setMessage("Smart Merge is ready. Share the rules and I will wire this button next.");
+    setIsProcessing(true);
+    setMessage(`Smart merging ${rows.length} PDF file${rows.length === 1 ? "" : "s"} into 20 MB lots...`);
+
+    try {
+      const lots = createSmartMergeLots(rows);
+      const oversizedLots = lots.filter((lot) => lot.size > SMART_MERGE_MAX_SIZE);
+
+      if (lots.length === 1) {
+        const bytes = await createMergedPdfBytes(lots[0].rows, pdfFileMapRef.current);
+        downloadBlob(createPdfBlob(bytes), "workline-smart-merge-lot-01.pdf");
+      } else {
+        const zip = new JSZip();
+
+        for (let index = 0; index < lots.length; index += 1) {
+          const lot = lots[index];
+          const bytes = await createMergedPdfBytes(lot.rows, pdfFileMapRef.current);
+
+          zip.file(`workline-smart-merge-lot-${String(index + 1).padStart(2, "0")}.pdf`, bytes);
+        }
+
+        downloadBlob(await zip.generateAsync({ type: "blob" }), "workline-smart-merge-lots.zip");
+      }
+
+      setMessage(
+        `Smart Merge created ${lots.length} lot${lots.length === 1 ? "" : "s"} under ${formatFileSize(SMART_MERGE_MAX_SIZE)}${
+          oversizedLots.length
+            ? `; ${oversizedLots.length} lot${oversizedLots.length === 1 ? " has" : "s have"} a single PDF over the limit.`
+            : "."
+        }`
+      );
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not create Smart Merge lots.");
+    } finally {
+      setIsProcessing(false);
+    }
   }
 
   async function createPdfIndex() {
@@ -944,6 +986,51 @@ function getAnnexureBookmarkTitle(row: PdfFileRow) {
   const label = row.annexureLabel.trim();
 
   return label ? `Annexure - ${label}` : stripPdfExtension(row.name);
+}
+
+function createSmartMergeLots(rows: PdfFileRow[]) {
+  const lots: SmartMergeLot[] = [];
+  let currentLot: SmartMergeLot = { rows: [], size: 0 };
+
+  rows.forEach((row) => {
+    const shouldStartNewLot =
+      currentLot.rows.length > 0 && currentLot.size + row.size > SMART_MERGE_MAX_SIZE;
+
+    if (shouldStartNewLot) {
+      lots.push(currentLot);
+      currentLot = { rows: [], size: 0 };
+    }
+
+    currentLot.rows.push(row);
+    currentLot.size += row.size;
+  });
+
+  if (currentLot.rows.length) {
+    lots.push(currentLot);
+  }
+
+  return lots;
+}
+
+async function createMergedPdfBytes(rows: PdfFileRow[], fileMap: Map<string, File>) {
+  const mergedPdf = await PDFDocument.create();
+
+  for (const row of rows) {
+    const file = fileMap.get(row.id);
+
+    if (!file) {
+      continue;
+    }
+
+    const sourcePdf = await PDFDocument.load(await file.arrayBuffer(), { ignoreEncryption: true });
+    await appendPortraitPages(mergedPdf, sourcePdf);
+  }
+
+  if (!mergedPdf.getPageCount()) {
+    throw new Error("Could not merge the selected PDF files.");
+  }
+
+  return mergedPdf.save();
 }
 
 function getPageImageDimensions(pdf: PDFDocument, resources: PDFDict | undefined, visitedRefs = new Set<string>()): ImageDimensions[] {
