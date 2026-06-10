@@ -55,6 +55,12 @@ type SmartMergeLot = {
   size: number;
 };
 
+type SmartMergeOutput = {
+  bytes: Uint8Array;
+  filename: string;
+  isOverLimit: boolean;
+};
+
 type PdfPreview = {
   name: string;
   url: string;
@@ -536,28 +542,37 @@ export default function PdfIndexingPage() {
 
     try {
       const lots = createSmartMergeLots(rows);
-      const oversizedLots = lots.filter((lot) => lot.size > SMART_MERGE_MAX_SIZE);
+      const outputs: SmartMergeOutput[] = [];
 
-      if (lots.length === 1) {
-        const bytes = await createMergedPdfBytes(lots[0].rows, pdfFileMapRef.current);
-        downloadBlob(createPdfBlob(bytes), "workline-smart-merge-lot-01.pdf");
+      for (const lot of lots) {
+        if (lot.rows.length === 1 && lot.size > SMART_MERGE_MAX_SIZE) {
+          outputs.push(...await createSmartMergePartsForOversizedPdf(lot.rows[0], pdfFileMapRef.current));
+          continue;
+        }
+
+        outputs.push({
+          bytes: await createMergedPdfBytes(lot.rows, pdfFileMapRef.current),
+          filename: `workline-smart-merge-lot-${String(outputs.length + 1).padStart(2, "0")}.pdf`,
+          isOverLimit: false
+        });
+      }
+
+      const overLimitOutputs = outputs.filter((output) => output.isOverLimit);
+
+      if (outputs.length === 1) {
+        downloadBlob(createPdfBlob(outputs[0].bytes), outputs[0].filename);
       } else {
         const zip = new JSZip();
 
-        for (let index = 0; index < lots.length; index += 1) {
-          const lot = lots[index];
-          const bytes = await createMergedPdfBytes(lot.rows, pdfFileMapRef.current);
-
-          zip.file(`workline-smart-merge-lot-${String(index + 1).padStart(2, "0")}.pdf`, bytes);
-        }
+        outputs.forEach((output) => zip.file(output.filename, output.bytes));
 
         downloadBlob(await zip.generateAsync({ type: "blob" }), "workline-smart-merge-lots.zip");
       }
 
       setMessage(
-        `Smart Merge created ${lots.length} lot${lots.length === 1 ? "" : "s"} under ${formatFileSize(SMART_MERGE_MAX_SIZE)}${
-          oversizedLots.length
-            ? `; ${oversizedLots.length} lot${oversizedLots.length === 1 ? " has" : "s have"} a single PDF over the limit.`
+        `Smart Merge created ${outputs.length} file${outputs.length === 1 ? "" : "s"} with a ${formatFileSize(SMART_MERGE_MAX_SIZE)} target${
+          overLimitOutputs.length
+            ? `; ${overLimitOutputs.length} single-page part${overLimitOutputs.length === 1 ? " is" : "s are"} still over the limit.`
             : "."
         }`
       );
@@ -1033,6 +1048,68 @@ async function createMergedPdfBytes(rows: PdfFileRow[], fileMap: Map<string, Fil
   return mergedPdf.save();
 }
 
+async function createSmartMergePartsForOversizedPdf(row: PdfFileRow, fileMap: Map<string, File>) {
+  const file = fileMap.get(row.id);
+
+  if (!file) {
+    return [];
+  }
+
+  const sourcePdf = await PDFDocument.load(await file.arrayBuffer(), { ignoreEncryption: true });
+  const pageCount = sourcePdf.getPageCount();
+  const outputs: SmartMergeOutput[] = [];
+  let startPageIndex = 0;
+
+  while (startPageIndex < pageCount) {
+    let endPageIndex = startPageIndex;
+    let bestBytes: Uint8Array | null = null;
+    let bestEndPageIndex = startPageIndex;
+    let singlePageWasTooLarge = false;
+
+    while (endPageIndex < pageCount) {
+      const candidateBytes = await createPdfBytesForPageRange(sourcePdf, startPageIndex, endPageIndex);
+
+      if (candidateBytes.byteLength <= SMART_MERGE_MAX_SIZE) {
+        bestBytes = candidateBytes;
+        bestEndPageIndex = endPageIndex;
+        endPageIndex += 1;
+        continue;
+      }
+
+      if (bestBytes === null) {
+        bestBytes = candidateBytes;
+        bestEndPageIndex = endPageIndex;
+        singlePageWasTooLarge = true;
+      }
+
+      break;
+    }
+
+    if (!bestBytes) {
+      break;
+    }
+
+    outputs.push({
+      bytes: bestBytes,
+      filename: `${stripPdfExtension(row.name)}-pages-${formatPageRangeLabel(startPageIndex + 1, bestEndPageIndex + 1)}.pdf`,
+      isOverLimit: singlePageWasTooLarge || bestBytes.byteLength > SMART_MERGE_MAX_SIZE
+    });
+    startPageIndex = bestEndPageIndex + 1;
+  }
+
+  return outputs;
+}
+
+async function createPdfBytesForPageRange(sourcePdf: PDFDocument, startPageIndex: number, endPageIndex: number) {
+  const pdf = await PDFDocument.create();
+
+  for (let pageIndex = startPageIndex; pageIndex <= endPageIndex; pageIndex += 1) {
+    await appendPortraitPage(pdf, sourcePdf.getPage(pageIndex));
+  }
+
+  return pdf.save();
+}
+
 function getPageImageDimensions(pdf: PDFDocument, resources: PDFDict | undefined, visitedRefs = new Set<string>()): ImageDimensions[] {
   const xObjects = resources?.lookupMaybe(PDFName.of("XObject"), PDFDict);
 
@@ -1119,31 +1196,35 @@ async function createPortraitPdf(sourcePdf: PDFDocument) {
 
 async function appendPortraitPages(targetPdf: PDFDocument, sourcePdf: PDFDocument) {
   for (const sourcePage of sourcePdf.getPages()) {
-    const { height, width } = sourcePage.getSize();
-    const rotation = normalizePageRotation(sourcePage.getRotation().angle);
-    const isLandscape = width > height || rotation === 90 || rotation === 270;
+    await appendPortraitPage(targetPdf, sourcePage);
+  }
+}
 
-    sourcePage.setRotation(degrees(0));
-    const embeddedPage = await targetPdf.embedPage(sourcePage);
+async function appendPortraitPage(targetPdf: PDFDocument, sourcePage: ReturnType<PDFDocument["getPage"]>) {
+  const { height, width } = sourcePage.getSize();
+  const rotation = normalizePageRotation(sourcePage.getRotation().angle);
+  const isLandscape = width > height || rotation === 90 || rotation === 270;
 
-    if (isLandscape) {
-      const portraitWidth = Math.min(width, height);
-      const portraitHeight = Math.max(width, height);
-      const page = targetPdf.addPage([portraitWidth, portraitHeight]);
+  sourcePage.setRotation(degrees(0));
+  const embeddedPage = await targetPdf.embedPage(sourcePage);
 
-      if (width > height) {
-        drawRotatedEmbeddedPage(page, embeddedPage, width, height, 270);
-      } else {
-        drawRotatedEmbeddedPage(page, embeddedPage, portraitWidth, portraitHeight, 0);
-      }
+  if (isLandscape) {
+    const portraitWidth = Math.min(width, height);
+    const portraitHeight = Math.max(width, height);
+    const page = targetPdf.addPage([portraitWidth, portraitHeight]);
 
-      continue;
+    if (width > height) {
+      drawRotatedEmbeddedPage(page, embeddedPage, width, height, 270);
+    } else {
+      drawRotatedEmbeddedPage(page, embeddedPage, portraitWidth, portraitHeight, 0);
     }
 
-    const page = targetPdf.addPage([width, height]);
-
-    drawRotatedEmbeddedPage(page, embeddedPage, width, height, 0);
+    return;
   }
+
+  const page = targetPdf.addPage([width, height]);
+
+  drawRotatedEmbeddedPage(page, embeddedPage, width, height, 0);
 }
 
 function drawRotatedEmbeddedPage(
