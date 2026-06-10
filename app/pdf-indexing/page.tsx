@@ -793,10 +793,10 @@ async function appendPortraitPages(targetPdf: PDFDocument, sourcePdf: PDFDocumen
       if (width > height) {
         page.drawPage(embeddedPage, {
           height,
-          rotate: degrees(90),
+          rotate: degrees(270),
           width,
-          x: portraitWidth,
-          y: 0
+          x: 0,
+          y: portraitHeight
         });
       } else {
         page.drawPage(embeddedPage, {
