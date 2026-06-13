@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const stagingDir = path.join(os.tmpdir(), `workline-dsc-helper-bundle-${process.pid}`);
 const publicDir = path.join(rootDir, "public");
-const outputZip = path.join(publicDir, "dsc-helper-bundle-v3.zip");
+const outputZip = path.join(publicDir, "dsc-helper-bundle-v4.zip");
 const outputInstaller = path.join(publicDir, "install-workline-dsc-helper.ps1");
 const outputLauncher = path.join(publicDir, "WorkLineDSCHelperSetup.vbs");
 

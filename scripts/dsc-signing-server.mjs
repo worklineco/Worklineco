@@ -1,5 +1,9 @@
+import { execFile } from "node:child_process";
+import fs from "node:fs";
 import http from "node:http";
 import https from "node:https";
+import os from "node:os";
+import path from "node:path";
 import process from "node:process";
 import { URL } from "node:url";
 
@@ -18,6 +22,17 @@ const EMSIGNER_ENDPOINTS = [
   { protocol: "https:", port: 2565 },
   { protocol: "http:", port: 2565 },
 ];
+const EMSIGNER_INSTALL_PATHS =
+  process.platform === "win32"
+    ? [
+        path.join(process.env.ProgramFiles || "C:\\Program Files", "GSTSigner"),
+        path.join(process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)", "GSTSigner"),
+        path.join(process.env.ProgramFiles || "C:\\Program Files", "emSigner"),
+        path.join(process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)", "emSigner"),
+        path.join(os.homedir(), "AppData", "Local", "Programs", "GSTSigner"),
+        path.join(os.homedir(), "AppData", "Local", "Programs", "emSigner"),
+      ]
+    : [];
 const ALLOWED_ORIGINS = new Set([
   "https://worklineco.com",
   "https://www.worklineco.com",
@@ -92,6 +107,55 @@ async function detectEmSigner() {
   return null;
 }
 
+function commandOutput(command, args) {
+  return new Promise((resolve) => {
+    execFile(command, args, { timeout: 2500, windowsHide: true }, (error, stdout) => {
+      resolve(error ? "" : stdout);
+    });
+  });
+}
+
+async function detectEmSignerProcess() {
+  if (process.platform !== "win32") {
+    return null;
+  }
+
+  const output = await commandOutput("powershell.exe", [
+    "-NoProfile",
+    "-Command",
+    "Get-CimInstance Win32_Process | Where-Object { $_.Name -match 'GSTSigner|emSigner|java|javaw' -or $_.CommandLine -match 'GSTSigner|emSigner' } | Select-Object -First 5 Name,CommandLine | ConvertTo-Json -Compress",
+  ]);
+
+  if (!output.trim()) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(output);
+  } catch {
+    return { raw: output.trim() };
+  }
+}
+
+function detectEmSignerInstallPath() {
+  return EMSIGNER_INSTALL_PATHS.find((installPath) => fs.existsSync(installPath)) || null;
+}
+
+async function detectEmSignerState() {
+  const endpoint = await detectEmSigner();
+  const processInfo = await detectEmSignerProcess();
+  const installPath = detectEmSignerInstallPath();
+  const installed = Boolean(installPath || processInfo || endpoint);
+
+  return {
+    endpoint,
+    installPath,
+    installed,
+    process: processInfo,
+    running: Boolean(endpoint),
+  };
+}
+
 const server = http.createServer(async (request, response) => {
   const origin = request.headers.origin || "";
   const requestUrl = new URL(request.url || "/", `http://${HOST}:${PORT}`);
@@ -107,7 +171,7 @@ const server = http.createServer(async (request, response) => {
   }
 
   if (request.method === "GET" && requestUrl.pathname === "/health") {
-    const emSigner = await detectEmSigner();
+    const emSigner = await detectEmSignerState();
 
     sendJson(
       response,
@@ -116,11 +180,13 @@ const server = http.createServer(async (request, response) => {
         canSignPdfs: false,
         emSigner,
         emSignerDownloadUrl: EMSIGNER_DOWNLOAD_URL,
-        engine: emSigner ? "emsigner-detected" : "emsigner-missing",
+        engine: emSigner.running ? "emsigner-detected" : emSigner.installed ? "emsigner-installed-not-running" : "emsigner-missing",
         helper: "workline-dsc",
-        message: emSigner
+        message: emSigner.running
           ? "WorkLine DSC helper found emSigner on this computer. PDF signing connector is not enabled yet."
-          : "WorkLine DSC helper is installed, but emSigner is not running.",
+          : emSigner.installed
+            ? "GSTSigner is installed, but WorkLine cannot reach its local signing service. Open GSTSigner/emSigner from Start Menu, allow any firewall prompt, then click Check again."
+            : "WorkLine DSC helper is installed, but GSTSigner/emSigner is not installed or running.",
         status: "ready",
       },
       origin,
@@ -130,16 +196,18 @@ const server = http.createServer(async (request, response) => {
 
   if (request.method === "POST" && requestUrl.pathname === "/sign") {
     await drainRequest(request);
-    const emSigner = await detectEmSigner();
+    const emSigner = await detectEmSignerState();
 
-    if (!emSigner) {
+    if (!emSigner.running) {
       sendJson(
         response,
         409,
         {
           emSignerDownloadUrl: EMSIGNER_DOWNLOAD_URL,
-          error: "emSigner is not running on this computer.",
-          nextStep: "Install or start emSigner, insert DSC, then click Check again.",
+          error: emSigner.installed
+            ? "GSTSigner is installed, but its local signing service is not reachable."
+            : "GSTSigner/emSigner is not running on this computer.",
+          nextStep: "Open GSTSigner/emSigner from Start Menu, insert DSC, allow any firewall prompt, then click Check again.",
         },
         origin,
       );

@@ -74,7 +74,7 @@ type PdfPreview = {
   url: string;
 };
 
-type DscHelperStatus = "idle" | "checking" | "ready" | "offline" | "emsigner_missing" | "unsupported" | "signing";
+type DscHelperStatus = "idle" | "checking" | "ready" | "offline" | "emsigner_missing" | "emsigner_not_running" | "unsupported" | "signing";
 
 export default function PdfIndexingPage() {
   const [pdfRows, setPdfRows] = useState<PdfFileRow[]>([]);
@@ -126,11 +126,22 @@ export default function PdfIndexingPage() {
         helperEngine === "emsigner-missing" ||
         helperEngine === "pending" ||
         /signing engine is not connected/i.test(helperMessage);
+      const signerInstalledButNotRunning = helperEngine === "emsigner-installed-not-running";
 
-      setDscHelperStatus(needsEmSigner ? "emsigner_missing" : canSignPdfs ? "ready" : "unsupported");
+      setDscHelperStatus(
+        needsEmSigner
+          ? "emsigner_missing"
+          : signerInstalledButNotRunning
+            ? "emsigner_not_running"
+            : canSignPdfs
+              ? "ready"
+              : "unsupported"
+      );
       setDscMessage(
         needsEmSigner
-          ? "WorkLine DSC helper is installed. Install or start emSigner, then click Check again."
+          ? payload?.message || "WorkLine DSC helper is installed. Install or start GSTSigner/emSigner, then click Check again."
+          : signerInstalledButNotRunning
+            ? payload?.message || "GSTSigner is installed, but WorkLine cannot reach its local signing service."
           : !canSignPdfs
             ? payload?.message || "emSigner is detected. WorkLine PDF signing connector is not enabled yet."
           : payload?.message || "Local DSC helper is reachable."
@@ -1077,6 +1088,11 @@ export default function PdfIndexingPage() {
                       </a>
                     </div>
                   </>
+                ) : null}
+                {dscHelperStatus === "emsigner_not_running" ? (
+                  <p className="mt-2 text-xs font-bold leading-relaxed text-slate-600">
+                    GSTSigner appears to be installed. Open GSTSigner/emSigner from the Start Menu, keep it running, allow any Windows firewall prompt, then click Check again.
+                  </p>
                 ) : null}
                 {dscHelperStatus === "unsupported" ? (
                   <p className="mt-2 text-xs font-bold leading-relaxed text-amber-700">
