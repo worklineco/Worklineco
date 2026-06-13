@@ -22,6 +22,7 @@ const PDF_PAGE_NUMBER_FONT_SIZE = 12;
 const PDF_PAGE_NUMBER_MARGIN = 24;
 const SMART_MERGE_MAX_SIZE = 19.5 * 1024 * 1024;
 const DSC_HELPER_URL = "http://127.0.0.1:48783";
+const DSC_HELPER_DOWNLOAD_URL = "/dsc-helper-bundle.zip";
 
 type PageRange = {
   label: string;
@@ -1027,6 +1028,15 @@ export default function PdfIndexingPage() {
               <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
                 <p className="text-xs font-black uppercase text-slate-500">Local helper</p>
                 <p className="mt-1 text-sm font-bold text-slate-950">{dscMessage || "Not checked yet."}</p>
+                {dscHelperStatus === "offline" ? (
+                  <a
+                    className="mt-3 inline-flex h-9 items-center justify-center rounded-lg bg-slate-950 px-3 text-xs font-black uppercase text-white shadow-sm transition hover:bg-slate-800"
+                    download
+                    href={DSC_HELPER_DOWNLOAD_URL}
+                  >
+                    Download DSC helper
+                  </a>
+                ) : null}
               </div>
               <div className="flex flex-wrap justify-end gap-2">
                 <button
