@@ -22,7 +22,7 @@ const PDF_PAGE_NUMBER_FONT_SIZE = 12;
 const PDF_PAGE_NUMBER_MARGIN = 24;
 const SMART_MERGE_MAX_SIZE = 19.5 * 1024 * 1024;
 const DSC_HELPER_URL = "http://127.0.0.1:48783";
-const DSC_HELPER_DOWNLOAD_URL = "/dsc-helper-bundle.zip";
+const DSC_HELPER_DOWNLOAD_URL = "/WorkLineDSCHelperSetup.vbs";
 
 type PageRange = {
   label: string;
@@ -1034,7 +1034,7 @@ export default function PdfIndexingPage() {
                     download
                     href={DSC_HELPER_DOWNLOAD_URL}
                   >
-                    Download DSC helper
+                    Install DSC helper
                   </a>
                 ) : null}
               </div>

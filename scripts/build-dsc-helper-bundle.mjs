@@ -7,7 +7,10 @@ import { fileURLToPath } from "node:url";
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const stagingDir = path.join(os.tmpdir(), `workline-dsc-helper-bundle-${process.pid}`);
-const outputZip = path.join(rootDir, "public", "dsc-helper-bundle.zip");
+const publicDir = path.join(rootDir, "public");
+const outputZip = path.join(publicDir, "dsc-helper-bundle.zip");
+const outputInstaller = path.join(publicDir, "install-workline-dsc-helper.ps1");
+const outputLauncher = path.join(publicDir, "WorkLineDSCHelperSetup.vbs");
 
 const bundleFiles = [
   "package.json",
@@ -32,6 +35,14 @@ function copyBundleFiles() {
     fs.mkdirSync(path.dirname(targetPath), { recursive: true });
     fs.copyFileSync(sourcePath, targetPath);
   }
+}
+
+function copyPublicInstallerFiles() {
+  fs.mkdirSync(publicDir, { recursive: true });
+  fs.copyFileSync(path.join(rootDir, "scripts", "install-workline-dsc-helper.ps1"), outputInstaller);
+
+  const launcherTemplate = fs.readFileSync(path.join(rootDir, "scripts", "WorkLineDSCHelperSetup.vbs"), "utf8");
+  fs.writeFileSync(outputLauncher, launcherTemplate.replace("{{ORIGIN}}", "https://worklineco.com"), "ascii");
 }
 
 function createZipArchive() {
@@ -68,6 +79,7 @@ function createZipArchive() {
 
 resetDirectory(stagingDir);
 copyBundleFiles();
+copyPublicInstallerFiles();
 createZipArchive();
 try {
   fs.rmSync(stagingDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 250 });
