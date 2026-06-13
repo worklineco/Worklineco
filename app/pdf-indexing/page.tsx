@@ -21,6 +21,7 @@ const DOCUMENT_TYPES = ["POA", "SCN", "SCN Reply", "OIO", "Appeal", "Annexure"];
 const PDF_PAGE_NUMBER_FONT_SIZE = 12;
 const PDF_PAGE_NUMBER_MARGIN = 24;
 const SMART_MERGE_MAX_SIZE = 19.5 * 1024 * 1024;
+const DSC_HELPER_URL = "http://127.0.0.1:48783";
 
 type PageRange = {
   label: string;
@@ -71,6 +72,8 @@ type PdfPreview = {
   url: string;
 };
 
+type DscHelperStatus = "idle" | "checking" | "ready" | "offline" | "signing";
+
 export default function PdfIndexingPage() {
   const [pdfRows, setPdfRows] = useState<PdfFileRow[]>([]);
   const [selectedRowIds, setSelectedRowIds] = useState<Set<string>>(() => new Set());
@@ -80,6 +83,9 @@ export default function PdfIndexingPage() {
   const [bookmarkShouldPaginate, setBookmarkShouldPaginate] = useState(true);
   const [message, setMessage] = useState("");
   const [pdfPreview, setPdfPreview] = useState<PdfPreview | null>(null);
+  const [isDscModalOpen, setIsDscModalOpen] = useState(false);
+  const [dscHelperStatus, setDscHelperStatus] = useState<DscHelperStatus>("idle");
+  const [dscMessage, setDscMessage] = useState("");
   const folderInputRef = useRef<HTMLInputElement>(null);
   const pdfFileMapRef = useRef<Map<string, File>>(new Map());
   const selectedFilesRef = useRef<File[]>([]);
@@ -92,8 +98,81 @@ export default function PdfIndexingPage() {
   const areSomeRowsSelected = selectedRowIds.size > 0 && selectedRowIds.size < pdfRows.length;
 
   const startDscFiling = () => {
-    setMessage("DSC filing is ready. Tell me the functionality to build next.");
+    if (!selectedRows.length) {
+      setMessage("Select PDFs before using DSC filing.");
+      return;
+    }
+
+    setIsDscModalOpen(true);
+    void checkDscHelper();
   };
+
+  async function checkDscHelper() {
+    setDscHelperStatus("checking");
+    setDscMessage("Checking local DSC helper...");
+
+    try {
+      const response = await fetch(`${DSC_HELPER_URL}/health`, {
+        cache: "no-store",
+        method: "GET",
+      });
+
+      if (!response.ok) {
+        throw new Error("Local DSC helper did not respond correctly.");
+      }
+
+      const payload = await response.json().catch(() => null);
+      setDscHelperStatus("ready");
+      setDscMessage(payload?.message || "Local DSC helper is reachable.");
+    } catch {
+      setDscHelperStatus("offline");
+      setDscMessage("Local DSC helper is not running on this computer.");
+    }
+  }
+
+  async function signSelectedPdfsWithDsc() {
+    if (!selectedRows.length) {
+      setDscMessage("Select PDFs before signing.");
+      return;
+    }
+
+    setDscHelperStatus("signing");
+    setDscMessage("Sending selected PDFs to local DSC helper...");
+
+    try {
+      const formData = new FormData();
+
+      for (const row of selectedRows) {
+        const file = pdfFileMapRef.current.get(row.id);
+
+        if (!file) {
+          throw new Error(`Missing file data for ${row.name}. Refresh the folder and try again.`);
+        }
+
+        formData.append("files", file, row.name);
+      }
+
+      const response = await fetch(`${DSC_HELPER_URL}/sign`, {
+        body: formData,
+        method: "POST",
+      });
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        throw new Error(payload?.error || "DSC helper could not sign the selected PDFs.");
+      }
+
+      const blob = await response.blob();
+      const disposition = response.headers.get("Content-Disposition") || "";
+      const filenameMatch = disposition.match(/filename="?([^"]+)"?/i);
+      downloadBlob(blob, filenameMatch?.[1] || "workline-dsc-signed.pdf");
+      setDscHelperStatus("ready");
+      setDscMessage("Signed PDF downloaded.");
+    } catch (error) {
+      setDscHelperStatus("ready");
+      setDscMessage(error instanceof Error ? error.message : "Could not complete DSC filing.");
+    }
+  }
 
   useEffect(() => {
     if (!pdfPreview) {
@@ -707,7 +786,7 @@ export default function PdfIndexingPage() {
               <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={Scissors} label="Split" onClick={splitSelectedPdfs} />
               <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={Hash} label="Page No." onClick={addPageNumbersToPdfs} />
               <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={FileSearch} label="Check DPI" onClick={checkSelectedPdfDpi} />
-              <ToolButton disabled={isProcessing} icon={FileSearch} label="DSC filing" onClick={startDscFiling} />
+              <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={FileSearch} label="DSC filing" onClick={startDscFiling} />
               <label className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-950/10 bg-white px-3 text-xs font-black uppercase text-slate-800 shadow-sm">
                 <input
                   checked={bookmarkShouldPaginate}
@@ -921,6 +1000,54 @@ export default function PdfIndexingPage() {
                 src={pdfPreview.url}
                 title={`Preview ${pdfPreview.name}`}
               />
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {isDscModalOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4">
+          <div className="w-full max-w-lg overflow-hidden rounded-2xl bg-white shadow-2xl">
+            <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
+              <div>
+                <p className="text-sm font-black uppercase text-slate-950">DSC filing</p>
+                <p className="mt-0.5 text-xs font-bold text-slate-500">
+                  {selectedRows.length} selected PDF{selectedRows.length === 1 ? "" : "s"}
+                </p>
+              </div>
+              <button
+                aria-label="Close DSC filing"
+                className="flex size-9 items-center justify-center rounded-lg border border-slate-950/10 bg-white text-slate-700 transition hover:bg-slate-100"
+                onClick={() => setIsDscModalOpen(false)}
+                type="button"
+              >
+                <X className="size-4" />
+              </button>
+            </div>
+            <div className="space-y-4 px-4 py-4">
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                <p className="text-xs font-black uppercase text-slate-500">Local helper</p>
+                <p className="mt-1 text-sm font-bold text-slate-950">{dscMessage || "Not checked yet."}</p>
+              </div>
+              <div className="flex flex-wrap justify-end gap-2">
+                <button
+                  className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-950/10 bg-white px-3 text-xs font-black uppercase text-slate-800 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:translate-y-0 disabled:hover:shadow-sm"
+                  disabled={dscHelperStatus === "checking" || dscHelperStatus === "signing"}
+                  onClick={checkDscHelper}
+                  type="button"
+                >
+                  <RefreshCw className={`size-4 ${dscHelperStatus === "checking" ? "animate-spin" : ""}`} />
+                  Check
+                </button>
+                <button
+                  className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 text-xs font-black uppercase text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-45"
+                  disabled={dscHelperStatus !== "ready"}
+                  onClick={signSelectedPdfsWithDsc}
+                  type="button"
+                >
+                  <FileSearch className="size-4" />
+                  Sign selected
+                </button>
+              </div>
             </div>
           </div>
         </div>

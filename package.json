@@ -8,6 +8,7 @@
     "gst:helper:portable": "node scripts/build-gst-helper-portable.mjs",
     "gst:collector": "node scripts/gst-portal-collector.mjs",
     "gst:helper": "node scripts/gst-collector-server.mjs",
+    "dsc:helper": "node scripts/dsc-signing-server.mjs",
     "gst:helper:bundle": "node scripts/build-gst-helper-bundle.mjs",
     "gst:helper:install": "powershell -ExecutionPolicy Bypass -File scripts/install-workline-gst-helper.ps1",
     "start": "next start",
