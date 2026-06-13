@@ -13,6 +13,10 @@ const EMSIGNER_ENDPOINTS = [
   { protocol: "http:", port: 1645 },
   { protocol: "https:", port: 2015 },
   { protocol: "http:", port: 2015 },
+  { protocol: "https:", port: 2095 },
+  { protocol: "http:", port: 2095 },
+  { protocol: "https:", port: 2565 },
+  { protocol: "http:", port: 2565 },
 ];
 const ALLOWED_ORIGINS = new Set([
   "https://worklineco.com",

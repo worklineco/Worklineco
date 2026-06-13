@@ -1050,23 +1050,28 @@ export default function PdfIndexingPage() {
                   </a>
                 ) : null}
                 {dscHelperStatus === "emsigner_missing" ? (
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <a
-                      className="inline-flex h-9 items-center justify-center rounded-lg bg-slate-950 px-3 text-xs font-black uppercase text-white shadow-sm transition hover:bg-slate-800"
-                      href={EMSIGNER_DOWNLOAD_URL}
-                      rel="noreferrer"
-                      target="_blank"
-                    >
-                      Download emSigner
-                    </a>
-                    <a
-                      className="inline-flex h-9 items-center justify-center rounded-lg border border-slate-950/10 bg-white px-3 text-xs font-black uppercase text-slate-800 shadow-sm transition hover:bg-slate-100"
-                      download
-                      href={DSC_HELPER_DOWNLOAD_URL}
-                    >
-                      Update helper
-                    </a>
-                  </div>
+                  <>
+                    <p className="mt-2 text-xs font-bold leading-relaxed text-slate-600">
+                      Downloading is not enough. Install GSTSigner, open GSTSigner/emSigner from Start Menu, allow any firewall prompt, then click Check again.
+                    </p>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <a
+                        className="inline-flex h-9 items-center justify-center rounded-lg bg-slate-950 px-3 text-xs font-black uppercase text-white shadow-sm transition hover:bg-slate-800"
+                        href={EMSIGNER_DOWNLOAD_URL}
+                        rel="noreferrer"
+                        target="_blank"
+                      >
+                        Download GSTSigner
+                      </a>
+                      <a
+                        className="inline-flex h-9 items-center justify-center rounded-lg border border-slate-950/10 bg-white px-3 text-xs font-black uppercase text-slate-800 shadow-sm transition hover:bg-slate-100"
+                        download
+                        href={DSC_HELPER_DOWNLOAD_URL}
+                      >
+                        Update helper
+                      </a>
+                    </div>
+                  </>
                 ) : null}
               </div>
               <div className="flex flex-wrap justify-end gap-2">
