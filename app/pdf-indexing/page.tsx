@@ -122,16 +122,18 @@ export default function PdfIndexingPage() {
       const helperEngine = String(payload?.engine || "");
       const helperMessage = String(payload?.message || "");
       const canSignPdfs = payload?.canSignPdfs !== false;
+      const signerNotReachable =
+        helperEngine === "emsigner-installed-not-running" ||
+        /(?:GSTSigner|emSigner).*(?:not running|not reachable)|(?:not running|not reachable).*(?:GSTSigner|emSigner)/i.test(helperMessage);
       const needsEmSigner =
-        helperEngine === "emsigner-missing" ||
+        (helperEngine === "emsigner-missing" && !signerNotReachable) ||
         helperEngine === "pending" ||
         /signing engine is not connected/i.test(helperMessage);
-      const signerInstalledButNotRunning = helperEngine === "emsigner-installed-not-running";
 
       setDscHelperStatus(
         needsEmSigner
           ? "emsigner_missing"
-          : signerInstalledButNotRunning
+          : signerNotReachable
             ? "emsigner_not_running"
             : canSignPdfs
               ? "ready"
@@ -140,8 +142,8 @@ export default function PdfIndexingPage() {
       setDscMessage(
         needsEmSigner
           ? payload?.message || "WorkLine DSC helper is installed. Install or start GSTSigner/emSigner, then click Check again."
-          : signerInstalledButNotRunning
-            ? payload?.message || "GSTSigner is installed, but WorkLine cannot reach its local signing service."
+          : signerNotReachable
+            ? "GSTSigner may be installed, but WorkLine cannot reach its local signing service. Open GSTSigner/emSigner and click Check again."
           : !canSignPdfs
             ? payload?.message || "emSigner is detected. WorkLine PDF signing connector is not enabled yet."
           : payload?.message || "Local DSC helper is reachable."
@@ -1068,23 +1070,23 @@ export default function PdfIndexingPage() {
                 {dscHelperStatus === "emsigner_missing" ? (
                   <>
                     <p className="mt-2 text-xs font-bold leading-relaxed text-slate-600">
-                      Downloading is not enough. Install GSTSigner, open GSTSigner/emSigner from Start Menu, allow any firewall prompt, then click Check again.
+                      If GSTSigner is already installed, open it from the Start Menu and click Check again. Use the download only when GSTSigner is not installed on this computer.
                     </p>
                     <div className="mt-3 flex flex-wrap gap-2">
-                      <a
-                        className="inline-flex h-9 items-center justify-center rounded-lg bg-slate-950 px-3 text-xs font-black uppercase text-white shadow-sm transition hover:bg-slate-800"
-                        href={EMSIGNER_DOWNLOAD_URL}
-                        rel="noreferrer"
-                        target="_blank"
-                      >
-                        Download GSTSigner
-                      </a>
                       <a
                         className="inline-flex h-9 items-center justify-center rounded-lg border border-slate-950/10 bg-white px-3 text-xs font-black uppercase text-slate-800 shadow-sm transition hover:bg-slate-100"
                         download
                         href={DSC_HELPER_DOWNLOAD_URL}
                       >
                         Update helper
+                      </a>
+                      <a
+                        className="inline-flex h-9 items-center justify-center rounded-lg border border-slate-950/10 bg-white px-3 text-xs font-black uppercase text-slate-800 shadow-sm transition hover:bg-slate-100"
+                        href={EMSIGNER_DOWNLOAD_URL}
+                        rel="noreferrer"
+                        target="_blank"
+                      >
+                        Download GSTSigner
                       </a>
                     </div>
                   </>

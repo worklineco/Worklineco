@@ -10,7 +10,7 @@
 #>
 param(
   [string]$SourcePath = "",
-  [string]$BundleUrl = "https://worklineco.com/dsc-helper-bundle-v4.zip"
+  [string]$BundleUrl = "https://worklineco.com/dsc-helper-bundle-v5.zip"
 )
 
 $ErrorActionPreference = "Stop"

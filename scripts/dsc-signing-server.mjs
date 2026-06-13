@@ -186,7 +186,7 @@ const server = http.createServer(async (request, response) => {
           ? "WorkLine DSC helper found emSigner on this computer. PDF signing connector is not enabled yet."
           : emSigner.installed
             ? "GSTSigner is installed, but WorkLine cannot reach its local signing service. Open GSTSigner/emSigner from Start Menu, allow any firewall prompt, then click Check again."
-            : "WorkLine DSC helper is installed, but GSTSigner/emSigner is not installed or running.",
+            : "WorkLine DSC helper cannot reach the GSTSigner/emSigner local signing service. If GSTSigner is installed, open it from Start Menu, allow any firewall prompt, then click Check again.",
         status: "ready",
       },
       origin,
