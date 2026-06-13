@@ -124,8 +124,19 @@ export default function PdfIndexingPage() {
       }
 
       const payload = await response.json().catch(() => null);
-      setDscHelperStatus(payload?.engine === "emsigner-missing" ? "emsigner_missing" : "ready");
-      setDscMessage(payload?.message || "Local DSC helper is reachable.");
+      const helperEngine = String(payload?.engine || "");
+      const helperMessage = String(payload?.message || "");
+      const needsEmSigner =
+        helperEngine === "emsigner-missing" ||
+        helperEngine === "pending" ||
+        /signing engine is not connected/i.test(helperMessage);
+
+      setDscHelperStatus(needsEmSigner ? "emsigner_missing" : "ready");
+      setDscMessage(
+        needsEmSigner
+          ? "WorkLine DSC helper is installed. Install or start emSigner, then click Check again."
+          : payload?.message || "Local DSC helper is reachable."
+      );
     } catch {
       setDscHelperStatus("offline");
       setDscMessage("Local DSC helper is not running on this computer.");
@@ -1039,14 +1050,23 @@ export default function PdfIndexingPage() {
                   </a>
                 ) : null}
                 {dscHelperStatus === "emsigner_missing" ? (
-                  <a
-                    className="mt-3 inline-flex h-9 items-center justify-center rounded-lg bg-slate-950 px-3 text-xs font-black uppercase text-white shadow-sm transition hover:bg-slate-800"
-                    href={EMSIGNER_DOWNLOAD_URL}
-                    rel="noreferrer"
-                    target="_blank"
-                  >
-                    Download emSigner
-                  </a>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <a
+                      className="inline-flex h-9 items-center justify-center rounded-lg bg-slate-950 px-3 text-xs font-black uppercase text-white shadow-sm transition hover:bg-slate-800"
+                      href={EMSIGNER_DOWNLOAD_URL}
+                      rel="noreferrer"
+                      target="_blank"
+                    >
+                      Download emSigner
+                    </a>
+                    <a
+                      className="inline-flex h-9 items-center justify-center rounded-lg border border-slate-950/10 bg-white px-3 text-xs font-black uppercase text-slate-800 shadow-sm transition hover:bg-slate-100"
+                      download
+                      href={DSC_HELPER_DOWNLOAD_URL}
+                    >
+                      Update helper
+                    </a>
+                  </div>
                 ) : null}
               </div>
               <div className="flex flex-wrap justify-end gap-2">
