@@ -91,6 +91,10 @@ export default function PdfIndexingPage() {
   const areAllRowsSelected = pdfRows.length > 0 && selectedRowIds.size === pdfRows.length;
   const areSomeRowsSelected = selectedRowIds.size > 0 && selectedRowIds.size < pdfRows.length;
 
+  const startDscFiling = () => {
+    setMessage("DSC filing is ready. Tell me the functionality to build next.");
+  };
+
   useEffect(() => {
     if (!pdfPreview) {
       return;
@@ -703,6 +707,7 @@ export default function PdfIndexingPage() {
               <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={Scissors} label="Split" onClick={splitSelectedPdfs} />
               <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={Hash} label="Page No." onClick={addPageNumbersToPdfs} />
               <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={FileSearch} label="Check DPI" onClick={checkSelectedPdfDpi} />
+              <ToolButton disabled={isProcessing} icon={FileSearch} label="DSC filing" onClick={startDscFiling} />
               <label className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-950/10 bg-white px-3 text-xs font-black uppercase text-slate-800 shadow-sm">
                 <input
                   checked={bookmarkShouldPaginate}
