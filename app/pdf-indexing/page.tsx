@@ -23,6 +23,7 @@ const PDF_PAGE_NUMBER_MARGIN = 24;
 const SMART_MERGE_MAX_SIZE = 19.5 * 1024 * 1024;
 const DSC_HELPER_URL = "http://127.0.0.1:48783";
 const DSC_HELPER_DOWNLOAD_URL = "/WorkLineDSCHelperSetup.vbs";
+const EMSIGNER_DOWNLOAD_URL = "https://tutorial.gst.gov.in/downloads/emSigner/emSigner.msi";
 
 type PageRange = {
   label: string;
@@ -73,7 +74,7 @@ type PdfPreview = {
   url: string;
 };
 
-type DscHelperStatus = "idle" | "checking" | "ready" | "offline" | "signing";
+type DscHelperStatus = "idle" | "checking" | "ready" | "offline" | "emsigner_missing" | "signing";
 
 export default function PdfIndexingPage() {
   const [pdfRows, setPdfRows] = useState<PdfFileRow[]>([]);
@@ -123,7 +124,7 @@ export default function PdfIndexingPage() {
       }
 
       const payload = await response.json().catch(() => null);
-      setDscHelperStatus("ready");
+      setDscHelperStatus(payload?.engine === "emsigner-missing" ? "emsigner_missing" : "ready");
       setDscMessage(payload?.message || "Local DSC helper is reachable.");
     } catch {
       setDscHelperStatus("offline");
@@ -1035,6 +1036,16 @@ export default function PdfIndexingPage() {
                     href={DSC_HELPER_DOWNLOAD_URL}
                   >
                     Install DSC helper
+                  </a>
+                ) : null}
+                {dscHelperStatus === "emsigner_missing" ? (
+                  <a
+                    className="mt-3 inline-flex h-9 items-center justify-center rounded-lg bg-slate-950 px-3 text-xs font-black uppercase text-white shadow-sm transition hover:bg-slate-800"
+                    href={EMSIGNER_DOWNLOAD_URL}
+                    rel="noreferrer"
+                    target="_blank"
+                  >
+                    Download emSigner
                   </a>
                 ) : null}
               </div>
