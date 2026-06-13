@@ -113,12 +113,13 @@ const server = http.createServer(async (request, response) => {
       response,
       200,
       {
+        canSignPdfs: false,
         emSigner,
         emSignerDownloadUrl: EMSIGNER_DOWNLOAD_URL,
         engine: emSigner ? "emsigner-detected" : "emsigner-missing",
         helper: "workline-dsc",
         message: emSigner
-          ? "WorkLine DSC helper found emSigner on this computer."
+          ? "WorkLine DSC helper found emSigner on this computer. PDF signing connector is not enabled yet."
           : "WorkLine DSC helper is installed, but emSigner is not running.",
         status: "ready",
       },

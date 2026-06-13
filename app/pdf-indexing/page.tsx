@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowDown, ArrowLeft, ArrowUp, BookMarked, Eye, FileSearch, FolderOpen, Hash, ListOrdered, RefreshCw, Scissors, Shuffle, X, type LucideIcon } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowUp, BookMarked, Eye, FileSearch, FolderOpen, Hash, ListOrdered, RefreshCw, Scissors, ShieldCheck, Shuffle, X, type LucideIcon } from "lucide-react";
 import { AlignmentType, BorderStyle, Document, Packer, Paragraph, Table, TableCell, TableRow, TextRun, WidthType } from "docx";
 import { PDFDict, PDFDocument, PDFHexString, PDFName, PDFNumber, PDFRef, PDFStream, StandardFonts, degrees, rgb } from "pdf-lib";
 import Link from "next/link";
@@ -74,7 +74,7 @@ type PdfPreview = {
   url: string;
 };
 
-type DscHelperStatus = "idle" | "checking" | "ready" | "offline" | "emsigner_missing" | "signing";
+type DscHelperStatus = "idle" | "checking" | "ready" | "offline" | "emsigner_missing" | "unsupported" | "signing";
 
 export default function PdfIndexingPage() {
   const [pdfRows, setPdfRows] = useState<PdfFileRow[]>([]);
@@ -100,11 +100,6 @@ export default function PdfIndexingPage() {
   const areSomeRowsSelected = selectedRowIds.size > 0 && selectedRowIds.size < pdfRows.length;
 
   const startDscFiling = () => {
-    if (!selectedRows.length) {
-      setMessage("Select PDFs before using DSC filing.");
-      return;
-    }
-
     setIsDscModalOpen(true);
     void checkDscHelper();
   };
@@ -126,15 +121,18 @@ export default function PdfIndexingPage() {
       const payload = await response.json().catch(() => null);
       const helperEngine = String(payload?.engine || "");
       const helperMessage = String(payload?.message || "");
+      const canSignPdfs = payload?.canSignPdfs !== false;
       const needsEmSigner =
         helperEngine === "emsigner-missing" ||
         helperEngine === "pending" ||
         /signing engine is not connected/i.test(helperMessage);
 
-      setDscHelperStatus(needsEmSigner ? "emsigner_missing" : "ready");
+      setDscHelperStatus(needsEmSigner ? "emsigner_missing" : canSignPdfs ? "ready" : "unsupported");
       setDscMessage(
         needsEmSigner
           ? "WorkLine DSC helper is installed. Install or start emSigner, then click Check again."
+          : !canSignPdfs
+            ? payload?.message || "emSigner is detected. WorkLine PDF signing connector is not enabled yet."
           : payload?.message || "Local DSC helper is reachable."
       );
     } catch {
@@ -172,7 +170,14 @@ export default function PdfIndexingPage() {
 
       if (!response.ok) {
         const payload = await response.json().catch(() => null);
-        throw new Error(payload?.error || "DSC helper could not sign the selected PDFs.");
+        if (response.status === 501) {
+          setDscHelperStatus("unsupported");
+        }
+        throw new Error(
+          [payload?.error || "DSC helper could not sign the selected PDFs.", payload?.nextStep]
+            .filter(Boolean)
+            .join(" ")
+        );
       }
 
       const blob = await response.blob();
@@ -182,7 +187,7 @@ export default function PdfIndexingPage() {
       setDscHelperStatus("ready");
       setDscMessage("Signed PDF downloaded.");
     } catch (error) {
-      setDscHelperStatus("ready");
+      setDscHelperStatus((status) => (status === "unsupported" ? "unsupported" : "ready"));
       setDscMessage(error instanceof Error ? error.message : "Could not complete DSC filing.");
     }
   }
@@ -799,7 +804,7 @@ export default function PdfIndexingPage() {
               <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={Scissors} label="Split" onClick={splitSelectedPdfs} />
               <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={Hash} label="Page No." onClick={addPageNumbersToPdfs} />
               <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={FileSearch} label="Check DPI" onClick={checkSelectedPdfDpi} />
-              <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={FileSearch} label="DSC filing" onClick={startDscFiling} />
+              <ToolButton disabled={isProcessing} icon={ShieldCheck} label="DSC filing" onClick={startDscFiling} />
               <label className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-950/10 bg-white px-3 text-xs font-black uppercase text-slate-800 shadow-sm">
                 <input
                   checked={bookmarkShouldPaginate}
@@ -1073,7 +1078,17 @@ export default function PdfIndexingPage() {
                     </div>
                   </>
                 ) : null}
+                {dscHelperStatus === "unsupported" ? (
+                  <p className="mt-2 text-xs font-bold leading-relaxed text-amber-700">
+                    Setup is complete on this computer, but automatic PDF signing still needs the WorkLine-to-emSigner connector before signed files can be generated.
+                  </p>
+                ) : null}
               </div>
+              {!selectedRows.length ? (
+                <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold leading-relaxed text-amber-800">
+                  Select one or more PDFs in the table before signing.
+                </p>
+              ) : null}
               <div className="flex flex-wrap justify-end gap-2">
                 <button
                   className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-950/10 bg-white px-3 text-xs font-black uppercase text-slate-800 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:translate-y-0 disabled:hover:shadow-sm"
@@ -1086,11 +1101,11 @@ export default function PdfIndexingPage() {
                 </button>
                 <button
                   className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 text-xs font-black uppercase text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-45"
-                  disabled={dscHelperStatus !== "ready"}
+                  disabled={dscHelperStatus !== "ready" || selectedRows.length === 0}
                   onClick={signSelectedPdfsWithDsc}
                   type="button"
                 >
-                  <FileSearch className="size-4" />
+                  <ShieldCheck className="size-4" />
                   Sign selected
                 </button>
               </div>
