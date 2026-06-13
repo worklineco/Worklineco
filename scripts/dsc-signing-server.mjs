@@ -5,7 +5,7 @@ import { URL } from "node:url";
 
 const HOST = "127.0.0.1";
 const PORT = Number(process.env.WORKLINE_DSC_HELPER_PORT || 48783);
-const EMSIGNER_DOWNLOAD_URL = "https://tutorial.gst.gov.in/downloads/emSigner/emSigner.msi";
+const EMSIGNER_DOWNLOAD_URL = "https://tutorial.gst.gov.in/installers/dscemSigner/GSTSigner-v2.8.msi";
 const EMSIGNER_ENDPOINTS = [
   { protocol: "https:", port: 1585 },
   { protocol: "http:", port: 1585 },

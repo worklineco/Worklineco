@@ -23,7 +23,7 @@ const PDF_PAGE_NUMBER_MARGIN = 24;
 const SMART_MERGE_MAX_SIZE = 19.5 * 1024 * 1024;
 const DSC_HELPER_URL = "http://127.0.0.1:48783";
 const DSC_HELPER_DOWNLOAD_URL = "/WorkLineDSCHelperSetup.vbs";
-const EMSIGNER_DOWNLOAD_URL = "https://tutorial.gst.gov.in/downloads/emSigner/emSigner.msi";
+const EMSIGNER_DOWNLOAD_URL = "https://tutorial.gst.gov.in/installers/dscemSigner/GSTSigner-v2.8.msi";
 
 type PageRange = {
   label: string;
