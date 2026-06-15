@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowDown, ArrowLeft, ArrowUp, BookMarked, CopyCheck, Eye, FileSearch, FolderOpen, Hash, ListOrdered, RefreshCw, Scissors, ShieldCheck, Shuffle, X, type LucideIcon } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowUp, BookMarked, CopyCheck, Download, Eye, FileSearch, FolderOpen, Hash, ListOrdered, RefreshCw, Scissors, ShieldCheck, Shuffle, X, type LucideIcon } from "lucide-react";
 import { AlignmentType, BorderStyle, Document, Packer, Paragraph, Table, TableCell, TableRow, TextRun, WidthType } from "docx";
 import { PDFDict, PDFDocument, PDFHexString, PDFName, PDFNumber, PDFRef, PDFStream, StandardFonts, degrees, rgb } from "pdf-lib";
 import Link from "next/link";
@@ -221,6 +221,59 @@ export default function PdfIndexingPage() {
     } catch (error) {
       setDscHelperStatus((status) => (status === "unsupported" ? "unsupported" : "ready"));
       setDscMessage(error instanceof Error ? error.message : "Could not complete DSC filing.");
+    }
+  }
+
+  async function downloadManualDscPack() {
+    if (!selectedRows.length) {
+      setDscMessage("Select PDFs before preparing the manual signing pack.");
+      return;
+    }
+
+    setDscMessage(`Preparing ${selectedRows.length} PDF${selectedRows.length === 1 ? "" : "s"} for manual DSC signing...`);
+
+    try {
+      if (selectedRows.length === 1) {
+        const row = selectedRows[0];
+        const file = pdfFileMapRef.current.get(row.id);
+
+        if (!file) {
+          throw new Error(`Missing file data for ${row.name}. Refresh the folder and try again.`);
+        }
+
+        downloadBlob(file, row.name);
+        setDscMessage("Downloaded the selected PDF. Sign it manually in Digital Signing Tool/NIC signer.");
+        return;
+      }
+
+      const zip = new JSZip();
+
+      for (const row of selectedRows) {
+        const file = pdfFileMapRef.current.get(row.id);
+
+        if (!file) {
+          throw new Error(`Missing file data for ${row.name}. Refresh the folder and try again.`);
+        }
+
+        zip.file(row.name, file);
+      }
+
+      zip.file(
+        "README-manual-dsc.txt",
+        [
+          "Manual DSC signing pack from WorkLine.",
+          "",
+          "1. Extract this ZIP.",
+          "2. Open NIC Digital Signing Tool / Digital Signing Tool.",
+          "3. Select these PDFs for bulk signing.",
+          "4. Save the signed PDFs for filing.",
+        ].join("\r\n")
+      );
+
+      downloadBlob(await zip.generateAsync({ type: "blob" }), "workline-manual-dsc-pack.zip");
+      setDscMessage("Downloaded manual DSC signing pack. Extract it and sign the PDFs in Digital Signing Tool/NIC signer.");
+    } catch (error) {
+      setDscMessage(error instanceof Error ? error.message : "Could not prepare manual DSC signing pack.");
     }
   }
 
@@ -1186,7 +1239,7 @@ export default function PdfIndexingPage() {
                 ) : null}
                 {dscHelperStatus === "unsupported" ? (
                   <p className="mt-2 text-xs font-bold leading-relaxed text-amber-700">
-                    Setup is complete on this computer, but automatic PDF signing still needs the WorkLine-to-emSigner connector before signed files can be generated.
+                    Setup is complete on this computer, but automatic PDF signing still needs the final WorkLine connector. Use the manual pack below to sign in NIC Digital Signing Tool for now.
                   </p>
                 ) : null}
               </div>
@@ -1218,6 +1271,15 @@ export default function PdfIndexingPage() {
                 </p>
               </div>
               <div className="flex flex-wrap justify-end gap-2">
+                <button
+                  className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-950/10 bg-white px-3 text-xs font-black uppercase text-slate-800 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:translate-y-0 disabled:hover:shadow-sm"
+                  disabled={selectedRows.length === 0}
+                  onClick={downloadManualDscPack}
+                  type="button"
+                >
+                  <Download className="size-4" />
+                  Manual pack
+                </button>
                 <button
                   className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-950/10 bg-white px-3 text-xs font-black uppercase text-slate-800 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:translate-y-0 disabled:hover:shadow-sm"
                   disabled={dscHelperStatus === "checking" || dscHelperStatus === "signing"}
