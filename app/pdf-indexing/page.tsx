@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowDown, ArrowLeft, ArrowUp, BookMarked, CopyCheck, Download, Eye, FileImage, FileSearch, FolderOpen, Hash, ListOrdered, RefreshCw, Scissors, ShieldCheck, Shuffle, X, type LucideIcon } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowUp, BookMarked, Download, Eye, FileImage, FileSearch, FolderOpen, Hash, ListOrdered, RefreshCw, Scissors, ShieldCheck, Shuffle, X, type LucideIcon } from "lucide-react";
 import { AlignmentType, BorderStyle, Document, Packer, Paragraph, Table, TableCell, TableRow, TextRun, WidthType } from "docx";
 import { PDFDict, PDFDocument, PDFHexString, PDFName, PDFNumber, PDFRef, PDFStream, StandardFonts, degrees, rgb } from "pdf-lib";
 import Link from "next/link";
@@ -1100,21 +1100,8 @@ export default function PdfIndexingPage() {
               <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={BookMarked} label="Smart Merge" onClick={startSmartMerge} />
               <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={Scissors} label="Split" onClick={splitSelectedPdfs} />
               <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={Hash} label="Page No." onClick={addPageNumbersToPdfs} />
-              <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={FileSearch} label="Check DPI" onClick={checkSelectedPdfDpi} />
-              <ToolButton disabled={isProcessing} icon={ShieldCheck} label="DSC filing" onClick={startDscFiling} />
-              <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={CopyCheck} label="Duplicate DSC Sign" onClick={duplicateDscSignOnSelectedPdfs} />
               <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={FileImage} label="TRUE COPY" onClick={applyTrueCopyStampToPdfs} />
               <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={BookMarked} label="PaperBook" onClick={createPaperBookPdf} />
-              <label className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-950/10 bg-white px-3 text-xs font-black uppercase text-slate-800 shadow-sm">
-                <input
-                  checked={bookmarkShouldPaginate}
-                  className="size-4 rounded border-slate-300 accent-teal-600"
-                  disabled={isProcessing}
-                  onChange={(event) => setBookmarkShouldPaginate(event.target.checked)}
-                  type="checkbox"
-                />
-                Pagination
-              </label>
               <ToolButton disabled={isProcessing || selectedRowIds.size < 2} icon={BookMarked} label="Bookmarks" onClick={createBookmarkedPdf} />
               <ToolButton disabled={isProcessing || pdfRows.length === 0} icon={ListOrdered} label="Create Index" onClick={createPdfIndex} />
               <input
@@ -1133,16 +1120,6 @@ export default function PdfIndexingPage() {
               >
                 <FolderOpen className="size-4" />
                 Select Folder
-              </button>
-              <button
-                className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-950/10 bg-white px-3 text-xs font-black uppercase text-slate-800 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:translate-y-0 disabled:hover:shadow-sm"
-                disabled={!selectedFilesRef.current.length || isReading}
-                onClick={refreshSelectedFolder}
-                title="Refresh the currently selected PDF file list"
-                type="button"
-              >
-                <RefreshCw className={`size-4 ${isReading ? "animate-spin" : ""}`} />
-                Refresh
               </button>
             </div>
           </div>
