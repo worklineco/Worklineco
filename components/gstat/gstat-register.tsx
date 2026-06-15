@@ -5,6 +5,7 @@ import { supabase } from "@/lib/supabase/client";
 import { ArrowDown, ArrowLeft, ArrowUp, Download, Expand, ExternalLink, FileSpreadsheet, FileText, Filter, History, Pencil, Plus, Scale, Search, Settings2, ShieldCheck, Trash2, Upload, X } from "lucide-react";
 import Link from "next/link";
 import { ChangeEvent, memo, useDeferredValue, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { createPortal } from "react-dom";
 import * as XLSX from "xlsx-js-style";
 
 type Column = { group?: string; key: string; label: string };
@@ -445,7 +446,14 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
     const rect = anchor.getBoundingClientRect();
     const menuWidth = 288;
     const viewportPadding = 12;
-    const top = Math.min(rect.bottom + 8, window.innerHeight - 120);
+    const preferredMenuHeight = 430;
+    const spaceBelow = window.innerHeight - rect.bottom - viewportPadding;
+    const spaceAbove = rect.top - viewportPadding;
+    const shouldOpenBelow = spaceBelow >= 260 || spaceBelow >= spaceAbove;
+    const maxHeight = Math.max(220, (shouldOpenBelow ? spaceBelow : spaceAbove) - 8);
+    const top = shouldOpenBelow
+      ? rect.bottom + 8
+      : Math.max(viewportPadding, rect.top - Math.min(preferredMenuHeight, maxHeight) - 8);
     const left = Math.min(
       Math.max(viewportPadding, rect.left),
       Math.max(viewportPadding, window.innerWidth - menuWidth - viewportPadding)
@@ -454,7 +462,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
     setOpenFilterColumnKey(column.key);
     setFilterMenuPosition({
       left,
-      maxHeight: Math.max(260, window.innerHeight - top - viewportPadding),
+      maxHeight,
       top
     });
     setFilterSearch("");
@@ -2175,7 +2183,7 @@ function ExcelColumnHeader({
         </button>
       </div>
 
-      {isOpen && menuPosition ? (
+      {isOpen && menuPosition && typeof document !== "undefined" ? createPortal(
         <div
           className="fixed z-[1000] w-72 overflow-hidden rounded-lg border border-slate-300 bg-white p-2 text-left text-slate-900 shadow-2xl"
           style={{
@@ -2287,7 +2295,8 @@ function ExcelColumnHeader({
               Showing first {columnFilterOptionLimit} unique values.
             </p>
           ) : null}
-        </div>
+        </div>,
+        document.body
       ) : null}
     </div>
   );
