@@ -135,6 +135,7 @@ export default function PdfIndexingPage() {
       const helperEngine = String(payload?.engine || "");
       const helperMessage = String(payload?.message || "");
       const canSignPdfs = payload?.canSignPdfs !== false;
+      const hasNicSigner = helperEngine === "nic-digital-signer-service-detected";
       const signerNotReachable =
         helperEngine === "emsigner-installed-not-running" ||
         /(?:GSTSigner|emSigner).*(?:not running|not reachable)|(?:not running|not reachable).*(?:GSTSigner|emSigner)/i.test(helperMessage);
@@ -148,7 +149,7 @@ export default function PdfIndexingPage() {
           ? "emsigner_missing"
           : signerNotReachable
             ? "emsigner_not_running"
-            : canSignPdfs
+            : canSignPdfs && !hasNicSigner
               ? "ready"
               : "unsupported"
       );
@@ -157,6 +158,8 @@ export default function PdfIndexingPage() {
           ? payload?.message || "WorkLine DSC helper is installed. Install or start GSTSigner/emSigner, then click Check again."
         : signerNotReachable
             ? payload?.message || "GSTSigner is running, but WorkLine cannot reach its local signing service. Fully exit GSTSigner/emSigner, reopen it, allow any firewall prompt, then click Check again."
+          : hasNicSigner
+            ? payload?.message || "NIC Digital Signer Service is running on this computer. WorkLine can use it after the signing request connector is mapped."
           : !canSignPdfs
             ? payload?.message || "emSigner is detected. WorkLine PDF signing connector is not enabled yet."
           : payload?.message || "Local DSC helper is reachable."

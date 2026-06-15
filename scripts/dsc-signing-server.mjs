@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import fs from "node:fs";
 import http from "node:http";
+import https from "node:https";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -9,8 +10,9 @@ import { URL } from "node:url";
 
 const HOST = "127.0.0.1";
 const PORT = Number(process.env.WORKLINE_DSC_HELPER_PORT || 48783);
-const HELPER_VERSION = "v10";
+const HELPER_VERSION = "v11";
 const EMSIGNER_DOWNLOAD_URL = "https://tutorial.gst.gov.in/installers/dscemSigner/GSTSigner-v2.8.msi";
+const NIC_SIGNER_URL = "https://127.0.0.1:55103";
 const PDF_SIGNING_CONNECTOR_MESSAGE =
   "GSTSigner local service is reachable. WorkLine still needs a PDF signing connector to prepare the PDF hash, call the DSC token signer, and embed the returned signature.";
 const EMSIGNER_HOSTS = ["127.0.0.1", "localhost", "::1"];
@@ -80,6 +82,48 @@ function requestLocalEndpoint({ host, port }) {
       socket.destroy();
       resolve(null);
     });
+  });
+}
+
+function requestNicSignerHealth() {
+  return new Promise((resolve) => {
+    const request = https.request(
+      `${NIC_SIGNER_URL}/check/isLive`,
+      {
+        headers: {
+          Host: "127.0.0.1:55103",
+        },
+        method: "GET",
+        rejectUnauthorized: false,
+        timeout: 1800,
+      },
+      (response) => {
+        let body = "";
+
+        response.setEncoding("utf8");
+        response.on("data", (chunk) => {
+          body += chunk;
+        });
+        response.on("end", () => {
+          const versionMatch = body.match(/Digital Signer Service version\s*:\s*([0-9.]+)/i);
+
+          resolve({
+            body,
+            ok: response.statusCode === 200 && /success/i.test(body),
+            statusCode: response.statusCode || 0,
+            url: NIC_SIGNER_URL,
+            version: versionMatch?.[1] || "",
+          });
+        });
+      },
+    );
+
+    request.on("error", () => resolve({ ok: false, url: NIC_SIGNER_URL }));
+    request.on("timeout", () => {
+      request.destroy();
+      resolve({ ok: false, timedOut: true, url: NIC_SIGNER_URL });
+    });
+    request.end();
   });
 }
 
@@ -239,6 +283,19 @@ async function detectEmSignerStateWithRecovery() {
   };
 }
 
+async function detectSigningEngines() {
+  const [nicSigner, emSigner] = await Promise.all([
+    requestNicSignerHealth(),
+    detectEmSignerStateWithRecovery(),
+  ]);
+
+  return {
+    emSigner,
+    nicSigner,
+    preferred: nicSigner.ok ? "nic-digital-signer-service" : emSigner.running ? "gstsigner" : "none",
+  };
+}
+
 const server = http.createServer(async (request, response) => {
   const origin = request.headers.origin || "";
   const requestUrl = new URL(request.url || "/", `http://${HOST}:${PORT}`);
@@ -254,7 +311,9 @@ const server = http.createServer(async (request, response) => {
   }
 
   if (request.method === "GET" && requestUrl.pathname === "/health") {
-    const emSigner = await detectEmSignerStateWithRecovery();
+    const engines = await detectSigningEngines();
+    const { emSigner, nicSigner } = engines;
+    const hasNicSigner = Boolean(nicSigner.ok);
 
     sendJson(
       response,
@@ -263,14 +322,24 @@ const server = http.createServer(async (request, response) => {
         canSignPdfs: false,
         emSigner,
         emSignerDownloadUrl: EMSIGNER_DOWNLOAD_URL,
-        engine: emSigner.running ? "pdf-connector-pending" : emSigner.installed ? "emsigner-installed-not-running" : "emsigner-missing",
+        engine: hasNicSigner
+          ? "nic-digital-signer-service-detected"
+          : emSigner.running
+            ? "pdf-connector-pending"
+            : emSigner.installed
+              ? "emsigner-installed-not-running"
+              : "emsigner-missing",
+        engines,
         helper: "workline-dsc",
         helperVersion: HELPER_VERSION,
+        nicSigner,
         pdfSigning: {
           signatureMode: "single_document_signature",
           visiblePlacements: ["all_pages", "first_page", "last_page"],
         },
-        message: emSigner.running
+        message: hasNicSigner
+          ? `NIC Digital Signer Service ${nicSigner.version || ""} is running on this computer. WorkLine can use this service as the next PDF signing engine; the request XML connector is being wired.`
+          : emSigner.running
           ? emSigner.recovery?.attempted
             ? "GSTSigner was stuck, so WorkLine restarted it and reached the local signing service."
             : PDF_SIGNING_CONNECTOR_MESSAGE
@@ -288,7 +357,24 @@ const server = http.createServer(async (request, response) => {
 
   if (request.method === "POST" && requestUrl.pathname === "/sign") {
     await drainRequest(request);
-    const emSigner = await detectEmSignerState();
+    const engines = await detectSigningEngines();
+    const { emSigner, nicSigner } = engines;
+
+    if (nicSigner.ok) {
+      sendJson(
+        response,
+        501,
+        {
+          engine: "nic-digital-signer-service-detected",
+          engines,
+          error: "NIC Digital Signer Service is running, but WorkLine still needs the signer_service XML request mapping before it can generate signed PDFs automatically.",
+          nextStep: "Use Duplicate DSC Sign for visual copies now, or sign batches in the NIC Digital Signing Tool while WorkLine's XML connector is completed.",
+          nicSigner,
+        },
+        origin,
+      );
+      return;
+    }
 
     if (!emSigner.running) {
       sendJson(
