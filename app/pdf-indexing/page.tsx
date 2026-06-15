@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowDown, ArrowLeft, ArrowUp, BookMarked, Eye, FileSearch, FolderOpen, Hash, ListOrdered, RefreshCw, Scissors, ShieldCheck, Shuffle, X, type LucideIcon } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowUp, BookMarked, CopyCheck, Eye, FileSearch, FolderOpen, Hash, ListOrdered, RefreshCw, Scissors, ShieldCheck, Shuffle, X, type LucideIcon } from "lucide-react";
 import { AlignmentType, BorderStyle, Document, Packer, Paragraph, Table, TableCell, TableRow, TextRun, WidthType } from "docx";
 import { PDFDict, PDFDocument, PDFHexString, PDFName, PDFNumber, PDFRef, PDFStream, StandardFonts, degrees, rgb } from "pdf-lib";
 import Link from "next/link";
@@ -213,6 +213,57 @@ export default function PdfIndexingPage() {
     } catch (error) {
       setDscHelperStatus((status) => (status === "unsupported" ? "unsupported" : "ready"));
       setDscMessage(error instanceof Error ? error.message : "Could not complete DSC filing.");
+    }
+  }
+
+  async function duplicateDscSignOnSelectedPdfs() {
+    const rows = getActionRows(true);
+
+    if (!rows.length) {
+      setMessage("Select at least one signed PDF.");
+      return;
+    }
+
+    setIsProcessing(true);
+    setMessage(`Duplicating visible DSC mark on ${rows.length} PDF file${rows.length === 1 ? "" : "s"}...`);
+
+    try {
+      const outputs: { bytes: Uint8Array; filename: string }[] = [];
+
+      for (const row of rows) {
+        const file = pdfFileMapRef.current.get(row.id);
+
+        if (!file) {
+          throw new Error(`Missing file data for ${row.name}. Refresh the folder and try again.`);
+        }
+
+        const result = await duplicateVisibleDscSignature(await file.arrayBuffer());
+
+        outputs.push({
+          bytes: result.bytes,
+          filename: `${stripPdfExtension(row.name)}-dsc-visual-duplicated.pdf`,
+        });
+      }
+
+      if (outputs.length === 1) {
+        downloadBlob(createPdfBlob(outputs[0].bytes), outputs[0].filename);
+      } else {
+        const zip = new JSZip();
+
+        outputs.forEach((output) => {
+          zip.file(output.filename, output.bytes);
+        });
+
+        downloadBlob(await zip.generateAsync({ type: "blob" }), "workline-dsc-visual-duplicated.zip");
+      }
+
+      setMessage(
+        "Duplicated the visible DSC mark. Note: editing an already signed PDF can invalidate the real digital signature; use this only for visual-copy workflows."
+      );
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not duplicate visible DSC mark.");
+    } finally {
+      setIsProcessing(false);
     }
   }
 
@@ -829,6 +880,7 @@ export default function PdfIndexingPage() {
               <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={Hash} label="Page No." onClick={addPageNumbersToPdfs} />
               <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={FileSearch} label="Check DPI" onClick={checkSelectedPdfDpi} />
               <ToolButton disabled={isProcessing} icon={ShieldCheck} label="DSC filing" onClick={startDscFiling} />
+              <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={CopyCheck} label="Duplicate DSC Sign" onClick={duplicateDscSignOnSelectedPdfs} />
               <label className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-950/10 bg-white px-3 text-xs font-black uppercase text-slate-800 shadow-sm">
                 <input
                   checked={bookmarkShouldPaginate}
@@ -1208,6 +1260,134 @@ function Metric({ label, value }: { label: string; value: string }) {
       <span>{value}</span>
     </div>
   );
+}
+
+type SignatureRect = {
+  height: number;
+  pageIndex: number;
+  width: number;
+  x: number;
+  y: number;
+};
+
+async function duplicateVisibleDscSignature(buffer: ArrayBuffer) {
+  const pdf = await PDFDocument.load(buffer.slice(0), { ignoreEncryption: true });
+  const signatureRect = findVisibleSignatureRect(pdf);
+  const pages = pdf.getPages();
+  const sourcePage = pages[signatureRect.pageIndex];
+  const embeddedSignature = await pdf.embedPage(sourcePage, {
+    bottom: signatureRect.y,
+    left: signatureRect.x,
+    right: signatureRect.x + signatureRect.width,
+    top: signatureRect.y + signatureRect.height,
+  });
+
+  pages.forEach((page, pageIndex) => {
+    if (pageIndex === signatureRect.pageIndex) {
+      return;
+    }
+
+    const { width: pageWidth, height: pageHeight } = page.getSize();
+    const width = Math.min(signatureRect.width, Math.max(48, pageWidth - 24));
+    const height = Math.min(signatureRect.height, Math.max(24, pageHeight - 24));
+    const x = Math.min(Math.max(signatureRect.x, 12), Math.max(12, pageWidth - width - 12));
+    const y = Math.min(Math.max(signatureRect.y, 12), Math.max(12, pageHeight - height - 12));
+
+    page.drawPage(embeddedSignature, {
+      height,
+      width,
+      x,
+      y,
+    });
+  });
+
+  return {
+    bytes: await pdf.save(),
+    rect: signatureRect,
+  };
+}
+
+function findVisibleSignatureRect(pdf: PDFDocument): SignatureRect {
+  const pages = pdf.getPages();
+
+  for (const [pageIndex, page] of pages.entries()) {
+    const annots = page.node.Annots();
+
+    if (!annots) {
+      continue;
+    }
+
+    const annotCount = typeof annots.size === "function" ? annots.size() : 0;
+
+    for (let index = 0; index < annotCount; index += 1) {
+      const annot = annots.lookup(index);
+
+      if (!(annot instanceof PDFDict) || !isLikelySignatureAnnotation(annot)) {
+        continue;
+      }
+
+      const rect = readAnnotationRect(annot);
+
+      if (rect) {
+        return { ...rect, pageIndex };
+      }
+    }
+  }
+
+  throw new Error("Could not detect a visible DSC signature box. Sign the PDF visibly first, then try Duplicate DSC Sign.");
+}
+
+function isLikelySignatureAnnotation(annot: PDFDict) {
+  const subtype = annot.lookup(PDFName.of("Subtype"))?.toString();
+  const fieldType = annot.lookup(PDFName.of("FT"))?.toString();
+  const parent = annot.lookup(PDFName.of("Parent"));
+  const parentFieldType = parent instanceof PDFDict ? parent.lookup(PDFName.of("FT"))?.toString() : "";
+  const hasSignatureValue = Boolean(annot.lookup(PDFName.of("V")) || (parent instanceof PDFDict && parent.lookup(PDFName.of("V"))));
+
+  return subtype === "/Widget" && (fieldType === "/Sig" || parentFieldType === "/Sig" || hasSignatureValue);
+}
+
+function readAnnotationRect(annot: PDFDict) {
+  const rect = annot.lookup(PDFName.of("Rect")) as unknown as {
+    lookup?: (index: number) => unknown;
+    size?: () => number;
+  };
+
+  if (!rect || typeof rect.size !== "function" || rect.size() < 4 || typeof rect.lookup !== "function") {
+    return null;
+  }
+
+  const left = readPdfNumber(rect.lookup(0));
+  const bottom = readPdfNumber(rect.lookup(1));
+  const right = readPdfNumber(rect.lookup(2));
+  const top = readPdfNumber(rect.lookup(3));
+
+  if ([left, bottom, right, top].some((value) => value === null)) {
+    return null;
+  }
+
+  const x = Math.min(left as number, right as number);
+  const y = Math.min(bottom as number, top as number);
+  const width = Math.abs((right as number) - (left as number));
+  const height = Math.abs((top as number) - (bottom as number));
+
+  if (width < 20 || height < 12) {
+    return null;
+  }
+
+  return { height, width, x, y };
+}
+
+function readPdfNumber(value: unknown) {
+  if (value instanceof PDFNumber) {
+    return value.asNumber();
+  }
+
+  if (typeof value === "number") {
+    return value;
+  }
+
+  return null;
 }
 
 async function getPdfPageCount(file: File) {
