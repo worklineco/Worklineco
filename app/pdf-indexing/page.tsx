@@ -258,7 +258,7 @@ export default function PdfIndexingPage() {
       }
 
       setMessage(
-        "Duplicated the visible DSC mark. Note: editing an already signed PDF can invalidate the real digital signature; use this only for visual-copy workflows."
+        "Duplicated the visible DSC mark. If no formal signature box is found, WorkLine copies the first page top-left signature area. Note: editing an already signed PDF can invalidate the real digital signature."
       );
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Could not duplicate visible DSC mark.");
@@ -1263,6 +1263,7 @@ function Metric({ label, value }: { label: string; value: string }) {
 }
 
 type SignatureRect = {
+  detectedBy: "annotation" | "first_page_top_left";
   height: number;
   pageIndex: number;
   width: number;
@@ -1329,12 +1330,33 @@ function findVisibleSignatureRect(pdf: PDFDocument): SignatureRect {
       const rect = readAnnotationRect(annot);
 
       if (rect) {
-        return { ...rect, pageIndex };
+        return { ...rect, detectedBy: "annotation", pageIndex };
       }
     }
   }
 
-  throw new Error("Could not detect a visible DSC signature box. Sign the PDF visibly first, then try Duplicate DSC Sign.");
+  return createFirstPageTopLeftSignatureFallback(pages);
+}
+
+function createFirstPageTopLeftSignatureFallback(pages: ReturnType<PDFDocument["getPages"]>): SignatureRect {
+  const firstPage = pages[0];
+
+  if (!firstPage) {
+    throw new Error("Could not read the first page of this PDF.");
+  }
+
+  const { height: pageHeight, width: pageWidth } = firstPage.getSize();
+  const width = Math.min(440, pageWidth * 0.74);
+  const height = Math.min(165, pageHeight * 0.2);
+
+  return {
+    detectedBy: "first_page_top_left",
+    height,
+    pageIndex: 0,
+    width,
+    x: 0,
+    y: pageHeight - height,
+  };
 }
 
 function isLikelySignatureAnnotation(annot: PDFDict) {
