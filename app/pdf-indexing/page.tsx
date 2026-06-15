@@ -853,9 +853,10 @@ export default function PdfIndexingPage() {
       return;
     }
 
-    const pageNumberSettings = promptForPageNumberSettings();
+    const shouldAddPageNumbers = window.confirm("Add page numbering to PaperBook?");
+    const pageNumberSettings = shouldAddPageNumbers ? promptForPageNumberSettings() : null;
 
-    if (!pageNumberSettings) {
+    if (shouldAddPageNumbers && !pageNumberSettings) {
       return;
     }
 
@@ -921,13 +922,15 @@ export default function PdfIndexingPage() {
       }
 
       addPdfBookmarks(paperBookPdf, bookmarks);
-      await drawPageNumbers(paperBookPdf, pageNumberSettings);
+      if (pageNumberSettings) {
+        await drawPageNumbers(paperBookPdf, pageNumberSettings);
+      }
       await drawAnnexureStartLabels(paperBookPdf, annexureStartLabels);
       await drawTrueCopyStampOnPages(paperBookPdf, stampBuffer, trueCopyPageIndices);
 
       downloadBlob(createPdfBlob(await paperBookPdf.save()), "workline-paperbook.pdf");
       setMessage(
-        `Created PaperBook with page numbers, bookmarks, merged PDFs, and TRUE COPY stamp on ${trueCopyPageIndices.length} page${trueCopyPageIndices.length === 1 ? "" : "s"}.`
+        `Created PaperBook with${pageNumberSettings ? "" : "out"} page numbers, bookmarks, merged PDFs, and TRUE COPY stamp on ${trueCopyPageIndices.length} page${trueCopyPageIndices.length === 1 ? "" : "s"}.`
       );
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Could not create PaperBook.");
