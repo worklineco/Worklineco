@@ -10,7 +10,7 @@
 #>
 param(
   [string]$SourcePath = "",
-  [string]$BundleUrl = "https://worklineco.com/dsc-helper-bundle-v7.zip"
+  [string]$BundleUrl = "https://worklineco.com/dsc-helper-bundle-v9.zip"
 )
 
 $ErrorActionPreference = "Stop"
@@ -22,6 +22,29 @@ function Write-Step([string]$Message) {
 
 $InstallRoot = Join-Path $env:LOCALAPPDATA "WorkLine\DSCHelper"
 $HelperPort = if ($env:WORKLINE_DSC_HELPER_PORT) { $env:WORKLINE_DSC_HELPER_PORT } else { "48783" }
+
+function Stop-ExistingHelper {
+  Write-Step "Stopping existing WorkLine DSC helper on port $HelperPort"
+
+  try {
+    $connections = Get-NetTCPConnection -LocalPort ([int]$HelperPort) -State Listen -ErrorAction SilentlyContinue
+  } catch {
+    $connections = @()
+  }
+
+  foreach ($connection in $connections) {
+    if (-not $connection.OwningProcess) {
+      continue
+    }
+
+    try {
+      Stop-Process -Id $connection.OwningProcess -Force -ErrorAction Stop
+      Start-Sleep -Seconds 1
+    } catch {
+      Write-Warning "Could not stop existing helper process $($connection.OwningProcess): $($_.Exception.Message)"
+    }
+  }
+}
 
 function Resolve-SourcePath {
   param([string]$RequestedSourcePath)
@@ -45,6 +68,8 @@ function Resolve-SourcePath {
 }
 
 $SourcePath = Resolve-SourcePath -RequestedSourcePath $SourcePath
+
+Stop-ExistingHelper
 
 if (-not $SourcePath) {
   Write-Step "Downloading DSC helper bundle"
@@ -100,24 +125,19 @@ $nodeExe = Ensure-Node
 $helperServer = Join-Path $InstallRoot "scripts\dsc-signing-server.mjs"
 
 Write-Step "Starting DSC helper in the background"
-$existingHelper = $null
-try {
-  $existingHelper = Invoke-WebRequest -Uri "http://127.0.0.1:$HelperPort/health" -UseBasicParsing -TimeoutSec 2
-} catch {
-  $existingHelper = $null
-}
-
-if (-not $existingHelper) {
-  Start-Process -FilePath $nodeExe -ArgumentList "`"$helperServer`"" -WorkingDirectory $InstallRoot -WindowStyle Hidden
-  Start-Sleep -Seconds 2
-}
+Start-Process -FilePath $nodeExe -ArgumentList "`"$helperServer`"" -WorkingDirectory $InstallRoot -WindowStyle Hidden
+Start-Sleep -Seconds 2
 
 Write-Step "Adding sign-in startup task"
 $taskName = "WorkLine DSC Helper"
 $taskAction = New-ScheduledTaskAction -Execute $nodeExe -Argument "`"$helperServer`"" -WorkingDirectory $InstallRoot
 $taskTrigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
 $taskSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
-Register-ScheduledTask -TaskName $taskName -Action $taskAction -Trigger $taskTrigger -Settings $taskSettings -Force | Out-Null
+try {
+  Register-ScheduledTask -TaskName $taskName -Action $taskAction -Trigger $taskTrigger -Settings $taskSettings -Force | Out-Null
+} catch {
+  Write-Warning "Could not register startup task: $($_.Exception.Message)"
+}
 
 Write-Host ""
 Write-Host "WorkLine DSC helper is installed." -ForegroundColor Green

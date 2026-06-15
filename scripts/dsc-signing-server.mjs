@@ -9,6 +9,7 @@ import { URL } from "node:url";
 
 const HOST = "127.0.0.1";
 const PORT = Number(process.env.WORKLINE_DSC_HELPER_PORT || 48783);
+const HELPER_VERSION = "v9";
 const EMSIGNER_DOWNLOAD_URL = "https://tutorial.gst.gov.in/installers/dscemSigner/GSTSigner-v2.8.msi";
 const PDF_SIGNING_CONNECTOR_MESSAGE =
   "GSTSigner local service is reachable. WorkLine still needs a PDF signing connector to prepare the PDF hash, call the DSC token signer, and embed the returned signature.";
@@ -182,6 +183,7 @@ const server = http.createServer(async (request, response) => {
         emSignerDownloadUrl: EMSIGNER_DOWNLOAD_URL,
         engine: emSigner.running ? "pdf-connector-pending" : emSigner.installed ? "emsigner-installed-not-running" : "emsigner-missing",
         helper: "workline-dsc",
+        helperVersion: HELPER_VERSION,
         pdfSigning: {
           signatureMode: "single_document_signature",
           visiblePlacements: ["all_pages", "first_page", "last_page"],
