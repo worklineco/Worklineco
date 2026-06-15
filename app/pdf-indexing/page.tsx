@@ -69,6 +69,11 @@ type SmartMergeOutput = {
   isOverLimit: boolean;
 };
 
+type PageNumberSettings = {
+  startNumber: number;
+  startPage: number;
+};
+
 type PdfPreview = {
   name: string;
   url: string;
@@ -536,8 +541,16 @@ export default function PdfIndexingPage() {
       return;
     }
 
+    const pageNumberSettings = promptForPageNumberSettings();
+
+    if (!pageNumberSettings) {
+      return;
+    }
+
     setIsProcessing(true);
-    setMessage(`Adding page numbers to ${rows.length} PDF file${rows.length === 1 ? "" : "s"}...`);
+    setMessage(
+      `Adding page numbers to ${rows.length} PDF file${rows.length === 1 ? "" : "s"} from page ${pageNumberSettings.startPage}, starting at ${pageNumberSettings.startNumber}...`
+    );
 
     try {
       if (rows.length === 1) {
@@ -549,7 +562,7 @@ export default function PdfIndexingPage() {
 
         const sourcePdf = await PDFDocument.load(await file.arrayBuffer(), { ignoreEncryption: true });
         const numberedPdf = await createPortraitPdf(sourcePdf);
-        await drawPageNumbers(numberedPdf);
+        await drawPageNumbers(numberedPdf, pageNumberSettings);
         downloadBlob(createPdfBlob(await numberedPdf.save()), `${stripPdfExtension(rows[0].name)}-page-numbered.pdf`);
         setMessage(`Added page numbers to ${rows[0].name}.`);
         return;
@@ -566,7 +579,7 @@ export default function PdfIndexingPage() {
 
         const sourcePdf = await PDFDocument.load(await file.arrayBuffer(), { ignoreEncryption: true });
         const numberedPdf = await createPortraitPdf(sourcePdf);
-        await drawPageNumbers(numberedPdf);
+        await drawPageNumbers(numberedPdf, pageNumberSettings);
         zip.file(`${stripPdfExtension(row.name)}-page-numbered.pdf`, await numberedPdf.save());
       }
 
@@ -1774,12 +1787,50 @@ function drawRotatedEmbeddedPage(
   });
 }
 
-async function drawPageNumbers(pdf: PDFDocument) {
+function promptForPageNumberSettings(): PageNumberSettings | null {
+  const startPage = promptForPositiveInteger("Start page numbering from which PDF page?", "1");
+
+  if (startPage === null) {
+    return null;
+  }
+
+  const startNumber = promptForPositiveInteger("Start page numbering from which number?", "1");
+
+  if (startNumber === null) {
+    return null;
+  }
+
+  return { startNumber, startPage };
+}
+
+function promptForPositiveInteger(message: string, defaultValue: string) {
+  const input = window.prompt(message, defaultValue);
+
+  if (input === null) {
+    return null;
+  }
+
+  const value = Number(input.trim());
+
+  if (!Number.isInteger(value) || value < 1) {
+    window.alert("Enter a whole number greater than 0.");
+    return null;
+  }
+
+  return value;
+}
+
+async function drawPageNumbers(pdf: PDFDocument, settings: PageNumberSettings = { startNumber: 1, startPage: 1 }) {
   const font = await pdf.embedFont(StandardFonts.Helvetica);
   const pages = pdf.getPages();
+  const startPageIndex = settings.startPage - 1;
 
   pages.forEach((page, index) => {
-    const text = String(index + 1);
+    if (index < startPageIndex) {
+      return;
+    }
+
+    const text = String(settings.startNumber + index - startPageIndex);
     const { height, width } = page.getSize();
     const textWidth = font.widthOfTextAtSize(text, PDF_PAGE_NUMBER_FONT_SIZE);
 
