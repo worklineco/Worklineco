@@ -24,6 +24,7 @@ const SMART_MERGE_MAX_SIZE = 19.5 * 1024 * 1024;
 const DSC_HELPER_URL = "http://127.0.0.1:48783";
 const DSC_HELPER_DOWNLOAD_URL = "/WorkLineDSCHelperSetup.vbs";
 const EMSIGNER_DOWNLOAD_URL = "https://tutorial.gst.gov.in/installers/dscemSigner/GSTSigner-v2.8.msi";
+const TRUE_COPY_STAMP_URL = "/true-copy-stamp.png";
 
 type PageRange = {
   label: string;
@@ -102,7 +103,6 @@ export default function PdfIndexingPage() {
   const [dscMessage, setDscMessage] = useState("");
   const [dscVisiblePlacement, setDscVisiblePlacement] = useState<DscVisiblePlacement>("all_pages");
   const folderInputRef = useRef<HTMLInputElement>(null);
-  const trueCopyImageInputRef = useRef<HTMLInputElement>(null);
   const pdfFileMapRef = useRef<Map<string, File>>(new Map());
   const selectedFilesRef = useRef<File[]>([]);
   const totalSize = pdfRows.reduce((sum, row) => sum + row.size, 0);
@@ -438,17 +438,6 @@ export default function PdfIndexingPage() {
       : pdfRows;
   }
 
-  function selectTrueCopyImage() {
-    const rows = getActionRows(true);
-
-    if (!rows.length) {
-      setMessage("Select at least one PDF file before applying TRUE COPY.");
-      return;
-    }
-
-    trueCopyImageInputRef.current?.click();
-  }
-
   function movePdfRow(rowId: string, direction: -1 | 1) {
     setPdfRows((currentRows) => {
       const currentIndex = currentRows.findIndex((row) => row.id === rowId);
@@ -660,14 +649,7 @@ export default function PdfIndexingPage() {
     }
   }
 
-  async function attachTrueCopyImageToPdfs(event: ChangeEvent<HTMLInputElement>) {
-    const imageFile = event.target.files?.[0];
-    event.target.value = "";
-
-    if (!imageFile) {
-      return;
-    }
-
+  async function applyTrueCopyStampToPdfs() {
     const rows = getActionRows(true);
 
     if (!rows.length) {
@@ -675,16 +657,17 @@ export default function PdfIndexingPage() {
       return;
     }
 
-    if (!isSupportedTrueCopyImage(imageFile)) {
-      setMessage("TRUE COPY image must be a PNG or JPG file.");
-      return;
-    }
-
     setIsProcessing(true);
-    setMessage(`Applying TRUE COPY image to ${rows.length} PDF file${rows.length === 1 ? "" : "s"}...`);
+    setMessage(`Applying TRUE COPY stamp to ${rows.length} PDF file${rows.length === 1 ? "" : "s"}...`);
 
     try {
-      const imageBuffer = await imageFile.arrayBuffer();
+      const stampResponse = await fetch(TRUE_COPY_STAMP_URL);
+
+      if (!stampResponse.ok) {
+        throw new Error("Could not load the TRUE COPY stamp.");
+      }
+
+      const stampBuffer = await stampResponse.arrayBuffer();
 
       if (rows.length === 1) {
         const file = pdfFileMapRef.current.get(rows[0].id);
@@ -694,9 +677,9 @@ export default function PdfIndexingPage() {
         }
 
         const pdf = await PDFDocument.load(await file.arrayBuffer(), { ignoreEncryption: true });
-        await drawTrueCopyImageOnEachPage(pdf, imageBuffer, imageFile.name);
+        await drawTrueCopyStampOnEachPage(pdf, stampBuffer);
         downloadBlob(createPdfBlob(await pdf.save()), `${stripPdfExtension(rows[0].name)}-true-copy.pdf`);
-        setMessage(`Applied TRUE COPY image to ${rows[0].name}.`);
+        setMessage(`Applied TRUE COPY stamp to ${rows[0].name}.`);
         return;
       }
 
@@ -710,14 +693,14 @@ export default function PdfIndexingPage() {
         }
 
         const pdf = await PDFDocument.load(await file.arrayBuffer(), { ignoreEncryption: true });
-        await drawTrueCopyImageOnEachPage(pdf, imageBuffer, imageFile.name);
+        await drawTrueCopyStampOnEachPage(pdf, stampBuffer);
         zip.file(`${stripPdfExtension(row.name)}-true-copy.pdf`, await pdf.save());
       }
 
       downloadBlob(await zip.generateAsync({ type: "blob" }), "workline-true-copy-pdfs.zip");
-      setMessage(`Applied TRUE COPY image to ${rows.length} PDF files.`);
+      setMessage(`Applied TRUE COPY stamp to ${rows.length} PDF files.`);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Could not apply TRUE COPY image.");
+      setMessage(error instanceof Error ? error.message : "Could not apply TRUE COPY stamp.");
     } finally {
       setIsProcessing(false);
     }
@@ -1025,14 +1008,7 @@ export default function PdfIndexingPage() {
               <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={FileSearch} label="Check DPI" onClick={checkSelectedPdfDpi} />
               <ToolButton disabled={isProcessing} icon={ShieldCheck} label="DSC filing" onClick={startDscFiling} />
               <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={CopyCheck} label="Duplicate DSC Sign" onClick={duplicateDscSignOnSelectedPdfs} />
-              <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={FileImage} label="TRUE COPY" onClick={selectTrueCopyImage} />
-              <input
-                accept="image/png,image/jpeg,.png,.jpg,.jpeg"
-                className="hidden"
-                onChange={attachTrueCopyImageToPdfs}
-                ref={trueCopyImageInputRef}
-                type="file"
-              />
+              <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={FileImage} label="TRUE COPY" onClick={applyTrueCopyStampToPdfs} />
               <label className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-950/10 bg-white px-3 text-xs font-black uppercase text-slate-800 shadow-sm">
                 <input
                   checked={bookmarkShouldPaginate}
@@ -1992,34 +1968,25 @@ async function drawPageNumbers(pdf: PDFDocument, settings: PageNumberSettings = 
   });
 }
 
-async function drawTrueCopyImageOnEachPage(pdf: PDFDocument, imageBuffer: ArrayBuffer, imageName: string) {
-  const lowerImageName = imageName.toLowerCase();
-  const image = lowerImageName.endsWith(".png")
-    ? await pdf.embedPng(imageBuffer.slice(0))
-    : await pdf.embedJpg(imageBuffer.slice(0));
-  const margin = 28;
+async function drawTrueCopyStampOnEachPage(pdf: PDFDocument, stampBuffer: ArrayBuffer) {
+  const stamp = await pdf.embedPng(stampBuffer.slice(0));
+  const margin = 26;
 
   pdf.getPages().forEach((page) => {
     const { height, width } = page.getSize();
-    const maxWidth = Math.min(170, width * 0.28);
-    const maxHeight = Math.min(90, height * 0.14);
-    const scale = Math.min(maxWidth / image.width, maxHeight / image.height, 1);
-    const scaledWidth = image.width * scale;
-    const scaledHeight = image.height * scale;
+    const maxWidth = Math.min(210, width * 0.34);
+    const maxHeight = Math.min(95, height * 0.14);
+    const scale = Math.min(maxWidth / stamp.width, maxHeight / stamp.height, 1);
+    const scaledWidth = stamp.width * scale;
+    const scaledHeight = stamp.height * scale;
 
-    page.drawImage(image, {
+    page.drawImage(stamp, {
       height: scaledHeight,
       width: scaledWidth,
       x: width - margin - scaledWidth,
       y: height - margin - scaledHeight
     });
   });
-}
-
-function isSupportedTrueCopyImage(file: File) {
-  const lowerName = file.name.toLowerCase();
-
-  return file.type === "image/png" || file.type === "image/jpeg" || lowerName.endsWith(".png") || lowerName.endsWith(".jpg") || lowerName.endsWith(".jpeg");
 }
 
 async function drawAnnexureStartLabels(pdf: PDFDocument, labels: AnnexureStartLabel[]) {
