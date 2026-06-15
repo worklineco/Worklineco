@@ -12,23 +12,21 @@ const PORT = Number(process.env.WORKLINE_DSC_HELPER_PORT || 48783);
 const EMSIGNER_DOWNLOAD_URL = "https://tutorial.gst.gov.in/installers/dscemSigner/GSTSigner-v2.8.msi";
 const PDF_SIGNING_CONNECTOR_MESSAGE =
   "GSTSigner local service is reachable. WorkLine still needs a PDF signing connector to prepare the PDF hash, call the DSC token signer, and embed the returned signature.";
-const EMSIGNER_ENDPOINTS = [
-  { protocol: "https:", port: 1585 },
-  { protocol: "http:", port: 1585 },
-  { protocol: "https:", port: 1645 },
-  { protocol: "http:", port: 1645 },
-  { protocol: "https:", port: 2015 },
-  { protocol: "http:", port: 2015 },
-  { protocol: "https:", port: 2095 },
-  { protocol: "http:", port: 2095 },
-  { protocol: "https:", port: 2565 },
-  { protocol: "http:", port: 2565 },
-];
+const EMSIGNER_HOSTS = ["127.0.0.1", "localhost", "::1"];
+const EMSIGNER_PORTS = [1585, 1645, 2015, 2095, 2565];
+const EMSIGNER_ENDPOINTS = EMSIGNER_PORTS.flatMap((port) =>
+  EMSIGNER_HOSTS.flatMap((host) => [
+    { host, protocol: "https:", port },
+    { host, protocol: "http:", port },
+  ])
+);
 const EMSIGNER_INSTALL_PATHS =
   process.platform === "win32"
     ? [
         path.join(process.env.ProgramFiles || "C:\\Program Files", "GSTSigner"),
         path.join(process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)", "GSTSigner"),
+        "C:\\GSTSigner",
+        "C:\\GSTSigner\\GSTSigner",
         path.join(process.env.ProgramFiles || "C:\\Program Files", "emSigner"),
         path.join(process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)", "emSigner"),
         path.join(os.homedir(), "AppData", "Local", "Programs", "GSTSigner"),
@@ -70,12 +68,12 @@ function drainRequest(request) {
   });
 }
 
-function requestLocalEndpoint({ protocol, port }) {
+function requestLocalEndpoint({ host, protocol, port }) {
   return new Promise((resolve) => {
     const client = protocol === "https:" ? https : http;
     const request = client.request(
       {
-        host: HOST,
+        host,
         method: "GET",
         path: "/",
         port,
@@ -84,7 +82,7 @@ function requestLocalEndpoint({ protocol, port }) {
       },
       (response) => {
         response.resume();
-        resolve({ ok: true, port, protocol, statusCode: response.statusCode || 0 });
+        resolve({ host, ok: true, port, protocol, statusCode: response.statusCode || 0 });
       },
     );
 
@@ -125,7 +123,7 @@ async function detectEmSignerProcess() {
   const output = await commandOutput("powershell.exe", [
     "-NoProfile",
     "-Command",
-    "Get-CimInstance Win32_Process | Where-Object { $_.Name -match 'GSTSigner|emSigner|java|javaw' -or $_.CommandLine -match 'GSTSigner|emSigner' } | Select-Object -First 5 Name,CommandLine | ConvertTo-Json -Compress",
+    "Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -ne $PID -and ($_.Name -match 'GSTSigner|emSigner|java|javaw' -or $_.CommandLine -match 'GSTSigner|emSigner') } | Select-Object -First 5 Name,CommandLine | ConvertTo-Json -Compress",
   ]);
 
   if (!output.trim()) {
@@ -191,7 +189,7 @@ const server = http.createServer(async (request, response) => {
         message: emSigner.running
           ? PDF_SIGNING_CONNECTOR_MESSAGE
           : emSigner.installed
-            ? "GSTSigner is installed or running as a process, but WorkLine cannot reach its local signing service on 127.0.0.1:1585. Restart GSTSigner/emSigner, allow any firewall prompt, then click Check again."
+            ? "GSTSigner is installed or running as a process, but WorkLine cannot reach its local signing service on port 1585. Fully exit GSTSigner/emSigner, reopen it, allow any firewall prompt, then click Check again."
             : "WorkLine DSC helper cannot reach the GSTSigner/emSigner local signing service. If GSTSigner is installed, open it from Start Menu, allow any firewall prompt, then click Check again.",
         status: "ready",
       },

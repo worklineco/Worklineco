@@ -150,8 +150,8 @@ export default function PdfIndexingPage() {
       setDscMessage(
         needsEmSigner
           ? payload?.message || "WorkLine DSC helper is installed. Install or start GSTSigner/emSigner, then click Check again."
-          : signerNotReachable
-            ? "GSTSigner may be installed, but WorkLine cannot reach its local signing service. Open GSTSigner/emSigner and click Check again."
+        : signerNotReachable
+            ? payload?.message || "GSTSigner is running, but WorkLine cannot reach its local signing service. Fully exit GSTSigner/emSigner, reopen it, allow any firewall prompt, then click Check again."
           : !canSignPdfs
             ? payload?.message || "emSigner is detected. WorkLine PDF signing connector is not enabled yet."
           : payload?.message || "Local DSC helper is reachable."
@@ -1103,9 +1103,18 @@ export default function PdfIndexingPage() {
                   </>
                 ) : null}
                 {dscHelperStatus === "emsigner_not_running" ? (
-                  <p className="mt-2 text-xs font-bold leading-relaxed text-slate-600">
-                    GSTSigner appears to be installed. Open GSTSigner/emSigner from the Start Menu, keep it running, allow any Windows firewall prompt, then click Check again.
-                  </p>
+                  <>
+                    <p className="mt-2 text-xs font-bold leading-relaxed text-slate-600">
+                      GSTSigner appears to be installed, but its local service is not reachable. Fully exit GSTSigner/emSigner from the taskbar or Task Manager, reopen it, allow any Windows firewall prompt, then click Check again.
+                    </p>
+                    <a
+                      className="mt-3 inline-flex h-9 items-center justify-center rounded-lg border border-slate-950/10 bg-white px-3 text-xs font-black uppercase text-slate-800 shadow-sm transition hover:bg-slate-100"
+                      download
+                      href={DSC_HELPER_DOWNLOAD_URL}
+                    >
+                      Update helper
+                    </a>
+                  </>
                 ) : null}
                 {dscHelperStatus === "unsupported" ? (
                   <p className="mt-2 text-xs font-bold leading-relaxed text-amber-700">
