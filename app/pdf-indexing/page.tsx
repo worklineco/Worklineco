@@ -17,7 +17,7 @@ type PdfFileRow = {
   size: number;
 };
 
-const DOCUMENT_TYPES = ["POA", "SCN", "SCN Reply", "OIO", "Appeal", "Annexure"];
+const DOCUMENT_TYPES = ["POA", "SCN", "SCN Reply", "OIO", "OIA", "Appeal", "Annexure"];
 const PDF_PAGE_NUMBER_FONT_SIZE = 12;
 const PDF_PAGE_NUMBER_MARGIN = 24;
 const SMART_MERGE_MAX_SIZE = 19.5 * 1024 * 1024;
@@ -25,6 +25,7 @@ const DSC_HELPER_URL = "http://127.0.0.1:48783";
 const DSC_HELPER_DOWNLOAD_URL = "/WorkLineDSCHelperSetup.vbs";
 const EMSIGNER_DOWNLOAD_URL = "https://tutorial.gst.gov.in/installers/dscemSigner/GSTSigner-v2.8.msi";
 const TRUE_COPY_STAMP_URL = "/true-copy-stamp.png";
+const PAPERBOOK_TRUE_COPY_DOCUMENT_TYPES = new Set(["SCN", "OIO", "OIA", "Appeal"]);
 
 type PageRange = {
   label: string;
@@ -844,6 +845,97 @@ export default function PdfIndexingPage() {
     }
   }
 
+  async function createPaperBookPdf() {
+    const rows = getActionRows(true);
+
+    if (!rows.length) {
+      setMessage("Select at least one PDF file to create PaperBook.");
+      return;
+    }
+
+    const pageNumberSettings = promptForPageNumberSettings();
+
+    if (!pageNumberSettings) {
+      return;
+    }
+
+    setIsProcessing(true);
+    setMessage(`Creating PaperBook from ${rows.length} PDF file${rows.length === 1 ? "" : "s"}...`);
+
+    try {
+      const stampResponse = await fetch(TRUE_COPY_STAMP_URL);
+
+      if (!stampResponse.ok) {
+        throw new Error("Could not load the TRUE COPY stamp.");
+      }
+
+      const stampBuffer = await stampResponse.arrayBuffer();
+      const paperBookPdf = await PDFDocument.create();
+      const bookmarks: BookmarkNode[] = [];
+      const annexureStartLabels: AnnexureStartLabel[] = [];
+      const trueCopyPageIndices: number[] = [];
+      let annexureBookmark: BookmarkNode | null = null;
+
+      for (const row of rows) {
+        const file = pdfFileMapRef.current.get(row.id);
+
+        if (!file) {
+          continue;
+        }
+
+        const startPageIndex = paperBookPdf.getPageCount();
+        const sourcePdf = await PDFDocument.load(await file.arrayBuffer(), { ignoreEncryption: true });
+        await appendPortraitPages(paperBookPdf, sourcePdf);
+        const endPageIndex = paperBookPdf.getPageCount() - 1;
+
+        if (PAPERBOOK_TRUE_COPY_DOCUMENT_TYPES.has(row.documentType)) {
+          for (let pageIndex = startPageIndex; pageIndex <= endPageIndex; pageIndex += 1) {
+            trueCopyPageIndices.push(pageIndex);
+          }
+        }
+
+        if (row.documentType === "Annexure") {
+          if (!annexureBookmark) {
+            annexureBookmark = { children: [], pageIndex: startPageIndex, title: "Annexure" };
+            bookmarks.push(annexureBookmark);
+          }
+
+          annexureBookmark.children?.push({
+            pageIndex: startPageIndex,
+            title: getAnnexureBookmarkTitle(row)
+          });
+          annexureStartLabels.push({
+            pageIndex: startPageIndex,
+            text: getAnnexurePageLabel(row)
+          });
+        } else {
+          bookmarks.push({
+            pageIndex: startPageIndex,
+            title: getDocumentBookmarkTitle(row)
+          });
+        }
+      }
+
+      if (!paperBookPdf.getPageCount()) {
+        throw new Error("Could not merge the selected PDF files.");
+      }
+
+      addPdfBookmarks(paperBookPdf, bookmarks);
+      await drawPageNumbers(paperBookPdf, pageNumberSettings);
+      await drawAnnexureStartLabels(paperBookPdf, annexureStartLabels);
+      await drawTrueCopyStampOnPages(paperBookPdf, stampBuffer, trueCopyPageIndices);
+
+      downloadBlob(createPdfBlob(await paperBookPdf.save()), "workline-paperbook.pdf");
+      setMessage(
+        `Created PaperBook with page numbers, bookmarks, merged PDFs, and TRUE COPY stamp on ${trueCopyPageIndices.length} page${trueCopyPageIndices.length === 1 ? "" : "s"}.`
+      );
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not create PaperBook.");
+    } finally {
+      setIsProcessing(false);
+    }
+  }
+
   async function startSmartMerge() {
     const rows = getActionRows(true);
 
@@ -1009,6 +1101,7 @@ export default function PdfIndexingPage() {
               <ToolButton disabled={isProcessing} icon={ShieldCheck} label="DSC filing" onClick={startDscFiling} />
               <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={CopyCheck} label="Duplicate DSC Sign" onClick={duplicateDscSignOnSelectedPdfs} />
               <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={FileImage} label="TRUE COPY" onClick={applyTrueCopyStampToPdfs} />
+              <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={BookMarked} label="PaperBook" onClick={createPaperBookPdf} />
               <label className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-950/10 bg-white px-3 text-xs font-black uppercase text-slate-800 shadow-sm">
                 <input
                   checked={bookmarkShouldPaginate}
@@ -1969,10 +2062,27 @@ async function drawPageNumbers(pdf: PDFDocument, settings: PageNumberSettings = 
 }
 
 async function drawTrueCopyStampOnEachPage(pdf: PDFDocument, stampBuffer: ArrayBuffer) {
+  await drawTrueCopyStampOnPages(
+    pdf,
+    stampBuffer,
+    Array.from({ length: pdf.getPageCount() }, (_, pageIndex) => pageIndex)
+  );
+}
+
+async function drawTrueCopyStampOnPages(pdf: PDFDocument, stampBuffer: ArrayBuffer, pageIndices: number[]) {
+  if (!pageIndices.length) {
+    return;
+  }
+
   const stamp = await pdf.embedPng(stampBuffer.slice(0));
   const margin = 26;
 
-  pdf.getPages().forEach((page) => {
+  pageIndices.forEach((pageIndex) => {
+    if (pageIndex < 0 || pageIndex >= pdf.getPageCount()) {
+      return;
+    }
+
+    const page = pdf.getPage(pageIndex);
     const { height, width } = page.getSize();
     const maxWidth = Math.min(210, width * 0.34);
     const maxHeight = Math.min(95, height * 0.14);
