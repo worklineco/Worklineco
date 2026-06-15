@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowDown, ArrowLeft, ArrowUp, BookMarked, CopyCheck, Download, Eye, FileSearch, FolderOpen, Hash, ListOrdered, RefreshCw, Scissors, ShieldCheck, Shuffle, X, type LucideIcon } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowUp, BookMarked, CopyCheck, Download, Eye, FileImage, FileSearch, FolderOpen, Hash, ListOrdered, RefreshCw, Scissors, ShieldCheck, Shuffle, X, type LucideIcon } from "lucide-react";
 import { AlignmentType, BorderStyle, Document, Packer, Paragraph, Table, TableCell, TableRow, TextRun, WidthType } from "docx";
 import { PDFDict, PDFDocument, PDFHexString, PDFName, PDFNumber, PDFRef, PDFStream, StandardFonts, degrees, rgb } from "pdf-lib";
 import Link from "next/link";
@@ -102,6 +102,7 @@ export default function PdfIndexingPage() {
   const [dscMessage, setDscMessage] = useState("");
   const [dscVisiblePlacement, setDscVisiblePlacement] = useState<DscVisiblePlacement>("all_pages");
   const folderInputRef = useRef<HTMLInputElement>(null);
+  const trueCopyImageInputRef = useRef<HTMLInputElement>(null);
   const pdfFileMapRef = useRef<Map<string, File>>(new Map());
   const selectedFilesRef = useRef<File[]>([]);
   const totalSize = pdfRows.reduce((sum, row) => sum + row.size, 0);
@@ -437,6 +438,17 @@ export default function PdfIndexingPage() {
       : pdfRows;
   }
 
+  function selectTrueCopyImage() {
+    const rows = getActionRows(true);
+
+    if (!rows.length) {
+      setMessage("Select at least one PDF file before applying TRUE COPY.");
+      return;
+    }
+
+    trueCopyImageInputRef.current?.click();
+  }
+
   function movePdfRow(rowId: string, direction: -1 | 1) {
     setPdfRows((currentRows) => {
       const currentIndex = currentRows.findIndex((row) => row.id === rowId);
@@ -643,6 +655,69 @@ export default function PdfIndexingPage() {
       setMessage(`Added page numbers to ${rows.length} PDF files.`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Could not add page numbers.");
+    } finally {
+      setIsProcessing(false);
+    }
+  }
+
+  async function attachTrueCopyImageToPdfs(event: ChangeEvent<HTMLInputElement>) {
+    const imageFile = event.target.files?.[0];
+    event.target.value = "";
+
+    if (!imageFile) {
+      return;
+    }
+
+    const rows = getActionRows(true);
+
+    if (!rows.length) {
+      setMessage("Select at least one PDF file before applying TRUE COPY.");
+      return;
+    }
+
+    if (!isSupportedTrueCopyImage(imageFile)) {
+      setMessage("TRUE COPY image must be a PNG or JPG file.");
+      return;
+    }
+
+    setIsProcessing(true);
+    setMessage(`Applying TRUE COPY image to ${rows.length} PDF file${rows.length === 1 ? "" : "s"}...`);
+
+    try {
+      const imageBuffer = await imageFile.arrayBuffer();
+
+      if (rows.length === 1) {
+        const file = pdfFileMapRef.current.get(rows[0].id);
+
+        if (!file) {
+          throw new Error("Could not find the selected PDF file.");
+        }
+
+        const pdf = await PDFDocument.load(await file.arrayBuffer(), { ignoreEncryption: true });
+        await drawTrueCopyImageOnEachPage(pdf, imageBuffer, imageFile.name);
+        downloadBlob(createPdfBlob(await pdf.save()), `${stripPdfExtension(rows[0].name)}-true-copy.pdf`);
+        setMessage(`Applied TRUE COPY image to ${rows[0].name}.`);
+        return;
+      }
+
+      const zip = new JSZip();
+
+      for (const row of rows) {
+        const file = pdfFileMapRef.current.get(row.id);
+
+        if (!file) {
+          continue;
+        }
+
+        const pdf = await PDFDocument.load(await file.arrayBuffer(), { ignoreEncryption: true });
+        await drawTrueCopyImageOnEachPage(pdf, imageBuffer, imageFile.name);
+        zip.file(`${stripPdfExtension(row.name)}-true-copy.pdf`, await pdf.save());
+      }
+
+      downloadBlob(await zip.generateAsync({ type: "blob" }), "workline-true-copy-pdfs.zip");
+      setMessage(`Applied TRUE COPY image to ${rows.length} PDF files.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not apply TRUE COPY image.");
     } finally {
       setIsProcessing(false);
     }
@@ -950,6 +1025,14 @@ export default function PdfIndexingPage() {
               <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={FileSearch} label="Check DPI" onClick={checkSelectedPdfDpi} />
               <ToolButton disabled={isProcessing} icon={ShieldCheck} label="DSC filing" onClick={startDscFiling} />
               <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={CopyCheck} label="Duplicate DSC Sign" onClick={duplicateDscSignOnSelectedPdfs} />
+              <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={FileImage} label="TRUE COPY" onClick={selectTrueCopyImage} />
+              <input
+                accept="image/png,image/jpeg,.png,.jpg,.jpeg"
+                className="hidden"
+                onChange={attachTrueCopyImageToPdfs}
+                ref={trueCopyImageInputRef}
+                type="file"
+              />
               <label className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-950/10 bg-white px-3 text-xs font-black uppercase text-slate-800 shadow-sm">
                 <input
                   checked={bookmarkShouldPaginate}
@@ -1907,6 +1990,36 @@ async function drawPageNumbers(pdf: PDFDocument, settings: PageNumberSettings = 
       y: height - PDF_PAGE_NUMBER_MARGIN - PDF_PAGE_NUMBER_FONT_SIZE
     });
   });
+}
+
+async function drawTrueCopyImageOnEachPage(pdf: PDFDocument, imageBuffer: ArrayBuffer, imageName: string) {
+  const lowerImageName = imageName.toLowerCase();
+  const image = lowerImageName.endsWith(".png")
+    ? await pdf.embedPng(imageBuffer.slice(0))
+    : await pdf.embedJpg(imageBuffer.slice(0));
+  const margin = 28;
+
+  pdf.getPages().forEach((page) => {
+    const { height, width } = page.getSize();
+    const maxWidth = Math.min(170, width * 0.28);
+    const maxHeight = Math.min(90, height * 0.14);
+    const scale = Math.min(maxWidth / image.width, maxHeight / image.height, 1);
+    const scaledWidth = image.width * scale;
+    const scaledHeight = image.height * scale;
+
+    page.drawImage(image, {
+      height: scaledHeight,
+      width: scaledWidth,
+      x: width - margin - scaledWidth,
+      y: height - margin - scaledHeight
+    });
+  });
+}
+
+function isSupportedTrueCopyImage(file: File) {
+  const lowerName = file.name.toLowerCase();
+
+  return file.type === "image/png" || file.type === "image/jpeg" || lowerName.endsWith(".png") || lowerName.endsWith(".jpg") || lowerName.endsWith(".jpeg");
 }
 
 async function drawAnnexureStartLabels(pdf: PDFDocument, labels: AnnexureStartLabel[]) {
