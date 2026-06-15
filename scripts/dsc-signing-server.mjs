@@ -10,6 +10,8 @@ import { URL } from "node:url";
 const HOST = "127.0.0.1";
 const PORT = Number(process.env.WORKLINE_DSC_HELPER_PORT || 48783);
 const EMSIGNER_DOWNLOAD_URL = "https://tutorial.gst.gov.in/installers/dscemSigner/GSTSigner-v2.8.msi";
+const PDF_SIGNING_CONNECTOR_MESSAGE =
+  "GSTSigner local service is reachable. WorkLine still needs a PDF signing connector to prepare the PDF hash, call the DSC token signer, and embed the returned signature.";
 const EMSIGNER_ENDPOINTS = [
   { protocol: "https:", port: 1585 },
   { protocol: "http:", port: 1585 },
@@ -180,12 +182,16 @@ const server = http.createServer(async (request, response) => {
         canSignPdfs: false,
         emSigner,
         emSignerDownloadUrl: EMSIGNER_DOWNLOAD_URL,
-        engine: emSigner.running ? "emsigner-detected" : emSigner.installed ? "emsigner-installed-not-running" : "emsigner-missing",
+        engine: emSigner.running ? "pdf-connector-pending" : emSigner.installed ? "emsigner-installed-not-running" : "emsigner-missing",
         helper: "workline-dsc",
+        pdfSigning: {
+          signatureMode: "single_document_signature",
+          visiblePlacements: ["all_pages", "first_page", "last_page"],
+        },
         message: emSigner.running
-          ? "WorkLine DSC helper found emSigner on this computer. PDF signing connector is not enabled yet."
+          ? PDF_SIGNING_CONNECTOR_MESSAGE
           : emSigner.installed
-            ? "GSTSigner is installed, but WorkLine cannot reach its local signing service. Open GSTSigner/emSigner from Start Menu, allow any firewall prompt, then click Check again."
+            ? "GSTSigner is installed or running as a process, but WorkLine cannot reach its local signing service on 127.0.0.1:1585. Restart GSTSigner/emSigner, allow any firewall prompt, then click Check again."
             : "WorkLine DSC helper cannot reach the GSTSigner/emSigner local signing service. If GSTSigner is installed, open it from Start Menu, allow any firewall prompt, then click Check again.",
         status: "ready",
       },
@@ -219,8 +225,13 @@ const server = http.createServer(async (request, response) => {
       501,
       {
         emSigner,
-        error: "emSigner is detected, but WorkLine PDF signing through emSigner is not connected yet.",
-        nextStep: "Connect WorkLine helper to the emSigner PDF signing API.",
+        error: "GSTSigner local service is reachable, but WorkLine PDF signing is not connected yet.",
+        nextStep:
+          "Connect a PDF signing engine or vendor DSC SDK that can create the PDF byte range/hash, ask the USB token to sign it, and embed the returned CMS signature. WorkLine already sends visiblePlacement for first page, last page, or all pages.",
+        pdfSigning: {
+          signatureMode: "single_document_signature",
+          visiblePlacements: ["all_pages", "first_page", "last_page"],
+        },
       },
       origin,
     );

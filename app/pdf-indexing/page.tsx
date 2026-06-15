@@ -75,6 +75,13 @@ type PdfPreview = {
 };
 
 type DscHelperStatus = "idle" | "checking" | "ready" | "offline" | "emsigner_missing" | "emsigner_not_running" | "unsupported" | "signing";
+type DscVisiblePlacement = "all_pages" | "first_page" | "last_page";
+
+const DSC_VISIBLE_PLACEMENTS: { label: string; value: DscVisiblePlacement }[] = [
+  { label: "All pages", value: "all_pages" },
+  { label: "First page", value: "first_page" },
+  { label: "Last page", value: "last_page" },
+];
 
 export default function PdfIndexingPage() {
   const [pdfRows, setPdfRows] = useState<PdfFileRow[]>([]);
@@ -88,6 +95,7 @@ export default function PdfIndexingPage() {
   const [isDscModalOpen, setIsDscModalOpen] = useState(false);
   const [dscHelperStatus, setDscHelperStatus] = useState<DscHelperStatus>("idle");
   const [dscMessage, setDscMessage] = useState("");
+  const [dscVisiblePlacement, setDscVisiblePlacement] = useState<DscVisiblePlacement>("all_pages");
   const folderInputRef = useRef<HTMLInputElement>(null);
   const pdfFileMapRef = useRef<Map<string, File>>(new Map());
   const selectedFilesRef = useRef<File[]>([]);
@@ -175,6 +183,9 @@ export default function PdfIndexingPage() {
 
         formData.append("files", file, row.name);
       }
+
+      formData.append("visiblePlacement", dscVisiblePlacement);
+      formData.append("signatureMode", "single_document_signature");
 
       const response = await fetch(`${DSC_HELPER_URL}/sign`, {
         body: formData,
@@ -1107,6 +1118,28 @@ export default function PdfIndexingPage() {
                   Select one or more PDFs in the table before signing.
                 </p>
               ) : null}
+              <div className="rounded-xl border border-slate-200 bg-white p-3">
+                <p className="text-xs font-black uppercase text-slate-500">Visible signature</p>
+                <div className="mt-3 grid grid-cols-3 gap-2">
+                  {DSC_VISIBLE_PLACEMENTS.map((placement) => (
+                    <button
+                      className={`h-10 rounded-lg border px-2 text-xs font-black uppercase transition ${
+                        dscVisiblePlacement === placement.value
+                          ? "border-slate-950 bg-slate-950 text-white"
+                          : "border-slate-950/10 bg-white text-slate-700 hover:bg-slate-100"
+                      }`}
+                      key={placement.value}
+                      onClick={() => setDscVisiblePlacement(placement.value)}
+                      type="button"
+                    >
+                      {placement.label}
+                    </button>
+                  ))}
+                </div>
+                <p className="mt-2 text-xs font-bold leading-relaxed text-slate-600">
+                  WorkLine will apply one DSC to the whole PDF and repeat the visible mark on the selected pages.
+                </p>
+              </div>
               <div className="flex flex-wrap justify-end gap-2">
                 <button
                   className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-950/10 bg-white px-3 text-xs font-black uppercase text-slate-800 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:translate-y-0 disabled:hover:shadow-sm"
