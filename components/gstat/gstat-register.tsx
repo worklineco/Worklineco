@@ -25,7 +25,7 @@ type SortState = { columnKey: string; direction: SortDirection } | null;
 type ColumnValueFilters = Record<string, string[]>;
 type ColumnTextFilters = Record<string, string>;
 type ColumnFilterOption = { key: string; label: string };
-type FilterMenuPosition = { left: number; maxHeight: number; top: number };
+type FilterMenuPosition = { left: number; listMaxHeight: number; top: number };
 type InlineEditorState = { columnKey: string; rowIndex: number; value: string };
 type ColumnLayout = { hiddenColumnKeys: string[]; order: string[] };
 
@@ -440,29 +440,34 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
     });
   }
 
-  function openColumnFilter(column: Column, anchor: HTMLElement) {
+  function openColumnFilter(column: Column, anchor: HTMLElement, clickPoint?: { clientX: number; clientY: number }) {
     const options = getUniqueColumnFilterOptions(rows, column, columnFilterOptionLimit);
     const appliedValues = columnValueFilters[column.key];
     const rect = anchor.getBoundingClientRect();
     const menuWidth = 288;
     const viewportPadding = 12;
-    const preferredMenuHeight = 430;
-    const spaceBelow = window.innerHeight - rect.bottom - viewportPadding;
-    const spaceAbove = rect.top - viewportPadding;
-    const shouldOpenBelow = spaceBelow >= 260 || spaceBelow >= spaceAbove;
-    const maxHeight = Math.max(220, (shouldOpenBelow ? spaceBelow : spaceAbove) - 8);
+    const menuChromeHeight = 196;
+    const minListHeight = 110;
+    const preferredListHeight = 210;
+    const anchorX = clickPoint?.clientX ?? rect.left + rect.width / 2;
+    const anchorY = clickPoint?.clientY ?? rect.bottom;
+    const spaceBelow = window.innerHeight - anchorY - viewportPadding - 14;
+    const spaceAbove = anchorY - viewportPadding - 14;
+    const shouldOpenBelow = spaceBelow >= menuChromeHeight + minListHeight || spaceBelow >= spaceAbove;
+    const availableHeight = shouldOpenBelow ? spaceBelow : spaceAbove;
+    const listMaxHeight = Math.max(minListHeight, Math.min(preferredListHeight, availableHeight - menuChromeHeight));
     const top = shouldOpenBelow
-      ? rect.bottom + 8
-      : Math.max(viewportPadding, rect.top - Math.min(preferredMenuHeight, maxHeight) - 8);
+      ? anchorY + 14
+      : Math.max(viewportPadding, anchorY - menuChromeHeight - listMaxHeight - 14);
     const left = Math.min(
-      Math.max(viewportPadding, rect.left),
+      Math.max(viewportPadding, anchorX - menuWidth / 2),
       Math.max(viewportPadding, window.innerWidth - menuWidth - viewportPadding)
     );
 
     setOpenFilterColumnKey(column.key);
     setFilterMenuPosition({
       left,
-      maxHeight,
+      listMaxHeight,
       top
     });
     setFilterSearch("");
@@ -475,6 +480,28 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
     setFilterSearch("");
     setDraftFilterValues([]);
   }
+
+  useEffect(() => {
+    if (!openFilterColumnKey) {
+      return;
+    }
+
+    function closeOnViewportChange(event: Event) {
+      if (event.target instanceof Element && event.target.closest("[data-gstat-filter-menu]")) {
+        return;
+      }
+
+      closeColumnFilter();
+    }
+
+    window.addEventListener("resize", closeOnViewportChange);
+    window.addEventListener("scroll", closeOnViewportChange, true);
+
+    return () => {
+      window.removeEventListener("resize", closeOnViewportChange);
+      window.removeEventListener("scroll", closeOnViewportChange, true);
+    };
+  }, [openFilterColumnKey]);
 
   function toggleDraftFilterValue(value: string) {
     setDraftFilterValues((currentValues) =>
@@ -2125,7 +2152,7 @@ function ExcelColumnHeader({
   onClearFilter: (column: Column) => void;
   onCloseFilter: () => void;
   onFilterSearchChange: (value: string) => void;
-  onOpenFilter: (column: Column, anchor: HTMLElement) => void;
+  onOpenFilter: (column: Column, anchor: HTMLElement, clickPoint: { clientX: number; clientY: number }) => void;
   onSetSort: (column: Column, direction: SortDirection) => void;
   onSort: (column: Column) => void;
   onToggleDraftFilterValue: (value: string) => void;
@@ -2175,7 +2202,7 @@ function ExcelColumnHeader({
               ? "border-cyan-200 bg-cyan-200 text-slate-950"
               : "border-white/15 bg-white/10 text-white hover:bg-white/20"
           }`}
-          onClick={(event) => onOpenFilter(column, event.currentTarget)}
+          onClick={(event) => onOpenFilter(column, event.currentTarget, { clientX: event.clientX, clientY: event.clientY })}
           title={`Filter ${headerLabel}`}
           type="button"
         >
@@ -2186,9 +2213,9 @@ function ExcelColumnHeader({
       {isOpen && menuPosition && typeof document !== "undefined" ? createPortal(
         <div
           className="fixed z-[1000] w-72 overflow-hidden rounded-lg border border-slate-300 bg-white p-2 text-left text-slate-900 shadow-2xl"
+          data-gstat-filter-menu="true"
           style={{
             left: menuPosition.left,
-            maxHeight: menuPosition.maxHeight,
             top: menuPosition.top
           }}
         >
@@ -2254,7 +2281,7 @@ function ExcelColumnHeader({
             />
           </div>
 
-          <div className="mt-2 overflow-y-auto border border-slate-200 bg-slate-50 p-2" style={{ maxHeight: Math.max(120, menuPosition.maxHeight - 196) }}>
+          <div className="mt-2 overflow-y-auto overscroll-contain border border-slate-200 bg-slate-50 p-2" style={{ maxHeight: menuPosition.listMaxHeight }}>
             <label className="flex cursor-pointer items-center gap-2 text-sm font-semibold text-slate-950">
               <input
                 checked={areAllVisibleValuesSelected}
