@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import fs from "node:fs";
 import http from "node:http";
-import https from "node:https";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -9,17 +9,14 @@ import { URL } from "node:url";
 
 const HOST = "127.0.0.1";
 const PORT = Number(process.env.WORKLINE_DSC_HELPER_PORT || 48783);
-const HELPER_VERSION = "v9";
+const HELPER_VERSION = "v10";
 const EMSIGNER_DOWNLOAD_URL = "https://tutorial.gst.gov.in/installers/dscemSigner/GSTSigner-v2.8.msi";
 const PDF_SIGNING_CONNECTOR_MESSAGE =
   "GSTSigner local service is reachable. WorkLine still needs a PDF signing connector to prepare the PDF hash, call the DSC token signer, and embed the returned signature.";
 const EMSIGNER_HOSTS = ["127.0.0.1", "localhost", "::1"];
 const EMSIGNER_PORTS = [1585, 1645, 2015, 2095, 2565];
 const EMSIGNER_ENDPOINTS = EMSIGNER_PORTS.flatMap((port) =>
-  EMSIGNER_HOSTS.flatMap((host) => [
-    { host, protocol: "https:", port },
-    { host, protocol: "http:", port },
-  ])
+  EMSIGNER_HOSTS.map((host) => ({ host, port }))
 );
 const EMSIGNER_INSTALL_PATHS =
   process.platform === "win32"
@@ -69,30 +66,20 @@ function drainRequest(request) {
   });
 }
 
-function requestLocalEndpoint({ host, protocol, port }) {
+function requestLocalEndpoint({ host, port }) {
   return new Promise((resolve) => {
-    const client = protocol === "https:" ? https : http;
-    const request = client.request(
-      {
-        host,
-        method: "GET",
-        path: "/",
-        port,
-        rejectUnauthorized: false,
-        timeout: 1200,
-      },
-      (response) => {
-        response.resume();
-        resolve({ host, ok: true, port, protocol, statusCode: response.statusCode || 0 });
-      },
-    );
+    const socket = net.createConnection({ host, port });
 
-    request.on("error", () => resolve(null));
-    request.on("timeout", () => {
-      request.destroy();
+    socket.setTimeout(1200);
+    socket.on("connect", () => {
+      socket.destroy();
+      resolve({ host, ok: true, port, protocol: "tcp:" });
+    });
+    socket.on("error", () => resolve(null));
+    socket.on("timeout", () => {
+      socket.destroy();
       resolve(null);
     });
-    request.end();
   });
 }
 
@@ -108,11 +95,29 @@ async function detectEmSigner() {
   return null;
 }
 
-function commandOutput(command, args) {
+function commandOutput(command, args, timeout = 2500) {
   return new Promise((resolve) => {
-    execFile(command, args, { timeout: 2500, windowsHide: true }, (error, stdout) => {
+    execFile(command, args, { timeout, windowsHide: true }, (error, stdout) => {
       resolve(error ? "" : stdout);
     });
+  });
+}
+
+function commandResult(command, args, timeout = 2500) {
+  return new Promise((resolve) => {
+    execFile(command, args, { timeout, windowsHide: true }, (error, stdout, stderr) => {
+      resolve({
+        error: error?.message || "",
+        stderr: stderr || "",
+        stdout: stdout || "",
+      });
+    });
+  });
+}
+
+function wait(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
   });
 }
 
@@ -142,6 +147,62 @@ function detectEmSignerInstallPath() {
   return EMSIGNER_INSTALL_PATHS.find((installPath) => fs.existsSync(installPath)) || null;
 }
 
+function detectEmSignerLauncher(installPath) {
+  if (!installPath) {
+    return null;
+  }
+
+  const candidates = [
+    path.join(installPath, "GSTSigner.exe"),
+    path.join(installPath, "GSTSigner", "GSTSigner.exe"),
+    path.join(installPath, "emSigner.exe"),
+    path.join(installPath, "emSigner", "emSigner.exe"),
+  ];
+
+  return candidates.find((candidate) => fs.existsSync(candidate)) || null;
+}
+
+async function restartEmSignerService(installPath) {
+  if (process.platform !== "win32") {
+    return { attempted: false, reason: "unsupported-platform" };
+  }
+
+  const launcherPath = detectEmSignerLauncher(installPath);
+  if (!launcherPath) {
+    return { attempted: false, reason: "launcher-not-found" };
+  }
+
+  const escapedLauncherPath = launcherPath.replaceAll("'", "''");
+  const result = await commandResult(
+    "powershell.exe",
+    [
+      "-NoProfile",
+      "-Command",
+      [
+        `$launcher = '${escapedLauncherPath}'`,
+        "$javaCandidates = @((Join-Path $env:ProgramFiles 'Java\\jre1.8.0_251\\bin\\javaw.exe'), (Join-Path ${env:ProgramFiles(x86)} 'Java\\jre1.8.0_251\\bin\\javaw.exe'))",
+        "Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -ne $PID -and ($_.CommandLine -match 'GSTSigner|emSigner' -or $_.Name -match 'GSTSigner|emSigner') } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }",
+        "Start-Sleep -Seconds 2",
+        "$java = $javaCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1",
+        "if ($java) {",
+        "  Start-Process -FilePath $java -ArgumentList @('-jar', $launcher) -WindowStyle Hidden",
+        "} else {",
+        "  Start-Process -FilePath $launcher -WindowStyle Hidden",
+        "}",
+        "Write-Output 'restart-attempted'",
+      ].join("; "),
+    ],
+    10000,
+  );
+  const output = result.stdout;
+
+  return {
+    attempted: output.includes("restart-attempted"),
+    launcherPath,
+    reason: output.includes("restart-attempted") ? undefined : result.stderr || result.error || "restart-command-failed",
+  };
+}
+
 async function detectEmSignerState() {
   const endpoint = await detectEmSigner();
   const processInfo = await detectEmSignerProcess();
@@ -154,6 +215,27 @@ async function detectEmSignerState() {
     installed,
     process: processInfo,
     running: Boolean(endpoint),
+  };
+}
+
+async function detectEmSignerStateWithRecovery() {
+  const initialState = await detectEmSignerState();
+
+  if (initialState.running || !initialState.installed) {
+    return { ...initialState, recovery: { attempted: false } };
+  }
+
+  const recovery = await restartEmSignerService(initialState.installPath);
+  if (!recovery.attempted) {
+    return { ...initialState, recovery };
+  }
+
+  await wait(6000);
+  const recoveredState = await detectEmSignerState();
+
+  return {
+    ...recoveredState,
+    recovery,
   };
 }
 
@@ -172,7 +254,7 @@ const server = http.createServer(async (request, response) => {
   }
 
   if (request.method === "GET" && requestUrl.pathname === "/health") {
-    const emSigner = await detectEmSignerState();
+    const emSigner = await detectEmSignerStateWithRecovery();
 
     sendJson(
       response,
@@ -189,9 +271,13 @@ const server = http.createServer(async (request, response) => {
           visiblePlacements: ["all_pages", "first_page", "last_page"],
         },
         message: emSigner.running
-          ? PDF_SIGNING_CONNECTOR_MESSAGE
+          ? emSigner.recovery?.attempted
+            ? "GSTSigner was stuck, so WorkLine restarted it and reached the local signing service."
+            : PDF_SIGNING_CONNECTOR_MESSAGE
           : emSigner.installed
-            ? "GSTSigner is installed or running as a process, but WorkLine cannot reach its local signing service on port 1585. Fully exit GSTSigner/emSigner, reopen it, allow any firewall prompt, then click Check again."
+            ? emSigner.recovery?.attempted
+              ? "WorkLine restarted GSTSigner, but port 1585 is still not reachable. Allow any firewall prompt or reinstall GSTSigner."
+              : "GSTSigner is installed or running as a process, but WorkLine cannot reach its local signing service on port 1585. Fully exit GSTSigner/emSigner, reopen it, allow any firewall prompt, then click Check again."
             : "WorkLine DSC helper cannot reach the GSTSigner/emSigner local signing service. If GSTSigner is installed, open it from Start Menu, allow any firewall prompt, then click Check again.",
         status: "ready",
       },
