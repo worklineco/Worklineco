@@ -1983,8 +1983,8 @@ async function drawTrueCopyStampOnEachPage(pdf: PDFDocument, stampBuffer: ArrayB
     page.drawImage(stamp, {
       height: scaledHeight,
       width: scaledWidth,
-      x: width - margin - scaledWidth,
-      y: height - margin - scaledHeight
+      x: margin,
+      y: margin
     });
   });
 }
