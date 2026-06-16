@@ -1923,9 +1923,9 @@ async function appendPortraitPage(targetPdf: PDFDocument, sourcePage: ReturnType
     const page = targetPdf.addPage([portraitWidth, portraitHeight]);
 
     if (width > height) {
-      drawRotatedEmbeddedPage(page, embeddedPage, width, height, 270);
+      drawRotatedEmbeddedPage(page, embeddedPage, width, height, 90);
     } else {
-      drawRotatedEmbeddedPage(page, embeddedPage, portraitWidth, portraitHeight, 0);
+      drawRotatedEmbeddedPage(page, embeddedPage, portraitWidth, portraitHeight, 180);
     }
 
     return;
