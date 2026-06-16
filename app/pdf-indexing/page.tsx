@@ -1146,12 +1146,12 @@ export default function PdfIndexingPage() {
             </div>
 
             <div className="flex flex-wrap gap-2">
+              <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={Eraser} label="Remove Watermark" onClick={removeDemoWatermarkFromPdfs} />
               <ToolButton disabled={isProcessing || selectedRowIds.size < 2} icon={Shuffle} label="Merge" onClick={mergeSelectedPdfs} />
               <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={BookMarked} label="Smart Merge" onClick={startSmartMerge} />
               <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={Scissors} label="Split" onClick={splitSelectedPdfs} />
               <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={Hash} label="Page No." onClick={addPageNumbersToPdfs} />
               <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={FileImage} label="TRUE COPY" onClick={applyTrueCopyStampToPdfs} />
-              <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={Eraser} label="Remove Watermark" onClick={removeDemoWatermarkFromPdfs} />
               <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={BookMarked} label="PaperBook" onClick={createPaperBookPdf} />
               <ToolButton disabled={isProcessing || selectedRowIds.size < 2} icon={BookMarked} label="Bookmarks" onClick={createBookmarkedPdf} />
               <ToolButton disabled={isProcessing || pdfRows.length === 0} icon={ListOrdered} label="Create Index" onClick={createPdfIndex} />
