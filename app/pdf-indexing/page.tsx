@@ -17,7 +17,7 @@ type PdfFileRow = {
   size: number;
 };
 
-const DOCUMENT_TYPES = ["POA", "ASMT-10", "SCN", "SCN Reply", "OIO", "OIA", "Appeal", "Affidavit", "Annexure"];
+const DOCUMENT_TYPES = ["POA", "ASMT-10", "SCN", "SCN Reply", "OIO", "OIA", "Appeal", "Annexure"];
 const PDF_PAGE_NUMBER_FONT_SIZE = 12;
 const PDF_PAGE_NUMBER_MARGIN = 24;
 const SMART_MERGE_MAX_SIZE = 19.5 * 1024 * 1024;
