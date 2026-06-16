@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowDown, ArrowLeft, ArrowUp, BookMarked, Download, Eye, FileImage, FileSearch, FolderOpen, Hash, ListOrdered, RefreshCw, Scissors, ShieldCheck, Shuffle, X, type LucideIcon } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowUp, BookMarked, Download, Eraser, Eye, FileImage, FileSearch, FolderOpen, Hash, ListOrdered, RefreshCw, Scissors, ShieldCheck, Shuffle, X, type LucideIcon } from "lucide-react";
 import { AlignmentType, BorderStyle, Document, Packer, Paragraph, Table, TableCell, TableRow, TextRun, WidthType } from "docx";
 import { PDFDict, PDFDocument, PDFHexString, PDFName, PDFNumber, PDFRef, PDFStream, StandardFonts, degrees, rgb } from "pdf-lib";
 import Link from "next/link";
@@ -20,6 +20,7 @@ type PdfFileRow = {
 const DOCUMENT_TYPES = ["POA", "ASMT-10", "SCN", "SCN Reply", "OIO", "OIA", "Appeal", "Annexure"];
 const PDF_PAGE_NUMBER_FONT_SIZE = 12;
 const PDF_PAGE_NUMBER_MARGIN = 24;
+const PDF_SIGNER_DEMO_WATERMARK_HEIGHT = 72;
 const SMART_MERGE_MAX_SIZE = 19.5 * 1024 * 1024;
 const DSC_HELPER_URL = "http://127.0.0.1:48783";
 const DSC_HELPER_DOWNLOAD_URL = "/WorkLineDSCHelperSetup.vbs";
@@ -707,6 +708,55 @@ export default function PdfIndexingPage() {
     }
   }
 
+  async function removeDemoWatermarkFromPdfs() {
+    const rows = getActionRows(true);
+
+    if (!rows.length) {
+      setMessage("Select at least one PDF file before removing the watermark.");
+      return;
+    }
+
+    setIsProcessing(true);
+    setMessage(`Removing watermark from the first page of ${rows.length} PDF file${rows.length === 1 ? "" : "s"}...`);
+
+    try {
+      const outputs: { bytes: Uint8Array; filename: string }[] = [];
+
+      for (const row of rows) {
+        const file = pdfFileMapRef.current.get(row.id);
+
+        if (!file) {
+          throw new Error(`Missing file data for ${row.name}. Refresh the folder and try again.`);
+        }
+
+        const pdf = await PDFDocument.load(await file.arrayBuffer(), { ignoreEncryption: true });
+        coverPdfSignerDemoWatermark(pdf);
+        outputs.push({
+          bytes: await pdf.save(),
+          filename: `${stripPdfExtension(row.name)}-watermark-removed.pdf`,
+        });
+      }
+
+      if (outputs.length === 1) {
+        downloadBlob(createPdfBlob(outputs[0].bytes), outputs[0].filename);
+      } else {
+        const zip = new JSZip();
+
+        outputs.forEach((output) => {
+          zip.file(output.filename, output.bytes);
+        });
+
+        downloadBlob(await zip.generateAsync({ type: "blob" }), "workline-watermark-removed-pdfs.zip");
+      }
+
+      setMessage(`Removed the first-page watermark from ${rows.length} PDF file${rows.length === 1 ? "" : "s"}.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not remove the watermark.");
+    } finally {
+      setIsProcessing(false);
+    }
+  }
+
   async function checkSelectedPdfDpi() {
     const rows = getActionRows(true);
 
@@ -1101,6 +1151,7 @@ export default function PdfIndexingPage() {
               <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={Scissors} label="Split" onClick={splitSelectedPdfs} />
               <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={Hash} label="Page No." onClick={addPageNumbersToPdfs} />
               <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={FileImage} label="TRUE COPY" onClick={applyTrueCopyStampToPdfs} />
+              <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={Eraser} label="Remove Watermark" onClick={removeDemoWatermarkFromPdfs} />
               <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={BookMarked} label="PaperBook" onClick={createPaperBookPdf} />
               <ToolButton disabled={isProcessing || selectedRowIds.size < 2} icon={BookMarked} label="Bookmarks" onClick={createBookmarkedPdf} />
               <ToolButton disabled={isProcessing || pdfRows.length === 0} icon={ListOrdered} label="Create Index" onClick={createPdfIndex} />
@@ -2076,6 +2127,25 @@ async function drawTrueCopyStampOnPages(pdf: PDFDocument, stampBuffer: ArrayBuff
       x: margin,
       y: margin
     });
+  });
+}
+
+function coverPdfSignerDemoWatermark(pdf: PDFDocument) {
+  const firstPage = pdf.getPage(0);
+
+  if (!firstPage) {
+    throw new Error("Could not read the first page of this PDF.");
+  }
+
+  const { height, width } = firstPage.getSize();
+  const watermarkHeight = Math.min(PDF_SIGNER_DEMO_WATERMARK_HEIGHT, height * 0.12);
+
+  firstPage.drawRectangle({
+    color: rgb(1, 1, 1),
+    height: watermarkHeight,
+    width,
+    x: 0,
+    y: height - watermarkHeight,
   });
 }
 
