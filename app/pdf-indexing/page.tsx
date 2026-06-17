@@ -97,6 +97,7 @@ export default function PdfIndexingPage() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [isReading, setIsReading] = useState(false);
   const [bookmarkShouldPaginate, setBookmarkShouldPaginate] = useState(true);
+  const [smartSplitShouldLimitSize, setSmartSplitShouldLimitSize] = useState(true);
   const [message, setMessage] = useState("");
   const [pdfPreview, setPdfPreview] = useState<PdfPreview | null>(null);
   const [isDscModalOpen, setIsDscModalOpen] = useState(false);
@@ -672,8 +673,17 @@ export default function PdfIndexingPage() {
         await drawAnnexureStartLabels(partPdf, annexureStartLabels);
         await drawTrueCopyStampOnPages(partPdf, stampBuffer, trueCopyPageIndices);
 
-        zip.file(group.filename, await partPdf.save());
-        outputs.push({ filename: group.filename, label: group.label });
+        const groupOutputs = smartSplitShouldLimitSize
+          ? await createSmartSplitSizedOutputs(partPdf, group.filename, group.label, setMessage)
+          : [{ bytes: await partPdf.save(), filename: group.filename, isOverLimit: false }];
+
+        groupOutputs.forEach((output) => {
+          zip.file(output.filename, output.bytes);
+          outputs.push({
+            filename: output.filename,
+            label: output.isOverLimit ? `${group.label} over 19.5 MB` : group.label,
+          });
+        });
       }
 
       if (!outputs.length) {
@@ -681,7 +691,7 @@ export default function PdfIndexingPage() {
       }
 
       downloadBlob(await zip.generateAsync({ type: "blob" }), "workline-smart-split-docket.zip");
-      setMessage(`Smart Split created ${outputs.map((output) => output.label).join(", ")}.`);
+      setMessage(`Smart Split created ${outputs.length} file${outputs.length === 1 ? "" : "s"} for ${smartSplitGroups.length} document type${smartSplitGroups.length === 1 ? "" : "s"}.`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Could not create Smart Split docket parts.");
     } finally {
@@ -1200,6 +1210,16 @@ export default function PdfIndexingPage() {
               <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={BookMarked} label="Smart Merge" onClick={startSmartMerge} />
               <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={Scissors} label="Split" onClick={splitSelectedPdfs} />
               <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={Scissors} label="Smart Split" onClick={startSmartSplit} />
+              <label className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-950/10 bg-white px-3 text-xs font-black uppercase text-slate-800 shadow-sm">
+                <input
+                  checked={smartSplitShouldLimitSize}
+                  className="size-4 rounded border-slate-300 accent-teal-500"
+                  disabled={isProcessing}
+                  onChange={(event) => setSmartSplitShouldLimitSize(event.target.checked)}
+                  type="checkbox"
+                />
+                19.5 MB Split
+              </label>
               <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={Hash} label="Page No." onClick={addPageNumbersToPdfs} />
               <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={FileImage} label="TRUE COPY" onClick={applyTrueCopyStampToPdfs} />
               <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={BookMarked} label="PaperBook" onClick={createPaperBookPdf} />
@@ -1817,6 +1837,76 @@ function createSmartSplitGroups(rows: PdfFileRow[]) {
 
 function sanitizeFilenamePart(value: string) {
   return value.replace(/[\\/:*?"<>|]+/g, "-").replace(/\s+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "") || "Document";
+}
+
+async function createSmartSplitSizedOutputs(
+  sourcePdf: PDFDocument,
+  filename: string,
+  label: string,
+  reportProgress: (message: string) => void
+) {
+  const fullBytes = await sourcePdf.save();
+
+  if (fullBytes.byteLength <= SMART_MERGE_MAX_SIZE) {
+    return [{ bytes: fullBytes, filename, isOverLimit: false }];
+  }
+
+  const outputs: SmartMergeOutput[] = [];
+  const pageCount = sourcePdf.getPageCount();
+  const baseName = stripPdfExtension(filename);
+  let startPageIndex = 0;
+
+  while (startPageIndex < pageCount) {
+    let endPageIndex = startPageIndex;
+    let bestEndPageIndex = startPageIndex;
+    let bestBytes = await createPdfBytesForCopiedPageRange(sourcePdf, startPageIndex, startPageIndex);
+    let singlePageWasTooLarge = bestBytes.byteLength > SMART_MERGE_MAX_SIZE;
+
+    while (endPageIndex < pageCount) {
+      reportProgress(`Smart Split: ${label} is over 19.5 MB, testing pages ${startPageIndex + 1}-${endPageIndex + 1}...`);
+      await waitForUiUpdate();
+
+      const candidateBytes = await createPdfBytesForCopiedPageRange(sourcePdf, startPageIndex, endPageIndex);
+
+      if (candidateBytes.byteLength <= SMART_MERGE_MAX_SIZE) {
+        bestBytes = candidateBytes;
+        bestEndPageIndex = endPageIndex;
+        endPageIndex += 1;
+        continue;
+      }
+
+      if (endPageIndex === startPageIndex) {
+        bestBytes = candidateBytes;
+        bestEndPageIndex = endPageIndex;
+        singlePageWasTooLarge = true;
+      }
+
+      break;
+    }
+
+    outputs.push({
+      bytes: bestBytes,
+      filename: `${baseName}-part-${String(outputs.length + 1).padStart(2, "0")}.pdf`,
+      isOverLimit: singlePageWasTooLarge || bestBytes.byteLength > SMART_MERGE_MAX_SIZE,
+    });
+
+    startPageIndex = bestEndPageIndex + 1;
+  }
+
+  return outputs;
+}
+
+async function createPdfBytesForCopiedPageRange(sourcePdf: PDFDocument, startPageIndex: number, endPageIndex: number) {
+  const pdf = await PDFDocument.create();
+  const pageIndices = Array.from(
+    { length: endPageIndex - startPageIndex + 1 },
+    (_, index) => startPageIndex + index
+  );
+  const copiedPages = await pdf.copyPages(sourcePdf, pageIndices);
+
+  copiedPages.forEach((page) => pdf.addPage(page));
+
+  return pdf.save();
 }
 
 function createSmartMergeLots(rows: PdfFileRow[]) {
