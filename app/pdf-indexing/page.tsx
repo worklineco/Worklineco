@@ -645,6 +645,7 @@ export default function PdfIndexingPage() {
           const copiedPages = await partPdf.copyPages(sourcePdf, sourcePdf.getPageIndices());
 
           copiedPages.forEach((page) => partPdf.addPage(page));
+          await preserveVisibleDscSignature(sourcePdf, partPdf, startPageIndex);
           const endPageIndex = partPdf.getPageCount() - 1;
 
           if (PAPERBOOK_TRUE_COPY_DOCUMENT_TYPES.has(row.documentType)) {
@@ -997,6 +998,7 @@ export default function PdfIndexingPage() {
         const copiedPages = await paperBookPdf.copyPages(sourcePdf, sourcePdf.getPageIndices());
 
         copiedPages.forEach((page) => paperBookPdf.addPage(page));
+        await preserveVisibleDscSignature(sourcePdf, paperBookPdf, startPageIndex);
         const endPageIndex = paperBookPdf.getPageCount() - 1;
 
         if (PAPERBOOK_TRUE_COPY_DOCUMENT_TYPES.has(row.documentType)) {
@@ -1605,6 +1607,11 @@ type SignatureRect = {
 async function duplicateVisibleDscSignature(buffer: ArrayBuffer) {
   const pdf = await PDFDocument.load(buffer.slice(0), { ignoreEncryption: true });
   const signatureRect = findVisibleSignatureRect(pdf);
+
+  if (!signatureRect) {
+    throw new Error("Could not find a visible DSC mark in this PDF.");
+  }
+
   const pages = pdf.getPages();
   const sourcePage = pages[signatureRect.pageIndex];
   const embeddedSignature = await pdf.embedPage(sourcePage, {
@@ -1639,7 +1646,36 @@ async function duplicateVisibleDscSignature(buffer: ArrayBuffer) {
   };
 }
 
-function findVisibleSignatureRect(pdf: PDFDocument): SignatureRect {
+async function preserveVisibleDscSignature(sourcePdf: PDFDocument, targetPdf: PDFDocument, targetStartPageIndex: number) {
+  const signatureRect = findVisibleSignatureRect(sourcePdf, false);
+
+  if (!signatureRect) {
+    return;
+  }
+
+  const sourcePage = sourcePdf.getPage(signatureRect.pageIndex);
+  const targetPage = targetPdf.getPage(targetStartPageIndex + signatureRect.pageIndex);
+  const embeddedSignature = await targetPdf.embedPage(sourcePage, {
+    bottom: signatureRect.y,
+    left: signatureRect.x,
+    right: signatureRect.x + signatureRect.width,
+    top: signatureRect.y + signatureRect.height,
+  });
+  const { width: pageWidth, height: pageHeight } = targetPage.getSize();
+  const width = Math.min(signatureRect.width, Math.max(48, pageWidth - 24));
+  const height = Math.min(signatureRect.height, Math.max(24, pageHeight - 24));
+  const x = Math.min(Math.max(signatureRect.x, 12), Math.max(12, pageWidth - width - 12));
+  const y = Math.min(Math.max(signatureRect.y, 12), Math.max(12, pageHeight - height - 12));
+
+  targetPage.drawPage(embeddedSignature, {
+    height,
+    width,
+    x,
+    y,
+  });
+}
+
+function findVisibleSignatureRect(pdf: PDFDocument, allowFallback = true): SignatureRect | null {
   const pages = pdf.getPages();
 
   for (const [pageIndex, page] of pages.entries()) {
@@ -1666,7 +1702,7 @@ function findVisibleSignatureRect(pdf: PDFDocument): SignatureRect {
     }
   }
 
-  return createFirstPageTopLeftSignatureFallback(pages);
+  return allowFallback ? createFirstPageTopLeftSignatureFallback(pages) : null;
 }
 
 function createFirstPageTopLeftSignatureFallback(pages: ReturnType<PDFDocument["getPages"]>): SignatureRect {
