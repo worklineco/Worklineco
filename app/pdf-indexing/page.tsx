@@ -1117,7 +1117,7 @@ export default function PdfIndexingPage() {
       return;
     }
 
-    const shouldUsePageNumberSettings = window.confirm("Use page numbering start settings for this index?");
+    const shouldUsePageNumberSettings = window.confirm("Is page numbering required?");
     const pageNumberSettings = shouldUsePageNumberSettings ? promptForPageNumberSettings() : null;
 
     if (shouldUsePageNumberSettings && !pageNumberSettings) {
