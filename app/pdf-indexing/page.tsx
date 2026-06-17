@@ -890,7 +890,9 @@ export default function PdfIndexingPage() {
 
         const startPageIndex = paperBookPdf.getPageCount();
         const sourcePdf = await PDFDocument.load(await file.arrayBuffer(), { ignoreEncryption: true });
-        await appendPortraitPages(paperBookPdf, sourcePdf);
+        const copiedPages = await paperBookPdf.copyPages(sourcePdf, sourcePdf.getPageIndices());
+
+        copiedPages.forEach((page) => paperBookPdf.addPage(page));
         const endPageIndex = paperBookPdf.getPageCount() - 1;
 
         if (PAPERBOOK_TRUE_COPY_DOCUMENT_TYPES.has(row.documentType)) {
