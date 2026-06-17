@@ -1117,11 +1117,18 @@ export default function PdfIndexingPage() {
       return;
     }
 
+    const shouldUsePageNumberSettings = window.confirm("Use page numbering start settings for this index?");
+    const pageNumberSettings = shouldUsePageNumberSettings ? promptForPageNumberSettings() : null;
+
+    if (shouldUsePageNumberSettings && !pageNumberSettings) {
+      return;
+    }
+
     setIsProcessing(true);
     setMessage(`Creating index for ${rows.length} PDF file${rows.length === 1 ? "" : "s"}...`);
 
     try {
-      let nextStartPage = 1;
+      const pageNumberState = createIndexPageNumberState(pageNumberSettings);
       const indexDoc = new Document({
         sections: [
           {
@@ -1147,9 +1154,7 @@ export default function PdfIndexingPage() {
                         children: [
                           createIndexCell(String(index + 1), { alignment: AlignmentType.CENTER, width: 900 }),
                           createIndexCell(row.name, { width: 6200 }),
-                          createIndexCell(getStartingPageText(row.pages, () => nextStartPage, (pages) => {
-                            nextStartPage += pages;
-                          }), {
+                          createIndexCell(getStartingPageText(row.pages, pageNumberState), {
                             alignment: AlignmentType.CENTER,
                             width: 1100
                           }),
@@ -2627,14 +2632,35 @@ function createBookmarkLevel(pdf: PDFDocument, nodes: BookmarkNode[], parentRef:
   };
 }
 
-function getStartingPageText(pages: number | null, getCurrentStartPage: () => number, addPages: (pages: number) => void) {
+type IndexPageNumberState = {
+  nextPageNumber: number;
+  processedPages: number;
+  startPage: number;
+};
+
+function createIndexPageNumberState(settings: PageNumberSettings | null): IndexPageNumberState {
+  return {
+    nextPageNumber: settings?.startNumber ?? 1,
+    processedPages: 0,
+    startPage: settings?.startPage ?? 1,
+  };
+}
+
+function getStartingPageText(pages: number | null, state: IndexPageNumberState) {
   if (pages === null) {
     return "Unreadable";
   }
 
-  const startPage = getCurrentStartPage();
-  addPages(pages);
-  return String(startPage);
+  const rowStartPage = state.processedPages + 1;
+  const rowEndPage = state.processedPages + pages;
+  const firstNumberedPage = Math.max(rowStartPage, state.startPage);
+  const numberedPages = Math.max(0, rowEndPage - firstNumberedPage + 1);
+  const startText = numberedPages > 0 ? String(state.nextPageNumber) : "";
+
+  state.nextPageNumber += numberedPages;
+  state.processedPages += pages;
+
+  return startText;
 }
 
 function createIndexCell(
