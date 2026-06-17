@@ -2,7 +2,7 @@
 
 import { ArrowDown, ArrowLeft, ArrowUp, BookMarked, Download, Eye, FileImage, FileSearch, FolderOpen, Hash, ListOrdered, RefreshCw, Scissors, ShieldCheck, Shuffle, X, type LucideIcon } from "lucide-react";
 import { AlignmentType, BorderStyle, Document, Packer, Paragraph, Table, TableCell, TableRow, TextRun, WidthType } from "docx";
-import { PDFDict, PDFDocument, PDFHexString, PDFName, PDFNumber, PDFRef, PDFStream, StandardFonts, degrees, rgb } from "pdf-lib";
+import { PDFDict, PDFDocument, PDFHexString, PDFName, PDFNumber, PDFRef, PDFStream, StandardFonts, concatTransformationMatrix, degrees, drawObject, popGraphicsState, pushGraphicsState, rgb } from "pdf-lib";
 import Link from "next/link";
 import { ChangeEvent, useEffect, useRef, useState } from "react";
 import JSZip from "jszip";
@@ -1728,6 +1728,101 @@ function findVisibleSignatureRect(pdf: PDFDocument, allowFallback = true): Signa
   return allowFallback ? createFirstPageTopLeftSignatureFallback(pages) : null;
 }
 
+function flattenVisibleSignatureAppearances(pdf: PDFDocument) {
+  pdf.getPages().forEach((page) => {
+    const annots = page.node.Annots();
+
+    if (!annots) {
+      return;
+    }
+
+    const annotCount = typeof annots.size === "function" ? annots.size() : 0;
+
+    for (let index = 0; index < annotCount; index += 1) {
+      const annot = annots.lookup(index);
+
+      if (!(annot instanceof PDFDict) || !isLikelySignatureAnnotation(annot)) {
+        continue;
+      }
+
+      const rect = readAnnotationRect(annot);
+      const appearance = getNormalAnnotationAppearance(annot);
+
+      if (!rect || !appearance) {
+        continue;
+      }
+
+      const appearanceName = page.node.newXObject("VisibleSignature", appearance.ref);
+      const bbox = readAppearanceBBox(appearance.stream) ?? { bottom: 0, left: 0, right: rect.width, top: rect.height };
+      const bboxWidth = Math.abs(bbox.right - bbox.left) || rect.width;
+      const bboxHeight = Math.abs(bbox.top - bbox.bottom) || rect.height;
+      const scaleX = rect.width / bboxWidth;
+      const scaleY = rect.height / bboxHeight;
+
+      page.pushOperators(
+        pushGraphicsState(),
+        concatTransformationMatrix(scaleX, 0, 0, scaleY, rect.x - bbox.left * scaleX, rect.y - bbox.bottom * scaleY),
+        drawObject(appearanceName),
+        popGraphicsState()
+      );
+    }
+  });
+}
+
+function getNormalAnnotationAppearance(annot: PDFDict) {
+  const appearanceDict = annot.lookup(PDFName.of("AP"));
+
+  if (!(appearanceDict instanceof PDFDict)) {
+    return null;
+  }
+
+  const normalAppearance = appearanceDict.get(PDFName.of("N"));
+  const resolvedAppearance = appearanceDict.context.lookup(normalAppearance);
+
+  if (normalAppearance instanceof PDFRef && resolvedAppearance instanceof PDFStream) {
+    return { ref: normalAppearance, stream: resolvedAppearance };
+  }
+
+  if (resolvedAppearance instanceof PDFDict) {
+    for (const [, appearanceState] of resolvedAppearance.entries()) {
+      const resolvedState = resolvedAppearance.context.lookup(appearanceState);
+
+      if (appearanceState instanceof PDFRef && resolvedState instanceof PDFStream) {
+        return { ref: appearanceState, stream: resolvedState };
+      }
+    }
+  }
+
+  return null;
+}
+
+function readAppearanceBBox(stream: PDFStream) {
+  const bbox = stream.dict.lookup(PDFName.of("BBox")) as unknown as {
+    lookup?: (index: number) => unknown;
+    size?: () => number;
+  };
+
+  if (!bbox || typeof bbox.size !== "function" || bbox.size() < 4 || typeof bbox.lookup !== "function") {
+    return null;
+  }
+
+  const left = readPdfNumber(bbox.lookup(0));
+  const bottom = readPdfNumber(bbox.lookup(1));
+  const right = readPdfNumber(bbox.lookup(2));
+  const top = readPdfNumber(bbox.lookup(3));
+
+  if ([left, bottom, right, top].some((value) => value === null)) {
+    return null;
+  }
+
+  return {
+    bottom: bottom as number,
+    left: left as number,
+    right: right as number,
+    top: top as number,
+  };
+}
+
 function createFirstPageTopLeftSignatureFallback(pages: ReturnType<PDFDocument["getPages"]>): SignatureRect {
   const firstPage = pages[0];
 
@@ -1929,6 +2024,7 @@ async function createGstatDocketPdf(
 
     const startPageIndex = docketPdf.getPageCount();
     const sourcePdf = await PDFDocument.load(await file.arrayBuffer(), { ignoreEncryption: true });
+    flattenVisibleSignatureAppearances(sourcePdf);
     const copiedPages = await docketPdf.copyPages(sourcePdf, sourcePdf.getPageIndices());
 
     copiedPages.forEach((page) => docketPdf.addPage(page));
