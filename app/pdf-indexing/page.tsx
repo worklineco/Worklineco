@@ -2489,16 +2489,58 @@ async function drawPageNumbers(pdf: PDFDocument, settings: PageNumberSettings = 
     }
 
     const text = String(settings.startNumber + index - startPageIndex);
-    const { height, width } = page.getSize();
-    const textWidth = font.widthOfTextAtSize(text, PDF_PAGE_NUMBER_FONT_SIZE);
+    drawPageNumberText(page, text, font);
+  });
+}
 
+function drawPageNumberText(
+  page: ReturnType<PDFDocument["getPages"]>[number],
+  text: string,
+  font: Awaited<ReturnType<PDFDocument["embedFont"]>>
+) {
+  const { height, width } = page.getSize();
+  const textWidth = font.widthOfTextAtSize(text, PDF_PAGE_NUMBER_FONT_SIZE);
+  const rotation = normalizePageRotation(page.getRotation().angle);
+  const baseOptions = {
+    color: rgb(0, 0, 0),
+    font,
+    size: PDF_PAGE_NUMBER_FONT_SIZE,
+  };
+
+  if (rotation === 90) {
     page.drawText(text, {
-      color: rgb(0, 0, 0),
-      font,
-      size: PDF_PAGE_NUMBER_FONT_SIZE,
-      x: width - PDF_PAGE_NUMBER_MARGIN - textWidth,
-      y: height - PDF_PAGE_NUMBER_MARGIN - PDF_PAGE_NUMBER_FONT_SIZE
+      ...baseOptions,
+      rotate: degrees(-90),
+      x: PDF_PAGE_NUMBER_MARGIN + PDF_PAGE_NUMBER_FONT_SIZE,
+      y: height - PDF_PAGE_NUMBER_MARGIN - textWidth,
     });
+    return;
+  }
+
+  if (rotation === 180) {
+    page.drawText(text, {
+      ...baseOptions,
+      rotate: degrees(180),
+      x: PDF_PAGE_NUMBER_MARGIN + textWidth,
+      y: PDF_PAGE_NUMBER_MARGIN + PDF_PAGE_NUMBER_FONT_SIZE,
+    });
+    return;
+  }
+
+  if (rotation === 270) {
+    page.drawText(text, {
+      ...baseOptions,
+      rotate: degrees(90),
+      x: width - PDF_PAGE_NUMBER_MARGIN - PDF_PAGE_NUMBER_FONT_SIZE,
+      y: PDF_PAGE_NUMBER_MARGIN + textWidth,
+    });
+    return;
+  }
+
+  page.drawText(text, {
+    ...baseOptions,
+    x: width - PDF_PAGE_NUMBER_MARGIN - textWidth,
+    y: height - PDF_PAGE_NUMBER_MARGIN - PDF_PAGE_NUMBER_FONT_SIZE,
   });
 }
 
