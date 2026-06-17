@@ -1174,8 +1174,57 @@ export default function PdfIndexingPage() {
     }
   }
 
-  function openGstatDocket() {
-    setMessage("GSTAT Docket functionality will be added later.");
+  async function openGstatDocket() {
+    const rows = getActionRows(true);
+
+    if (!rows.length) {
+      setMessage("Select at least one PDF file before creating GSTAT Docket.");
+      return;
+    }
+
+    const shouldAddPageNumbers = window.confirm("Is page numbering required?");
+    const pageNumberSettings = shouldAddPageNumbers ? promptForPageNumberSettings() : null;
+
+    if (shouldAddPageNumbers && !pageNumberSettings) {
+      return;
+    }
+
+    const shouldApplyTrueCopy = window.confirm("Is TRUE COPY required for OIO, OIA and SCN?");
+    const shouldSmartSplit = window.confirm("Is smart merge required?");
+
+    setIsProcessing(true);
+    setMessage(`Creating GSTAT Docket from ${rows.length} selected PDF file${rows.length === 1 ? "" : "s"}...`);
+
+    try {
+      const stampBuffer = shouldApplyTrueCopy ? await loadTrueCopyStamp() : null;
+      const zip = new JSZip();
+      const outputs: SmartMergeOutput[] = [];
+      const groups = createGstatDocketGroups(rows);
+
+      for (const group of groups) {
+        setMessage(`GSTAT Docket: merging ${group.label}...`);
+        await waitForUiUpdate();
+
+        const docketPdf = await createGstatDocketPdf(group.rows, {
+          pageNumberSettings,
+          stampBuffer,
+        }, pdfFileMapRef.current);
+        const filename = `${String(outputs.length + 1).padStart(2, "0")}-${sanitizeFilenamePart(group.label)}.pdf`;
+        const groupOutputs = shouldSmartSplit
+          ? await createSmartSplitSizedOutputs(docketPdf, filename, group.label, setMessage)
+          : [{ bytes: await docketPdf.save(), filename, isOverLimit: false }];
+
+        outputs.push(...groupOutputs);
+      }
+
+      outputs.forEach((output) => zip.file(output.filename, output.bytes));
+      downloadBlob(await zip.generateAsync({ type: "blob" }), "workline-gstat-docket.zip");
+      setMessage(`Created GSTAT Docket with ${outputs.length} output file${outputs.length === 1 ? "" : "s"}.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not create GSTAT Docket.");
+    } finally {
+      setIsProcessing(false);
+    }
   }
 
   return (
@@ -1825,6 +1874,94 @@ function getAnnexurePageLabel(row: PdfFileRow) {
   }
 
   return /^annexure\b/i.test(label) ? label : `Annexure ${label}`;
+}
+
+async function loadTrueCopyStamp() {
+  const stampResponse = await fetch(TRUE_COPY_STAMP_URL);
+
+  if (!stampResponse.ok) {
+    throw new Error("Could not load the TRUE COPY stamp.");
+  }
+
+  return stampResponse.arrayBuffer();
+}
+
+function createGstatDocketGroups(rows: PdfFileRow[]) {
+  const groupedRows = new Map<string, PdfFileRow[]>();
+
+  rows.forEach((row) => {
+    const documentType = row.documentType.trim() || "Unclassified";
+    const currentRows = groupedRows.get(documentType) ?? [];
+
+    currentRows.push(row);
+    groupedRows.set(documentType, currentRows);
+  });
+
+  const orderedTypes = [
+    ...DOCUMENT_TYPES.filter((documentType) => groupedRows.has(documentType)),
+    ...Array.from(groupedRows.keys()).filter((documentType) => !DOCUMENT_TYPES.includes(documentType)).sort(),
+  ];
+
+  return orderedTypes.map((documentType) => ({
+    label: documentType === "Annexure" ? "Annexures" : documentType,
+    rows: groupedRows.get(documentType) ?? [],
+  }));
+}
+
+async function createGstatDocketPdf(
+  rows: PdfFileRow[],
+  options: {
+    pageNumberSettings: PageNumberSettings | null;
+    stampBuffer: ArrayBuffer | null;
+  },
+  fileMap: Map<string, File>
+) {
+  const docketPdf = await PDFDocument.create();
+  const bookmarks: BookmarkNode[] = [];
+  const trueCopyPageIndices: number[] = [];
+
+  for (const row of rows) {
+    const file = fileMap.get(row.id);
+
+    if (!file) {
+      throw new Error(`Missing file data for ${row.name}. Refresh the folder and try again.`);
+    }
+
+    const startPageIndex = docketPdf.getPageCount();
+    const sourcePdf = await PDFDocument.load(await file.arrayBuffer(), { ignoreEncryption: true });
+    const copiedPages = await docketPdf.copyPages(sourcePdf, sourcePdf.getPageIndices());
+
+    copiedPages.forEach((page) => docketPdf.addPage(page));
+
+    const endPageIndex = docketPdf.getPageCount() - 1;
+
+    if (options.stampBuffer && PAPERBOOK_TRUE_COPY_DOCUMENT_TYPES.has(row.documentType)) {
+      for (let pageIndex = startPageIndex; pageIndex <= endPageIndex; pageIndex += 1) {
+        trueCopyPageIndices.push(pageIndex);
+      }
+    }
+
+    bookmarks.push({
+      pageIndex: startPageIndex,
+      title: row.documentType === "Annexure" ? getAnnexureBookmarkTitle(row) : getDocumentBookmarkTitle(row),
+    });
+  }
+
+  if (!docketPdf.getPageCount()) {
+    throw new Error("Could not merge the selected PDF files.");
+  }
+
+  addPdfBookmarks(docketPdf, bookmarks);
+
+  if (options.pageNumberSettings) {
+    await drawPageNumbers(docketPdf, options.pageNumberSettings);
+  }
+
+  if (options.stampBuffer) {
+    await drawTrueCopyStampOnPages(docketPdf, options.stampBuffer, trueCopyPageIndices);
+  }
+
+  return docketPdf;
 }
 
 function createSmartSplitGroups(rows: PdfFileRow[]) {
