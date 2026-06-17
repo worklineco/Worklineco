@@ -1205,13 +1205,14 @@ export default function PdfIndexingPage() {
       const zip = new JSZip();
       const outputs: SmartMergeOutput[] = [];
       const groups = createGstatDocketGroups(rows);
+      const pageNumberState = pageNumberSettings ? createContinuousPageNumberState(pageNumberSettings) : null;
 
       for (const group of groups) {
         setMessage(`GSTAT Docket: merging ${group.label}...`);
         await waitForUiUpdate();
 
         const docketPdf = await createGstatDocketPdf(group.rows, {
-          pageNumberSettings,
+          pageNumberState,
           stampBuffer,
         }, pdfFileMapRef.current);
         const filename = `${String(outputs.length + 1).padStart(2, "0")}-${sanitizeFilenamePart(group.label)}.pdf`;
@@ -2011,7 +2012,7 @@ function createGstatDocketGroups(rows: PdfFileRow[]) {
 async function createGstatDocketPdf(
   rows: PdfFileRow[],
   options: {
-    pageNumberSettings: PageNumberSettings | null;
+    pageNumberState: ContinuousPageNumberState | null;
     stampBuffer: ArrayBuffer | null;
   },
   fileMap: Map<string, File>
@@ -2054,8 +2055,8 @@ async function createGstatDocketPdf(
 
   addPdfBookmarks(docketPdf, bookmarks);
 
-  if (options.pageNumberSettings) {
-    await drawPageNumbers(docketPdf, options.pageNumberSettings);
+  if (options.pageNumberState) {
+    await drawContinuousPageNumbers(docketPdf, options.pageNumberState);
   }
 
   if (options.stampBuffer) {
@@ -2490,6 +2491,35 @@ async function drawPageNumbers(pdf: PDFDocument, settings: PageNumberSettings = 
 
     const text = String(settings.startNumber + index - startPageIndex);
     drawPageNumberText(page, text, font);
+  });
+}
+
+type ContinuousPageNumberState = {
+  nextPageNumber: number;
+  processedPages: number;
+  startPage: number;
+};
+
+function createContinuousPageNumberState(settings: PageNumberSettings): ContinuousPageNumberState {
+  return {
+    nextPageNumber: settings.startNumber,
+    processedPages: 0,
+    startPage: settings.startPage,
+  };
+}
+
+async function drawContinuousPageNumbers(pdf: PDFDocument, state: ContinuousPageNumberState) {
+  const font = await pdf.embedFont(StandardFonts.Helvetica);
+
+  pdf.getPages().forEach((page) => {
+    state.processedPages += 1;
+
+    if (state.processedPages < state.startPage) {
+      return;
+    }
+
+    drawPageNumberText(page, String(state.nextPageNumber), font);
+    state.nextPageNumber += 1;
   });
 }
 
