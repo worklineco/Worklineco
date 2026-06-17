@@ -591,6 +591,10 @@ export default function PdfIndexingPage() {
     }
   }
 
+  function startSmartSplit() {
+    setMessage("Smart Split button is ready. Functioning will be added next.");
+  }
+
   async function addPageNumbersToPdfs() {
     const rows = getActionRows(true);
 
@@ -1099,6 +1103,7 @@ export default function PdfIndexingPage() {
               <ToolButton disabled={isProcessing || selectedRowIds.size < 2} icon={Shuffle} label="Merge" onClick={mergeSelectedPdfs} />
               <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={BookMarked} label="Smart Merge" onClick={startSmartMerge} />
               <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={Scissors} label="Split" onClick={splitSelectedPdfs} />
+              <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={Scissors} label="Smart Split" onClick={startSmartSplit} />
               <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={Hash} label="Page No." onClick={addPageNumbersToPdfs} />
               <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={FileImage} label="TRUE COPY" onClick={applyTrueCopyStampToPdfs} />
               <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={BookMarked} label="PaperBook" onClick={createPaperBookPdf} />
