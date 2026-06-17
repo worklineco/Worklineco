@@ -26,14 +26,6 @@ const DSC_HELPER_DOWNLOAD_URL = "/WorkLineDSCHelperSetup.vbs";
 const EMSIGNER_DOWNLOAD_URL = "https://tutorial.gst.gov.in/installers/dscemSigner/GSTSigner-v2.8.msi";
 const TRUE_COPY_STAMP_URL = "/true-copy-stamp.png";
 const PAPERBOOK_TRUE_COPY_DOCUMENT_TYPES = new Set(["SCN", "OIO", "OIA"]);
-const SMART_SPLIT_GROUPS = [
-  { filename: "01-Appeal.pdf", label: "Appeal", types: ["Appeal"] },
-  { filename: "02-POA.pdf", label: "POA", types: ["POA"] },
-  { filename: "03-SCN.pdf", label: "SCN", types: ["SCN", "SCN Reply"] },
-  { filename: "04-OIO.pdf", label: "OIO", types: ["OIO"] },
-  { filename: "05-OIA.pdf", label: "OIA", types: ["OIA"] },
-  { filename: "06-Annexures.pdf", label: "Annexures", types: ["Annexure"] },
-];
 
 type PageRange = {
   label: string;
@@ -627,13 +619,10 @@ export default function PdfIndexingPage() {
       const stampBuffer = await stampResponse.arrayBuffer();
       const zip = new JSZip();
       const outputs: { filename: string; label: string }[] = [];
+      const smartSplitGroups = createSmartSplitGroups(rows);
 
-      for (const group of SMART_SPLIT_GROUPS) {
-        const groupRows = rows.filter((row) => group.types.includes(row.documentType));
-
-        if (!groupRows.length) {
-          continue;
-        }
+      for (const group of smartSplitGroups) {
+        const groupRows = group.rows;
 
         setMessage(`Smart Split: creating ${group.label} from ${groupRows.length} PDF file${groupRows.length === 1 ? "" : "s"}...`);
         await waitForUiUpdate();
@@ -688,7 +677,7 @@ export default function PdfIndexingPage() {
       }
 
       if (!outputs.length) {
-        throw new Error("Select document types matching Appeal, POA, SCN, OIO, OIA, or Annexure before using Smart Split.");
+        throw new Error("Select at least one document type before using Smart Split.");
       }
 
       downloadBlob(await zip.generateAsync({ type: "blob" }), "workline-smart-split-docket.zip");
@@ -1806,6 +1795,28 @@ function getAnnexurePageLabel(row: PdfFileRow) {
   }
 
   return /^annexure\b/i.test(label) ? label : `Annexure ${label}`;
+}
+
+function createSmartSplitGroups(rows: PdfFileRow[]) {
+  const selectedTypes = new Set(rows.map((row) => row.documentType.trim()).filter(Boolean));
+  const orderedTypes = [
+    ...DOCUMENT_TYPES.filter((documentType) => selectedTypes.has(documentType)),
+    ...Array.from(selectedTypes).filter((documentType) => !DOCUMENT_TYPES.includes(documentType)).sort(),
+  ];
+
+  return orderedTypes.map((documentType, index) => {
+    const label = documentType === "Annexure" ? "Annexures" : documentType;
+
+    return {
+      filename: `${String(index + 1).padStart(2, "0")}-${sanitizeFilenamePart(label)}.pdf`,
+      label,
+      rows: rows.filter((row) => row.documentType === documentType),
+    };
+  });
+}
+
+function sanitizeFilenamePart(value: string) {
+  return value.replace(/[\\/:*?"<>|]+/g, "-").replace(/\s+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "") || "Document";
 }
 
 function createSmartMergeLots(rows: PdfFileRow[]) {
