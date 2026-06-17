@@ -1174,6 +1174,10 @@ export default function PdfIndexingPage() {
     }
   }
 
+  function openGstatDocket() {
+    setMessage("GSTAT Docket functionality will be added later.");
+  }
+
   return (
     <main className="min-h-screen overflow-hidden bg-[#f7f3ea] px-2 py-3 text-slate-950 sm:px-3 lg:px-4">
       <div className="pointer-events-none fixed inset-0 -z-10">
@@ -1225,6 +1229,7 @@ export default function PdfIndexingPage() {
               <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={BookMarked} label="PaperBook" onClick={createPaperBookPdf} />
               <ToolButton disabled={isProcessing || selectedRowIds.size < 2} icon={BookMarked} label="Bookmarks" onClick={createBookmarkedPdf} />
               <ToolButton disabled={isProcessing || pdfRows.length === 0} icon={ListOrdered} label="Create Index" onClick={createPdfIndex} />
+              <ToolButton disabled={isProcessing} icon={FileSearch} label="GSTAT Docket" onClick={openGstatDocket} />
               <input
                 accept="application/pdf,.pdf"
                 className="hidden"
