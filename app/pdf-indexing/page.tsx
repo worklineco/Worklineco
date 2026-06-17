@@ -26,6 +26,14 @@ const DSC_HELPER_DOWNLOAD_URL = "/WorkLineDSCHelperSetup.vbs";
 const EMSIGNER_DOWNLOAD_URL = "https://tutorial.gst.gov.in/installers/dscemSigner/GSTSigner-v2.8.msi";
 const TRUE_COPY_STAMP_URL = "/true-copy-stamp.png";
 const PAPERBOOK_TRUE_COPY_DOCUMENT_TYPES = new Set(["SCN", "OIO", "OIA"]);
+const SMART_SPLIT_GROUPS = [
+  { filename: "01-Appeal.pdf", label: "Appeal", types: ["Appeal"] },
+  { filename: "02-POA.pdf", label: "POA", types: ["POA"] },
+  { filename: "03-SCN.pdf", label: "SCN", types: ["SCN", "SCN Reply"] },
+  { filename: "04-OIO.pdf", label: "OIO", types: ["OIO"] },
+  { filename: "05-OIA.pdf", label: "OIA", types: ["OIA"] },
+  { filename: "06-Annexures.pdf", label: "Annexures", types: ["Annexure"] },
+];
 
 type PageRange = {
   label: string;
@@ -591,8 +599,105 @@ export default function PdfIndexingPage() {
     }
   }
 
-  function startSmartSplit() {
-    setMessage("Smart Split button is ready. Functioning will be added next.");
+  async function startSmartSplit() {
+    const rows = getActionRows(true);
+
+    if (!rows.length) {
+      setMessage("Select at least one PDF file before using Smart Split.");
+      return;
+    }
+
+    const shouldAddPageNumbers = window.confirm("Add page numbering to Smart Split PDFs?");
+    const pageNumberSettings = shouldAddPageNumbers ? promptForPageNumberSettings() : null;
+
+    if (shouldAddPageNumbers && !pageNumberSettings) {
+      return;
+    }
+
+    setIsProcessing(true);
+    setMessage(`Smart Split: preparing ${rows.length} PDF file${rows.length === 1 ? "" : "s"} into docket parts...`);
+
+    try {
+      const stampResponse = await fetch(TRUE_COPY_STAMP_URL);
+
+      if (!stampResponse.ok) {
+        throw new Error("Could not load the TRUE COPY stamp.");
+      }
+
+      const stampBuffer = await stampResponse.arrayBuffer();
+      const zip = new JSZip();
+      const outputs: { filename: string; label: string }[] = [];
+
+      for (const group of SMART_SPLIT_GROUPS) {
+        const groupRows = rows.filter((row) => group.types.includes(row.documentType));
+
+        if (!groupRows.length) {
+          continue;
+        }
+
+        setMessage(`Smart Split: creating ${group.label} from ${groupRows.length} PDF file${groupRows.length === 1 ? "" : "s"}...`);
+        await waitForUiUpdate();
+
+        const partPdf = await PDFDocument.create();
+        const bookmarks: BookmarkNode[] = [];
+        const annexureStartLabels: AnnexureStartLabel[] = [];
+        const trueCopyPageIndices: number[] = [];
+
+        for (const row of groupRows) {
+          const file = pdfFileMapRef.current.get(row.id);
+
+          if (!file) {
+            throw new Error(`Missing file data for ${row.name}. Refresh the folder and try again.`);
+          }
+
+          const startPageIndex = partPdf.getPageCount();
+          const sourcePdf = await PDFDocument.load(await file.arrayBuffer(), { ignoreEncryption: true });
+          const copiedPages = await partPdf.copyPages(sourcePdf, sourcePdf.getPageIndices());
+
+          copiedPages.forEach((page) => partPdf.addPage(page));
+          const endPageIndex = partPdf.getPageCount() - 1;
+
+          if (PAPERBOOK_TRUE_COPY_DOCUMENT_TYPES.has(row.documentType)) {
+            for (let pageIndex = startPageIndex; pageIndex <= endPageIndex; pageIndex += 1) {
+              trueCopyPageIndices.push(pageIndex);
+            }
+          }
+
+          bookmarks.push({
+            pageIndex: startPageIndex,
+            title: row.documentType === "Annexure" ? getAnnexureBookmarkTitle(row) : getDocumentBookmarkTitle(row),
+          });
+
+          if (row.documentType === "Annexure") {
+            annexureStartLabels.push({
+              pageIndex: startPageIndex,
+              text: getAnnexurePageLabel(row),
+            });
+          }
+        }
+
+        addPdfBookmarks(partPdf, bookmarks);
+        if (pageNumberSettings) {
+          await drawPageNumbers(partPdf, pageNumberSettings);
+        }
+        await drawAnnexureStartLabels(partPdf, annexureStartLabels);
+        await drawTrueCopyStampOnPages(partPdf, stampBuffer, trueCopyPageIndices);
+
+        zip.file(group.filename, await partPdf.save());
+        outputs.push({ filename: group.filename, label: group.label });
+      }
+
+      if (!outputs.length) {
+        throw new Error("Select document types matching Appeal, POA, SCN, OIO, OIA, or Annexure before using Smart Split.");
+      }
+
+      downloadBlob(await zip.generateAsync({ type: "blob" }), "workline-smart-split-docket.zip");
+      setMessage(`Smart Split created ${outputs.map((output) => output.label).join(", ")}.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not create Smart Split docket parts.");
+    } finally {
+      setIsProcessing(false);
+    }
   }
 
   async function addPageNumbersToPdfs() {
