@@ -2,7 +2,7 @@
 
 import { ArrowDown, ArrowLeft, ArrowUp, BookMarked, Download, Eye, FileImage, FileSearch, FolderOpen, Hash, ListOrdered, RefreshCw, Scissors, ShieldCheck, Shuffle, X, type LucideIcon } from "lucide-react";
 import { AlignmentType, BorderStyle, Document, Packer, Paragraph, Table, TableCell, TableRow, TextRun, WidthType } from "docx";
-import { PDFArray, PDFDict, PDFDocument, PDFHexString, PDFName, PDFNumber, PDFObjectCopier, PDFRef, PDFStream, StandardFonts, degrees, rgb } from "pdf-lib";
+import { PDFDict, PDFDocument, PDFHexString, PDFName, PDFNumber, PDFRef, PDFStream, StandardFonts, degrees, rgb } from "pdf-lib";
 import Link from "next/link";
 import { ChangeEvent, useEffect, useRef, useState } from "react";
 import JSZip from "jszip";
@@ -578,13 +578,6 @@ export default function PdfIndexingPage() {
           const copiedPages = await extractedPdf.copyPages(sourcePdf, pageRange.pageIndices);
 
           copiedPages.forEach((page) => extractedPdf.addPage(page));
-          await preserveSourcePdfAnnotations(
-            sourcePdf,
-            extractedPdf,
-            0,
-            pageRange.pageIndices[0] ?? 0,
-            pageRange.pageIndices.length
-          );
           folder.file(`${stripPdfExtension(row.name)}-pages-${pageRange.label}.pdf`, await extractedPdf.save());
         }
       }
@@ -652,7 +645,6 @@ export default function PdfIndexingPage() {
           const copiedPages = await partPdf.copyPages(sourcePdf, sourcePdf.getPageIndices());
 
           copiedPages.forEach((page) => partPdf.addPage(page));
-          await preserveSourcePdfAnnotations(sourcePdf, partPdf, startPageIndex);
           const endPageIndex = partPdf.getPageCount() - 1;
 
           if (PAPERBOOK_TRUE_COPY_DOCUMENT_TYPES.has(row.documentType)) {
@@ -1005,7 +997,6 @@ export default function PdfIndexingPage() {
         const copiedPages = await paperBookPdf.copyPages(sourcePdf, sourcePdf.getPageIndices());
 
         copiedPages.forEach((page) => paperBookPdf.addPage(page));
-        await preserveSourcePdfAnnotations(sourcePdf, paperBookPdf, startPageIndex);
         const endPageIndex = paperBookPdf.getPageCount() - 1;
 
         if (PAPERBOOK_TRUE_COPY_DOCUMENT_TYPES.has(row.documentType)) {
@@ -1653,120 +1644,34 @@ async function duplicateVisibleDscSignature(buffer: ArrayBuffer) {
   };
 }
 
-async function preserveSourcePdfAnnotations(
-  sourcePdf: PDFDocument,
-  targetPdf: PDFDocument,
-  targetStartPageIndex: number,
-  sourceStartPageIndex = 0,
-  pageCount = sourcePdf.getPageCount()
-) {
-  const copier = PDFObjectCopier.for(sourcePdf.context, targetPdf.context);
-
-  for (let offset = 0; offset < pageCount; offset += 1) {
-    const sourcePageIndex = sourceStartPageIndex + offset;
-    const sourcePage = sourcePdf.getPage(sourcePageIndex);
-    const targetPage = targetPdf.getPage(targetStartPageIndex + offset);
-    const sourceAnnots = sourcePage.node.Annots();
-
-    if (sourceAnnots) {
-      const copiedAnnots = copier.copy(sourceAnnots);
-
-      targetPage.node.set(PDFName.of("Annots"), copiedAnnots);
-      reassignAnnotationPageRefs(copiedAnnots, targetPage.ref);
-    }
-
-    await redrawVisibleSignatureRects(sourcePdf, targetPdf, sourcePageIndex, targetStartPageIndex + offset);
-  }
-}
-
-function reassignAnnotationPageRefs(annots: PDFArray, pageRef: PDFRef) {
-  for (let index = 0; index < annots.size(); index += 1) {
-    const annot = annots.lookup(index);
-
-    if (annot instanceof PDFDict) {
-      annot.set(PDFName.of("P"), pageRef);
-    }
-  }
-}
-
-async function redrawVisibleSignatureRects(sourcePdf: PDFDocument, targetPdf: PDFDocument, sourcePageIndex: number, targetPageIndex: number) {
-  const signatureRects = findVisibleSignatureRectsOnPage(sourcePdf, sourcePageIndex);
-
-  if (!signatureRects.length) {
-    return;
-  }
-
-  const sourcePage = sourcePdf.getPage(sourcePageIndex);
-  const targetPage = targetPdf.getPage(targetPageIndex);
-
-  for (const signatureRect of signatureRects) {
-    const embeddedSignature = await targetPdf.embedPage(sourcePage, {
-      bottom: signatureRect.y,
-      left: signatureRect.x,
-      right: signatureRect.x + signatureRect.width,
-      top: signatureRect.y + signatureRect.height,
-    });
-    const { width: pageWidth, height: pageHeight } = targetPage.getSize();
-    const width = Math.min(signatureRect.width, Math.max(48, pageWidth - 24));
-    const height = Math.min(signatureRect.height, Math.max(24, pageHeight - 24));
-    const x = Math.min(Math.max(signatureRect.x, 12), Math.max(12, pageWidth - width - 12));
-    const y = Math.min(Math.max(signatureRect.y, 12), Math.max(12, pageHeight - height - 12));
-
-    targetPage.drawPage(embeddedSignature, {
-      height,
-      width,
-      x,
-      y,
-    });
-  }
-}
-
 function findVisibleSignatureRect(pdf: PDFDocument, allowFallback = true): SignatureRect | null {
-  const signatureRects = findVisibleSignatureRects(pdf);
-
-  if (signatureRects[0]) {
-    return signatureRects[0];
-  }
-
-  return allowFallback ? createFirstPageTopLeftSignatureFallback(pdf.getPages()) : null;
-}
-
-function findVisibleSignatureRects(pdf: PDFDocument): SignatureRect[] {
   const pages = pdf.getPages();
-  const signatureRects: SignatureRect[] = [];
 
   for (const [pageIndex, page] of pages.entries()) {
-    signatureRects.push(...findVisibleSignatureRectsOnPage(pdf, pageIndex, page));
-  }
+    const annots = page.node.Annots();
 
-  return signatureRects;
-}
-
-function findVisibleSignatureRectsOnPage(pdf: PDFDocument, pageIndex: number, page = pdf.getPage(pageIndex)): SignatureRect[] {
-  const annots = page.node.Annots();
-
-  if (!annots) {
-    return [];
-  }
-
-  const signatureRects: SignatureRect[] = [];
-  const annotCount = typeof annots.size === "function" ? annots.size() : 0;
-
-  for (let index = 0; index < annotCount; index += 1) {
-    const annot = annots.lookup(index);
-
-    if (!(annot instanceof PDFDict) || !isLikelySignatureAnnotation(annot)) {
+    if (!annots) {
       continue;
     }
 
-    const rect = readAnnotationRect(annot);
+    const annotCount = typeof annots.size === "function" ? annots.size() : 0;
 
-    if (rect) {
-      signatureRects.push({ ...rect, detectedBy: "annotation", pageIndex });
+    for (let index = 0; index < annotCount; index += 1) {
+      const annot = annots.lookup(index);
+
+      if (!(annot instanceof PDFDict) || !isLikelySignatureAnnotation(annot)) {
+        continue;
+      }
+
+      const rect = readAnnotationRect(annot);
+
+      if (rect) {
+        return { ...rect, detectedBy: "annotation", pageIndex };
+      }
     }
   }
 
-  return signatureRects;
+  return allowFallback ? createFirstPageTopLeftSignatureFallback(pages) : null;
 }
 
 function createFirstPageTopLeftSignatureFallback(pages: ReturnType<PDFDocument["getPages"]>): SignatureRect {
@@ -2005,7 +1910,6 @@ async function createPdfBytesForCopiedPageRange(sourcePdf: PDFDocument, startPag
   const copiedPages = await pdf.copyPages(sourcePdf, pageIndices);
 
   copiedPages.forEach((page) => pdf.addPage(page));
-  await preserveSourcePdfAnnotations(sourcePdf, pdf, 0, startPageIndex, pageIndices.length);
 
   return pdf.save();
 }
