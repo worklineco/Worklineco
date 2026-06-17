@@ -1989,19 +1989,19 @@ async function loadTrueCopyStamp() {
 
 function createGstatDocketGroups(rows: PdfFileRow[]) {
   const groupedRows = new Map<string, PdfFileRow[]>();
+  const orderedTypes: string[] = [];
 
   rows.forEach((row) => {
     const documentType = row.documentType.trim() || "Unclassified";
     const currentRows = groupedRows.get(documentType) ?? [];
 
+    if (!groupedRows.has(documentType)) {
+      orderedTypes.push(documentType);
+    }
+
     currentRows.push(row);
     groupedRows.set(documentType, currentRows);
   });
-
-  const orderedTypes = [
-    ...DOCUMENT_TYPES.filter((documentType) => groupedRows.has(documentType)),
-    ...Array.from(groupedRows.keys()).filter((documentType) => !DOCUMENT_TYPES.includes(documentType)).sort(),
-  ];
 
   return orderedTypes.map((documentType) => ({
     label: documentType === "Annexure" ? "Annexures" : documentType,
