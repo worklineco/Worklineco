@@ -2147,7 +2147,19 @@ function SortColumnHeader({
 }
 
 function StatusSelectEditor({ onChange, value }: { onChange: (value: string) => void; value: string }) {
-  const selectValue = getStatusSelectValue(value);
+  const [isCustom, setIsCustom] = useState(() => isCustomStatusValue(value));
+  const customInputRef = useRef<HTMLInputElement>(null);
+  const selectValue = isCustom ? customStatusOption : getStatusSelectValue(value);
+
+  useEffect(() => {
+    setIsCustom(isCustomStatusValue(value));
+  }, [value]);
+
+  useEffect(() => {
+    if (isCustom) {
+      customInputRef.current?.focus();
+    }
+  }, [isCustom]);
 
   return (
     <div className="space-y-1">
@@ -2156,7 +2168,14 @@ function StatusSelectEditor({ onChange, value }: { onChange: (value: string) => 
         onChange={(event) => {
           const nextValue = event.target.value;
 
-          onChange(nextValue === customStatusOption ? (statusOptions.includes(value) ? "" : value) : nextValue);
+          if (nextValue === customStatusOption) {
+            setIsCustom(true);
+            onChange(isCustomStatusValue(value) ? value : "");
+            return;
+          }
+
+          setIsCustom(false);
+          onChange(nextValue);
         }}
         value={selectValue}
       >
@@ -2168,8 +2187,9 @@ function StatusSelectEditor({ onChange, value }: { onChange: (value: string) => 
         ))}
         <option value={customStatusOption}>Other</option>
       </select>
-      {selectValue === customStatusOption ? (
+      {isCustom ? (
         <input
+          ref={customInputRef}
           className="h-8 w-full rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-900 outline-none transition focus:border-teal-300 focus:ring-2 focus:ring-teal-100"
           onChange={(event) => onChange(event.target.value)}
           placeholder="Type custom status"
@@ -2192,7 +2212,15 @@ function StatusInlineEditor({
   onSave: (valueOverride?: string) => void;
   value: string;
 }) {
-  const selectValue = getStatusSelectValue(value);
+  const [isCustom, setIsCustom] = useState(() => isCustomStatusValue(value));
+  const customInputRef = useRef<HTMLInputElement>(null);
+  const selectValue = isCustom ? customStatusOption : getStatusSelectValue(value);
+
+  useEffect(() => {
+    if (isCustom) {
+      customInputRef.current?.focus();
+    }
+  }, [isCustom]);
 
   return (
     <div className="space-y-1">
@@ -2203,10 +2231,12 @@ function StatusInlineEditor({
           const nextValue = event.target.value;
 
           if (nextValue === customStatusOption) {
-            onChange(statusOptions.includes(value) ? "" : value);
+            setIsCustom(true);
+            onChange(isCustomStatusValue(value) ? value : "");
             return;
           }
 
+          setIsCustom(false);
           onSave(nextValue);
         }}
         onKeyDown={(event) => {
@@ -2229,8 +2259,9 @@ function StatusInlineEditor({
         ))}
         <option value={customStatusOption}>Other</option>
       </select>
-      {selectValue === customStatusOption ? (
+      {isCustom ? (
         <input
+          ref={customInputRef}
           className="h-7 w-full rounded-md border border-teal-300 bg-white px-1.5 text-[11px] font-bold text-slate-950 outline-none ring-2 ring-teal-100"
           onBlur={(event) => onSave(event.currentTarget.value)}
           onChange={(event) => onChange(event.target.value)}
@@ -2254,7 +2285,11 @@ function StatusInlineEditor({
 }
 
 function getStatusSelectValue(value: string) {
-  return statusOptions.includes(value) ? value : customStatusOption;
+  return isCustomStatusValue(value) ? customStatusOption : value;
+}
+
+function isCustomStatusValue(value: string) {
+  return value.trim() !== "" && !statusOptions.includes(value);
 }
 
 function ExcelColumnHeader({
