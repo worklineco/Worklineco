@@ -20,7 +20,8 @@ type PdfFileRow = {
 const DOCUMENT_TYPES = ["POA", "Affidavit", "ASMT-10", "SCN", "SCN Reply", "OIO", "OIA", "Appeal", "Annexure"];
 const PDF_PAGE_NUMBER_FONT_SIZE = 12;
 const PDF_PAGE_NUMBER_MARGIN = 24;
-const SMART_MERGE_MAX_SIZE = 19.5 * 1024 * 1024;
+const DEFAULT_SMART_MERGE_MAX_MB = 19.5;
+const SMART_MERGE_MAX_SIZE = DEFAULT_SMART_MERGE_MAX_MB * 1024 * 1024;
 const DSC_HELPER_URL = "http://127.0.0.1:48783";
 const DSC_HELPER_DOWNLOAD_URL = "/WorkLineDSCHelperSetup.vbs";
 const EMSIGNER_DOWNLOAD_URL = "https://tutorial.gst.gov.in/installers/dscemSigner/GSTSigner-v2.8.msi";
@@ -1057,11 +1058,17 @@ export default function PdfIndexingPage() {
       return;
     }
 
+    const smartMergeMaxSize = promptForSmartMergeMaxSize();
+
+    if (smartMergeMaxSize === null) {
+      return;
+    }
+
     setIsProcessing(true);
-    setMessage(`Smart merging ${rows.length} PDF file${rows.length === 1 ? "" : "s"} into 19.5 MB lots...`);
+    setMessage(`Smart merging ${rows.length} PDF file${rows.length === 1 ? "" : "s"} into ${formatFileSize(smartMergeMaxSize)} lots...`);
 
     try {
-      const lots = createSmartMergeLots(rows);
+      const lots = createSmartMergeLots(rows, smartMergeMaxSize);
       const outputs: SmartMergeOutput[] = [];
 
       for (let lotIndex = 0; lotIndex < lots.length; lotIndex += 1) {
@@ -1071,8 +1078,8 @@ export default function PdfIndexingPage() {
         );
         await waitForUiUpdate();
 
-        if (lot.rows.length === 1 && lot.size > SMART_MERGE_MAX_SIZE) {
-          outputs.push(...await createSmartMergePartsForOversizedPdf(lot.rows[0], pdfFileMapRef.current, setMessage));
+        if (lot.rows.length === 1 && lot.size > smartMergeMaxSize) {
+          outputs.push(...await createSmartMergePartsForOversizedPdf(lot.rows[0], pdfFileMapRef.current, setMessage, smartMergeMaxSize));
           continue;
         }
 
@@ -1096,7 +1103,7 @@ export default function PdfIndexingPage() {
       }
 
       setMessage(
-        `Smart Merge created ${outputs.length} file${outputs.length === 1 ? "" : "s"} with a ${formatFileSize(SMART_MERGE_MAX_SIZE)} target${
+        `Smart Merge created ${outputs.length} file${outputs.length === 1 ? "" : "s"} with a ${formatFileSize(smartMergeMaxSize)} target${
           overLimitOutputs.length
             ? `; ${overLimitOutputs.length} single-page part${overLimitOutputs.length === 1 ? " is" : "s are"} still over the limit.`
             : "."
@@ -1196,6 +1203,11 @@ export default function PdfIndexingPage() {
 
     const shouldApplyTrueCopy = window.confirm("Is TRUE COPY required for OIO, OIA and SCN?");
     const shouldSmartSplit = window.confirm("Is smart merge required?");
+    const smartMergeMaxSize = shouldSmartSplit ? promptForSmartMergeMaxSize("Enter GSTAT Docket split size limit in MB") : null;
+
+    if (shouldSmartSplit && smartMergeMaxSize === null) {
+      return;
+    }
 
     setIsProcessing(true);
     setMessage(`Creating GSTAT Docket from ${rows.length} selected PDF file${rows.length === 1 ? "" : "s"}...`);
@@ -1217,7 +1229,7 @@ export default function PdfIndexingPage() {
         });
         const filename = `${String(outputs.length + 1).padStart(2, "0")}-${sanitizeFilenamePart(group.label)}.pdf`;
         const groupOutputs = shouldSmartSplit
-          ? await createSmartSplitSizedOutputs(docketPdf, filename, group.label, setMessage)
+          ? await createSmartSplitSizedOutputs(docketPdf, filename, group.label, setMessage, smartMergeMaxSize ?? SMART_MERGE_MAX_SIZE)
           : [{ bytes: await docketPdf.save(), filename, isOverLimit: false }];
 
         outputs.push(...groupOutputs);
@@ -2127,11 +2139,12 @@ async function createSmartSplitSizedOutputs(
   sourcePdf: PDFDocument,
   filename: string,
   label: string,
-  reportProgress: (message: string) => void
+  reportProgress: (message: string) => void,
+  maxSize = SMART_MERGE_MAX_SIZE
 ) {
   const fullBytes = await sourcePdf.save();
 
-  if (fullBytes.byteLength <= SMART_MERGE_MAX_SIZE) {
+  if (fullBytes.byteLength <= maxSize) {
     return [{ bytes: fullBytes, filename, isOverLimit: false }];
   }
 
@@ -2144,15 +2157,15 @@ async function createSmartSplitSizedOutputs(
     let endPageIndex = startPageIndex;
     let bestEndPageIndex = startPageIndex;
     let bestBytes = await createPdfBytesForCopiedPageRange(sourcePdf, startPageIndex, startPageIndex);
-    let singlePageWasTooLarge = bestBytes.byteLength > SMART_MERGE_MAX_SIZE;
+    let singlePageWasTooLarge = bestBytes.byteLength > maxSize;
 
     while (endPageIndex < pageCount) {
-      reportProgress(`Smart Split: ${label} is over 19.5 MB, testing pages ${startPageIndex + 1}-${endPageIndex + 1}...`);
+      reportProgress(`Smart Split: ${label} is over ${formatFileSize(maxSize)}, testing pages ${startPageIndex + 1}-${endPageIndex + 1}...`);
       await waitForUiUpdate();
 
       const candidateBytes = await createPdfBytesForCopiedPageRange(sourcePdf, startPageIndex, endPageIndex);
 
-      if (candidateBytes.byteLength <= SMART_MERGE_MAX_SIZE) {
+      if (candidateBytes.byteLength <= maxSize) {
         bestBytes = candidateBytes;
         bestEndPageIndex = endPageIndex;
         endPageIndex += 1;
@@ -2171,7 +2184,7 @@ async function createSmartSplitSizedOutputs(
     outputs.push({
       bytes: bestBytes,
       filename: `${baseName}-part-${String(outputs.length + 1).padStart(2, "0")}.pdf`,
-      isOverLimit: singlePageWasTooLarge || bestBytes.byteLength > SMART_MERGE_MAX_SIZE,
+      isOverLimit: singlePageWasTooLarge || bestBytes.byteLength > maxSize,
     });
 
     startPageIndex = bestEndPageIndex + 1;
@@ -2193,13 +2206,13 @@ async function createPdfBytesForCopiedPageRange(sourcePdf: PDFDocument, startPag
   return pdf.save();
 }
 
-function createSmartMergeLots(rows: PdfFileRow[]) {
+function createSmartMergeLots(rows: PdfFileRow[], maxSize = SMART_MERGE_MAX_SIZE) {
   const lots: SmartMergeLot[] = [];
   let currentLot: SmartMergeLot = { rows: [], size: 0 };
 
   rows.forEach((row) => {
     const shouldStartNewLot =
-      currentLot.rows.length > 0 && currentLot.size + row.size > SMART_MERGE_MAX_SIZE;
+      currentLot.rows.length > 0 && currentLot.size + row.size > maxSize;
 
     if (shouldStartNewLot) {
       lots.push(currentLot);
@@ -2241,7 +2254,8 @@ async function createMergedPdfBytes(rows: PdfFileRow[], fileMap: Map<string, Fil
 async function createSmartMergePartsForOversizedPdf(
   row: PdfFileRow,
   fileMap: Map<string, File>,
-  reportProgress: (message: string) => void
+  reportProgress: (message: string) => void,
+  maxSize = SMART_MERGE_MAX_SIZE
 ) {
   const file = fileMap.get(row.id);
 
@@ -2267,7 +2281,7 @@ async function createSmartMergePartsForOversizedPdf(
       await waitForUiUpdate();
       const candidateBytes = await createPdfBytesForPageRange(sourcePdf, startPageIndex, endPageIndex);
 
-      if (candidateBytes.byteLength <= SMART_MERGE_MAX_SIZE) {
+      if (candidateBytes.byteLength <= maxSize) {
         bestBytes = candidateBytes;
         bestEndPageIndex = endPageIndex;
         endPageIndex += 1;
@@ -2290,7 +2304,7 @@ async function createSmartMergePartsForOversizedPdf(
     outputs.push({
       bytes: bestBytes,
       filename: `${stripPdfExtension(row.name)}-pages-${formatPageRangeLabel(startPageIndex + 1, bestEndPageIndex + 1)}.pdf`,
-      isOverLimit: singlePageWasTooLarge || bestBytes.byteLength > SMART_MERGE_MAX_SIZE
+      isOverLimit: singlePageWasTooLarge || bestBytes.byteLength > maxSize
     });
     reportProgress(
       `Smart Merge: created ${stripPdfExtension(row.name)} pages ${startPageIndex + 1}-${bestEndPageIndex + 1} (${formatFileSize(bestBytes.byteLength)}).`
@@ -2512,6 +2526,23 @@ function promptForPositiveInteger(message: string, defaultValue: string) {
   }
 
   return value;
+}
+
+function promptForSmartMergeMaxSize(message = "Enter Smart Merge size limit in MB") {
+  const input = window.prompt(message, String(DEFAULT_SMART_MERGE_MAX_MB));
+
+  if (input === null) {
+    return null;
+  }
+
+  const value = Number(input.trim());
+
+  if (!Number.isFinite(value) || value <= 0) {
+    window.alert("Enter a valid MB limit greater than 0.");
+    return null;
+  }
+
+  return value * 1024 * 1024;
 }
 
 async function drawPageNumbers(pdf: PDFDocument, settings: PageNumberSettings = { startNumber: 1, startPage: 1 }) {
