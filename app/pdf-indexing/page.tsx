@@ -521,7 +521,7 @@ export default function PdfIndexingPage() {
           continue;
         }
 
-        const sourcePdf = await PDFDocument.load(await file.arrayBuffer(), { ignoreEncryption: true });
+        const sourcePdf = await loadPdfWithVisibleSignatures(file);
         await appendPortraitPages(mergedPdf, sourcePdf);
       }
 
@@ -569,7 +569,7 @@ export default function PdfIndexingPage() {
           continue;
         }
 
-        const sourcePdf = await PDFDocument.load(await file.arrayBuffer(), { ignoreEncryption: true });
+        const sourcePdf = await loadPdfWithVisibleSignatures(file);
         const pageRanges = parsePageRanges(normalizedRange, sourcePdf.getPageCount(), row.name);
         const folder = zip.folder(stripPdfExtension(row.name)) ?? zip;
 
@@ -641,7 +641,7 @@ export default function PdfIndexingPage() {
           }
 
           const startPageIndex = partPdf.getPageCount();
-          const sourcePdf = await PDFDocument.load(await file.arrayBuffer(), { ignoreEncryption: true });
+          const sourcePdf = await loadPdfWithVisibleSignatures(file);
           const copiedPages = await partPdf.copyPages(sourcePdf, sourcePdf.getPageIndices());
 
           copiedPages.forEach((page) => partPdf.addPage(page));
@@ -726,7 +726,7 @@ export default function PdfIndexingPage() {
           throw new Error("Could not find the selected PDF file.");
         }
 
-        const sourcePdf = await PDFDocument.load(await file.arrayBuffer(), { ignoreEncryption: true });
+        const sourcePdf = await loadPdfWithVisibleSignatures(file);
         const numberedPdf = await createPortraitPdf(sourcePdf);
         await drawPageNumbers(numberedPdf, pageNumberSettings);
         downloadBlob(createPdfBlob(await numberedPdf.save()), `${stripPdfExtension(rows[0].name)}-page-numbered.pdf`);
@@ -743,7 +743,7 @@ export default function PdfIndexingPage() {
           continue;
         }
 
-        const sourcePdf = await PDFDocument.load(await file.arrayBuffer(), { ignoreEncryption: true });
+        const sourcePdf = await loadPdfWithVisibleSignatures(file);
         const numberedPdf = await createPortraitPdf(sourcePdf);
         await drawPageNumbers(numberedPdf, pageNumberSettings);
         zip.file(`${stripPdfExtension(row.name)}-page-numbered.pdf`, await numberedPdf.save());
@@ -785,7 +785,7 @@ export default function PdfIndexingPage() {
           throw new Error("Could not find the selected PDF file.");
         }
 
-        const pdf = await PDFDocument.load(await file.arrayBuffer(), { ignoreEncryption: true });
+        const pdf = await loadPdfWithVisibleSignatures(file);
         await drawTrueCopyStampOnEachPage(pdf, stampBuffer);
         downloadBlob(createPdfBlob(await pdf.save()), `${stripPdfExtension(rows[0].name)}-true-copy.pdf`);
         setMessage(`Applied TRUE COPY stamp to ${rows[0].name}.`);
@@ -801,7 +801,7 @@ export default function PdfIndexingPage() {
           continue;
         }
 
-        const pdf = await PDFDocument.load(await file.arrayBuffer(), { ignoreEncryption: true });
+        const pdf = await loadPdfWithVisibleSignatures(file);
         await drawTrueCopyStampOnEachPage(pdf, stampBuffer);
         zip.file(`${stripPdfExtension(row.name)}-true-copy.pdf`, await pdf.save());
       }
@@ -907,7 +907,7 @@ export default function PdfIndexingPage() {
         }
 
         const startPageIndex = mergedPdf.getPageCount();
-        const sourcePdf = await PDFDocument.load(await file.arrayBuffer(), { ignoreEncryption: true });
+        const sourcePdf = await loadPdfWithVisibleSignatures(file);
         await appendPortraitPages(mergedPdf, sourcePdf);
 
         if (row.documentType === "Annexure") {
@@ -993,7 +993,7 @@ export default function PdfIndexingPage() {
         }
 
         const startPageIndex = paperBookPdf.getPageCount();
-        const sourcePdf = await PDFDocument.load(await file.arrayBuffer(), { ignoreEncryption: true });
+        const sourcePdf = await loadPdfWithVisibleSignatures(file);
         const copiedPages = await paperBookPdf.copyPages(sourcePdf, sourcePdf.getPageIndices());
 
         copiedPages.forEach((page) => paperBookPdf.addPage(page));
@@ -1953,6 +1953,14 @@ function createPdfBlob(bytes: Uint8Array) {
   return new Blob([buffer], { type: "application/pdf" });
 }
 
+async function loadPdfWithVisibleSignatures(file: File) {
+  const pdf = await PDFDocument.load(await file.arrayBuffer(), { ignoreEncryption: true });
+
+  flattenVisibleSignatureAppearances(pdf);
+
+  return pdf;
+}
+
 function stripPdfExtension(filename: string) {
   return filename.replace(/\.pdf$/i, "");
 }
@@ -2006,8 +2014,7 @@ async function createGstatDocketPreparedRows(
       throw new Error(`Missing file data for ${row.name}. Refresh the folder and try again.`);
     }
 
-    const sourcePdf = await PDFDocument.load(await file.arrayBuffer(), { ignoreEncryption: true });
-    flattenVisibleSignatureAppearances(sourcePdf);
+    const sourcePdf = await loadPdfWithVisibleSignatures(file);
 
     const rowPdf = await PDFDocument.create();
     const copiedPages = await rowPdf.copyPages(sourcePdf, sourcePdf.getPageIndices());
@@ -2220,7 +2227,7 @@ async function createMergedPdfBytes(rows: PdfFileRow[], fileMap: Map<string, Fil
       continue;
     }
 
-    const sourcePdf = await PDFDocument.load(await file.arrayBuffer(), { ignoreEncryption: true });
+    const sourcePdf = await loadPdfWithVisibleSignatures(file);
     await appendPortraitPages(mergedPdf, sourcePdf);
   }
 
@@ -2242,7 +2249,7 @@ async function createSmartMergePartsForOversizedPdf(
     return [];
   }
 
-  const sourcePdf = await PDFDocument.load(await file.arrayBuffer(), { ignoreEncryption: true });
+  const sourcePdf = await loadPdfWithVisibleSignatures(file);
   const pageCount = sourcePdf.getPageCount();
   const outputs: SmartMergeOutput[] = [];
   let startPageIndex = 0;
