@@ -151,6 +151,15 @@ const teamOptions = [
   "Team 10",
   "Team 12"
 ];
+const statusOptions = [
+  "",
+  "Drafting in Process",
+  "Pending for Review",
+  "Sent to Client",
+  "Pending for upload",
+  "Filed"
+];
+const customStatusOption = "__workline_custom_status__";
 const editorSections = [
   {
     fields: [
@@ -905,7 +914,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
     setInlineEditor(null);
   }
 
-  async function saveInlineEditor() {
+  async function saveInlineEditor(valueOverride?: string) {
     if (inlineSaveCancelledRef.current) {
       inlineSaveCancelledRef.current = false;
       return;
@@ -922,9 +931,10 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
       return;
     }
 
+    const editorValue = valueOverride ?? inlineEditor.value;
     const nextValue = dateFields.has(inlineEditor.columnKey)
-      ? normalizeDateValue(inlineEditor.value)
-      : inlineEditor.value;
+      ? normalizeDateValue(editorValue)
+      : editorValue;
     const currentValue = dateFields.has(inlineEditor.columnKey)
       ? normalizeDateValue(row.data[inlineEditor.columnKey])
       : String(row.data[inlineEditor.columnKey] ?? "");
@@ -1501,11 +1511,22 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                             >
                               {column.key === "Sno" ? (
                                 row.row_number || row.data.Sno || originalIndex + 1
+                              ) : isInlineEditing && column.key === "Status" ? (
+                                <StatusInlineEditor
+                                  onCancel={cancelInlineEditor}
+                                  onChange={(value) =>
+                                    setInlineEditor((currentEditor) =>
+                                      currentEditor ? { ...currentEditor, value } : currentEditor
+                                    )
+                                  }
+                                  onSave={saveInlineEditor}
+                                  value={inlineEditor.value}
+                                />
                               ) : isInlineEditing ? (
                                 <input
                                   autoFocus
                                   className="h-7 w-full rounded-md border border-teal-300 bg-white px-1.5 text-[11px] font-bold text-slate-950 outline-none ring-2 ring-teal-100"
-                                  onBlur={saveInlineEditor}
+                                  onBlur={() => saveInlineEditor()}
                                   onChange={(event) =>
                                     setInlineEditor((currentEditor) =>
                                       currentEditor ? { ...currentEditor, value: event.target.value } : currentEditor
@@ -1626,6 +1647,11 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                                 </option>
                               ))}
                             </select>
+                          ) : field === "Status" ? (
+                            <StatusSelectEditor
+                              onChange={(value) => updateDraft(field, value)}
+                              value={String(editor.draft[field] ?? "")}
+                            />
                           ) : (
                             <input
                               className="mt-0.5 h-8 w-full rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-900 outline-none transition focus:border-teal-300 focus:ring-2 focus:ring-teal-100"
@@ -2118,6 +2144,117 @@ function SortColumnHeader({
       </span>
     </button>
   );
+}
+
+function StatusSelectEditor({ onChange, value }: { onChange: (value: string) => void; value: string }) {
+  const selectValue = getStatusSelectValue(value);
+
+  return (
+    <div className="space-y-1">
+      <select
+        className="mt-0.5 h-8 w-full rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-900 outline-none transition focus:border-teal-300 focus:ring-2 focus:ring-teal-100"
+        onChange={(event) => {
+          const nextValue = event.target.value;
+
+          onChange(nextValue === customStatusOption ? (statusOptions.includes(value) ? "" : value) : nextValue);
+        }}
+        value={selectValue}
+      >
+        <option value="">(blanks)</option>
+        {statusOptions.filter(Boolean).map((status) => (
+          <option key={status} value={status}>
+            {status}
+          </option>
+        ))}
+        <option value={customStatusOption}>Other</option>
+      </select>
+      {selectValue === customStatusOption ? (
+        <input
+          className="h-8 w-full rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-900 outline-none transition focus:border-teal-300 focus:ring-2 focus:ring-teal-100"
+          onChange={(event) => onChange(event.target.value)}
+          placeholder="Type custom status"
+          type="text"
+          value={value}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function StatusInlineEditor({
+  onCancel,
+  onChange,
+  onSave,
+  value
+}: {
+  onCancel: () => void;
+  onChange: (value: string) => void;
+  onSave: (valueOverride?: string) => void;
+  value: string;
+}) {
+  const selectValue = getStatusSelectValue(value);
+
+  return (
+    <div className="space-y-1">
+      <select
+        autoFocus
+        className="h-7 w-full rounded-md border border-teal-300 bg-white px-1.5 text-[11px] font-bold text-slate-950 outline-none ring-2 ring-teal-100"
+        onChange={(event) => {
+          const nextValue = event.target.value;
+
+          if (nextValue === customStatusOption) {
+            onChange(statusOptions.includes(value) ? "" : value);
+            return;
+          }
+
+          onSave(nextValue);
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            event.preventDefault();
+            onCancel();
+          }
+          if (event.key === "Enter" && selectValue !== customStatusOption) {
+            event.preventDefault();
+            onSave(value);
+          }
+        }}
+        value={selectValue}
+      >
+        <option value="">(blanks)</option>
+        {statusOptions.filter(Boolean).map((status) => (
+          <option key={status} value={status}>
+            {status}
+          </option>
+        ))}
+        <option value={customStatusOption}>Other</option>
+      </select>
+      {selectValue === customStatusOption ? (
+        <input
+          className="h-7 w-full rounded-md border border-teal-300 bg-white px-1.5 text-[11px] font-bold text-slate-950 outline-none ring-2 ring-teal-100"
+          onBlur={(event) => onSave(event.currentTarget.value)}
+          onChange={(event) => onChange(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              event.preventDefault();
+              onCancel();
+            }
+            if (event.key === "Enter") {
+              event.preventDefault();
+              onSave(event.currentTarget.value);
+            }
+          }}
+          placeholder="Type custom status"
+          type="text"
+          value={value}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function getStatusSelectValue(value: string) {
+  return statusOptions.includes(value) ? value : customStatusOption;
 }
 
 function ExcelColumnHeader({
