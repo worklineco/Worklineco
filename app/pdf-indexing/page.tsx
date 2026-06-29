@@ -1968,7 +1968,15 @@ function createPdfBlob(bytes: Uint8Array) {
 }
 
 async function loadPdfWithVisibleSignatures(file: File) {
-  const pdf = await PDFDocument.load(await file.arrayBuffer(), { ignoreEncryption: true });
+  let pdf: PDFDocument;
+
+  try {
+    pdf = await PDFDocument.load(await file.arrayBuffer(), { ignoreEncryption: true });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "Unknown PDF parsing error.";
+
+    throw new Error(`Could not read "${file.name}". This PDF appears to be damaged or not fully valid. Re-save or print it as a new PDF, then try again. Details: ${detail}`);
+  }
 
   flattenVisibleSignatureAppearances(pdf);
 
