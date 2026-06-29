@@ -576,9 +576,11 @@ export default function PdfIndexingPage() {
 
         for (const pageRange of pageRanges) {
           const extractedPdf = await PDFDocument.create();
-          const copiedPages = await extractedPdf.copyPages(sourcePdf, pageRange.pageIndices);
 
-          copiedPages.forEach((page) => extractedPdf.addPage(page));
+          for (const pageIndex of pageRange.pageIndices) {
+            await appendPortraitPage(extractedPdf, sourcePdf.getPage(pageIndex));
+          }
+
           folder.file(`${stripPdfExtension(row.name)}-pages-${pageRange.label}.pdf`, await extractedPdf.save());
         }
       }
@@ -2195,13 +2197,10 @@ async function createSmartSplitSizedOutputs(
 
 async function createPdfBytesForCopiedPageRange(sourcePdf: PDFDocument, startPageIndex: number, endPageIndex: number) {
   const pdf = await PDFDocument.create();
-  const pageIndices = Array.from(
-    { length: endPageIndex - startPageIndex + 1 },
-    (_, index) => startPageIndex + index
-  );
-  const copiedPages = await pdf.copyPages(sourcePdf, pageIndices);
 
-  copiedPages.forEach((page) => pdf.addPage(page));
+  for (let pageIndex = startPageIndex; pageIndex <= endPageIndex; pageIndex += 1) {
+    await appendPortraitPage(pdf, sourcePdf.getPage(pageIndex));
+  }
 
   return pdf.save();
 }
