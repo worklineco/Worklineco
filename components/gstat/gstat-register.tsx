@@ -372,6 +372,10 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
   );
   const statusSummaryPreview = useMemo(() => statusSummary.filter((item) => item.count > 0).slice(0, 3), [statusSummary]);
   const statusSummaryGroupCount = useMemo(() => statusSummary.filter((item) => item.count > 0).length, [statusSummary]);
+  const statusSummaryColumns = useMemo(() => {
+    const midpoint = Math.ceil(statusSummary.length / 2);
+    return [statusSummary.slice(0, midpoint), statusSummary.slice(midpoint)];
+  }, [statusSummary]);
   const statusChartBackground = useMemo(() => getStatusChartBackground(statusSummary), [statusSummary]);
   const selectedStatusFilter = columnValueFilters.Status?.[0] ?? null;
   
@@ -1395,45 +1399,49 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                     </div>
                   </div>
                   <div className="grid gap-1.5 xl:grid-cols-2">
-                    {statusSummary.map((item) => {
-                      const isActive = selectedStatusFilter === item.key;
+                    {statusSummaryColumns.map((columnItems, columnIndex) => (
+                      <div className="grid content-start gap-1.5" key={`status-summary-column-${columnIndex}`}>
+                        {columnItems.map((item) => {
+                          const isActive = selectedStatusFilter === item.key;
 
-                      return (
-                        <button
-                          className={`grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-xl border px-3 py-2 text-left transition hover:bg-white hover:shadow-sm ${
-                            isActive
-                              ? "border-teal-300 bg-teal-50 ring-2 ring-teal-100"
-                              : "border-slate-200 bg-white"
-                          }`}
-                          key={item.key}
-                          onClick={() => applyStatusSummaryFilter(item.key)}
-                          title={`Filter Status: ${item.label}`}
-                          type="button"
-                        >
-                          <div className="min-w-0">
-                            <div className="flex min-w-0 items-center justify-between gap-3">
-                              <span className="flex min-w-0 items-center gap-2">
-                                <span className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: item.color }} />
-                                <span className="min-w-0 truncate text-xs font-black uppercase text-slate-700">
-                                  {item.label}
-                                </span>
-                              </span>
-                              <span className="shrink-0 text-[11px] font-black text-slate-500">{item.percentage}%</span>
-                            </div>
-                            <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-slate-200">
-                              <div
-                                className="h-full rounded-full"
-                                style={{
-                                  backgroundColor: item.color,
-                                  width: `${Math.max(item.percentage, item.count ? 4 : 0)}%`
-                                }}
-                              />
-                            </div>
-                          </div>
-                          <span className="text-lg font-black text-slate-950">{item.count}</span>
-                        </button>
-                      );
-                    })}
+                          return (
+                            <button
+                              className={`grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-xl border px-3 py-2 text-left transition hover:bg-white hover:shadow-sm ${
+                                isActive
+                                  ? "border-teal-300 bg-teal-50 ring-2 ring-teal-100"
+                                  : "border-slate-200 bg-white"
+                              }`}
+                              key={item.key}
+                              onClick={() => applyStatusSummaryFilter(item.key)}
+                              title={`Filter Status: ${item.label}`}
+                              type="button"
+                            >
+                              <div className="min-w-0">
+                                <div className="flex min-w-0 items-center justify-between gap-3">
+                                  <span className="flex min-w-0 items-center gap-2">
+                                    <span className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: item.color }} />
+                                    <span className="min-w-0 truncate text-xs font-black uppercase text-slate-700">
+                                      {item.label}
+                                    </span>
+                                  </span>
+                                  <span className="shrink-0 text-[11px] font-black text-slate-500">{item.percentage}%</span>
+                                </div>
+                                <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-slate-200">
+                                  <div
+                                    className="h-full rounded-full"
+                                    style={{
+                                      backgroundColor: item.color,
+                                      width: `${Math.max(item.percentage, item.count ? 4 : 0)}%`
+                                    }}
+                                  />
+                                </div>
+                              </div>
+                              <span className="text-lg font-black text-slate-950">{item.count}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ))}
                   </div>
                 </div>
               </div>
