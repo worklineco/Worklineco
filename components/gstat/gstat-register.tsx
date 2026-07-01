@@ -2,7 +2,7 @@
 
 import { downloadGstatPoa } from "@/lib/gstat/poa-document";
 import { supabase } from "@/lib/supabase/client";
-import { ArrowDown, ArrowLeft, ArrowUp, Download, Expand, ExternalLink, FileSpreadsheet, FileText, Filter, History, Pencil, Plus, Scale, Search, Settings2, ShieldCheck, Trash2, Upload, X } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowUp, ChevronDown, ChevronUp, Download, Expand, ExternalLink, FileSpreadsheet, FileText, Filter, History, Pencil, Plus, Scale, Search, Settings2, ShieldCheck, Trash2, Upload, X } from "lucide-react";
 import Link from "next/link";
 import { ChangeEvent, memo, useDeferredValue, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { createPortal } from "react-dom";
@@ -249,6 +249,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
   const [isLoading, setIsLoading] = useState(true);
   const [isSavingEditor, setIsSavingEditor] = useState(false);
   const [message, setMessage] = useState("");
+  const [isSummaryOpen, setIsSummaryOpen] = useState(false);
   const [userAccess, setUserAccess] = useState<UserAccess>({ isPartner: false, team: "" });
   const [sortState, setSortState] = useState<SortState>(null);
   const [selectedRowKeys, setSelectedRowKeys] = useState<Set<string>>(() => new Set());
@@ -368,6 +369,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
     () => getStatusSummary(filteredRows.map(({ row }) => row)),
     [filteredRows]
   );
+  const statusSummaryPreview = useMemo(() => statusSummary.filter((item) => item.count > 0).slice(0, 3), [statusSummary]);
   const selectedStatusFilter = columnValueFilters.Status?.[0] ?? null;
   
   const hasActiveFilters = useMemo(
@@ -1324,49 +1326,93 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
             </button>
           </div>
 
-          <section className="mb-3 rounded-2xl border border-slate-950/10 bg-white p-3 shadow-sm">
-            <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-              <div>
-                <p className="text-xs font-black uppercase tracking-[0.14em] text-teal-700">Summary by Status</p>
-                <h3 className="text-base font-black text-slate-950">Current view</h3>
+          <section className="mb-3 overflow-hidden rounded-2xl border border-slate-950/10 bg-white shadow-sm">
+            <div className="flex flex-col gap-3 px-3 py-2.5 lg:flex-row lg:items-center lg:justify-between">
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                <span className="rounded-lg bg-teal-50 px-2.5 py-1 text-xs font-black uppercase tracking-[0.12em] text-teal-700">
+                  Status Summary
+                </span>
+                <span className="text-sm font-black text-slate-950">
+                  {filteredRows.length} row{filteredRows.length === 1 ? "" : "s"}
+                </span>
+                <span className="text-xs font-bold text-slate-400">/</span>
+                <span className="text-xs font-bold text-slate-500">
+                  {statusSummary.filter((item) => item.count > 0).length} status group{statusSummary.filter((item) => item.count > 0).length === 1 ? "" : "s"}
+                </span>
+                {selectedStatusFilter ? (
+                  <span className="rounded-full bg-teal-100 px-2.5 py-1 text-xs font-black text-teal-800">
+                    {selectedStatusFilter === blankColumnFilterValue ? "Not set" : selectedStatusFilter}
+                  </span>
+                ) : null}
               </div>
-              <p className="text-xs font-bold text-slate-500">
-                {filteredRows.length} row{filteredRows.length === 1 ? "" : "s"} grouped by Status column
-              </p>
+              <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between lg:justify-end">
+                <div className="flex min-w-0 flex-wrap gap-1.5">
+                  {statusSummaryPreview.map((item) => (
+                    <button
+                      className={`inline-flex h-8 max-w-[190px] items-center gap-1.5 rounded-lg border px-2 text-xs font-black transition hover:bg-white hover:shadow-sm ${
+                        selectedStatusFilter === item.key
+                          ? "border-teal-300 bg-teal-50 text-teal-800"
+                          : "border-slate-200 bg-slate-50 text-slate-700"
+                      }`}
+                      key={`preview-${item.key}`}
+                      onClick={() => applyStatusSummaryFilter(item.key)}
+                      title={`Filter Status: ${item.label}`}
+                      type="button"
+                    >
+                      <span className="min-w-0 truncate">{item.label}</span>
+                      <span className="shrink-0 text-slate-400">{item.count}</span>
+                    </button>
+                  ))}
+                </div>
+                <button
+                  className="inline-flex h-9 items-center justify-center gap-2 rounded-xl border border-slate-950/10 bg-white px-3 text-xs font-black uppercase text-slate-800 shadow-sm transition hover:-translate-y-0.5 hover:bg-slate-50 hover:shadow-md"
+                  onClick={() => setIsSummaryOpen((current) => !current)}
+                  type="button"
+                >
+                  {isSummaryOpen ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
+                  {isSummaryOpen ? "Hide Summary" : "Show Summary"}
+                </button>
+              </div>
             </div>
-            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-              {statusSummary.map((item) => {
-                const isActive = selectedStatusFilter === item.key;
+            {isSummaryOpen ? (
+              <div className="border-t border-slate-100 bg-slate-50/70 p-2">
+                <div className="grid gap-1.5 lg:grid-cols-2 xl:grid-cols-3">
+                  {statusSummary.map((item) => {
+                    const isActive = selectedStatusFilter === item.key;
 
-                return (
-                  <button
-                    className={`min-w-0 rounded-xl border p-3 text-left transition hover:-translate-y-0.5 hover:shadow-md ${
-                      isActive
-                        ? "border-teal-300 bg-teal-50 ring-2 ring-teal-100"
-                        : "border-slate-200 bg-slate-50 hover:bg-white"
-                    }`}
-                    key={item.key}
-                    onClick={() => applyStatusSummaryFilter(item.key)}
-                    title={`Filter Status: ${item.label}`}
-                    type="button"
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <p className="min-w-0 truncate text-xs font-black uppercase text-slate-600">{item.label}</p>
-                      <span className="shrink-0 rounded-full bg-white px-2 py-0.5 text-[10px] font-black text-slate-700 shadow-sm">
-                        {item.percentage}%
-                      </span>
-                    </div>
-                    <p className="mt-2 text-2xl font-black text-slate-950">{item.count}</p>
-                    <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-200">
-                      <div
-                        className="h-full rounded-full bg-gradient-to-r from-teal-500 via-sky-500 to-fuchsia-500"
-                        style={{ width: `${Math.max(item.percentage, item.count ? 4 : 0)}%` }}
-                      />
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
+                    return (
+                      <button
+                        className={`grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-xl border px-3 py-2 text-left transition hover:bg-white hover:shadow-sm ${
+                          isActive
+                            ? "border-teal-300 bg-teal-50 ring-2 ring-teal-100"
+                            : "border-slate-200 bg-white"
+                        }`}
+                        key={item.key}
+                        onClick={() => applyStatusSummaryFilter(item.key)}
+                        title={`Filter Status: ${item.label}`}
+                        type="button"
+                      >
+                        <div className="min-w-0">
+                          <div className="flex min-w-0 items-center justify-between gap-3">
+                            <span className="min-w-0 truncate text-xs font-black uppercase text-slate-700">
+                              {item.label}
+                            </span>
+                            <span className="shrink-0 text-[11px] font-black text-slate-500">{item.percentage}%</span>
+                          </div>
+                          <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-slate-200">
+                            <div
+                              className="h-full rounded-full bg-teal-500"
+                              style={{ width: `${Math.max(item.percentage, item.count ? 4 : 0)}%` }}
+                            />
+                          </div>
+                        </div>
+                        <span className="text-lg font-black text-slate-950">{item.count}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : null}
           </section>
 
           <div className="overflow-hidden rounded-2xl border border-slate-950/10 bg-white">
