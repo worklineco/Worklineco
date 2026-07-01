@@ -28,6 +28,7 @@ type ColumnFilterOption = { key: string; label: string };
 type FilterMenuPosition = { left: number; listMaxHeight: number; top: number };
 type InlineEditorState = { columnKey: string; rowIndex: number; value: string };
 type ColumnLayout = { hiddenColumnKeys: string[]; order: string[] };
+type StatusSummaryItem = { count: number; key: string; label: string; percentage: number };
 
 const actionColumnWidth = 122;
 const columnFilterOptionLimit = 1000;
@@ -363,6 +364,11 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
     () => new Set(filteredRows.map(({ row }) => String(row.data["OIA No"] ?? "").trim()).filter(Boolean)).size,
     [filteredRows]
   );
+  const statusSummary = useMemo(
+    () => getStatusSummary(filteredRows.map(({ row }) => row)),
+    [filteredRows]
+  );
+  const selectedStatusFilter = columnValueFilters.Status?.[0] ?? null;
   
   const hasActiveFilters = useMemo(
     () =>
@@ -582,6 +588,21 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
     setGlobalSearch("");
     setColumnValueFilters({});
     setColumnTextFilters({});
+    closeColumnFilter();
+  }
+
+  function applyStatusSummaryFilter(statusKey: string) {
+    setColumnValueFilters((currentFilters) => {
+      const nextFilters = { ...currentFilters };
+
+      if (nextFilters.Status?.length === 1 && nextFilters.Status[0] === statusKey) {
+        delete nextFilters.Status;
+      } else {
+        nextFilters.Status = [statusKey];
+      }
+
+      return nextFilters;
+    });
     closeColumnFilter();
   }
 
@@ -1302,6 +1323,51 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
               Clear All Filters
             </button>
           </div>
+
+          <section className="mb-3 rounded-2xl border border-slate-950/10 bg-white p-3 shadow-sm">
+            <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <p className="text-xs font-black uppercase tracking-[0.14em] text-teal-700">Summary by Status</p>
+                <h3 className="text-base font-black text-slate-950">Current view</h3>
+              </div>
+              <p className="text-xs font-bold text-slate-500">
+                {filteredRows.length} row{filteredRows.length === 1 ? "" : "s"} grouped by Status column
+              </p>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+              {statusSummary.map((item) => {
+                const isActive = selectedStatusFilter === item.key;
+
+                return (
+                  <button
+                    className={`min-w-0 rounded-xl border p-3 text-left transition hover:-translate-y-0.5 hover:shadow-md ${
+                      isActive
+                        ? "border-teal-300 bg-teal-50 ring-2 ring-teal-100"
+                        : "border-slate-200 bg-slate-50 hover:bg-white"
+                    }`}
+                    key={item.key}
+                    onClick={() => applyStatusSummaryFilter(item.key)}
+                    title={`Filter Status: ${item.label}`}
+                    type="button"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="min-w-0 truncate text-xs font-black uppercase text-slate-600">{item.label}</p>
+                      <span className="shrink-0 rounded-full bg-white px-2 py-0.5 text-[10px] font-black text-slate-700 shadow-sm">
+                        {item.percentage}%
+                      </span>
+                    </div>
+                    <p className="mt-2 text-2xl font-black text-slate-950">{item.count}</p>
+                    <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-200">
+                      <div
+                        className="h-full rounded-full bg-gradient-to-r from-teal-500 via-sky-500 to-fuchsia-500"
+                        style={{ width: `${Math.max(item.percentage, item.count ? 4 : 0)}%` }}
+                      />
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
 
           <div className="overflow-hidden rounded-2xl border border-slate-950/10 bg-white">
             <div className={`${isMaximized ? "max-h-[calc(100vh-82px)]" : "max-h-[calc(100vh-285px)]"} overflow-auto`}>
@@ -2104,6 +2170,35 @@ function getUniqueColumnFilterOptions(rows: AppealRow[], column: Column, limit?:
       })
     )
     .map((value) => ({ key: value, label: getColumnFilterValueLabel(value) }));
+}
+
+function getStatusSummary(rows: AppealRow[]): StatusSummaryItem[] {
+  const statusColumn = columnByKey.get("Status") ?? { key: "Status", label: "Status" };
+  const counts = rows.reduce((summary, row) => {
+    const key = getColumnFilterValueKey(row.data.Status, statusColumn);
+    summary.set(key, (summary.get(key) ?? 0) + 1);
+    return summary;
+  }, new Map<string, number>());
+  const total = rows.length;
+
+  if (!counts.size) {
+    return [{ count: 0, key: blankColumnFilterValue, label: "Not set", percentage: 0 }];
+  }
+
+  return Array.from(counts.entries())
+    .map(([key, count]) => ({
+      count,
+      key,
+      label: key === blankColumnFilterValue ? "Not set" : getColumnFilterValueLabel(key),
+      percentage: total ? Math.round((count / total) * 100) : 0
+    }))
+    .sort((left, right) => {
+      if (right.count !== left.count) {
+        return right.count - left.count;
+      }
+
+      return left.label.localeCompare(right.label, undefined, { numeric: true, sensitivity: "base" });
+    });
 }
 
 function isGroupedOiaSearch(filter: string) {
