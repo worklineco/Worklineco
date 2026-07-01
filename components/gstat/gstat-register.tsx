@@ -28,7 +28,7 @@ type ColumnFilterOption = { key: string; label: string };
 type FilterMenuPosition = { left: number; listMaxHeight: number; top: number };
 type InlineEditorState = { columnKey: string; rowIndex: number; value: string };
 type ColumnLayout = { hiddenColumnKeys: string[]; order: string[] };
-type StatusSummaryItem = { count: number; key: string; label: string; percentage: number };
+type StatusSummaryItem = { color: string; count: number; key: string; label: string; percentage: number };
 
 const actionColumnWidth = 122;
 const columnFilterOptionLimit = 1000;
@@ -36,6 +36,7 @@ const blankColumnFilterValue = "__workline_column_blank__";
 const maxBulkDeleteRows = 5;
 const columnLayoutStorageKey = "workline:gstat-column-layout:v1";
 const poaGptUrl = "https://chatgpt.com/g/g-6a1f3abf8d008191985119e155f67c5f-poa-vakalatnama-helper";
+const statusSummaryColors = ["#14b8a6", "#0ea5e9", "#a855f7", "#f59e0b", "#ef4444", "#22c55e", "#64748b", "#ec4899"];
 
 const baseColumns: Column[] = [
   "Sno",
@@ -370,6 +371,8 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
     [filteredRows]
   );
   const statusSummaryPreview = useMemo(() => statusSummary.filter((item) => item.count > 0).slice(0, 3), [statusSummary]);
+  const statusSummaryGroupCount = useMemo(() => statusSummary.filter((item) => item.count > 0).length, [statusSummary]);
+  const statusChartBackground = useMemo(() => getStatusChartBackground(statusSummary), [statusSummary]);
   const selectedStatusFilter = columnValueFilters.Status?.[0] ?? null;
   
   const hasActiveFilters = useMemo(
@@ -1337,7 +1340,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                 </span>
                 <span className="text-xs font-bold text-slate-400">/</span>
                 <span className="text-xs font-bold text-slate-500">
-                  {statusSummary.filter((item) => item.count > 0).length} status group{statusSummary.filter((item) => item.count > 0).length === 1 ? "" : "s"}
+                  {statusSummaryGroupCount} status group{statusSummaryGroupCount === 1 ? "" : "s"}
                 </span>
                 {selectedStatusFilter ? (
                   <span className="rounded-full bg-teal-100 px-2.5 py-1 text-xs font-black text-teal-800">
@@ -1359,6 +1362,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                       title={`Filter Status: ${item.label}`}
                       type="button"
                     >
+                      <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: item.color }} />
                       <span className="min-w-0 truncate">{item.label}</span>
                       <span className="shrink-0 text-slate-400">{item.count}</span>
                     </button>
@@ -1376,40 +1380,61 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
             </div>
             {isSummaryOpen ? (
               <div className="border-t border-slate-100 bg-slate-50/70 p-2">
-                <div className="grid gap-1.5 lg:grid-cols-2 xl:grid-cols-3">
-                  {statusSummary.map((item) => {
-                    const isActive = selectedStatusFilter === item.key;
+                <div className="grid gap-2 lg:grid-cols-[220px_minmax(0,1fr)]">
+                  <div className="flex items-center justify-center rounded-2xl border border-slate-200 bg-white p-4">
+                    <div
+                      aria-label="Status distribution chart"
+                      className="relative size-36 rounded-full shadow-[inset_0_0_0_1px_rgba(15,23,42,0.08)]"
+                      role="img"
+                      style={{ background: statusChartBackground }}
+                    >
+                      <div className="absolute inset-8 flex flex-col items-center justify-center rounded-full bg-white text-center shadow-sm">
+                        <span className="text-2xl font-black leading-none text-slate-950">{filteredRows.length}</span>
+                        <span className="mt-1 text-[10px] font-black uppercase tracking-[0.12em] text-slate-500">Rows</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="grid gap-1.5 xl:grid-cols-2">
+                    {statusSummary.map((item) => {
+                      const isActive = selectedStatusFilter === item.key;
 
-                    return (
-                      <button
-                        className={`grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-xl border px-3 py-2 text-left transition hover:bg-white hover:shadow-sm ${
-                          isActive
-                            ? "border-teal-300 bg-teal-50 ring-2 ring-teal-100"
-                            : "border-slate-200 bg-white"
-                        }`}
-                        key={item.key}
-                        onClick={() => applyStatusSummaryFilter(item.key)}
-                        title={`Filter Status: ${item.label}`}
-                        type="button"
-                      >
-                        <div className="min-w-0">
-                          <div className="flex min-w-0 items-center justify-between gap-3">
-                            <span className="min-w-0 truncate text-xs font-black uppercase text-slate-700">
-                              {item.label}
-                            </span>
-                            <span className="shrink-0 text-[11px] font-black text-slate-500">{item.percentage}%</span>
+                      return (
+                        <button
+                          className={`grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-xl border px-3 py-2 text-left transition hover:bg-white hover:shadow-sm ${
+                            isActive
+                              ? "border-teal-300 bg-teal-50 ring-2 ring-teal-100"
+                              : "border-slate-200 bg-white"
+                          }`}
+                          key={item.key}
+                          onClick={() => applyStatusSummaryFilter(item.key)}
+                          title={`Filter Status: ${item.label}`}
+                          type="button"
+                        >
+                          <div className="min-w-0">
+                            <div className="flex min-w-0 items-center justify-between gap-3">
+                              <span className="flex min-w-0 items-center gap-2">
+                                <span className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: item.color }} />
+                                <span className="min-w-0 truncate text-xs font-black uppercase text-slate-700">
+                                  {item.label}
+                                </span>
+                              </span>
+                              <span className="shrink-0 text-[11px] font-black text-slate-500">{item.percentage}%</span>
+                            </div>
+                            <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-slate-200">
+                              <div
+                                className="h-full rounded-full"
+                                style={{
+                                  backgroundColor: item.color,
+                                  width: `${Math.max(item.percentage, item.count ? 4 : 0)}%`
+                                }}
+                              />
+                            </div>
                           </div>
-                          <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-slate-200">
-                            <div
-                              className="h-full rounded-full bg-teal-500"
-                              style={{ width: `${Math.max(item.percentage, item.count ? 4 : 0)}%` }}
-                            />
-                          </div>
-                        </div>
-                        <span className="text-lg font-black text-slate-950">{item.count}</span>
-                      </button>
-                    );
-                  })}
+                          <span className="text-lg font-black text-slate-950">{item.count}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
             ) : null}
@@ -2228,7 +2253,7 @@ function getStatusSummary(rows: AppealRow[]): StatusSummaryItem[] {
   const total = rows.length;
 
   if (!counts.size) {
-    return [{ count: 0, key: blankColumnFilterValue, label: "Not set", percentage: 0 }];
+    return [{ color: statusSummaryColors[0], count: 0, key: blankColumnFilterValue, label: "Not set", percentage: 0 }];
   }
 
   return Array.from(counts.entries())
@@ -2244,7 +2269,29 @@ function getStatusSummary(rows: AppealRow[]): StatusSummaryItem[] {
       }
 
       return left.label.localeCompare(right.label, undefined, { numeric: true, sensitivity: "base" });
-    });
+    })
+    .map((item, index) => ({
+      ...item,
+      color: statusSummaryColors[index % statusSummaryColors.length]
+    }));
+}
+
+function getStatusChartBackground(items: StatusSummaryItem[]) {
+  const total = items.reduce((sum, item) => sum + item.count, 0);
+
+  if (!total) {
+    return "#e2e8f0";
+  }
+
+  let currentAngle = 0;
+  const slices = items.map((item) => {
+    const nextAngle = currentAngle + (item.count / total) * 360;
+    const slice = `${item.color} ${currentAngle.toFixed(2)}deg ${nextAngle.toFixed(2)}deg`;
+    currentAngle = nextAngle;
+    return slice;
+  });
+
+  return `conic-gradient(${slices.join(", ")})`;
 }
 
 function isGroupedOiaSearch(filter: string) {
