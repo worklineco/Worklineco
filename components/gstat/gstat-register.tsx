@@ -42,6 +42,7 @@ const baseColumns: Column[] = [
   "Sno",
   "Person handling",
   "Status",
+  "NTBD Reason",
   "Proceedings Status",
   "Next Hearing Date",
   "Entity Group",
@@ -99,6 +100,7 @@ const columnWidths: Record<string, number> = {
   "Sno": 52,
   "Person handling": 92,
   "Status": 96,
+  "NTBD Reason": 170,
   "Proceedings Status": 132,
   "Next Hearing Date": 116,
   "Entity Group": 142,
@@ -138,6 +140,7 @@ const tableWidth = actionColumnWidth + columns.reduce((total, column) => total +
 const requiredBlankCheckColumns = baseColumns.filter(
   (column) =>
     column.key !== "Sno" &&
+    column.key !== "NTBD Reason" &&
     baseColumns.findIndex((item) => item.key === column.key) <=
       baseColumns.findIndex((item) => item.key === "GSTAT Login Password")
 );
@@ -155,6 +158,7 @@ const teamOptions = [
 ];
 const statusOptions = [
   "",
+  "NTBD",
   "Drafting in Process",
   "Pending for Review",
   "Sent to Client",
@@ -168,6 +172,7 @@ const editorSections = [
       "Sno",
       "Person handling",
       "Status",
+      "NTBD Reason",
       "Proceedings Status",
       "Next Hearing Date",
       "Entity Group",
@@ -251,6 +256,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
   const [isSavingEditor, setIsSavingEditor] = useState(false);
   const [message, setMessage] = useState("");
   const [isSummaryOpen, setIsSummaryOpen] = useState(false);
+  const [showNtbdRows, setShowNtbdRows] = useState(false);
   const [userAccess, setUserAccess] = useState<UserAccess>({ isPartner: false, team: "" });
   const [sortState, setSortState] = useState<SortState>(null);
   const [selectedRowKeys, setSelectedRowKeys] = useState<Set<string>>(() => new Set());
@@ -330,6 +336,10 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
       const visibleRows = rows
         .map((row, index) => ({ row, originalIndex: index }))
         .filter(({ row, originalIndex }) => {
+          if (!showNtbdRows && isNtbdStatus(row.data.Status)) {
+            return false;
+          }
+
           if (globalSearchLower) {
             const matchesGroupedOiaSearch =
               isGroupedOiaSearch(globalSearchLower) &&
@@ -359,7 +369,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
 
       return [...visibleRows].sort((left, right) => compareRowsForColumn(left, right, sortColumn, sortState.direction));
     },
-    [activeColumnFilterEntries, activeColumnTextFilterEntries, deferredGlobalSearch, duplicateOiaNumbers, rows, rowSearchText, sortState]
+    [activeColumnFilterEntries, activeColumnTextFilterEntries, deferredGlobalSearch, duplicateOiaNumbers, rows, rowSearchText, showNtbdRows, sortState]
   );
   
   const filteredUniqueAppeals = useMemo(
@@ -1267,6 +1277,15 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                 <ExternalLink className="size-4" />
                 Use GPT for drafting POA
               </a>
+              <label className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-950/10 bg-white px-3 text-xs font-black uppercase text-slate-800 shadow-sm">
+                <input
+                  checked={showNtbdRows}
+                  className="size-4 rounded border-slate-300 accent-teal-600"
+                  onChange={(event) => setShowNtbdRows(event.target.checked)}
+                  type="checkbox"
+                />
+                Show NTBD
+              </label>
               {!isMaximized ? (
                 <Link
                   className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-950/10 bg-white px-3 text-xs font-black uppercase text-slate-800 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
@@ -1630,9 +1649,14 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                             savingInlineCell?.rowIndex === originalIndex && savingInlineCell.columnKey === column.key;
                           const isDuplicateDrc07 = hasDuplicateDrc07 && column.key === "DRC 07 No";
                           const isDuplicateOia = hasDuplicateOia && column.key === "OIA No";
-                          const isRequiredBlank =
-                            requiredBlankCheckColumns.some((requiredColumn) => requiredColumn.key === column.key) &&
+                          const isBlankNtbdReason =
+                            column.key === "NTBD Reason" &&
+                            isNtbdStatus(row.data.Status) &&
                             isBlankCell(cellValue);
+                          const isRequiredBlank =
+                            (requiredBlankCheckColumns.some((requiredColumn) => requiredColumn.key === column.key) &&
+                              isBlankCell(cellValue)) ||
+                            isBlankNtbdReason;
 
                           return (
                             <td
@@ -1796,6 +1820,14 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                             <StatusSelectEditor
                               onChange={(value) => updateDraft(field, value)}
                               value={String(editor.draft[field] ?? "")}
+                            />
+                          ) : field === "NTBD Reason" ? (
+                            <input
+                              className="mt-0.5 h-8 w-full rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-900 outline-none transition disabled:bg-slate-100 disabled:text-slate-500 focus:border-teal-300 focus:ring-2 focus:ring-teal-100"
+                              disabled={!isNtbdStatus(editor.draft.Status)}
+                              onChange={(event) => updateDraft(field, event.target.value)}
+                              placeholder={isNtbdStatus(editor.draft.Status) ? "Reason for NTBD" : "Available when Status is NTBD"}
+                              value={editor.draft[field] ?? ""}
                             />
                           ) : (
                             <input
@@ -2124,6 +2156,10 @@ function normalizeDuplicateValue(value: string | number | undefined) {
 
 function isBlankCell(value: string | number | undefined) {
   return String(value ?? "").trim() === "";
+}
+
+function isNtbdStatus(value: string | number | undefined) {
+  return String(value ?? "").trim().toUpperCase() === "NTBD";
 }
 
 function normalizeDateValue(value: string | number | undefined) {
