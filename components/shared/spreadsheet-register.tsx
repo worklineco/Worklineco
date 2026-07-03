@@ -87,7 +87,7 @@ export function SpreadsheetRegister({
           <p className={`text-xs font-black uppercase tracking-[0.16em] ${tone}`}>Register</p>
           <h2 className="mt-2 text-2xl font-black text-slate-950">{title}</h2>
           <p className="mt-2 text-sm font-bold text-slate-500">
-            {columns.length} columns · {rows.length} rows
+            {columns.length} columns - {rows.length} rows
           </p>
         </div>
 

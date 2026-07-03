@@ -21,7 +21,6 @@ import { useRef, useState } from "react";
 import { MonthCalendar } from "@/components/home/month-calendar";
 import { ProfilePanel } from "@/components/home/profile-panel";
 import { TeamsPanel } from "@/components/home/teams-panel";
-import { SpreadsheetRegister } from "@/components/shared/spreadsheet-register";
 
 const navigation = [
   { href: "/", icon: LayoutDashboard, label: "Overview", tone: "bg-teal-100 text-teal-800" },
@@ -36,7 +35,7 @@ const navigation = [
     target: "_blank",
     tone: "bg-indigo-100 text-indigo-800"
   },
-  { href: "#records", icon: Building2, label: "Client Records", tone: "bg-sky-100 text-sky-800" },
+  { href: "/client-records", icon: Building2, label: "Client Records", target: "_blank", tone: "bg-sky-100 text-sky-800" },
   { href: "#reports", icon: BarChart3, label: "Reports", tone: "bg-emerald-100 text-emerald-800" },
   { href: "/gstat/trash", icon: Trash2, label: "Trash", target: "_blank", tone: "bg-emerald-100 text-emerald-800" }
 ];
@@ -67,17 +66,6 @@ const productFocus = [
 const supportingAreas = [
   { icon: FileText, label: "Documents", text: "Organised filing material and working papers." },
   { icon: Gavel, label: "Litigation", text: "Matter movement and responsibility tracking." }
-];
-
-const clientRecordColumns = [
-  "Sl No.",
-  "Particulars",
-  "Address",
-  "State",
-  "Country",
-  "Registration Type",
-  "GSTIN/UIN",
-  "PAN/IT No."
 ];
 
 export default function Home() {
@@ -175,17 +163,6 @@ export default function Home() {
               <TeamsPanel />
             </div>
           ) : null}
-
-          <div className="mt-5" id="records">
-            <SpreadsheetRegister
-              columns={clientRecordColumns}
-              emptyMessage="No client records yet."
-              filename="workline-client-records.xlsx"
-              minWidth={1120}
-              title="Client Records"
-              tone="text-sky-700"
-            />
-          </div>
 
           <section className="workline-frame mt-5 rounded-[26px] p-5 md:p-6">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
