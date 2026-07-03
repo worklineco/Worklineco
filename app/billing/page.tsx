@@ -1,5 +1,6 @@
 import { ArrowLeft, ReceiptText } from "lucide-react";
 import Link from "next/link";
+import { SpreadsheetRegister } from "@/components/shared/spreadsheet-register";
 
 const billingColumns = [
   "Date",
@@ -55,42 +56,16 @@ export default function BillingPage() {
           </div>
         </header>
 
-        <section className="mt-5 rounded-[28px] border border-white/80 bg-white/90 p-5 shadow-[0_24px_80px_rgba(15,23,42,0.10)]">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-            <div>
-              <p className="text-xs font-black uppercase tracking-[0.16em] text-lime-700">
-                Register
-              </p>
-              <h2 className="mt-2 text-2xl font-black text-slate-950">
-                Billing Table
-              </h2>
-            </div>
-            <p className="text-sm font-bold text-slate-500">
-              {billingColumns.length} columns
-            </p>
-          </div>
-
-          <div className="mt-5 overflow-auto rounded-2xl border border-slate-200 bg-white">
-            <table className="w-full min-w-[2200px] border-collapse text-left text-sm">
-              <thead className="bg-slate-50 text-xs font-black uppercase text-slate-500">
-                <tr>
-                  {billingColumns.map((column) => (
-                    <th className="border-b border-r border-slate-200 px-4 py-3 last:border-r-0" key={column}>
-                      {column}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td className="px-4 py-8 text-sm font-bold text-slate-500" colSpan={billingColumns.length}>
-                    No billing entries yet.
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </section>
+        <div className="mt-5">
+          <SpreadsheetRegister
+            columns={billingColumns}
+            emptyMessage="No billing entries yet."
+            filename="workline-billing-register.xlsx"
+            minWidth={2200}
+            title="Billing Table"
+            tone="text-lime-700"
+          />
+        </div>
       </section>
     </main>
   );

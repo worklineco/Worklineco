@@ -21,6 +21,7 @@ import { useRef, useState } from "react";
 import { MonthCalendar } from "@/components/home/month-calendar";
 import { ProfilePanel } from "@/components/home/profile-panel";
 import { TeamsPanel } from "@/components/home/teams-panel";
+import { SpreadsheetRegister } from "@/components/shared/spreadsheet-register";
 
 const navigation = [
   { href: "/", icon: LayoutDashboard, label: "Overview", tone: "bg-teal-100 text-teal-800" },
@@ -64,9 +65,19 @@ const productFocus = [
 ];
 
 const supportingAreas = [
-  { icon: Building2, label: "Client Records", text: "A clean master for firm clients and identifiers." },
   { icon: FileText, label: "Documents", text: "Organised filing material and working papers." },
   { icon: Gavel, label: "Litigation", text: "Matter movement and responsibility tracking." }
+];
+
+const clientRecordColumns = [
+  "Sl No.",
+  "Particulars",
+  "Address",
+  "State",
+  "Country",
+  "Registration Type",
+  "GSTIN/UIN",
+  "PAN/IT No."
 ];
 
 export default function Home() {
@@ -165,6 +176,17 @@ export default function Home() {
             </div>
           ) : null}
 
+          <div className="mt-5" id="records">
+            <SpreadsheetRegister
+              columns={clientRecordColumns}
+              emptyMessage="No client records yet."
+              filename="workline-client-records.xlsx"
+              minWidth={1120}
+              title="Client Records"
+              tone="text-sky-700"
+            />
+          </div>
+
           <section className="workline-frame mt-5 rounded-[26px] p-5 md:p-6">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
               <div>
@@ -178,7 +200,7 @@ export default function Home() {
               </p>
             </div>
 
-            <div className="mt-6 grid gap-4 md:grid-cols-3" id="records">
+            <div className="mt-6 grid gap-4 md:grid-cols-2">
               {supportingAreas.map((item) => {
                 const Icon = item.icon;
                 return (
