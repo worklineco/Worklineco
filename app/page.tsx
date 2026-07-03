@@ -9,6 +9,7 @@ import {
   FileText,
   Gavel,
   LayoutDashboard,
+  ReceiptText,
   Scale,
   ShieldCheck,
   Trash2,
@@ -25,6 +26,7 @@ const navigation = [
   { href: "/", icon: LayoutDashboard, label: "Overview", tone: "bg-teal-100 text-teal-800" },
   { href: "/gst", icon: ClipboardCheck, label: "GST Tracker", target: "_blank", tone: "bg-amber-100 text-amber-800" },
   { href: "/gstat", icon: Scale, label: "GSTAT", target: "_blank", tone: "bg-fuchsia-100 text-fuchsia-800" },
+  { href: "/billing", icon: ReceiptText, label: "Billing", target: "_blank", tone: "bg-lime-100 text-lime-800" },
   {
     href: "/pdf-indexing",
     icon: FileSearch,
