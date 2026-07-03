@@ -5,7 +5,7 @@ import { AlertCircle, ArrowRight, CheckCircle2, Eye, EyeOff, Loader2 } from "luc
 import { FormEvent, useState } from "react";
 
 const organisationId = "DCO1433";
-const roleOptions = ["Article Assistant", "Associate", "Manager", "Senior Manager", "Partner", "Others"];
+const roleOptions = ["Article Assistant", "Associate", "Manager", "Senior Manager", "Partner", "Accounts", "Others"];
 const teamOptions = [
   "Team 01",
   "Team 03",
