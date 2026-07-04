@@ -1,21 +1,6 @@
 import { ArrowLeft, Building2 } from "lucide-react";
 import Link from "next/link";
-import { SpreadsheetRegister } from "@/components/shared/spreadsheet-register";
-
-const clientRecordColumns = [
-  "S.no.",
-  "Group",
-  "Particulars",
-  "Email ID",
-  "POC Name",
-  "POC Contact no.",
-  "Address",
-  "State",
-  "Country",
-  "Registration Type",
-  "GSTIN/UIN",
-  "PAN/IT No."
-];
+import { ClientRecordsRegister } from "@/components/client-records/client-records-register";
 
 export default function ClientRecordsPage() {
   return (
@@ -50,23 +35,7 @@ export default function ClientRecordsPage() {
         </header>
 
         <div className="mt-5">
-          <SpreadsheetRegister
-            apiPath="/api/client-records"
-            autoSerialColumn="S.no."
-            columns={clientRecordColumns}
-            emptyMessage="No client records yet."
-            enableSearch
-            filename="workline-client-records.xlsx"
-            minWidth={1700}
-            pocConfig={{
-              clientColumn: "Particulars",
-              contactColumn: "POC Contact no.",
-              emailColumn: "Email ID",
-              nameColumn: "POC Name"
-            }}
-            title="Client Records"
-            tone="text-sky-700"
-          />
+          <ClientRecordsRegister />
         </div>
       </section>
     </main>
