@@ -1,27 +1,38 @@
 "use client";
 
-import { Download, Upload } from "lucide-react";
-import { ChangeEvent, useEffect, useRef, useState } from "react";
+import { Download, Plus, Search, Upload } from "lucide-react";
+import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx-js-style";
 
 type RegisterRow = Record<string, string | number>;
 
 type SpreadsheetRegisterProps = {
   apiPath?: string;
+  autoSerialColumn?: string;
   columns: string[];
   emptyMessage: string;
+  enableSearch?: boolean;
   filename: string;
   minWidth: number;
+  pocConfig?: {
+    clientColumn: string;
+    contactColumn: string;
+    emailColumn: string;
+    nameColumn: string;
+  };
   title: string;
   tone?: string;
 };
 
 export function SpreadsheetRegister({
   apiPath,
+  autoSerialColumn,
   columns,
   emptyMessage,
+  enableSearch = false,
   filename,
   minWidth,
+  pocConfig,
   title,
   tone = "text-slate-700"
 }: SpreadsheetRegisterProps) {
@@ -29,7 +40,37 @@ export function SpreadsheetRegister({
   const [message, setMessage] = useState("");
   const [isLoading, setIsLoading] = useState(Boolean(apiPath));
   const [isSaving, setIsSaving] = useState(false);
+  const [search, setSearch] = useState("");
+  const [pocClient, setPocClient] = useState("");
+  const [pocContact, setPocContact] = useState("");
+  const [pocEmail, setPocEmail] = useState("");
+  const [pocName, setPocName] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const visibleRows = useMemo(() => withAutoSerial(rows, autoSerialColumn), [autoSerialColumn, rows]);
+  const filteredRows = useMemo(() => {
+    const value = search.trim().toLowerCase();
+
+    if (!value) {
+      return visibleRows;
+    }
+
+    return visibleRows.filter((row) =>
+      columns.some((column) => String(row[column] ?? "").toLowerCase().includes(value))
+    );
+  }, [columns, search, visibleRows]);
+  const pocClients = useMemo(() => {
+    if (!pocConfig) {
+      return [];
+    }
+
+    return Array.from(
+      new Set(
+        rows
+          .map((row) => String(row[pocConfig.clientColumn] ?? "").trim())
+          .filter(Boolean)
+      )
+    );
+  }, [pocConfig, rows]);
 
   useEffect(() => {
     if (!apiPath) {
@@ -81,14 +122,25 @@ export function SpreadsheetRegister({
         header: 1
       });
       const headerIndex = rawRows.findIndex((row) =>
-        columns.every((column) => row.map((value) => String(value).trim()).includes(column))
+        getImportColumns(columns, autoSerialColumn).every((column) =>
+          row.map((value) => String(value).trim()).includes(column)
+        )
       );
+      const headerRow = headerIndex >= 0 ? rawRows[headerIndex].map((value) => String(value).trim()) : [];
       const dataRows = rawRows
         .slice(headerIndex >= 0 ? headerIndex + 1 : 1)
         .filter((row) => row.some((value) => String(value).trim()))
-        .map((row) =>
-          columns.reduce<RegisterRow>((record, column, index) => {
-            record[column] = row[index] ?? "";
+        .map((row, rowIndex) =>
+          columns.reduce<RegisterRow>((record, column, columnIndex) => {
+            if (column === autoSerialColumn) {
+              record[column] = rowIndex + 1;
+              return record;
+            }
+
+            const sourceIndex = headerRow.length
+              ? headerRow.findIndex((header) => header === column)
+              : getImportColumns(columns, autoSerialColumn).findIndex((header) => header === column);
+            record[column] = row[sourceIndex >= 0 ? sourceIndex : columnIndex] ?? "";
             return record;
           }, {})
         );
@@ -134,17 +186,53 @@ export function SpreadsheetRegister({
   }
 
   function exportExcel() {
-    const exportRows = rows.length ? rows : [createBlankRow(columns)];
+    const exportRows = visibleRows.length ? visibleRows : [createBlankRow(columns)];
     const worksheet = XLSX.utils.json_to_sheet(exportRows, { header: columns });
     worksheet["!cols"] = columns.map((column) => ({ wch: Math.max(14, column.length + 3) }));
     worksheet["!autofilter"] = {
-      ref: XLSX.utils.encode_range({ e: { c: columns.length - 1, r: Math.max(rows.length, 1) }, s: { c: 0, r: 0 } })
+      ref: XLSX.utils.encode_range({ e: { c: columns.length - 1, r: Math.max(visibleRows.length, 1) }, s: { c: 0, r: 0 } })
     };
 
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, title.slice(0, 31));
     XLSX.writeFile(workbook, filename);
     setMessage(rows.length ? `Exported ${rows.length} rows.` : "Exported a blank template.");
+  }
+
+  function addPoc(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!pocConfig || !pocClient.trim() || !pocName.trim()) {
+      setMessage("Select a client and enter POC name.");
+      return;
+    }
+
+    const matchingRow = rows.find(
+      (row) => String(row[pocConfig.clientColumn] ?? "").trim().toLowerCase() === pocClient.trim().toLowerCase()
+    );
+    const nextRow = columns.reduce<RegisterRow>((record, column) => {
+      if (column === autoSerialColumn) {
+        record[column] = rows.length + 1;
+      } else if (column === pocConfig.clientColumn) {
+        record[column] = pocClient.trim();
+      } else if (column === pocConfig.nameColumn) {
+        record[column] = pocName.trim();
+      } else if (column === pocConfig.contactColumn) {
+        record[column] = pocContact.trim();
+      } else if (column === pocConfig.emailColumn) {
+        record[column] = pocEmail.trim();
+      } else {
+        record[column] = matchingRow?.[column] ?? "";
+      }
+
+      return record;
+    }, {});
+
+    setRows((currentRows) => [...currentRows, nextRow]);
+    setPocContact("");
+    setPocEmail("");
+    setPocName("");
+    setMessage(`Added POC for ${pocClient.trim()}.`);
   }
 
   return (
@@ -186,6 +274,42 @@ export function SpreadsheetRegister({
         </div>
       </div>
 
+      {enableSearch ? (
+        <div className="mt-5 flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3">
+          <Search className="size-4 text-slate-400" />
+          <input
+            className="h-11 min-w-0 flex-1 border-0 bg-transparent text-sm font-semibold outline-none"
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder={`Search ${title.toLowerCase()}`}
+            value={search}
+          />
+        </div>
+      ) : null}
+
+      {pocConfig ? (
+        <form className="mt-4 grid gap-3 lg:grid-cols-[1.15fr_1fr_1fr_1fr_auto]" onSubmit={addPoc}>
+          <input
+            className="input"
+            list={`${title}-clients`}
+            onChange={(event) => setPocClient(event.target.value)}
+            placeholder="Client"
+            value={pocClient}
+          />
+          <datalist id={`${title}-clients`}>
+            {pocClients.map((client) => (
+              <option key={client} value={client} />
+            ))}
+          </datalist>
+          <input className="input" onChange={(event) => setPocName(event.target.value)} placeholder="POC Name" value={pocName} />
+          <input className="input" onChange={(event) => setPocContact(event.target.value)} placeholder="POC Contact no." value={pocContact} />
+          <input className="input" onChange={(event) => setPocEmail(event.target.value)} placeholder="Email ID" value={pocEmail} />
+          <button className="inline-flex h-12 items-center justify-center gap-2 rounded-2xl bg-lime-700 px-4 text-sm font-black text-white transition hover:bg-lime-800" type="submit">
+            <Plus className="size-4" />
+            Add POC
+          </button>
+        </form>
+      ) : null}
+
       {message ? (
         <p className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-900">
           {message}
@@ -210,8 +334,8 @@ export function SpreadsheetRegister({
                   Loading saved rows...
                 </td>
               </tr>
-            ) : rows.length ? (
-              rows.map((row, rowIndex) => (
+            ) : filteredRows.length ? (
+              filteredRows.map((row, rowIndex) => (
                 <tr className="border-b border-slate-100 last:border-b-0" key={`${title}-${rowIndex}`}>
                   {columns.map((column) => (
                     <td className="border-r border-slate-100 px-4 py-3 font-semibold text-slate-700 last:border-r-0" key={column}>
@@ -223,7 +347,7 @@ export function SpreadsheetRegister({
             ) : (
               <tr>
                 <td className="px-4 py-8 text-sm font-bold text-slate-500" colSpan={columns.length}>
-                  {emptyMessage}
+                  {search.trim() ? "No matching rows found." : emptyMessage}
                 </td>
               </tr>
             )}
@@ -239,4 +363,19 @@ function createBlankRow(columns: string[]) {
     row[column] = "";
     return row;
   }, {});
+}
+
+function getImportColumns(columns: string[], autoSerialColumn?: string) {
+  return autoSerialColumn ? columns.filter((column) => column !== autoSerialColumn) : columns;
+}
+
+function withAutoSerial(rows: RegisterRow[], autoSerialColumn?: string) {
+  if (!autoSerialColumn) {
+    return rows;
+  }
+
+  return rows.map((row, index) => ({
+    ...row,
+    [autoSerialColumn]: index + 1
+  }));
 }

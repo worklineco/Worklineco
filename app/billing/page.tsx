@@ -3,13 +3,17 @@ import Link from "next/link";
 import { SpreadsheetRegister } from "@/components/shared/spreadsheet-register";
 
 const billingColumns = [
+  "S.no.",
+  "Group",
   "Date",
   "Invoice Number",
   "Voucher Type",
   "Sales Ledger",
   "Cost Center",
-  "Group",
   "Client",
+  "Email ID",
+  "POC Name",
+  "POC Contact no.",
   "GSTIN",
   "Description",
   "Amount",
@@ -58,10 +62,18 @@ export default function BillingPage() {
 
         <div className="mt-5">
           <SpreadsheetRegister
+            autoSerialColumn="S.no."
             columns={billingColumns}
             emptyMessage="No billing entries yet."
+            enableSearch
             filename="workline-billing-register.xlsx"
-            minWidth={2200}
+            minWidth={2600}
+            pocConfig={{
+              clientColumn: "Client",
+              contactColumn: "POC Contact no.",
+              emailColumn: "Email ID",
+              nameColumn: "POC Name"
+            }}
             title="Billing Table"
             tone="text-lime-700"
           />
