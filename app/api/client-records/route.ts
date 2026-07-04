@@ -1,11 +1,12 @@
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type User } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
 type CookieToSet = { name: string; options: CookieOptions; value: string };
 type RegisterRow = Record<string, string | number>;
 
+const defaultOrganisationCode = "DCO1433";
 const sourceKey = "client_records_register";
 const columns = [
   "Sl No.",
@@ -26,7 +27,7 @@ export async function GET() {
   }
 
   const admin = createAdminClient();
-  const organisation = await getOrganisationId(admin, auth.user.id);
+  const organisation = await getOrganisationId(admin, auth.user);
 
   if ("error" in organisation) {
     return organisation.error;
@@ -62,7 +63,7 @@ export async function POST(request: Request) {
   }
 
   const admin = createAdminClient();
-  const organisation = await getOrganisationId(admin, auth.user.id);
+  const organisation = await getOrganisationId(admin, auth.user);
 
   if ("error" in organisation) {
     return organisation.error;
@@ -125,23 +126,85 @@ function createAdminClient() {
   });
 }
 
-async function getOrganisationId(admin: ReturnType<typeof createAdminClient>, userId: string) {
+async function getOrganisationId(
+  admin: ReturnType<typeof createAdminClient>,
+  user: User
+) {
   const { data, error } = await admin
     .from("users")
     .select("organisation_id")
-    .eq("id", userId)
+    .eq("id", user.id)
     .single();
 
-  if (error || !data?.organisation_id) {
+  if (!error && data?.organisation_id) {
+    return { organisationId: data.organisation_id as string };
+  }
+
+  const organisationCode =
+    String(user.user_metadata?.organisation_id ?? "").trim() || defaultOrganisationCode;
+  const slug = organisationCode.toLowerCase();
+  const organisationName = organisationCode === defaultOrganisationCode ? "WorkLine DCO" : organisationCode;
+  const existingOrganisation = await admin
+    .from("organisations")
+    .select("id")
+    .eq("slug", slug)
+    .maybeSingle();
+
+  if (existingOrganisation.error) {
     return {
       error: NextResponse.json(
-        { error: "Create the firm workspace before saving client records." },
-        { status: 400 }
+        { error: existingOrganisation.error.message },
+        { status: 500 }
       )
     };
   }
 
-  return { organisationId: data.organisation_id as string };
+  const organisationId = existingOrganisation.data?.id ?? await createOrganisation(admin, organisationName, slug);
+
+  if (!organisationId) {
+    return {
+      error: NextResponse.json(
+        { error: "Could not prepare the firm workspace for client records." },
+        { status: 500 }
+      )
+    };
+  }
+
+  const { error: userError } = await admin.from("users").upsert({
+    email: user.email ?? "",
+    full_name: String(user.user_metadata?.full_name ?? "").trim() || null,
+    id: user.id,
+    organisation_id: organisationId,
+    status: "active"
+  });
+
+  if (userError) {
+    return { error: NextResponse.json({ error: userError.message }, { status: 500 }) };
+  }
+
+  return { organisationId };
+}
+
+async function createOrganisation(
+  admin: ReturnType<typeof createAdminClient>,
+  name: string,
+  slug: string
+) {
+  const { data, error } = await admin
+    .from("organisations")
+    .insert({
+      name,
+      slug,
+      status: "trial"
+    })
+    .select("id")
+    .single();
+
+  if (error) {
+    return null;
+  }
+
+  return data.id as string;
 }
 
 async function requireUser() {
