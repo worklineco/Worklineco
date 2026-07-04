@@ -1,12 +1,13 @@
 "use client";
 
 import { Download, Upload } from "lucide-react";
-import { ChangeEvent, useRef, useState } from "react";
+import { ChangeEvent, useEffect, useRef, useState } from "react";
 import * as XLSX from "xlsx-js-style";
 
 type RegisterRow = Record<string, string | number>;
 
 type SpreadsheetRegisterProps = {
+  apiPath?: string;
   columns: string[];
   emptyMessage: string;
   filename: string;
@@ -16,6 +17,7 @@ type SpreadsheetRegisterProps = {
 };
 
 export function SpreadsheetRegister({
+  apiPath,
   columns,
   emptyMessage,
   filename,
@@ -25,7 +27,42 @@ export function SpreadsheetRegister({
 }: SpreadsheetRegisterProps) {
   const [rows, setRows] = useState<RegisterRow[]>([]);
   const [message, setMessage] = useState("");
+  const [isLoading, setIsLoading] = useState(Boolean(apiPath));
+  const [isSaving, setIsSaving] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!apiPath) {
+      return;
+    }
+
+    const endpoint = apiPath;
+
+    async function loadRows() {
+      setIsLoading(true);
+      setMessage("");
+
+      try {
+        const response = await fetch(endpoint, { cache: "no-store" });
+        const result = (await response.json()) as { error?: string; rows?: RegisterRow[] };
+
+        if (!response.ok) {
+          setMessage(result.error ?? "Could not load saved rows.");
+          setRows([]);
+          return;
+        }
+
+        setRows(result.rows ?? []);
+      } catch (error) {
+        console.error(`${title} load error:`, error);
+        setMessage("Could not load saved rows.");
+      } finally {
+        setIsLoading(false);
+      }
+    }
+
+    void loadRows();
+  }, [apiPath, title]);
 
   async function importExcel(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -56,13 +93,43 @@ export function SpreadsheetRegister({
           }, {})
         );
 
-      setRows(dataRows);
-      setMessage(dataRows.length ? `Imported ${dataRows.length} rows from ${file.name}.` : "No rows found in the selected Excel file.");
+      if (apiPath && dataRows.length) {
+        await saveRows(dataRows, `Imported and saved ${dataRows.length} rows from ${file.name}.`);
+      } else {
+        setRows(dataRows);
+        setMessage(dataRows.length ? `Imported ${dataRows.length} rows from ${file.name}.` : "No rows found in the selected Excel file.");
+      }
     } catch (error) {
       console.error(`${title} import error:`, error);
       setMessage("Could not import the selected Excel file.");
     } finally {
       event.target.value = "";
+    }
+  }
+
+  async function saveRows(nextRows: RegisterRow[], successMessage: string) {
+    setIsSaving(true);
+
+    try {
+      const response = await fetch(apiPath!, {
+        body: JSON.stringify({ rows: nextRows }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST"
+      });
+      const result = (await response.json()) as { error?: string; rows?: RegisterRow[] };
+
+      if (!response.ok) {
+        setMessage(result.error ?? "Could not save rows.");
+        return;
+      }
+
+      setRows(result.rows ?? nextRows);
+      setMessage(successMessage);
+    } catch (error) {
+      console.error(`${title} save error:`, error);
+      setMessage("Could not save rows.");
+    } finally {
+      setIsSaving(false);
     }
   }
 
@@ -87,7 +154,7 @@ export function SpreadsheetRegister({
           <p className={`text-xs font-black uppercase tracking-[0.16em] ${tone}`}>Register</p>
           <h2 className="mt-2 text-2xl font-black text-slate-950">{title}</h2>
           <p className="mt-2 text-sm font-bold text-slate-500">
-            {columns.length} columns - {rows.length} rows
+            {columns.length} columns - {isLoading ? "loading" : rows.length} rows
           </p>
         </div>
 
@@ -101,11 +168,12 @@ export function SpreadsheetRegister({
           />
           <button
             className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl bg-white px-4 text-sm font-black text-slate-800 ring-1 ring-slate-200 transition hover:bg-slate-50"
+            disabled={isLoading || isSaving}
             onClick={() => fileInputRef.current?.click()}
             type="button"
           >
             <Upload className="size-4" />
-            Import Excel
+            {isSaving ? "Saving..." : "Import Excel"}
           </button>
           <button
             className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl bg-slate-950 px-4 text-sm font-black text-white transition hover:bg-slate-800"
@@ -136,7 +204,13 @@ export function SpreadsheetRegister({
             </tr>
           </thead>
           <tbody>
-            {rows.length ? (
+            {isLoading ? (
+              <tr>
+                <td className="px-4 py-8 text-sm font-bold text-slate-500" colSpan={columns.length}>
+                  Loading saved rows...
+                </td>
+              </tr>
+            ) : rows.length ? (
               rows.map((row, rowIndex) => (
                 <tr className="border-b border-slate-100 last:border-b-0" key={`${title}-${rowIndex}`}>
                   {columns.map((column) => (

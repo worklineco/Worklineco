@@ -47,6 +47,7 @@ export default function ClientRecordsPage() {
 
         <div className="mt-5">
           <SpreadsheetRegister
+            apiPath="/api/client-records"
             columns={clientRecordColumns}
             emptyMessage="No client records yet."
             filename="workline-client-records.xlsx"
