@@ -9,8 +9,12 @@ type RegisterRow = Record<string, string | number>;
 const defaultOrganisationCode = "DCO1433";
 const sourceKey = "client_records_register";
 const columns = [
-  "Sl No.",
+  "S.no.",
+  "Group",
   "Particulars",
+  "Email ID",
+  "POC Name",
+  "POC Contact no.",
   "Address",
   "State",
   "Country",
@@ -89,7 +93,7 @@ export async function POST(request: Request) {
       ...row,
       source: sourceKey
     },
-    name: String(row.Particulars ?? "").trim() || `Client ${row["Sl No."]}`,
+    name: String(row.Particulars ?? "").trim() || `Client ${row["S.no."]}`,
     organisation_id: organisation.organisationId
   }));
 
@@ -243,6 +247,8 @@ function normalizeClientRow(client: { custom_values: RegisterRow | null; name: s
   return columns.reduce<RegisterRow>((row, column) => {
     if (column === "Sl No.") {
       row[column] = customValues[column] || index + 1;
+    } else if (column === "S.no.") {
+      row[column] = customValues[column] || customValues["Sl No."] || index + 1;
     } else if (column === "Particulars") {
       row[column] = customValues[column] || client.name || "";
     } else {
@@ -255,7 +261,7 @@ function normalizeClientRow(client: { custom_values: RegisterRow | null; name: s
 
 function normalizeIncomingRow(row: RegisterRow, index: number) {
   return columns.reduce<RegisterRow>((record, column) => {
-    record[column] = column === "Sl No." ? row[column] || index + 1 : row[column] ?? "";
+    record[column] = column === "S.no." ? row[column] || row["Sl No."] || index + 1 : row[column] ?? "";
     return record;
   }, {});
 }

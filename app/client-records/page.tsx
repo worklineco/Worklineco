@@ -3,8 +3,12 @@ import Link from "next/link";
 import { SpreadsheetRegister } from "@/components/shared/spreadsheet-register";
 
 const clientRecordColumns = [
-  "Sl No.",
+  "S.no.",
+  "Group",
   "Particulars",
+  "Email ID",
+  "POC Name",
+  "POC Contact no.",
   "Address",
   "State",
   "Country",
@@ -48,10 +52,18 @@ export default function ClientRecordsPage() {
         <div className="mt-5">
           <SpreadsheetRegister
             apiPath="/api/client-records"
+            autoSerialColumn="S.no."
             columns={clientRecordColumns}
             emptyMessage="No client records yet."
+            enableSearch
             filename="workline-client-records.xlsx"
-            minWidth={1120}
+            minWidth={1700}
+            pocConfig={{
+              clientColumn: "Particulars",
+              contactColumn: "POC Contact no.",
+              emailColumn: "Email ID",
+              nameColumn: "POC Name"
+            }}
             title="Client Records"
             tone="text-sky-700"
           />
