@@ -1,28 +1,6 @@
 import { ArrowLeft, ReceiptText } from "lucide-react";
 import Link from "next/link";
-import { SpreadsheetRegister } from "@/components/shared/spreadsheet-register";
-
-const billingColumns = [
-  "Date",
-  "Invoice Number",
-  "Voucher Type",
-  "Sales Ledger",
-  "Cost Center",
-  "Group",
-  "Client",
-  "GSTIN",
-  "Description",
-  "Amount",
-  "CGST",
-  "SGST",
-  "IGST",
-  "Total",
-  "State",
-  "Place of Supply",
-  "Registration Type",
-  "Address",
-  "State Code"
-];
+import { BillingRegister } from "@/components/billing/billing-register";
 
 export default function BillingPage() {
   return (
@@ -41,8 +19,8 @@ export default function BillingPage() {
                 Billing Register
               </h1>
               <p className="mt-3 max-w-3xl text-sm font-semibold leading-6 text-slate-600">
-                Invoice and GST billing columns are ready. Data entry, import,
-                export, and approval workflow can be added next.
+                Maintain billing records for GSTAT matters, track invoice status,
+                and keep payment realisation visible from one register.
               </p>
             </div>
 
@@ -57,14 +35,7 @@ export default function BillingPage() {
         </header>
 
         <div className="mt-5">
-          <SpreadsheetRegister
-            columns={billingColumns}
-            emptyMessage="No billing entries yet."
-            filename="workline-billing-register.xlsx"
-            minWidth={2200}
-            title="Billing Table"
-            tone="text-lime-700"
-          />
+          <BillingRegister />
         </div>
       </section>
     </main>

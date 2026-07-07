@@ -37,7 +37,9 @@ export async function GET() {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  return NextResponse.json({ rows: filterRowsForAccess(data ?? [], access) });
+  const billRaisedAppealIds = await getBillRaisedAppealIds(admin);
+
+  return NextResponse.json({ rows: markBillRaised(filterRowsForAccess(data ?? [], access), billRaisedAppealIds) });
 }
 
 export async function POST(request: Request) {
@@ -452,6 +454,30 @@ function filterRowsForAccess<T extends AppealRow>(rows: T[], access: AccessScope
   }
 
   return rows.filter((row) => canAccessRow(row, access));
+}
+
+async function getBillRaisedAppealIds(admin: ReturnType<typeof createAdminClient>) {
+  const { data, error } = await admin
+    .from("gstat_billing_records")
+    .select("gstat_appeal_id")
+    .eq("organisation_code", organisationCode)
+    .not("gstat_appeal_id", "is", null);
+
+  if (error) {
+    return new Set<string>();
+  }
+
+  return new Set((data ?? []).map((record) => String(record.gstat_appeal_id ?? "")).filter(Boolean));
+}
+
+function markBillRaised<T extends AppealRow>(rows: T[], billRaisedAppealIds: Set<string>) {
+  return rows.map((row) => ({
+    ...row,
+    data: {
+      ...(row.data ?? {}),
+      "Bill raised": row.id && billRaisedAppealIds.has(row.id) ? "Yes" : "No"
+    }
+  }));
 }
 
 function getAccessScope(user: { user_metadata?: Record<string, unknown> }): AccessScope {

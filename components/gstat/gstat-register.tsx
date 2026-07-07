@@ -76,7 +76,8 @@ const baseColumns: Column[] = [
   "EL status",
   "GSTAT Login ID",
   "GSTAT Login Password",
-  "Appellant"
+  "Appellant",
+  "Bill raised"
 ].map((label) => ({ key: label, label }));
 
 const groupedColumns = [
@@ -134,7 +135,8 @@ const columnWidths: Record<string, number> = {
   "EL status": 92,
   "GSTAT Login ID": 132,
   "GSTAT Login Password": 142,
-  "Appellant": 150
+  "Appellant": 150,
+  "Bill raised": 88
 };
 const tableWidth = actionColumnWidth + columns.reduce((total, column) => total + getColumnWidth(column), 0);
 const requiredBlankCheckColumns = baseColumns.filter(
@@ -1929,7 +1931,7 @@ function isPersonHandlingLocked(access: UserAccess) {
 }
 
 function canInlineEdit(field: string, _access: UserAccess) {
-  return field !== "Sno" && field !== "Person handling";
+  return field !== "Sno" && field !== "Person handling" && field !== "Bill raised";
 }
 
 function applyPersonHandlingForAccess(data: RowData, access: UserAccess): RowData {
