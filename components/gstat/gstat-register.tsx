@@ -275,6 +275,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
   const [savingInlineCell, setSavingInlineCell] = useState<{ columnKey: string; rowIndex: number } | null>(null);
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [billingDraft, setBillingDraft] = useState<BillingDraft | null>(null);
+  const [billingMessage, setBillingMessage] = useState("");
   const [isSavingBilling, setIsSavingBilling] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isSavingEditor, setIsSavingEditor] = useState(false);
@@ -847,6 +848,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
       return;
     }
 
+    setBillingMessage("");
     setBillingDraft({
       billing_status: "Draft",
       cgst: "",
@@ -875,50 +877,61 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
     }
 
     setIsSavingBilling(true);
+    setBillingMessage("Creating billing record...");
     setMessage(`Creating billing record for row ${billingDraft.rowLabel}...`);
 
-    const response = await fetch("/api/billing", {
-      body: JSON.stringify({
-        record: {
-          billing_status: billingDraft.billing_status,
-          cgst: billingDraft.cgst,
-          client: billingDraft.client,
-          gstin: billingDraft.gstin,
-          gstat_appeal_id: billingDraft.gstat_appeal_id,
-          igst: billingDraft.igst,
-          invoice_date: billingDraft.invoice_date,
-          invoice_number: billingDraft.invoice_number,
-          matter_description: billingDraft.matter_description,
-          payment_date: billingDraft.payment_date,
-          payment_status: billingDraft.payment_status,
-          professional_fee: billingDraft.professional_fee,
-          remarks: billingDraft.remarks,
-          sgst: billingDraft.sgst
-        }
-      }),
-      headers: { "Content-Type": "application/json" },
-      method: "POST"
-    });
-    const result = (await response.json()) as { error?: string };
+    try {
+      const response = await fetch("/api/billing", {
+        body: JSON.stringify({
+          record: {
+            billing_status: billingDraft.billing_status,
+            cgst: billingDraft.cgst,
+            client: billingDraft.client,
+            gstin: billingDraft.gstin,
+            gstat_appeal_id: billingDraft.gstat_appeal_id,
+            igst: billingDraft.igst,
+            invoice_date: billingDraft.invoice_date,
+            invoice_number: billingDraft.invoice_number,
+            matter_description: billingDraft.matter_description,
+            payment_date: billingDraft.payment_date,
+            payment_status: billingDraft.payment_status,
+            professional_fee: billingDraft.professional_fee,
+            remarks: billingDraft.remarks,
+            sgst: billingDraft.sgst
+          }
+        }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST"
+      });
+      const result = (await response.json().catch(() => ({}))) as { error?: string; record?: { id?: string } };
 
-    if (!response.ok) {
-      setMessage(result.error ?? "Could not create billing record.");
+      if (!response.ok || !result.record?.id) {
+        const errorMessage = result.error ?? "Could not create billing record.";
+        setBillingMessage(errorMessage);
+        setMessage(errorMessage);
+        setIsSavingBilling(false);
+        return;
+      }
+
+      setRows((currentRows) =>
+        currentRows.map((currentRow, index) =>
+          index === billingDraft.rowIndex
+            ? {
+                ...currentRow,
+                data: { ...currentRow.data, "Bill raised": "Yes" }
+              }
+            : currentRow
+        )
+      );
+      setBillingMessage("Billing record created. Opening Billing...");
+      setBillingDraft(null);
+      window.location.assign("/billing");
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Could not create billing record.";
+      setBillingMessage(errorMessage);
+      setMessage(errorMessage);
       setIsSavingBilling(false);
-      return;
     }
-
-    setRows((currentRows) =>
-      currentRows.map((currentRow, index) =>
-        index === billingDraft.rowIndex
-          ? {
-              ...currentRow,
-              data: { ...currentRow.data, "Bill raised": "Yes" }
-            }
-          : currentRow
-      )
-    );
-    setBillingDraft(null);
-    window.location.href = "/billing";
   }
 
   async function deleteSelectedRows() {
@@ -2119,6 +2132,12 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                 value={billingDraft.remarks}
               />
             </div>
+
+            {billingMessage ? (
+              <p className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-900">
+                {billingMessage}
+              </p>
+            ) : null}
 
             <div className="mt-5 flex justify-end gap-2 border-t border-slate-200 pt-4">
               <button
