@@ -2,7 +2,7 @@
 
 import { downloadGstatPoa } from "@/lib/gstat/poa-document";
 import { supabase } from "@/lib/supabase/client";
-import { ArrowDown, ArrowLeft, ArrowUp, ChevronDown, ChevronUp, Download, Expand, ExternalLink, FileSpreadsheet, FileText, Filter, History, Pencil, Plus, Scale, Search, Settings2, ShieldCheck, Trash2, Upload, X } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowUp, ChevronDown, ChevronUp, Download, Expand, ExternalLink, FileSpreadsheet, FileText, Filter, History, Pencil, Plus, ReceiptText, Scale, Search, Settings2, ShieldCheck, Trash2, Upload, X } from "lucide-react";
 import Link from "next/link";
 import { ChangeEvent, memo, useDeferredValue, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { createPortal } from "react-dom";
@@ -30,7 +30,7 @@ type InlineEditorState = { columnKey: string; rowIndex: number; value: string };
 type ColumnLayout = { hiddenColumnKeys: string[]; order: string[] };
 type StatusSummaryItem = { color: string; count: number; key: string; label: string; percentage: number };
 
-const actionColumnWidth = 122;
+const actionColumnWidth = 152;
 const columnFilterOptionLimit = 1000;
 const blankColumnFilterValue = "__workline_column_blank__";
 const maxBulkDeleteRows = 5;
@@ -817,6 +817,47 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
       return nextKeys;
     });
     await saveRowOperation("row_delete", rowIndex, `Deleted row ${rowLabel}. Audit log updated.`);
+  }
+
+  async function createBillingRecord(rowIndex: number, row: AppealRow) {
+    if (!row.id) {
+      setMessage("Save this GSTAT row before creating a bill.");
+      return;
+    }
+
+    setMessage(`Creating billing record for row ${row.row_number || rowIndex + 1}...`);
+
+    const response = await fetch("/api/billing", {
+      body: JSON.stringify({
+        record: {
+          billing_status: "Draft",
+          client: String(row.data["Entity Name"] || row.data.Appellant || ""),
+          gstat_appeal_id: row.id,
+          matter_description: String(row.data["Issue in brief"] || row.data.Remark || ""),
+          payment_status: "Unpaid"
+        }
+      }),
+      headers: { "Content-Type": "application/json" },
+      method: "POST"
+    });
+    const result = (await response.json()) as { error?: string };
+
+    if (!response.ok) {
+      setMessage(result.error ?? "Could not create billing record.");
+      return;
+    }
+
+    setRows((currentRows) =>
+      currentRows.map((currentRow, index) =>
+        index === rowIndex
+          ? {
+              ...currentRow,
+              data: { ...currentRow.data, "Bill raised": "Yes" }
+            }
+          : currentRow
+      )
+    );
+    setMessage(`Billing record created for row ${row.row_number || rowIndex + 1}.`);
   }
 
   async function deleteSelectedRows() {
@@ -1637,6 +1678,16 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                               type="button"
                             >
                               <Trash2 className="size-3" />
+                            </button>
+                            <button
+                              aria-label={`Create bill for row ${row.data.Sno || visibleIndex + 1}`}
+                              className="inline-flex size-6 items-center justify-center rounded-md border border-lime-200 bg-white text-lime-700 transition hover:bg-lime-50 disabled:cursor-not-allowed disabled:opacity-50"
+                              disabled={row.data["Bill raised"] === "Yes"}
+                              onClick={() => createBillingRecord(originalIndex, row)}
+                              title={row.data["Bill raised"] === "Yes" ? "Bill already raised" : "Create billing record"}
+                              type="button"
+                            >
+                              <ReceiptText className="size-3" />
                             </button>
                           </div>
                         </td>

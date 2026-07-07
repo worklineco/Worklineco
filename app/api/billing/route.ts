@@ -81,10 +81,6 @@ export async function POST(request: Request) {
   const admin = createAdminClient();
   const cleaned = cleanRecord(record);
 
-  if (!cleaned.client && !cleaned.gstat_appeal_id && !cleaned.invoice_number) {
-    return NextResponse.json({ error: "Select a GSTAT matter or enter billing details." }, { status: 400 });
-  }
-
   const payload = {
     ...cleaned,
     organisation_code: organisationCode,

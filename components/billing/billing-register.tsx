@@ -1,7 +1,7 @@
 "use client";
 
-import { Download, Plus, ReceiptText, Save, Search, Trash2 } from "lucide-react";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { Download, Plus, Search, Trash2 } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import * as XLSX from "xlsx-js-style";
 
 type BillingRecord = {
@@ -30,6 +30,14 @@ type GstatMatter = {
   matter_description: string;
   row_number: number;
 };
+type BillingField = keyof BillingRecord;
+type BillingColumn = {
+  field: BillingField | "gstat_matter" | "tax" | "actions";
+  label: string;
+  type?: "date" | "money" | "select" | "text";
+  width: number;
+};
+type InlineEditor = { field: BillingField; recordId: string; value: string };
 
 const emptyRecord: BillingRecord = {
   billing_status: "Draft",
@@ -50,13 +58,33 @@ const emptyRecord: BillingRecord = {
 };
 const billingStatuses = ["Draft", "Raised", "Cancelled"];
 const paymentStatuses = ["Unpaid", "Part Paid", "Paid"];
+const billingColumns: BillingColumn[] = [
+  { field: "invoice_number", label: "Invoice", type: "text", width: 150 },
+  { field: "invoice_date", label: "Date", type: "date", width: 135 },
+  { field: "gstat_matter", label: "GSTAT Matter", width: 320 },
+  { field: "client", label: "Client", type: "text", width: 230 },
+  { field: "gstin", label: "GSTIN", type: "text", width: 160 },
+  { field: "matter_description", label: "Description", type: "text", width: 280 },
+  { field: "professional_fee", label: "Fee", type: "money", width: 120 },
+  { field: "cgst", label: "CGST", type: "money", width: 105 },
+  { field: "sgst", label: "SGST", type: "money", width: 105 },
+  { field: "igst", label: "IGST", type: "money", width: 105 },
+  { field: "total", label: "Total", width: 125 },
+  { field: "billing_status", label: "Billing", type: "select", width: 130 },
+  { field: "payment_status", label: "Payment", type: "select", width: 130 },
+  { field: "payment_date", label: "Paid On", type: "date", width: 135 },
+  { field: "remarks", label: "Remarks", type: "text", width: 230 },
+  { field: "actions", label: "Actions", width: 84 }
+];
+const tableWidth = billingColumns.reduce((total, column) => total + column.width, 0);
 
 export function BillingRegister() {
   const [records, setRecords] = useState<BillingRecord[]>([]);
   const [matters, setMatters] = useState<GstatMatter[]>([]);
-  const [draft, setDraft] = useState<BillingRecord>(emptyRecord);
+  const [inlineEditor, setInlineEditor] = useState<InlineEditor | null>(null);
+  const [savingCell, setSavingCell] = useState<InlineEditor | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [isSaving, setIsSaving] = useState(false);
+  const [isAdding, setIsAdding] = useState(false);
   const [message, setMessage] = useState("");
   const [search, setSearch] = useState("");
 
@@ -74,10 +102,11 @@ export function BillingRegister() {
         record.gstin,
         record.matter_description,
         record.billing_status,
-        record.payment_status
+        record.payment_status,
+        getMatterLabel(record, matters)
       ].some((field) => String(field ?? "").toLowerCase().includes(value))
     );
-  }, [records, search]);
+  }, [matters, records, search]);
   const totals = useMemo(
     () =>
       records.reduce(
@@ -118,50 +147,58 @@ export function BillingRegister() {
     }
   }
 
-  function selectMatter(matterId: string) {
-    const matter = matters.find((item) => item.id === matterId);
-
-    setDraft((current) => ({
-      ...current,
-      client: matter?.client || current.client,
-      gstin: matter?.gstin || current.gstin,
-      gstat_appeal_id: matterId || null,
-      matter_description: matter?.matter_description || current.matter_description
-    }));
-  }
-
-  async function saveRecord(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setIsSaving(true);
-    setMessage("Saving billing record...");
+  async function addBlankRecord() {
+    setIsAdding(true);
+    setMessage("Adding billing row...");
 
     try {
-      const response = await fetch("/api/billing", {
-        body: JSON.stringify({ record: draft }),
-        headers: { "Content-Type": "application/json" },
-        method: "POST"
-      });
-      const result = (await response.json()) as { error?: string; record?: BillingRecord };
-
-      if (!response.ok || !result.record) {
-        setMessage(result.error ?? "Could not save billing record.");
-        return;
-      }
-
-      setRecords((currentRecords) => {
-        const nextRecords = draft.id
-          ? currentRecords.map((record) => (record.id === result.record!.id ? result.record! : record))
-          : [result.record!, ...currentRecords];
-
-        return nextRecords;
-      });
-      setDraft(emptyRecord);
-      setMessage("Billing record saved. GSTAT Bill raised column will show Yes for the linked matter.");
+      const saved = await saveRecord(emptyRecord);
+      setRecords((currentRecords) => [saved, ...currentRecords]);
+      setMessage("Billing row added. Click any cell to edit.");
     } catch (error) {
-      console.error("Billing save error:", error);
-      setMessage("Could not save billing record.");
+      setMessage(error instanceof Error ? error.message : "Could not add billing row.");
     } finally {
-      setIsSaving(false);
+      setIsAdding(false);
+    }
+  }
+
+  async function saveInlineEditor(valueOverride?: string) {
+    if (!inlineEditor || savingCell) {
+      return;
+    }
+
+    const record = records.find((item) => item.id === inlineEditor.recordId);
+
+    if (!record) {
+      setInlineEditor(null);
+      return;
+    }
+
+    const rawValue = valueOverride ?? inlineEditor.value;
+    const nextRecord = prepareRecordUpdate(record, inlineEditor.field, rawValue);
+
+    if (String(record[inlineEditor.field] ?? "") === String(nextRecord[inlineEditor.field] ?? "")) {
+      setInlineEditor(null);
+      return;
+    }
+
+    setSavingCell(inlineEditor);
+    setInlineEditor(null);
+    setRecords((currentRecords) =>
+      currentRecords.map((item) => (item.id === record.id ? nextRecord : item))
+    );
+
+    try {
+      const saved = await saveRecord(nextRecord);
+      setRecords((currentRecords) =>
+        currentRecords.map((item) => (item.id === saved.id ? saved : item))
+      );
+      setMessage(`Saved ${getColumnLabel(inlineEditor.field)}.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not save billing cell.");
+      await loadBilling();
+    } finally {
+      setSavingCell(null);
     }
   }
 
@@ -180,10 +217,22 @@ export function BillingRegister() {
     }
 
     setRecords((currentRecords) => currentRecords.filter((item) => item.id !== record.id));
-    if (draft.id === record.id) {
-      setDraft(emptyRecord);
-    }
     setMessage("Billing record deleted.");
+  }
+
+  async function saveRecord(record: BillingRecord) {
+    const response = await fetch("/api/billing", {
+      body: JSON.stringify({ record }),
+      headers: { "Content-Type": "application/json" },
+      method: "POST"
+    });
+    const result = (await response.json()) as { error?: string; record?: BillingRecord };
+
+    if (!response.ok || !result.record) {
+      throw new Error(result.error ?? "Could not save billing record.");
+    }
+
+    return result.record;
   }
 
   function exportExcel() {
@@ -225,9 +274,18 @@ export function BillingRegister() {
             {isLoading ? "Loading" : `${records.length} records`} - total billed {formatMoney(totals.billed)}
           </p>
         </div>
-        <div className="grid gap-2 text-sm font-black text-slate-700 sm:grid-cols-3">
+        <div className="grid gap-2 text-sm font-black text-slate-700 sm:grid-cols-4">
           <Summary label="Paid" value={formatMoney(totals.paid)} />
           <Summary label="Unpaid" value={formatMoney(totals.unpaid)} />
+          <button
+            className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-lime-700 px-4 text-white transition hover:bg-lime-800 disabled:opacity-50"
+            disabled={isAdding}
+            onClick={addBlankRecord}
+            type="button"
+          >
+            <Plus className="size-4" />
+            Add Row
+          </button>
           <button
             className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 text-white transition hover:bg-slate-800"
             onClick={exportExcel}
@@ -238,94 +296,6 @@ export function BillingRegister() {
           </button>
         </div>
       </div>
-
-      <form className="mt-5 grid gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 lg:grid-cols-12" onSubmit={saveRecord}>
-        <select
-          className="input lg:col-span-4"
-          onChange={(event) => selectMatter(event.target.value)}
-          value={draft.gstat_appeal_id ?? ""}
-        >
-          <option value="">Select GSTAT matter</option>
-          {matters.map((matter) => (
-            <option key={matter.id} value={matter.id}>
-              {matter.label}
-            </option>
-          ))}
-        </select>
-        <input
-          className="input lg:col-span-2"
-          onChange={(event) => setDraft((current) => ({ ...current, invoice_number: event.target.value }))}
-          placeholder="Invoice number"
-          value={draft.invoice_number}
-        />
-        <input
-          className="input lg:col-span-2"
-          onChange={(event) => setDraft((current) => ({ ...current, invoice_date: event.target.value }))}
-          type="date"
-          value={draft.invoice_date ?? ""}
-        />
-        <input
-          className="input lg:col-span-4"
-          onChange={(event) => setDraft((current) => ({ ...current, client: event.target.value }))}
-          placeholder="Client"
-          value={draft.client}
-        />
-        <input
-          className="input lg:col-span-2"
-          onChange={(event) => setDraft((current) => ({ ...current, gstin: event.target.value }))}
-          placeholder="GSTIN"
-          value={draft.gstin}
-        />
-        <input
-          className="input lg:col-span-4"
-          onChange={(event) => setDraft((current) => ({ ...current, matter_description: event.target.value }))}
-          placeholder="Matter description"
-          value={draft.matter_description}
-        />
-        <MoneyInput label="Professional fee" onChange={(value) => setDraft((current) => recalc({ ...current, professional_fee: value }))} value={draft.professional_fee} />
-        <MoneyInput label="CGST" onChange={(value) => setDraft((current) => recalc({ ...current, cgst: value }))} value={draft.cgst} />
-        <MoneyInput label="SGST" onChange={(value) => setDraft((current) => recalc({ ...current, sgst: value }))} value={draft.sgst} />
-        <MoneyInput label="IGST" onChange={(value) => setDraft((current) => recalc({ ...current, igst: value }))} value={draft.igst} />
-        <input className="input lg:col-span-2" readOnly value={formatMoney(draft.total)} />
-        <select
-          className="input lg:col-span-2"
-          onChange={(event) => setDraft((current) => ({ ...current, billing_status: event.target.value }))}
-          value={draft.billing_status}
-        >
-          {billingStatuses.map((status) => (
-            <option key={status}>{status}</option>
-          ))}
-        </select>
-        <select
-          className="input lg:col-span-2"
-          onChange={(event) => setDraft((current) => ({ ...current, payment_status: event.target.value }))}
-          value={draft.payment_status}
-        >
-          {paymentStatuses.map((status) => (
-            <option key={status}>{status}</option>
-          ))}
-        </select>
-        <input
-          className="input lg:col-span-2"
-          onChange={(event) => setDraft((current) => ({ ...current, payment_date: event.target.value }))}
-          type="date"
-          value={draft.payment_date ?? ""}
-        />
-        <input
-          className="input lg:col-span-3"
-          onChange={(event) => setDraft((current) => ({ ...current, remarks: event.target.value }))}
-          placeholder="Remarks"
-          value={draft.remarks}
-        />
-        <button
-          className="inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-lime-700 px-4 text-sm font-black text-white transition hover:bg-lime-800 disabled:opacity-50 lg:col-span-3"
-          disabled={isSaving}
-          type="submit"
-        >
-          {draft.id ? <Save className="size-4" /> : <Plus className="size-4" />}
-          {isSaving ? "Saving..." : draft.id ? "Update Bill" : "Add Bill"}
-        </button>
-      </form>
 
       <div className="mt-5 flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3">
         <Search className="size-4 text-slate-400" />
@@ -344,48 +314,154 @@ export function BillingRegister() {
       ) : null}
 
       <div className="mt-5 overflow-auto rounded-2xl border border-slate-200 bg-white">
-        <table className="w-full min-w-[1380px] border-collapse text-left text-sm">
+        <table className="table-fixed border-collapse text-left text-sm" style={{ minWidth: tableWidth, width: tableWidth }}>
+          <colgroup>
+            {billingColumns.map((column) => (
+              <col key={column.field} style={{ width: column.width }} />
+            ))}
+          </colgroup>
           <thead className="bg-slate-950 text-xs font-black uppercase text-white">
             <tr>
-              {["Invoice", "Date", "GSTAT Matter", "Client", "Fee", "Tax", "Total", "Billing", "Payment", "Actions"].map((column) => (
-                <th className="border-r border-white/10 px-3 py-3 last:border-r-0" key={column}>{column}</th>
+              {billingColumns.map((column) => (
+                <th className="border-r border-white/10 px-3 py-3 last:border-r-0" key={column.field}>
+                  {column.label}
+                </th>
               ))}
             </tr>
           </thead>
           <tbody>
             {isLoading ? (
-              <tr><td className="px-4 py-8 font-bold text-slate-500" colSpan={10}>Loading billing records...</td></tr>
+              <tr><td className="px-4 py-8 font-bold text-slate-500" colSpan={billingColumns.length}>Loading billing records...</td></tr>
             ) : filteredRecords.length ? (
               filteredRecords.map((record) => (
                 <tr className="border-b border-slate-100 last:border-b-0" key={record.id}>
-                  <td className="px-3 py-3 font-black text-slate-900">{record.invoice_number || "-"}</td>
-                  <td className="px-3 py-3 font-semibold text-slate-700">{record.invoice_date || "-"}</td>
-                  <td className="px-3 py-3 font-semibold text-slate-700">{matters.find((matter) => matter.id === record.gstat_appeal_id)?.label || "-"}</td>
-                  <td className="px-3 py-3 font-semibold text-slate-700">{record.client || "-"}</td>
-                  <td className="px-3 py-3 font-semibold text-slate-700">{formatMoney(record.professional_fee)}</td>
-                  <td className="px-3 py-3 font-semibold text-slate-700">{formatMoney(toNumber(record.cgst) + toNumber(record.sgst) + toNumber(record.igst))}</td>
-                  <td className="px-3 py-3 font-black text-slate-900">{formatMoney(record.total)}</td>
-                  <td className="px-3 py-3 font-semibold text-slate-700">{record.billing_status}</td>
-                  <td className="px-3 py-3 font-semibold text-slate-700">{record.payment_status}</td>
-                  <td className="px-3 py-3">
-                    <div className="flex gap-2">
-                      <button className="inline-flex size-8 items-center justify-center rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50" onClick={() => setDraft(normalizeDraft(record))} title="Edit bill" type="button">
-                        <ReceiptText className="size-4" />
-                      </button>
-                      <button className="inline-flex size-8 items-center justify-center rounded-lg border border-rose-200 text-rose-700 hover:bg-rose-50" onClick={() => deleteRecord(record)} title="Delete bill" type="button">
-                        <Trash2 className="size-4" />
-                      </button>
-                    </div>
-                  </td>
+                  {billingColumns.map((column) => (
+                    <BillingCell
+                      column={column}
+                      inlineEditor={inlineEditor}
+                      key={`${record.id}-${column.field}`}
+                      matters={matters}
+                      onDelete={() => deleteRecord(record)}
+                      onEdit={(field, value) => setInlineEditor({ field, recordId: record.id!, value })}
+                      onEditorChange={(value) =>
+                        setInlineEditor((currentEditor) => (currentEditor ? { ...currentEditor, value } : currentEditor))
+                      }
+                      onSave={saveInlineEditor}
+                      record={record}
+                      savingCell={savingCell}
+                    />
+                  ))}
                 </tr>
               ))
             ) : (
-              <tr><td className="px-4 py-8 font-bold text-slate-500" colSpan={10}>No billing records yet.</td></tr>
+              <tr><td className="px-4 py-8 font-bold text-slate-500" colSpan={billingColumns.length}>No billing records yet.</td></tr>
             )}
           </tbody>
         </table>
       </div>
     </section>
+  );
+}
+
+function BillingCell({
+  column,
+  inlineEditor,
+  matters,
+  onDelete,
+  onEdit,
+  onEditorChange,
+  onSave,
+  record,
+  savingCell
+}: {
+  column: BillingColumn;
+  inlineEditor: InlineEditor | null;
+  matters: GstatMatter[];
+  onDelete: () => void;
+  onEdit: (field: BillingField, value: string) => void;
+  onEditorChange: (value: string) => void;
+  onSave: (valueOverride?: string) => void;
+  record: BillingRecord;
+  savingCell: InlineEditor | null;
+}) {
+  const isReadOnly = column.field === "gstat_matter" || column.field === "tax" || column.field === "total";
+  const isActions = column.field === "actions";
+  const field = column.field as BillingField;
+  const isEditing = Boolean(inlineEditor && inlineEditor.recordId === record.id && inlineEditor.field === field);
+  const isSaving = Boolean(savingCell && savingCell.recordId === record.id && savingCell.field === field);
+  const editorValue = isEditing ? inlineEditor?.value ?? "" : "";
+  const displayValue = getDisplayValue(record, column, matters);
+
+  if (isActions) {
+    return (
+      <td className="border-r border-slate-100 px-3 py-2 last:border-r-0">
+        <button
+          className="inline-flex size-8 items-center justify-center rounded-lg border border-rose-200 text-rose-700 hover:bg-rose-50"
+          onClick={onDelete}
+          title="Delete bill"
+          type="button"
+        >
+          <Trash2 className="size-4" />
+        </button>
+      </td>
+    );
+  }
+
+  return (
+    <td className="border-r border-slate-100 px-2 py-2 font-semibold text-slate-700 last:border-r-0">
+      {isEditing && column.type === "select" ? (
+        <select
+          autoFocus
+          className="h-8 w-full rounded-md border border-teal-300 bg-white px-2 text-xs font-bold outline-none ring-2 ring-teal-100"
+          onBlur={() => onSave()}
+          onChange={(event) => {
+            onEditorChange(event.target.value);
+            onSave(event.target.value);
+          }}
+          value={editorValue}
+        >
+          {(field === "billing_status" ? billingStatuses : paymentStatuses).map((status) => (
+            <option key={status}>{status}</option>
+          ))}
+        </select>
+      ) : isEditing ? (
+        <input
+          autoFocus
+          className="h-8 w-full rounded-md border border-teal-300 bg-white px-2 text-xs font-bold outline-none ring-2 ring-teal-100"
+          onBlur={() => onSave()}
+          onChange={(event) => onEditorChange(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              onSave();
+            }
+            if (event.key === "Escape") {
+              event.preventDefault();
+              onEditorChange(String(record[field] ?? ""));
+              onSave(String(record[field] ?? ""));
+            }
+          }}
+          type={column.type === "date" ? "date" : column.type === "money" ? "number" : "text"}
+          value={editorValue}
+        />
+      ) : (
+        <button
+          className={`block h-8 w-full min-w-0 truncate rounded px-1.5 text-left ${
+            isReadOnly ? "cursor-default" : "cursor-text hover:bg-slate-50 hover:ring-1 hover:ring-teal-200"
+          }`}
+          disabled={isReadOnly || isSaving}
+          onClick={() => {
+            if (!isReadOnly && record.id) {
+              onEdit(field, String(record[field] ?? ""));
+            }
+          }}
+          title={String(displayValue || "")}
+          type="button"
+        >
+          {isSaving ? "Saving..." : displayValue || "-"}
+        </button>
+      )}
+    </td>
   );
 }
 
@@ -398,32 +474,53 @@ function Summary({ label, value }: { label: string; value: string }) {
   );
 }
 
-function MoneyInput({ label, onChange, value }: { label: string; onChange: (value: number) => void; value: number }) {
-  return (
-    <input
-      className="input lg:col-span-1"
-      min="0"
-      onChange={(event) => onChange(toNumber(event.target.value))}
-      placeholder={label}
-      type="number"
-      value={value || ""}
-    />
-  );
+function prepareRecordUpdate(record: BillingRecord, field: BillingField, rawValue: string): BillingRecord {
+  const nextRecord = {
+    ...record,
+    [field]: isMoneyField(field) ? toNumber(rawValue) : rawValue
+  };
+
+  return recalc(nextRecord);
+}
+
+function getDisplayValue(record: BillingRecord, column: BillingColumn, matters: GstatMatter[]) {
+  if (column.field === "gstat_matter") {
+    return getMatterLabel(record, matters);
+  }
+
+  if (column.field === "tax") {
+    return formatMoney(toNumber(record.cgst) + toNumber(record.sgst) + toNumber(record.igst));
+  }
+
+  if (column.field === "actions") {
+    return "";
+  }
+
+  const value = record[column.field];
+
+  if (column.type === "money" || column.field === "total") {
+    return formatMoney(value as number);
+  }
+
+  return String(value ?? "");
+}
+
+function getMatterLabel(record: BillingRecord, matters: GstatMatter[]) {
+  return matters.find((matter) => matter.id === record.gstat_appeal_id)?.label ?? "";
+}
+
+function getColumnLabel(field: BillingField) {
+  return billingColumns.find((column) => column.field === field)?.label ?? field;
+}
+
+function isMoneyField(field: BillingField) {
+  return field === "professional_fee" || field === "cgst" || field === "sgst" || field === "igst" || field === "total";
 }
 
 function recalc(record: BillingRecord): BillingRecord {
   return {
     ...record,
     total: toNumber(record.professional_fee) + toNumber(record.cgst) + toNumber(record.sgst) + toNumber(record.igst)
-  };
-}
-
-function normalizeDraft(record: BillingRecord): BillingRecord {
-  return {
-    ...emptyRecord,
-    ...record,
-    invoice_date: record.invoice_date ?? "",
-    payment_date: record.payment_date ?? ""
   };
 }
 
