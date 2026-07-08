@@ -190,6 +190,7 @@ const statusOptions = [
 ];
 const billingStatusOptions = ["Draft", "Raised", "Cancelled"];
 const paymentStatusOptions = ["Unpaid", "Part Paid", "Paid"];
+const billingInlineColumnKeys = new Set(["Billing amount", "Billing remarks"]);
 const customStatusOption = "__workline_custom_status__";
 const editorSections = [
   {
@@ -1788,6 +1789,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                         {visibleColumns.map((column) => {
                           const cellValue = row.data[column.key];
                           const displayValue = dateFields.has(column.key) ? formatDateForDisplay(cellValue) : cellValue;
+                          const isBillingInlineColumn = billingInlineColumnKeys.has(column.key);
                           const isSnoColumn = column.key === "Sno";
                           const isInlineEditable = canInlineEdit(column.key, userAccess);
                           const isInlineEditing =
@@ -1858,13 +1860,17 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                                       saveInlineEditor();
                                     }
                                   }}
-                                  type={dateFields.has(column.key) ? "date" : "text"}
+                                  type={dateFields.has(column.key) ? "date" : column.key === "Billing amount" ? "number" : "text"}
                                   value={inlineEditor.value}
                                 />
                               ) : (
                                 <button
-                                  className={`block w-full min-w-0 truncate rounded px-1.5 text-left ${
+                                  className={`block h-7 w-full min-w-0 truncate rounded px-1.5 text-left ${
                                     isInlineEditable ? "cursor-text hover:bg-white/80 hover:ring-1 hover:ring-teal-200" : ""
+                                  } ${
+                                    isBillingInlineColumn && isBlankCell(displayValue)
+                                      ? "text-slate-400 ring-1 ring-dashed ring-slate-200"
+                                      : ""
                                   }`}
                                   disabled={!isInlineEditable || Boolean(isSavingInline)}
                                   onClick={() => openInlineEditor(originalIndex, column, cellValue)}
@@ -1879,7 +1885,13 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                                   }
                                   type="button"
                                 >
-                                  {isSavingInline ? "Saving..." : isRequiredBlank ? "Required" : displayValue ?? ""}
+                                  {isSavingInline
+                                    ? "Saving..."
+                                    : isRequiredBlank
+                                      ? "Required"
+                                      : isBillingInlineColumn && isBlankCell(displayValue)
+                                        ? "Click to edit"
+                                        : displayValue ?? ""}
                                 </button>
                               )}
                             </td>
