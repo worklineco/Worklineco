@@ -95,9 +95,7 @@ const baseColumns: Column[] = [
   "GSTAT Login ID",
   "GSTAT Login Password",
   "Appellant",
-  "Bill raised",
-  "Billing amount",
-  "Billing remarks"
+  "Bill raised"
 ].map((label) => ({ key: label, label }));
 
 const groupedColumns = [
@@ -113,7 +111,8 @@ const demandColumns: Column[] = groupedColumns.flatMap((group) =>
     label
   }))
 );
-const columns = [...baseColumns, ...demandColumns];
+const billingColumns: Column[] = ["Billing amount", "Billing remarks"].map((label) => ({ key: label, label }));
+const columns = [...baseColumns, ...demandColumns, ...billingColumns];
 const defaultColumnOrder = columns.map((column) => column.key);
 const columnByKey = new Map(columns.map((column) => [column.key, column]));
 const defaultColumnWidth = 92;
@@ -723,11 +722,13 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
     );
     const headerRowOne = [
       ...baseColumns.map((column) => column.label),
-      ...groupedColumns.flatMap((group) => [group.label, "", ""])
+      ...groupedColumns.flatMap((group) => [group.label, "", ""]),
+      ...billingColumns.map((column) => column.label)
     ];
     const headerRowTwo = [
       ...baseColumns.map(() => ""),
-      ...groupedColumns.flatMap((group) => group.columns)
+      ...groupedColumns.flatMap((group) => group.columns),
+      ...billingColumns.map(() => "")
     ];
     const dataRows = exportRows.map(({ displayIndex, row }) =>
       columns.map((column) =>
@@ -745,6 +746,10 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
       ...groupedColumns.map((_, index) => {
         const start = baseColumns.length + index * 3;
         return { e: { c: start + 2, r: 0 }, s: { c: start, r: 0 } };
+      }),
+      ...billingColumns.map((_, index) => {
+        const start = baseColumns.length + demandColumns.length + index;
+        return { e: { c: start, r: 1 }, s: { c: start, r: 0 } };
       })
     ];
     worksheet["!cols"] = columns.map((column) => ({ wch: Math.max(14, column.label.length + 3) }));
@@ -2248,7 +2253,9 @@ function styleGstatWorksheet(
 
   for (let rowIndex = 0; rowIndex < 2; rowIndex += 1) {
     for (let columnIndex = 0; columnIndex < columns.length; columnIndex += 1) {
-      setCellStyle(worksheet, rowIndex, columnIndex, columnIndex < baseColumns.length ? headerStyle : groupHeaderStyle);
+      const isUngroupedColumn =
+        columnIndex < baseColumns.length || columnIndex >= baseColumns.length + demandColumns.length;
+      setCellStyle(worksheet, rowIndex, columnIndex, isUngroupedColumn ? headerStyle : groupHeaderStyle);
     }
   }
 
