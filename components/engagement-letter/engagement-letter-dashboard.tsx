@@ -1,6 +1,7 @@
 "use client";
 
 import { Download, Eye, FileText, Plus, Printer, X } from "lucide-react";
+import JSZip from "jszip";
 import { useMemo, useState } from "react";
 
 type EngagementField = {
@@ -10,6 +11,11 @@ type EngagementField = {
   type?: "date" | "textarea" | "text";
 };
 
+type TemplateReplacement = {
+  search: string;
+  value: (values: Record<string, string>) => string;
+};
+
 type EngagementFormat = {
   id: string;
   category: string;
@@ -17,15 +23,69 @@ type EngagementFormat = {
   description: string;
   fields: EngagementField[];
   clauses: string[];
+  templatePath?: string;
+  templateReplacements?: TemplateReplacement[];
 };
 
 type GeneratedLetter = {
   category: string;
   title: string;
   content: string;
+  format: EngagementFormat;
+  values: Record<string, string>;
 };
 
 const defaultFormats: EngagementFormat[] = [
+  {
+    id: "gstat-tribunal",
+    category: "GSTAT EL",
+    title: "Engagement Letter - GSTAT Tribunal Stage",
+    description: "Standard GSTAT tribunal-stage format using the original Word template so formatting, tables, and layout remain the same.",
+    templatePath: "/templates/gstat-engagement-letter.docx",
+    fields: [
+      { key: "date", label: "Letter Date", placeholder: "08-05-2026", type: "date" },
+      { key: "clientName", label: "Entity Name", placeholder: "M/s. Genesis Integrated Services & Solutions" },
+      { key: "gstin", label: "GSTIN", placeholder: "09ALLPR0532J1ZU" },
+      { key: "documentPeriod", label: "Document Period", placeholder: "FY 2026-27" },
+      { key: "engagementNo", label: "Engagement Letter No.", placeholder: "2026/05/10" },
+      { key: "orderReference", label: "Order Reference No.", placeholder: "ZD090824360281A" },
+      { key: "orderDate", label: "Order Date", placeholder: "31.08.2024" },
+      { key: "authority", label: "Authority", placeholder: "Ld. Deputy Commissioner, Ghaziabad, Block-16, Uttar Pradesh", type: "textarea" },
+      { key: "stage", label: "Stage", placeholder: "Tribunal Stage" },
+      { key: "draftingFee", label: "Drafting Fee", placeholder: "50000" },
+      { key: "representationFee", label: "Representation Fee", placeholder: "50000" },
+      { key: "travelFee", label: "Travel Expenses", placeholder: "16000" },
+      { key: "filingFee", label: "Filing Expenses", placeholder: "5000" },
+      { key: "acknowledger", label: "Acknowledged By", placeholder: "Name of authorised person" },
+      { key: "place", label: "Place", placeholder: "Jaipur" }
+    ],
+    clauses: [
+      "This format uses the GSTAT tribunal-stage Word template as the base document.",
+      "The generator replaces the entity details, GSTIN, document period, engagement number, order details, stage, fee table values, letter date, acknowledgement name, and place inside the original DOCX.",
+      "Download Word Draft will preserve the source template formatting, including tables and spacing."
+    ],
+    templateReplacements: [
+      { search: "M/s Genesis Integrated Services & Solutions", value: (values) => cleanValue(values.clientName, "M/s. [Entity Name]") },
+      { search: "M/s. Genesis Integrated Services & Solutions", value: (values) => cleanValue(values.clientName, "M/s. [Entity Name]") },
+      { search: "Genesis Integrated Services & Solutions", value: (values) => stripFirmPrefix(cleanValue(values.clientName, "[Entity Name]")) },
+      { search: "09ALLPR0532J1ZU", value: (values) => cleanValue(values.gstin, "[GSTIN]") },
+      { search: "FY 2026-27", value: (values) => cleanValue(values.documentPeriod, "[Document Period]") },
+      { search: "2026/05/10", value: (values) => cleanValue(values.engagementNo, "[Engagement Letter No.]") },
+      { search: "Tribunal Stage", value: (values) => cleanValue(values.stage, "[Stage]") },
+      { search: "ZD090824360281A", value: (values) => cleanValue(values.orderReference, "[Order Reference No.]") },
+      { search: "31.08.2024", value: (values) => cleanValue(values.orderDate, "[Order Date]") },
+      {
+        search: "Ld. Deputy Commissioner, Ghaziabad, Block-16, Uttar Pradesh",
+        value: (values) => cleanValue(values.authority, "[Authority]")
+      },
+      { search: "Date: 08-05-2026", value: (values) => `Date: ${formatDateForDocument(cleanValue(values.date, "[Letter Date]"))}` },
+      {
+        search: " on behalf of the management of M/s. Genesis Integrated Services & Solutions, hereby accept and agree to the aforesaid scope of services and terms of engagement along with the commercial terms provided above by M/s Dhadda & Co., Chartered Accountants.",
+        value: (values) => ` ${cleanValue(values.acknowledger, "[Acknowledged By]")}, on behalf of the management of ${cleanValue(values.clientName, "M/s. [Entity Name]")}, hereby accept and agree to the aforesaid scope of services and terms of engagement along with the commercial terms provided above by M/s Dhadda & Co., Chartered Accountants.`
+      },
+      { search: "Place:", value: (values) => `Place: ${cleanValue(values.place, "[Place]")}` }
+    ]
+  },
   {
     id: "gst-retainership",
     category: "Retainership",
@@ -120,6 +180,65 @@ const defaultFormats: EngagementFormat[] = [
   }
 ];
 
+function cleanValue(value: string | undefined, fallback: string) {
+  return value?.trim() || fallback;
+}
+
+function stripFirmPrefix(value: string) {
+  return value.replace(/^M\/s\.?\s*/i, "");
+}
+
+function formatDateForDocument(value: string) {
+  if (!value || value.startsWith("[")) {
+    return value;
+  }
+
+  const [year, month, day] = value.split("-");
+
+  if (year && month && day) {
+    return `${day}-${month}-${year}`;
+  }
+
+  return value;
+}
+
+function xmlEscape(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function replaceAllXmlText(xml: string, search: string, replacement: string) {
+  return xml.split(xmlEscape(search)).join(xmlEscape(replacement));
+}
+
+function applyGstatFeeReplacements(xml: string, values: Record<string, string>) {
+  const replacements = [
+    cleanValue(values.draftingFee, "[Drafting Fee]"),
+    cleanValue(values.representationFee, "[Representation Fee]")
+  ];
+  let index = 0;
+
+  let updatedXml = xml.replace(/(<w:t[^>]*>)50000(<\/w:t>)/g, (match, openTag: string, closeTag: string) => {
+    const replacement = replacements[index];
+    index += 1;
+    return replacement ? `${openTag}${xmlEscape(replacement)}${closeTag}` : match;
+  });
+
+  updatedXml = updatedXml.replace(
+    /(<w:t[^>]*>)16000(<\/w:t>)/,
+    (_match, openTag: string, closeTag: string) => `${openTag}${xmlEscape(cleanValue(values.travelFee, "[Travel Expenses]"))}${closeTag}`
+  );
+  updatedXml = updatedXml.replace(
+    /(<w:t[^>]*>)5000(<\/w:t>)/,
+    (_match, openTag: string, closeTag: string) => `${openTag}${xmlEscape(cleanValue(values.filingFee, "[Filing Expenses]"))}${closeTag}`
+  );
+
+  return updatedXml;
+}
+
 export function EngagementLetterDashboard() {
   const [activeFormat, setActiveFormat] = useState<EngagementFormat | null>(null);
   const [formValues, setFormValues] = useState<Record<string, string>>({});
@@ -169,6 +288,8 @@ export function EngagementLetterDashboard() {
     setGeneratedLetter({
       category: activeFormat.category,
       title: activeFormat.title,
+      format: activeFormat,
+      values: formValues,
       content: [
         `Date: ${dated}`,
         "",
@@ -202,8 +323,13 @@ export function EngagementLetterDashboard() {
     });
   }
 
-  function downloadGeneratedLetter() {
+  async function downloadGeneratedLetter() {
     if (!generatedLetter) {
+      return;
+    }
+
+    if (generatedLetter.format.templatePath) {
+      await downloadTemplateLetter(generatedLetter);
       return;
     }
 
@@ -234,6 +360,44 @@ export function EngagementLetterDashboard() {
     const link = document.createElement("a");
     link.href = url;
     link.download = `${generatedLetter.category.replace(/\s+/g, "-").toLowerCase()}-engagement-letter.doc`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function downloadTemplateLetter(letter: GeneratedLetter) {
+    const response = await fetch(letter.format.templatePath as string);
+
+    if (!response.ok) {
+      throw new Error("Could not load the engagement letter template.");
+    }
+
+    const zip = await JSZip.loadAsync(await response.arrayBuffer());
+    const documentXml = zip.file("word/document.xml");
+
+    if (!documentXml) {
+      throw new Error("The engagement letter template is missing document.xml.");
+    }
+
+    let xml = await documentXml.async("string");
+
+    letter.format.templateReplacements?.forEach((replacement) => {
+      xml = replaceAllXmlText(xml, replacement.search, replacement.value(letter.values));
+    });
+
+    if (letter.format.id === "gstat-tribunal") {
+      xml = applyGstatFeeReplacements(xml, letter.values);
+    }
+
+    zip.file("word/document.xml", xml);
+
+    const output = await zip.generateAsync({
+      mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      type: "blob"
+    });
+    const url = URL.createObjectURL(output);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${letter.category.replace(/\s+/g, "-").replace(/\//g, "").toLowerCase()}-engagement-letter.docx`;
     link.click();
     URL.revokeObjectURL(url);
   }
