@@ -73,6 +73,10 @@ const defaultFormats: EngagementFormat[] = [
       "Download Word Draft will preserve the source template formatting, including tables and spacing."
     ],
     templateReplacements: [
+      {
+        search: "GENESIS INTEGRATED SERVICES & SOLUTIONS",
+        value: (values) => stripFirmPrefix(cleanValue(values.clientName, "[Entity Name]")).toUpperCase()
+      },
       { search: "M/s Genesis Integrated Services & Solutions", value: (values) => cleanValue(values.clientName, "M/s. [Entity Name]") },
       { search: "M/s. Genesis Integrated Services & Solutions", value: (values) => cleanValue(values.clientName, "M/s. [Entity Name]") },
       { search: "Genesis Integrated Services & Solutions", value: (values) => stripFirmPrefix(cleanValue(values.clientName, "[Entity Name]")) },
