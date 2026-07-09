@@ -35,6 +35,14 @@ type GeneratedLetter = {
   values: Record<string, string>;
 };
 
+const formatTabs = [
+  { key: "all", label: "All Formats" },
+  { key: "gstat", label: "GSTAT EL" },
+  { key: "gst", label: "GST EL" }
+] as const;
+
+type FormatTab = (typeof formatTabs)[number]["key"];
+
 const defaultFormats: EngagementFormat[] = [
   {
     id: "gstat-tribunal",
@@ -240,9 +248,22 @@ function applyGstatFeeReplacements(xml: string, values: Record<string, string>) 
 }
 
 export function EngagementLetterDashboard() {
+  const [activeTab, setActiveTab] = useState<FormatTab>("gstat");
   const [activeFormat, setActiveFormat] = useState<EngagementFormat | null>(null);
   const [formValues, setFormValues] = useState<Record<string, string>>({});
   const [generatedLetter, setGeneratedLetter] = useState<GeneratedLetter | null>(null);
+
+  const visibleFormats = useMemo(() => {
+    if (activeTab === "gstat") {
+      return defaultFormats.filter((format) => format.category === "GSTAT EL");
+    }
+
+    if (activeTab === "gst") {
+      return defaultFormats.filter((format) => format.category !== "GSTAT EL");
+    }
+
+    return defaultFormats;
+  }, [activeTab]);
 
   const dashboardStats = useMemo(
     () => [
@@ -414,44 +435,63 @@ export function EngagementLetterDashboard() {
       </section>
 
       <section className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1fr)_420px]">
-        <div className="grid gap-4 lg:grid-cols-2">
-          {defaultFormats.map((format) => (
-            <article className="rounded-[28px] border border-white/80 bg-white/90 p-5 shadow-[0_24px_80px_rgba(15,23,42,0.10)]" key={format.id}>
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex size-12 items-center justify-center rounded-2xl bg-cyan-100 text-cyan-800">
-                  <FileText className="size-6" />
-                </div>
-                <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-black uppercase text-slate-600">
-                  {format.fields.length} blanks
-                </span>
-              </div>
-              <p className="mt-5 text-xs font-black uppercase text-cyan-700">{format.category}</p>
-              <h2 className="mt-2 text-2xl font-black text-slate-950">{format.title}</h2>
-              <p className="mt-3 text-sm font-semibold leading-6 text-slate-600">{format.description}</p>
-
-              <div className="mt-4 flex flex-wrap gap-2">
-                {format.fields.slice(0, 5).map((field) => (
-                  <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600" key={field.key}>
-                    {field.label}
-                  </span>
-                ))}
-                {format.fields.length > 5 ? (
-                  <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600">
-                    +{format.fields.length - 5} more
-                  </span>
-                ) : null}
-              </div>
-
+        <div className="rounded-[28px] border border-white/80 bg-white/90 p-4 shadow-[0_24px_80px_rgba(15,23,42,0.10)]">
+          <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-4">
+            {formatTabs.map((tab) => (
               <button
-                className="mt-5 inline-flex h-11 items-center justify-center gap-2 rounded-2xl bg-slate-950 px-4 text-sm font-black text-white transition hover:bg-slate-800"
-                onClick={() => openCreateWindow(format)}
+                className={`h-10 rounded-2xl px-4 text-sm font-black transition ${
+                  activeTab === tab.key ? "bg-slate-950 text-white" : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                }`}
+                key={tab.key}
+                onClick={() => setActiveTab(tab.key)}
                 type="button"
               >
-                <Plus className="size-4" />
-                Create EL
+                {tab.label}
               </button>
-            </article>
-          ))}
+            ))}
+          </div>
+
+          <div className="mt-4 space-y-3">
+            {visibleFormats.map((format) => (
+              <article
+                className="grid gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm lg:grid-cols-[minmax(190px,0.7fr)_minmax(0,1.3fr)_auto] lg:items-center"
+                key={format.id}
+              >
+                <div className="flex items-center gap-3">
+                  <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-cyan-100 text-cyan-800">
+                    <FileText className="size-5" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs font-black uppercase text-cyan-700">{format.category}</p>
+                    <h2 className="truncate text-base font-black text-slate-950">{format.title}</h2>
+                  </div>
+                </div>
+
+                <div className="min-w-0">
+                  <p className="line-clamp-2 text-sm font-semibold leading-6 text-slate-600">{format.description}</p>
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {format.fields.slice(0, 4).map((field) => (
+                      <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-600" key={field.key}>
+                        {field.label}
+                      </span>
+                    ))}
+                    <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-600">
+                      {format.fields.length} blanks
+                    </span>
+                  </div>
+                </div>
+
+                <button
+                  className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 text-sm font-black text-white transition hover:bg-slate-800"
+                  onClick={() => openCreateWindow(format)}
+                  type="button"
+                >
+                  <Plus className="size-4" />
+                  Create EL
+                </button>
+              </article>
+            ))}
+          </div>
         </div>
 
         <aside className="rounded-[28px] border border-white/80 bg-white/90 p-5 shadow-[0_24px_80px_rgba(15,23,42,0.10)]">
