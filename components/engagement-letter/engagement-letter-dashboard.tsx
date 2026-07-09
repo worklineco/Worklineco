@@ -27,72 +27,95 @@ type GeneratedLetter = {
 
 const defaultFormats: EngagementFormat[] = [
   {
-    id: "gst-compliance",
-    category: "GST Compliance",
-    title: "GST Compliance Engagement",
-    description: "Standard format for GST return, compliance, notice support, and advisory assignments.",
+    id: "gst-retainership",
+    category: "Retainership",
+    title: "Engagement Letter - GST Retainership",
+    description: "Format for monthly GST compliance, advisory, refund support, pre-SCN matters, and department audit support.",
     fields: [
       { key: "date", label: "Date", placeholder: "Letter date", type: "date" },
-      { key: "clientName", label: "Client Name", placeholder: "ABC Private Limited" },
-      { key: "clientAddress", label: "Client Address", placeholder: "Registered office address", type: "textarea" },
-      { key: "gstin", label: "GSTIN", placeholder: "27AAAAA0000A1Z5" },
-      { key: "scope", label: "Scope of Work", placeholder: "GST returns, reconciliations, notices, advisory", type: "textarea" },
-      { key: "fee", label: "Professional Fee", placeholder: "Rs. 25,000 plus taxes" },
-      { key: "period", label: "Engagement Period", placeholder: "FY 2026-27" },
-      { key: "signatory", label: "Authorised Signatory", placeholder: "Name and designation" }
+      { key: "clientName", label: "Entity Name", placeholder: "M/s. ABC Private Limited" },
+      { key: "clientAddress", label: "Entity Address", placeholder: "Registered office address", type: "textarea" },
+      { key: "effectiveDate", label: "Effective From", placeholder: "1st April 2026" },
+      { key: "coveredEntities", label: "Entities Covered", placeholder: "List entities covered for monthly compliances", type: "textarea" },
+      { key: "monthlyFee", label: "Monthly Fee", placeholder: "Rs. 45,000 per month" },
+      { key: "billingCycle", label: "Billing Cycle", placeholder: "Monthly" },
+      { key: "paymentCycle", label: "Payment Cycle", placeholder: "Monthly" },
+      { key: "acknowledger", label: "Acknowledged By", placeholder: "Name of authorised person" },
+      { key: "place", label: "Place", placeholder: "Jaipur" }
     ],
     clauses: [
-      "This engagement letter records the understanding between WorkLine Co and {{clientName}} for professional services relating to {{scope}}.",
-      "The services will be performed for GSTIN {{gstin}} for the period {{period}}, based on information and records made available by the client.",
-      "The professional fee for this engagement will be {{fee}}. Taxes and out-of-pocket expenses, if any, will be charged separately.",
-      "The client will remain responsible for completeness and accuracy of records, timely approvals, and statutory positions adopted in filings or replies.",
-      "This letter may be accepted by signing below through {{signatory}}."
+      "At the outset, we thank you for providing us an opportunity to submit our terms of engagement for providing review, advisory and compliance services relating to Goods and Services Tax Law(s) enacted in India to {{clientName}}.",
+      "We are engaged by the entity for providing advisory and consultancy services with respect to Goods and Services Tax Law(s) with effect from {{effectiveDate}}.",
+      "Monthly compliance services shall include filing of GSTR-1 and GSTR-3B.",
+      "Advisory services shall include advice on compliance related matters, technical issues in filing GST returns, documentation practices including invoices, delivery challans and e-way bills, regular GST transaction queries, department correspondence, meetings on GST issues, and GST implications in agreements.",
+      "Additional support shall include GST updates, periodical newsletters, advisory on amendments, refund applications, response to deficiency memos and show cause notices in respect of refunds, and representation services for pre-SCN matters.",
+      "Department audit support may include assistance in compilation of relevant information, review of information to be shared with audit authorities, strategy advisory, support on technical issues raised during audit, drafting replies to preliminary audit objections or final audit report, and coordination till conclusion of audit.",
+      "Services excluded from retainership include replies to show cause notices, appeals before Commissioner (Appeals), investigation proceedings, legal or professional opinions, and appeals before Tribunal, unless separately agreed.",
+      "Entities covered under this retainership: {{coveredEntities}}.",
+      "The entity shall ensure timely compilation of data, collation of documents, provision of information and system reports, communication with suppliers, expense credit reconciliation, decisions on reconciliation items and credit claims, ITC mismatch action points, and reconciliation of working and financial details.",
+      "We shall make every reasonable effort to avoid errors or omissions. However, tax laws and Indian GAAP are voluminous, ambiguous and constantly changing, and the entity shall be free to follow or disregard recommendations in whole or in part.",
+      "The assignment shall be undertaken by a team comprising Partner, Senior Manager, Manager and Executive of the firm. The billing shall be {{monthlyFee}}, out of pocket expenses shall be billed separately, billing shall be on {{billingCycle}} basis, payment cycle shall be {{paymentCycle}}, and applicable taxes shall be extra.",
+      "A countersigned copy of this engagement letter shall be a valid confirmation of the terms, scope and commercial understanding. Acknowledged by {{acknowledger}} at {{place}}."
     ]
   },
   {
-    id: "gstat-appeal",
-    category: "GSTAT Appeal",
-    title: "GSTAT Appeal Engagement",
-    description: "Format for appeal filing, document preparation, hearing support, and matter tracking.",
+    id: "gst-review",
+    category: "GST Review",
+    title: "Engagement Letter - GST Review Services",
+    description: "Format for GST review and verification services with exception-based report and recommendations.",
     fields: [
       { key: "date", label: "Date", placeholder: "Letter date", type: "date" },
-      { key: "clientName", label: "Client Name", placeholder: "ABC Private Limited" },
-      { key: "clientAddress", label: "Client Address", placeholder: "Registered office address", type: "textarea" },
-      { key: "matterTitle", label: "Matter Title", placeholder: "Appeal against Order No..." },
-      { key: "orderReference", label: "Order Reference", placeholder: "OIA / DRC / DIN details" },
-      { key: "scope", label: "Scope of Work", placeholder: "Appeal drafting, filing, hearing coordination", type: "textarea" },
-      { key: "fee", label: "Professional Fee", placeholder: "Rs. 75,000 plus taxes" },
-      { key: "signatory", label: "Authorised Signatory", placeholder: "Name and designation" }
+      { key: "clientName", label: "Entity Name", placeholder: "M/s. ABC Private Limited" },
+      { key: "clientAddress", label: "Entity Address", placeholder: "Registered office address", type: "textarea" },
+      { key: "entityWork", label: "Entity Work", placeholder: "Business profile / nature of activities", type: "textarea" },
+      { key: "documentPeriod", label: "Document Period", placeholder: "FY 2026-27" },
+      { key: "reviewPeriod", label: "Review Period", placeholder: "April 2026 to March 2027" },
+      { key: "fee", label: "Lump Sum Fee", placeholder: "Rs. 1,40,000" },
+      { key: "advancePercent", label: "Advance Billing", placeholder: "30%" },
+      { key: "balanceMilestone", label: "Balance Milestone", placeholder: "On sharing of deliverables" },
+      { key: "acknowledger", label: "Acknowledged By", placeholder: "Name of authorised person" },
+      { key: "place", label: "Place", placeholder: "Jaipur" }
     ],
     clauses: [
-      "This engagement covers professional services for {{matterTitle}} concerning {{orderReference}}.",
-      "WorkLine Co will assist with {{scope}}, subject to records, facts, and approvals provided by {{clientName}}.",
-      "The client will be responsible for factual accuracy, statutory declarations, portal credentials, and timely payment of government fees, if any.",
-      "The professional fee for this engagement will be {{fee}}. Additional appearances, adjournments, or expanded scope may be billed separately.",
-      "This letter may be accepted by signing below through {{signatory}}."
+      "At the outset, we thank you for providing us an opportunity to submit our terms of engagement for providing review and verification services relating to Goods and Services Tax Law(s) enacted in India to {{clientName}}.",
+      "As explained to us, this assignment shall be carried out for {{clientName}}, which is {{entityWork}}. Document period: {{documentPeriod}}. Review period: {{reviewPeriod}}.",
+      "We shall provide review and verification services, including review of documentation aspects under GST, verification of input tax credit claimed, verification of tax liability discharged, and suggestions based on information received from the entity.",
+      "The review shall cover tax positions under GST, GSTR-3B disclosures, GSTR-1 disclosures, GSTR-2A/2B versus ITC in books and returns, primary data analytics, reconciliation of GST returns with financial details, place of records, tax rates, time of supply, exemptions, supplier invoices for ITC, blocked credit eligibility, RCM, documentation practices, GST records, cross charge, ISD mechanism, reversal of ITC, GST registrations, credit leakage, valuation including related party transactions, books and records, agreements and contracts, and system reports.",
+      "We shall share an exception-based report highlighting issues observed during the process and recommendations on tax optimization strategy.",
+      "The entity shall ensure timely compilation of data and documents required for review, including basic data, documents, information, system reports, previous returns, supplier communication, expense credit reconciliation, decisions on reconciliation items and credit claims, ITC mismatch action points, and reconciliation of provisional credits, reversals and re-credits.",
+      "We shall make every reasonable effort to avoid errors or omissions. However, tax laws and Indian GAAP are voluminous, ambiguous and constantly changing, and the entity shall be free to follow or disregard recommendations in whole or in part.",
+      "The assignment shall be undertaken by a team comprising Partner, Senior Manager, Manager and Executive of the firm. The billing for the project shall be a lump sum amount of {{fee}}, with {{advancePercent}} payable at confirmation of engagement and the remaining amount payable {{balanceMilestone}}. Out of pocket expenses and applicable taxes shall be extra.",
+      "A countersigned copy of this engagement letter shall be a valid confirmation of the terms, scope and commercial understanding. Acknowledged by {{acknowledger}} at {{place}}."
     ]
   },
   {
-    id: "general-advisory",
-    category: "General Advisory",
-    title: "Professional Advisory Engagement",
-    description: "Flexible format for tax, compliance, research, representation, and consulting assignments.",
+    id: "gst-summon",
+    category: "Summon / Litigation",
+    title: "Engagement Letter - GST Litigation Representation Services",
+    description: "Format for summons, reply drafting, appearance, and follow-up representation before GST authority.",
     fields: [
       { key: "date", label: "Date", placeholder: "Letter date", type: "date" },
-      { key: "clientName", label: "Client Name", placeholder: "ABC Private Limited" },
-      { key: "clientAddress", label: "Client Address", placeholder: "Registered office address", type: "textarea" },
-      { key: "assignment", label: "Assignment", placeholder: "Brief description of assignment" },
-      { key: "deliverables", label: "Deliverables", placeholder: "Opinion, memo, review note, filing support", type: "textarea" },
-      { key: "fee", label: "Professional Fee", placeholder: "Rs. 40,000 plus taxes" },
-      { key: "timeline", label: "Timeline", placeholder: "Within 10 working days from receipt of records" },
-      { key: "signatory", label: "Authorised Signatory", placeholder: "Name and designation" }
+      { key: "clientName", label: "Entity Name", placeholder: "M/s. ABC Private Limited" },
+      { key: "clientAddress", label: "Entity Address", placeholder: "Registered office address", type: "textarea" },
+      { key: "authority", label: "Authority", placeholder: "Superintendent / GST Authority" },
+      { key: "issue", label: "Summon Issue", placeholder: "Inquiry related to non-payment of GST on input services under RCM", type: "textarea" },
+      { key: "stage", label: "Stage", placeholder: "Summon Stage" },
+      { key: "feeBreakup", label: "Fee Break-up", placeholder: "Drafting reply and appearance - Rs. 75,000", type: "textarea" },
+      { key: "advancePercent", label: "Advance Payment", placeholder: "60%" },
+      { key: "balancePercent", label: "Balance Payment", placeholder: "40%" },
+      { key: "place", label: "Place", placeholder: "Jaipur" },
+      { key: "acknowledger", label: "Acknowledged By", placeholder: "Name of authorised person" }
     ],
     clauses: [
-      "This engagement letter records the professional assignment for {{assignment}} for {{clientName}}.",
-      "The agreed deliverables are {{deliverables}}, to be completed within {{timeline}}, subject to timely availability of information.",
-      "The professional fee for this engagement will be {{fee}}. Taxes and out-of-pocket expenses, if any, will be charged separately.",
-      "Advice will be based on facts, documents, and assumptions shared by the client and the law applicable at the time of issuance.",
-      "This letter may be accepted by signing below through {{signatory}}."
+      "At the outset, we thank you for providing us an opportunity to submit our terms of engagement for providing representation services relating to Goods and Services Tax Law(s) enacted in India to {{clientName}}.",
+      "A summon was issued by {{authority}} for {{issue}}. We have been approached to share an engagement letter for professional services in this regard.",
+      "The scope of professional services at {{stage}} shall include drafting of reply to summon, representing before the authority, and coordinating follow-up matters.",
+      "We shall make every reasonable effort to avoid errors or omissions. However, tax laws and Indian GAAP are voluminous, ambiguous and constantly changing, and the entity shall be free to follow or disregard recommendations in whole or in part.",
+      "The assignment shall be undertaken by a team comprising Senior Partner, Senior Manager, Manager and Executive of the firm.",
+      "The work shall be carried out for the following fee break-up and conditions: {{feeBreakup}}. The professional fee shall be applicable for appearance before a single adjudicating authority.",
+      "Printing, postage and office supplies, out of pocket expenses, travelling, lodging and boarding expenses shall be charged separately. Applicable taxes shall be extra.",
+      "{{advancePercent}} shall be payable in advance on confirmation of engagement letter and balance {{balancePercent}} shall be payable on submission before the respective authority.",
+      "A countersigned copy of this engagement letter shall be a valid confirmation of the terms, scope and commercial understanding. Acknowledged by {{acknowledger}} at {{place}}."
     ]
   }
 ];
@@ -159,7 +182,20 @@ export function EngagementLetterDashboard() {
         "",
         clauses,
         "",
-        "For WorkLine Co",
+        "For Dhadda & Co.",
+        "",
+        "Yash Dhadda",
+        "[Partner]",
+        "",
+        "Acknowledgement",
+        `I, ${formValues.acknowledger?.trim() || "[acknowledger]"}, on behalf of management of ${formValues.clientName?.trim() || "[clientName]"} hereby accept the aforesaid scope of services and terms of engagement along with commercial terms provided above by M/s Dhadda & Co., Chartered Accountants.`,
+        "",
+        `For ${formValues.clientName?.trim() || "[clientName]"}`,
+        "",
+        "(                         )",
+        "",
+        "Date:",
+        `Place: ${formValues.place?.trim() || "[place]"}`,
         "",
         "Authorised Signatory"
       ].join("\n")
@@ -171,11 +207,33 @@ export function EngagementLetterDashboard() {
       return;
     }
 
-    const file = new Blob([generatedLetter.content], { type: "text/plain;charset=utf-8" });
+    const escapeHtml = (value: string) =>
+      value
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    const html = `
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <style>
+            body { font-family: Arial, sans-serif; font-size: 11pt; line-height: 1.45; color: #111827; }
+            h1 { font-size: 16pt; text-align: center; }
+            p { margin: 0 0 10px; white-space: pre-wrap; }
+          </style>
+        </head>
+        <body>
+          <h1>${escapeHtml(generatedLetter.title)}</h1>
+          ${generatedLetter.content.split("\n\n").map((paragraph) => `<p>${escapeHtml(paragraph)}</p>`).join("")}
+        </body>
+      </html>
+    `;
+    const file = new Blob([html], { type: "application/msword;charset=utf-8" });
     const url = URL.createObjectURL(file);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `${generatedLetter.category.replace(/\s+/g, "-").toLowerCase()}-engagement-letter.txt`;
+    link.download = `${generatedLetter.category.replace(/\s+/g, "-").toLowerCase()}-engagement-letter.doc`;
     link.click();
     URL.revokeObjectURL(url);
   }
@@ -255,7 +313,7 @@ export function EngagementLetterDashboard() {
                   type="button"
                 >
                   <Download className="size-4" />
-                  Download
+                  Download Word Draft
                 </button>
                 <button
                   className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 text-sm font-black text-white"
