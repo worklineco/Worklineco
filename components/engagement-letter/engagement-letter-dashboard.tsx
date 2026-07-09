@@ -103,6 +103,7 @@ const defaultFormats: EngagementFormat[] = [
     category: "Retainership",
     title: "Engagement Letter - GST Retainership",
     description: "Format for monthly GST compliance, advisory, refund support, pre-SCN matters, and department audit support.",
+    templatePath: "/templates/retainership-engagement-letter.docx",
     fields: [
       { key: "date", label: "Date", placeholder: "Letter date", type: "date" },
       { key: "clientName", label: "Entity Name", placeholder: "M/s. ABC Private Limited" },
@@ -128,6 +129,25 @@ const defaultFormats: EngagementFormat[] = [
       "We shall make every reasonable effort to avoid errors or omissions. However, tax laws and Indian GAAP are voluminous, ambiguous and constantly changing, and the entity shall be free to follow or disregard recommendations in whole or in part.",
       "The assignment shall be undertaken by a team comprising Partner, Senior Manager, Manager and Executive of the firm. The billing shall be {{monthlyFee}}, out of pocket expenses shall be billed separately, billing shall be on {{billingCycle}} basis, payment cycle shall be {{paymentCycle}}, and applicable taxes shall be extra.",
       "A countersigned copy of this engagement letter shall be a valid confirmation of the terms, scope and commercial understanding. Acknowledged by {{acknowledger}} at {{place}}."
+    ],
+    templateReplacements: [
+      { search: "____________", value: (values) => cleanValue(values.clientName, "M/s. [Entity Name]") },
+      { search: "__________", value: (values) => stripFirmPrefix(cleanValue(values.clientName, "[Entity Name]")) },
+      { search: "M/s.__________", value: (values) => cleanValue(values.clientName, "M/s. [Entity Name]") },
+      { search: "1st April 2024", value: (values) => cleanValue(values.effectiveDate, "[Effective From]") },
+      {
+        search: "*Entity’s Covered*(Mention Entities that are covered for the monthly complinaces)",
+        value: (values) => `*Entity’s Covered*\n${cleanValue(values.coveredEntities, "[Entities Covered]")}`
+      },
+      { search: "Rs 45,000/- per month", value: (values) => cleanValue(values.monthlyFee, "[Monthly Fee]") },
+      { search: "Billing shall be done on Monthly basis.", value: (values) => `Billing shall be done on ${cleanValue(values.billingCycle, "[Billing Cycle]")} basis.` },
+      { search: "Payment cycle shall be Monthly", value: (values) => `Payment cycle shall be ${cleanValue(values.paymentCycle, "[Payment Cycle]")}` },
+      { search: "14-05-2024", value: (values) => formatDateForDocument(cleanValue(values.date, "[Date]")) },
+      {
+        search: "I                                , on behalf of management of",
+        value: (values) => `I ${cleanValue(values.acknowledger, "[Acknowledged By]")}, on behalf of management of`
+      },
+      { search: "Place:", value: (values) => `Place: ${cleanValue(values.place, "[Place]")}` }
     ]
   },
   {
@@ -135,6 +155,7 @@ const defaultFormats: EngagementFormat[] = [
     category: "GST Review",
     title: "Engagement Letter - GST Review Services",
     description: "Format for GST review and verification services with exception-based report and recommendations.",
+    templatePath: "/templates/review-engagement-letter.docx",
     fields: [
       { key: "date", label: "Date", placeholder: "Letter date", type: "date" },
       { key: "clientName", label: "Entity Name", placeholder: "M/s. ABC Private Limited" },
@@ -158,6 +179,23 @@ const defaultFormats: EngagementFormat[] = [
       "We shall make every reasonable effort to avoid errors or omissions. However, tax laws and Indian GAAP are voluminous, ambiguous and constantly changing, and the entity shall be free to follow or disregard recommendations in whole or in part.",
       "The assignment shall be undertaken by a team comprising Partner, Senior Manager, Manager and Executive of the firm. The billing for the project shall be a lump sum amount of {{fee}}, with {{advancePercent}} payable at confirmation of engagement and the remaining amount payable {{balanceMilestone}}. Out of pocket expenses and applicable taxes shall be extra.",
       "A countersigned copy of this engagement letter shall be a valid confirmation of the terms, scope and commercial understanding. Acknowledged by {{acknowledger}} at {{place}}."
+    ],
+    templateReplacements: [
+      { search: "______________", value: (values) => cleanValue(values.clientName, "M/s. [Entity Name]") },
+      { search: "____________", value: (values) => cleanValue(values.clientName, "M/s. [Entity Name]") },
+      { search: "__________", value: (values) => stripFirmPrefix(cleanValue(values.clientName, "[Entity Name]")) },
+      { search: "(Entity’s Name)", value: (values) => cleanValue(values.clientName, "M/s. [Entity Name]") },
+      { search: "(Entity's Work", value: (values) => cleanValue(values.entityWork, "[Entity Work]") },
+      { search: "FY 2024-25", value: (values) => cleanValue(values.documentPeriod, "[Document Period]") },
+      { search: "1,40,000/-", value: (values) => cleanValue(values.fee, "[Lump Sum Fee]") },
+      { search: "30%", value: (values) => cleanValue(values.advancePercent, "[Advance Billing]") },
+      { search: "Remaining shall be billed and payable on sharing of deliverables", value: (values) => `Remaining shall be billed and payable ${cleanValue(values.balanceMilestone, "[Balance Milestone]")}` },
+      { search: "14-05-2024", value: (values) => formatDateForDocument(cleanValue(values.date, "[Date]")) },
+      {
+        search: "I                                , on behalf of management of",
+        value: (values) => `I ${cleanValue(values.acknowledger, "[Acknowledged By]")}, on behalf of management of`
+      },
+      { search: "Place:", value: (values) => `Place: ${cleanValue(values.place, "[Place]")}` }
     ]
   },
   {
@@ -165,6 +203,7 @@ const defaultFormats: EngagementFormat[] = [
     category: "Summon / Litigation",
     title: "Engagement Letter - GST Litigation Representation Services",
     description: "Format for summons, reply drafting, appearance, and follow-up representation before GST authority.",
+    templatePath: "/templates/summon-engagement-letter.docx",
     fields: [
       { key: "date", label: "Date", placeholder: "Letter date", type: "date" },
       { key: "clientName", label: "Entity Name", placeholder: "M/s. ABC Private Limited" },
@@ -188,6 +227,22 @@ const defaultFormats: EngagementFormat[] = [
       "Printing, postage and office supplies, out of pocket expenses, travelling, lodging and boarding expenses shall be charged separately. Applicable taxes shall be extra.",
       "{{advancePercent}} shall be payable in advance on confirmation of engagement letter and balance {{balancePercent}} shall be payable on submission before the respective authority.",
       "A countersigned copy of this engagement letter shall be a valid confirmation of the terms, scope and commercial understanding. Acknowledged by {{acknowledger}} at {{place}}."
+    ],
+    templateReplacements: [
+      { search: "Neerja Modi School", value: (values) => stripFirmPrefix(cleanValue(values.clientName, "[Entity Name]")) },
+      { search: "Superintendent", value: (values) => cleanValue(values.authority, "[Authority]") },
+      { search: "Inquiry related to non-payment of GST on Input Services on RCM", value: (values) => cleanValue(values.issue, "[Summon Issue]") },
+      { search: "Summon Stage", value: (values) => cleanValue(values.stage, "[Stage]") },
+      { search: "75,000", value: (values) => cleanValue(values.feeBreakup, "[Fee Break-up]") },
+      { search: "60%", value: (values) => cleanValue(values.advancePercent, "[Advance Payment]") },
+      { search: "40%", value: (values) => cleanValue(values.balancePercent, "[Balance Payment]") },
+      { search: "27-11-2024", value: (values) => formatDateForDocument(cleanValue(values.date, "[Date]")) },
+      {
+        search: "I                                         ",
+        value: (values) => `I ${cleanValue(values.acknowledger, "[Acknowledged By]")}`
+      },
+      { search: "Place: Jaipur", value: (values) => `Place: ${cleanValue(values.place, "[Place]")}` },
+      { search: "Place:", value: (values) => `Place: ${cleanValue(values.place, "[Place]")}` }
     ]
   }
 ];
