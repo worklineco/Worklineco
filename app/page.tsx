@@ -29,6 +29,7 @@ const navigation = [
   { href: "/gstat", icon: Scale, label: "GSTAT", target: "_blank", tone: "bg-fuchsia-100 text-fuchsia-800" },
   { href: "/billing", icon: ReceiptText, label: "Billing", target: "_blank", tone: "bg-lime-100 text-lime-800" },
   { href: "/taskline", icon: ListChecks, label: "TaskLine", target: "_blank", tone: "bg-rose-100 text-rose-800" },
+  { href: "/engagement-letter", icon: FileText, label: "Engagement Letter", target: "_blank", tone: "bg-cyan-100 text-cyan-800" },
   {
     href: "/pdf-indexing",
     icon: FileSearch,
