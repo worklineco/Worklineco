@@ -410,18 +410,13 @@ export function PartnerDashboard() {
 
             <div className="mt-4 space-y-2">
               {state.tasks.filter((task) => task.category === category && task.dueDate === activeTaskDates[category]).map((task, index) => (
-                <label className="flex gap-3 rounded-2xl bg-slate-50 p-3" key={task.id}>
+                <label className="flex items-center gap-3 rounded-2xl bg-slate-50 p-3" key={task.id}>
                   <input checked={task.done} className="mt-1" onChange={(event) => updateTask(task.id, { done: event.target.checked })} type="checkbox" />
-                  <span className="mt-0.5 text-sm font-black text-slate-400">{index + 1}.</span>
+                  <span className="text-sm font-black text-slate-400">{index + 1}.</span>
                   <span className="min-w-0 flex-1">
                     <span className={`block text-sm font-black ${task.done ? "text-slate-400 line-through" : "text-slate-950"}`}>{task.title}</span>
-                    <span className="mt-1 flex flex-wrap gap-2 text-xs font-bold text-slate-500">
-                      <span className="inline-flex items-center gap-1.5">
-                        <span className={`size-2.5 rounded-full ${priorityDotClass(task.priority)}`} />
-                        {task.priority}
-                      </span>
-                    </span>
                   </span>
+                  <span className={`size-3.5 shrink-0 rounded-full ${priorityDotClass(task.priority)}`} title={`${task.priority} priority`} />
                 </label>
               ))}
               {state.tasks.filter((task) => task.category === category && task.dueDate === activeTaskDates[category]).length === 0 ? (
