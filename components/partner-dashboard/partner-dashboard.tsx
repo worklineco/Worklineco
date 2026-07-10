@@ -66,10 +66,11 @@ type DashboardState = {
 
 const taskCategories: TaskCategory[] = ["Technical", "Business Development", "Hiring and Resource Management"];
 const storageKey = "workline-partner-dashboard";
+const today = new Date().toISOString().slice(0, 10);
 const defaultState: DashboardState = {
   followUps: [
     {
-      dueDate: new Date().toISOString().slice(0, 10),
+      dueDate: today,
       id: "followup-1",
       item: "Send pending update promised to client",
       owner: "Partner",
@@ -98,7 +99,7 @@ const defaultState: DashboardState = {
     {
       category: "Technical",
       done: false,
-      dueDate: new Date().toISOString().slice(0, 10),
+      dueDate: today,
       id: "task-1",
       priority: "High",
       title: "Review high-priority technical issue"
@@ -127,11 +128,17 @@ export function PartnerDashboard() {
   const [state, setState] = useState<DashboardState>(defaultState);
   const [activeNoteId, setActiveNoteId] = useState(defaultState.notes[0]?.id ?? "");
   const [activeThreadId, setActiveThreadId] = useState(defaultState.threads[0]?.id ?? "");
-  const [taskDrafts, setTaskDrafts] = useState<Record<TaskCategory, { dueDate: string; priority: Priority; title: string }>>({
-    "Business Development": { dueDate: "", priority: "Medium", title: "" },
-    "Hiring and Resource Management": { dueDate: "", priority: "Medium", title: "" },
-    Technical: { dueDate: "", priority: "High", title: "" }
+  const [activeTaskDates, setActiveTaskDates] = useState<Record<TaskCategory, string>>({
+    "Business Development": today,
+    "Hiring and Resource Management": today,
+    Technical: today
   });
+  const [taskDrafts, setTaskDrafts] = useState<Record<TaskCategory, { priority: Priority; title: string }>>({
+    "Business Development": { priority: "Medium", title: "" },
+    "Hiring and Resource Management": { priority: "Medium", title: "" },
+    Technical: { priority: "High", title: "" }
+  });
+  const [useNumberedNotes, setUseNumberedNotes] = useState(false);
   const [noteTitle, setNoteTitle] = useState("");
   const [threadDraft, setThreadDraft] = useState({ members: "", title: "" });
   const [messageDraft, setMessageDraft] = useState("");
@@ -178,7 +185,7 @@ export function PartnerDashboard() {
         {
           category,
           done: false,
-          dueDate: draft.dueDate,
+          dueDate: activeTaskDates[category],
           id: crypto.randomUUID(),
           priority: draft.priority,
           title: draft.title.trim()
@@ -186,7 +193,7 @@ export function PartnerDashboard() {
         ...current.tasks
       ]
     }));
-    setTaskDrafts((current) => ({ ...current, [category]: { dueDate: "", priority: "Medium", title: "" } }));
+    setTaskDrafts((current) => ({ ...current, [category]: { priority: "Medium", title: "" } }));
   }
 
   function updateTask(id: string, updates: Partial<TaskItem>) {
@@ -225,6 +232,32 @@ export function PartnerDashboard() {
         note.id === activeNote.id ? { ...note, content, updatedAt: new Date().toISOString() } : note
       )
     }));
+  }
+
+  function numberNoteLines(content: string) {
+    let count = 0;
+
+    return content
+      .split("\n")
+      .map((line) => {
+        const cleaned = line.replace(/^\s*\d+\.\s*/, "").trim();
+
+        if (!cleaned) {
+          return "";
+        }
+
+        count += 1;
+        return `${count}. ${cleaned}`;
+      })
+      .join("\n");
+  }
+
+  function toggleNumberedNotes(checked: boolean) {
+    setUseNumberedNotes(checked);
+
+    if (checked && activeNote) {
+      updateActiveNote(numberNoteLines(activeNote.content));
+    }
   }
 
   function createThread() {
@@ -331,6 +364,20 @@ export function PartnerDashboard() {
               <h3 className="text-base font-black text-slate-950">To-do list ({category})</h3>
             </div>
 
+            <div className="mt-4 rounded-2xl bg-violet-50 p-3">
+              <label className="block">
+                <span className="text-xs font-black uppercase text-violet-700">Date</span>
+                <input
+                  className="mt-2 h-10 w-full rounded-xl border border-violet-100 bg-white px-3 text-sm font-black text-slate-950 outline-none focus:border-violet-500"
+                  onChange={(event) =>
+                    setActiveTaskDates((current) => ({ ...current, [category]: event.target.value }))
+                  }
+                  type="date"
+                  value={activeTaskDates[category]}
+                />
+              </label>
+            </div>
+
             <div className="mt-4 grid gap-2">
               <input
                 className="h-10 rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-semibold outline-none focus:border-violet-500"
@@ -340,15 +387,7 @@ export function PartnerDashboard() {
                 placeholder="Add task"
                 value={taskDrafts[category].title}
               />
-              <div className="grid grid-cols-[1fr_120px_auto] gap-2">
-                <input
-                  className="h-10 rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-semibold outline-none focus:border-violet-500"
-                  onChange={(event) =>
-                    setTaskDrafts((current) => ({ ...current, [category]: { ...current[category], dueDate: event.target.value } }))
-                  }
-                  type="date"
-                  value={taskDrafts[category].dueDate}
-                />
+              <div className="grid grid-cols-[1fr_auto] gap-2">
                 <select
                   className="h-10 rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-black outline-none focus:border-violet-500"
                   onChange={(event) =>
@@ -370,18 +409,23 @@ export function PartnerDashboard() {
             </div>
 
             <div className="mt-4 space-y-2">
-              {state.tasks.filter((task) => task.category === category).map((task) => (
+              {state.tasks.filter((task) => task.category === category && task.dueDate === activeTaskDates[category]).map((task, index) => (
                 <label className="flex gap-3 rounded-2xl bg-slate-50 p-3" key={task.id}>
                   <input checked={task.done} className="mt-1" onChange={(event) => updateTask(task.id, { done: event.target.checked })} type="checkbox" />
+                  <span className="mt-0.5 text-sm font-black text-slate-400">{index + 1}.</span>
                   <span className="min-w-0 flex-1">
                     <span className={`block text-sm font-black ${task.done ? "text-slate-400 line-through" : "text-slate-950"}`}>{task.title}</span>
                     <span className="mt-1 flex flex-wrap gap-2 text-xs font-bold text-slate-500">
                       <span>{task.priority}</span>
-                      {task.dueDate ? <span>Due {task.dueDate}</span> : null}
                     </span>
                   </span>
                 </label>
               ))}
+              {state.tasks.filter((task) => task.category === category && task.dueDate === activeTaskDates[category]).length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-4 text-sm font-semibold text-slate-500">
+                  No tasks added for this date.
+                </div>
+              ) : null}
             </div>
           </div>
         ))}
@@ -409,7 +453,22 @@ export function PartnerDashboard() {
                 ))}
               </div>
             </div>
-            <textarea className="min-h-72 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm font-semibold leading-6 outline-none focus:border-violet-500 focus:bg-white" onChange={(event) => updateActiveNote(event.target.value)} placeholder="Write notes here" value={activeNote?.content ?? ""} />
+            <div>
+              <label className="mb-3 inline-flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-2 text-sm font-black text-slate-700">
+                <input
+                  checked={useNumberedNotes}
+                  onChange={(event) => toggleNumberedNotes(event.target.checked)}
+                  type="checkbox"
+                />
+                Numbered bullets
+              </label>
+              <textarea
+                className="min-h-72 w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm font-semibold leading-6 outline-none focus:border-violet-500 focus:bg-white"
+                onChange={(event) => updateActiveNote(useNumberedNotes ? numberNoteLines(event.target.value) : event.target.value)}
+                placeholder="Write notes here"
+                value={activeNote?.content ?? ""}
+              />
+            </div>
           </div>
         </div>
 
