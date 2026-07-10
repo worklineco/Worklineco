@@ -2,7 +2,7 @@
 
 import { Download, Eye, FileText, Plus, Printer, X } from "lucide-react";
 import JSZip from "jszip";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 type EngagementField = {
   key: string;
@@ -34,6 +34,30 @@ type GeneratedLetter = {
   format: EngagementFormat;
   values: Record<string, string>;
 };
+
+type EngagementLogEntry = {
+  id: string;
+  elNo: string;
+  entityName: string;
+  natureOfAssignment: string;
+  teamNumber: string;
+  date: string;
+  approvalStatus: "Pending" | "Approved" | "Rejected";
+  signedElLink: string;
+};
+
+type ApiEngagementLogRecord = {
+  approval_status?: string;
+  el_no?: string;
+  entity_name?: string;
+  generated_date?: string;
+  id: string;
+  nature_of_assignment?: string;
+  signed_el_link?: string;
+  team_number?: string;
+};
+
+const engagementLogStorageKey = "workline-engagement-letter-log";
 
 const formatTabs = [
   { key: "all", label: "All Formats" },
@@ -306,11 +330,65 @@ function applyGstatFeeReplacements(xml: string, values: Record<string, string>) 
   return updatedXml;
 }
 
+function mapApiLogRecord(record: ApiEngagementLogRecord): EngagementLogEntry {
+  return {
+    approvalStatus: (record.approval_status as EngagementLogEntry["approvalStatus"]) || "Pending",
+    date: record.generated_date || "",
+    elNo: record.el_no || "",
+    entityName: record.entity_name || "",
+    id: record.id,
+    natureOfAssignment: record.nature_of_assignment || "",
+    signedElLink: record.signed_el_link || "",
+    teamNumber: record.team_number || ""
+  };
+}
+
+async function saveLogEntry(entry: EngagementLogEntry) {
+  await fetch("/api/engagement-letters/log", {
+    body: JSON.stringify({
+      record: {
+        approval_status: entry.approvalStatus,
+        date: entry.date,
+        el_no: entry.elNo,
+        entity_name: entry.entityName,
+        id: entry.id,
+        nature_of_assignment: entry.natureOfAssignment,
+        signed_el_link: entry.signedElLink,
+        team_number: entry.teamNumber
+      }
+    }),
+    headers: { "Content-Type": "application/json" },
+    method: "POST"
+  });
+}
+
 export function EngagementLetterDashboard() {
   const [activeTab, setActiveTab] = useState<FormatTab>("gstat");
   const [activeFormat, setActiveFormat] = useState<EngagementFormat | null>(null);
   const [formValues, setFormValues] = useState<Record<string, string>>({});
   const [generatedLetter, setGeneratedLetter] = useState<GeneratedLetter | null>(null);
+  const [engagementLog, setEngagementLog] = useState<EngagementLogEntry[]>([]);
+
+  useEffect(() => {
+    const savedLog = window.localStorage.getItem(engagementLogStorageKey);
+
+    if (savedLog) {
+      setEngagementLog(JSON.parse(savedLog) as EngagementLogEntry[]);
+    }
+
+    fetch("/api/engagement-letters/log")
+      .then((response) => (response.ok ? response.json() : null))
+      .then((result: { records?: ApiEngagementLogRecord[] } | null) => {
+        if (result?.records) {
+          setEngagementLog(result.records.map(mapApiLogRecord));
+        }
+      })
+      .catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem(engagementLogStorageKey, JSON.stringify(engagementLog));
+  }, [engagementLog]);
 
   const visibleFormats = useMemo(() => {
     if (activeTab === "gstat") {
@@ -339,7 +417,7 @@ export function EngagementLetterDashboard() {
       format.fields.reduce<Record<string, string>>((values, field) => {
         values[field.key] = "";
         return values;
-      }, {})
+      }, { elNo: "", teamNumber: "" })
     );
     setGeneratedLetter(null);
   }
@@ -351,6 +429,37 @@ export function EngagementLetterDashboard() {
   function closeWindow() {
     setActiveFormat(null);
     setFormValues({});
+  }
+
+  function upsertEngagementLog(format: EngagementFormat, values: Record<string, string>) {
+    const dated = values.date?.trim() || new Date().toISOString().slice(0, 10);
+    const elNo = values.elNo?.trim() || values.engagementNo?.trim() || `EL-${dated}`;
+    const nextEntry: EngagementLogEntry = {
+      approvalStatus: "Pending",
+      date: dated,
+      elNo,
+      entityName: values.clientName?.trim() || "[Entity Name]",
+      id: crypto.randomUUID(),
+      natureOfAssignment: format.title,
+      signedElLink: "",
+      teamNumber: values.teamNumber?.trim() || "[Team]"
+    };
+
+    setEngagementLog((current) => [nextEntry, ...current]);
+    saveLogEntry(nextEntry).catch(() => undefined);
+  }
+
+  function updateLogEntry(id: string, updates: Partial<EngagementLogEntry>) {
+    setEngagementLog((current) => {
+      const updated = current.map((entry) => (entry.id === id ? { ...entry, ...updates } : entry));
+      const changed = updated.find((entry) => entry.id === id);
+
+      if (changed) {
+        saveLogEntry(changed).catch(() => undefined);
+      }
+
+      return updated;
+    });
   }
 
   function generateLetter() {
@@ -401,6 +510,7 @@ export function EngagementLetterDashboard() {
         "Authorised Signatory"
       ].join("\n")
     });
+    upsertEngagementLog(activeFormat, formValues);
   }
 
   async function downloadGeneratedLetter() {
@@ -596,6 +706,75 @@ export function EngagementLetterDashboard() {
         </aside>
       </section>
 
+      <section className="mt-5 rounded-[28px] border border-white/80 bg-white/90 p-4 shadow-[0_24px_80px_rgba(15,23,42,0.10)]">
+        <div className="flex flex-col gap-2 border-b border-slate-200 pb-4 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <p className="text-xs font-black uppercase text-cyan-700">Generated EL Log</p>
+            <h2 className="mt-1 text-2xl font-black text-slate-950">Engagement Letters Generated</h2>
+          </div>
+          <p className="text-sm font-semibold text-slate-500">{engagementLog.length} records</p>
+        </div>
+
+        <div className="mt-4 overflow-x-auto">
+          <table className="min-w-[980px] w-full border-separate border-spacing-y-2 text-left">
+            <thead>
+              <tr className="text-xs font-black uppercase text-slate-500">
+                <th className="px-3 py-2">EL No.</th>
+                <th className="px-3 py-2">Entity</th>
+                <th className="px-3 py-2">Nature of Assignment</th>
+                <th className="px-3 py-2">Team</th>
+                <th className="px-3 py-2">Date</th>
+                <th className="px-3 py-2">Approved</th>
+                <th className="px-3 py-2">Signed EL Link</th>
+              </tr>
+            </thead>
+            <tbody>
+              {engagementLog.length ? (
+                engagementLog.map((entry) => (
+                  <tr className="rounded-2xl bg-slate-50 text-sm font-semibold text-slate-700" key={entry.id}>
+                    <td className="rounded-l-2xl px-3 py-3 font-black text-slate-950">{entry.elNo}</td>
+                    <td className="px-3 py-3">{entry.entityName}</td>
+                    <td className="px-3 py-3">{entry.natureOfAssignment}</td>
+                    <td className="px-3 py-3">{entry.teamNumber}</td>
+                    <td className="px-3 py-3">{entry.date}</td>
+                    <td className="px-3 py-3">
+                      <select
+                        className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm font-black outline-none focus:border-cyan-500"
+                        onChange={(event) =>
+                          updateLogEntry(entry.id, {
+                            approvalStatus: event.target.value as EngagementLogEntry["approvalStatus"]
+                          })
+                        }
+                        value={entry.approvalStatus}
+                      >
+                        <option value="Pending">Pending</option>
+                        <option value="Approved">Approved</option>
+                        <option value="Rejected">Rejected</option>
+                      </select>
+                    </td>
+                    <td className="rounded-r-2xl px-3 py-3">
+                      <input
+                        className="h-10 w-full min-w-64 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold outline-none focus:border-cyan-500"
+                        onChange={(event) => updateLogEntry(entry.id, { signedElLink: event.target.value })}
+                        placeholder="Paste signed EL link"
+                        type="url"
+                        value={entry.signedElLink}
+                      />
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td className="rounded-2xl bg-slate-50 px-3 py-6 text-center text-sm font-semibold text-slate-500" colSpan={7}>
+                    No engagement letters generated yet.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
       {activeFormat ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55 p-4">
           <section className="max-h-[92vh] w-full max-w-3xl overflow-auto rounded-[28px] bg-white p-5 shadow-[0_30px_100px_rgba(15,23,42,0.35)]">
@@ -615,6 +794,26 @@ export function EngagementLetterDashboard() {
             </div>
 
             <div className="mt-5 grid gap-4 md:grid-cols-2">
+              <label>
+                <span className="text-xs font-black uppercase text-slate-500">EL No.</span>
+                <input
+                  className="mt-2 h-12 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 text-sm font-semibold outline-none transition focus:border-cyan-500 focus:bg-white"
+                  onChange={(event) => updateField("elNo", event.target.value)}
+                  placeholder="2026/05/10"
+                  type="text"
+                  value={formValues.elNo ?? ""}
+                />
+              </label>
+              <label>
+                <span className="text-xs font-black uppercase text-slate-500">Team No.</span>
+                <input
+                  className="mt-2 h-12 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 text-sm font-semibold outline-none transition focus:border-cyan-500 focus:bg-white"
+                  onChange={(event) => updateField("teamNumber", event.target.value)}
+                  placeholder="Team 03"
+                  type="text"
+                  value={formValues.teamNumber ?? ""}
+                />
+              </label>
               {activeFormat.fields.map((field) => (
                 <label className={field.type === "textarea" ? "md:col-span-2" : undefined} key={field.key}>
                   <span className="text-xs font-black uppercase text-slate-500">{field.label}</span>
