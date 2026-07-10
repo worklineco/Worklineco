@@ -139,7 +139,6 @@ export function PartnerDashboard() {
     Technical: { priority: "High", title: "" }
   });
   const [useNumberedNotes, setUseNumberedNotes] = useState(false);
-  const [noteTitle, setNoteTitle] = useState("");
   const [threadDraft, setThreadDraft] = useState({ members: "", title: "" });
   const [messageDraft, setMessageDraft] = useState("");
   const [followUpDraft, setFollowUpDraft] = useState({ dueDate: "", item: "", owner: "", type: "Callback" });
@@ -204,21 +203,15 @@ export function PartnerDashboard() {
   }
 
   function createNote() {
-    const title = noteTitle.trim();
-
-    if (!title) {
-      return;
-    }
-
+    const nextNumber = state.notes.length + 1;
     const note = {
-      content: "",
+      content: useNumberedNotes ? "1. " : "",
       id: crypto.randomUUID(),
-      title,
+      title: `Note ${nextNumber}`,
       updatedAt: new Date().toISOString()
     };
     setState((current) => ({ ...current, notes: [note, ...current.notes] }));
     setActiveNoteId(note.id);
-    setNoteTitle("");
   }
 
   function updateActiveNote(content: string) {
@@ -256,7 +249,7 @@ export function PartnerDashboard() {
     setUseNumberedNotes(checked);
 
     if (checked && activeNote) {
-      updateActiveNote(numberNoteLines(activeNote.content));
+      updateActiveNote(activeNote.content.trim() ? numberNoteLines(activeNote.content) : "1. ");
     }
   }
 
@@ -379,32 +372,39 @@ export function PartnerDashboard() {
             </div>
 
             <div className="mt-4 grid gap-2">
-              <input
-                className="h-10 rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-semibold outline-none focus:border-violet-500"
-                onChange={(event) =>
-                  setTaskDrafts((current) => ({ ...current, [category]: { ...current[category], title: event.target.value } }))
-                }
-                placeholder="Add task"
-                value={taskDrafts[category].title}
-              />
-              <div className="grid grid-cols-[1fr_auto] gap-2">
-                <select
-                  className="h-10 rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-black outline-none focus:border-violet-500"
+              <div className="grid grid-cols-[1fr_auto] items-center gap-2">
+                <input
+                  className="h-10 rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-semibold outline-none focus:border-violet-500"
                   onChange={(event) =>
-                    setTaskDrafts((current) => ({
-                      ...current,
-                      [category]: { ...current[category], priority: event.target.value as Priority }
-                    }))
+                    setTaskDrafts((current) => ({ ...current, [category]: { ...current[category], title: event.target.value } }))
                   }
-                  value={taskDrafts[category].priority}
-                >
-                  <option>High</option>
-                  <option>Medium</option>
-                  <option>Low</option>
-                </select>
-                <button className="flex size-10 items-center justify-center rounded-xl bg-slate-950 text-white" onClick={() => addTask(category)} type="button">
-                  <Plus className="size-4" />
-                </button>
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      addTask(category);
+                    }
+                  }}
+                  placeholder="Write task and press Enter"
+                  value={taskDrafts[category].title}
+                />
+                <div className="flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-2">
+                  {(["High", "Medium", "Low"] as Priority[]).map((priority) => (
+                    <button
+                      aria-label={`${priority} priority`}
+                      className={`size-4 rounded-full ring-2 ring-offset-2 transition ${priorityDotClass(priority)} ${
+                        taskDrafts[category].priority === priority ? "ring-slate-950" : "ring-transparent"
+                      }`}
+                      key={priority}
+                      onClick={() =>
+                        setTaskDrafts((current) => ({
+                          ...current,
+                          [category]: { ...current[category], priority }
+                        }))
+                      }
+                      title={`${priority} priority`}
+                      type="button"
+                    />
+                  ))}
+                </div>
               </div>
             </div>
 
@@ -416,7 +416,10 @@ export function PartnerDashboard() {
                   <span className="min-w-0 flex-1">
                     <span className={`block text-sm font-black ${task.done ? "text-slate-400 line-through" : "text-slate-950"}`}>{task.title}</span>
                     <span className="mt-1 flex flex-wrap gap-2 text-xs font-bold text-slate-500">
-                      <span>{task.priority}</span>
+                      <span className="inline-flex items-center gap-1.5">
+                        <span className={`size-2.5 rounded-full ${priorityDotClass(task.priority)}`} />
+                        {task.priority}
+                      </span>
                     </span>
                   </span>
                 </label>
@@ -439,12 +442,10 @@ export function PartnerDashboard() {
           </div>
           <div className="mt-4 grid gap-3 lg:grid-cols-[240px_minmax(0,1fr)]">
             <div>
-              <div className="flex gap-2">
-                <input className="h-10 min-w-0 flex-1 rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-semibold outline-none focus:border-violet-500" onChange={(event) => setNoteTitle(event.target.value)} placeholder="New note file" value={noteTitle} />
-                <button className="flex size-10 items-center justify-center rounded-xl bg-slate-950 text-white" onClick={createNote} type="button">
-                  <Plus className="size-4" />
-                </button>
-              </div>
+              <button className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-slate-950 px-3 text-sm font-black text-white" onClick={createNote} type="button">
+                <Plus className="size-4" />
+                New note
+              </button>
               <div className="mt-3 space-y-2">
                 {state.notes.map((note) => (
                   <button className={`w-full rounded-xl px-3 py-2 text-left text-sm font-black ${activeNote?.id === note.id ? "bg-violet-100 text-violet-900" : "bg-slate-50 text-slate-700"}`} key={note.id} onClick={() => setActiveNoteId(note.id)} type="button">
@@ -591,4 +592,16 @@ function Metric({ label, value }: { label: string; value: string }) {
       <p className="mt-1 text-2xl font-black text-slate-950">{value}</p>
     </div>
   );
+}
+
+function priorityDotClass(priority: Priority) {
+  if (priority === "High") {
+    return "bg-rose-500";
+  }
+
+  if (priority === "Medium") {
+    return "bg-amber-400";
+  }
+
+  return "bg-emerald-500";
 }
