@@ -11,7 +11,7 @@ import {
   Send,
   UserRound
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 type Priority = "High" | "Medium" | "Low";
 type TaskCategory = "Technical" | "Business Development" | "Hiring and Resource Management";
@@ -37,9 +37,24 @@ type ThreadMessage = {
 };
 type ThreadItem = {
   id: string;
+  memberIds: string[];
   members: string;
   messages: ThreadMessage[];
   title: string;
+};
+type TeamMember = {
+  designation: string;
+  email: string;
+  id: string;
+  name: string;
+  team: string;
+};
+type ApiThread = {
+  id: string;
+  member_ids?: string[];
+  members?: string;
+  messages?: ThreadMessage[];
+  title?: string;
 };
 type FollowUp = {
   dueDate: string;
@@ -108,6 +123,7 @@ const defaultState: DashboardState = {
   threads: [
     {
       id: "thread-1",
+      memberIds: [],
       members: "Shuchi Sethi, Team 03",
       messages: [
         {
@@ -122,9 +138,20 @@ const defaultState: DashboardState = {
   ]
 };
 
+function mapApiThread(thread: ApiThread): ThreadItem {
+  return {
+    id: thread.id,
+    memberIds: thread.member_ids ?? [],
+    members: thread.members ?? "",
+    messages: thread.messages ?? [],
+    title: thread.title ?? "Thread"
+  };
+}
+
 export function PartnerDashboard() {
   const [profileName, setProfileName] = useState("Partner");
   const [profileEmail, setProfileEmail] = useState("");
+  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [state, setState] = useState<DashboardState>(defaultState);
   const [activeNoteId, setActiveNoteId] = useState(defaultState.notes[0]?.id ?? "");
   const [activeThreadId, setActiveThreadId] = useState(defaultState.threads[0]?.id ?? "");
@@ -139,10 +166,26 @@ export function PartnerDashboard() {
     Technical: { priority: "High", title: "" }
   });
   const [useNumberedNotes, setUseNumberedNotes] = useState(false);
-  const [threadDraft, setThreadDraft] = useState({ members: "", title: "" });
+  const [threadDraft, setThreadDraft] = useState({ title: "" });
+  const [selectedThreadMemberIds, setSelectedThreadMemberIds] = useState<string[]>([]);
   const [messageDraft, setMessageDraft] = useState("");
   const [followUpDraft, setFollowUpDraft] = useState({ dueDate: "", item: "", owner: "", type: "Callback" });
   const [meetingDraft, setMeetingDraft] = useState({ agenda: "", prepNotes: "", time: "", title: "" });
+
+  const loadThreads = useCallback(async () => {
+    try {
+      const response = await fetch("/api/partner-threads");
+      const result = (await response.json()) as { threads?: ApiThread[] };
+
+      if (response.ok && result.threads?.length) {
+        const threads = result.threads.map(mapApiThread);
+        setState((current) => ({ ...current, threads }));
+        setActiveThreadId((current) => (threads.some((thread) => thread.id === current) ? current : threads[0]?.id ?? ""));
+      }
+    } catch {
+      // Keep the local dashboard available if the shared thread service is unavailable.
+    }
+  }, []);
 
   useEffect(() => {
     const saved = window.localStorage.getItem(storageKey);
@@ -161,7 +204,26 @@ export function PartnerDashboard() {
       setProfileName(name || "Partner");
       setProfileEmail(user?.email ?? "");
     });
-  }, []);
+
+    fetch("/api/teams")
+      .then((response) => (response.ok ? response.json() : null))
+      .then((result: { members?: TeamMember[] } | null) => {
+        if (result?.members) {
+          setTeamMembers(result.members);
+        }
+      })
+      .catch(() => undefined);
+
+    void loadThreads();
+  }, [loadThreads]);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      void loadThreads();
+    }, 8000);
+
+    return () => window.clearInterval(interval);
+  }, [loadThreads]);
 
   useEffect(() => {
     window.localStorage.setItem(storageKey, JSON.stringify(state));
@@ -253,23 +315,51 @@ export function PartnerDashboard() {
     }
   }
 
-  function createThread() {
-    if (!threadDraft.title.trim() || !threadDraft.members.trim()) {
+  async function createThread() {
+    if (!threadDraft.title.trim() || selectedThreadMemberIds.length === 0) {
       return;
     }
 
+    const selectedMembers = teamMembers.filter((member) => selectedThreadMemberIds.includes(member.id));
     const thread = {
       id: crypto.randomUUID(),
-      members: threadDraft.members.trim(),
+      memberIds: selectedThreadMemberIds,
+      members: selectedMembers.map((member) => member.name || member.email).join(", "),
       messages: [],
       title: threadDraft.title.trim()
     };
     setState((current) => ({ ...current, threads: [thread, ...current.threads] }));
     setActiveThreadId(thread.id);
-    setThreadDraft({ members: "", title: "" });
+    setThreadDraft({ title: "" });
+    setSelectedThreadMemberIds([]);
+
+    try {
+      const response = await fetch("/api/partner-threads", {
+        body: JSON.stringify({
+          action: "create",
+          memberIds: selectedThreadMemberIds,
+          members: thread.members,
+          title: thread.title
+        }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST"
+      });
+      const result = (await response.json()) as { thread?: ApiThread };
+
+      if (response.ok && result.thread) {
+        const savedThread = mapApiThread(result.thread);
+        setState((current) => ({
+          ...current,
+          threads: current.threads.map((item) => (item.id === thread.id ? savedThread : item))
+        }));
+        setActiveThreadId(savedThread.id);
+      }
+    } catch {
+      // Local fallback remains available until the database migration is applied.
+    }
   }
 
-  function sendMessage() {
+  async function sendMessage() {
     if (!activeThread || !messageDraft.trim()) {
       return;
     }
@@ -288,6 +378,29 @@ export function PartnerDashboard() {
       )
     }));
     setMessageDraft("");
+
+    try {
+      const response = await fetch("/api/partner-threads", {
+        body: JSON.stringify({
+          action: "message",
+          message: message.body,
+          threadId: activeThread.id
+        }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST"
+      });
+      const result = (await response.json()) as { thread?: ApiThread };
+
+      if (response.ok && result.thread) {
+        const savedThread = mapApiThread(result.thread);
+        setState((current) => ({
+          ...current,
+          threads: current.threads.map((thread) => (thread.id === savedThread.id ? savedThread : thread))
+        }));
+      }
+    } catch {
+      // Local fallback remains available until the database migration is applied.
+    }
   }
 
   function addFollowUp() {
@@ -475,10 +588,40 @@ export function PartnerDashboard() {
           </div>
           <div className="mt-4 grid gap-2">
             <input className="h-10 rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-semibold outline-none focus:border-violet-500" onChange={(event) => setThreadDraft((current) => ({ ...current, title: event.target.value }))} placeholder="Thread title" value={threadDraft.title} />
-            <div className="flex gap-2">
-              <input className="h-10 min-w-0 flex-1 rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-semibold outline-none focus:border-violet-500" onChange={(event) => setThreadDraft((current) => ({ ...current, members: event.target.value }))} placeholder="Members or group" value={threadDraft.members} />
-              <button className="flex size-10 items-center justify-center rounded-xl bg-slate-950 text-white" onClick={createThread} type="button">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+              <p className="text-xs font-black uppercase text-slate-500">Members</p>
+              <div className="mt-2 flex max-h-36 flex-wrap gap-2 overflow-auto">
+                {teamMembers.map((member) => {
+                  const isSelected = selectedThreadMemberIds.includes(member.id);
+
+                  return (
+                    <button
+                      className={`rounded-full px-3 py-1.5 text-xs font-black transition ${
+                        isSelected ? "bg-violet-700 text-white" : "bg-white text-slate-700 hover:bg-violet-100"
+                      }`}
+                      key={member.id}
+                      onClick={() =>
+                        setSelectedThreadMemberIds((current) =>
+                          current.includes(member.id) ? current.filter((id) => id !== member.id) : [...current, member.id]
+                        )
+                      }
+                      type="button"
+                    >
+                      {member.name}
+                    </button>
+                  );
+                })}
+                {teamMembers.length === 0 ? (
+                  <span className="rounded-full bg-white px-3 py-1.5 text-xs font-bold text-slate-500">
+                    No signed-in users loaded
+                  </span>
+                ) : null}
+              </div>
+            </div>
+            <div className="flex justify-end">
+              <button className="flex h-10 items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 text-sm font-black text-white" onClick={createThread} type="button">
                 <Plus className="size-4" />
+                Create thread
               </button>
             </div>
           </div>
