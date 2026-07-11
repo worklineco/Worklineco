@@ -61,11 +61,10 @@ const engagementLogStorageKey = "workline-engagement-letter-log";
 
 const formatTabs = [
   { key: "all", label: "All Formats" },
-  { key: "gstat", label: "GSTAT EL" },
-  { key: "gst", label: "GST EL" }
+  { key: "log", label: "Generated EL Log" }
 ] as const;
 
-type FormatTab = (typeof formatTabs)[number]["key"];
+type DashboardTab = (typeof formatTabs)[number]["key"];
 
 const defaultFormats: EngagementFormat[] = [
   {
@@ -363,7 +362,7 @@ async function saveLogEntry(entry: EngagementLogEntry) {
 }
 
 export function EngagementLetterDashboard() {
-  const [activeTab, setActiveTab] = useState<FormatTab>("gstat");
+  const [activeTab, setActiveTab] = useState<DashboardTab>("all");
   const [activeFormat, setActiveFormat] = useState<EngagementFormat | null>(null);
   const [formValues, setFormValues] = useState<Record<string, string>>({});
   const [generatedLetter, setGeneratedLetter] = useState<GeneratedLetter | null>(null);
@@ -390,17 +389,7 @@ export function EngagementLetterDashboard() {
     window.localStorage.setItem(engagementLogStorageKey, JSON.stringify(engagementLog));
   }, [engagementLog]);
 
-  const visibleFormats = useMemo(() => {
-    if (activeTab === "gstat") {
-      return defaultFormats.filter((format) => format.category === "GSTAT EL");
-    }
-
-    if (activeTab === "gst") {
-      return defaultFormats.filter((format) => format.category !== "GSTAT EL");
-    }
-
-    return defaultFormats;
-  }, [activeTab]);
+  const visibleFormats = useMemo(() => defaultFormats, []);
 
   const dashboardStats = useMemo(
     () => [
@@ -603,23 +592,26 @@ export function EngagementLetterDashboard() {
         ))}
       </section>
 
-      <section className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1fr)_420px]">
-        <div className="rounded-[28px] border border-white/80 bg-white/90 p-4 shadow-[0_24px_80px_rgba(15,23,42,0.10)]">
-          <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-4">
-            {formatTabs.map((tab) => (
-              <button
-                className={`h-10 rounded-2xl px-4 text-sm font-black transition ${
-                  activeTab === tab.key ? "bg-slate-950 text-white" : "bg-slate-100 text-slate-700 hover:bg-slate-200"
-                }`}
-                key={tab.key}
-                onClick={() => setActiveTab(tab.key)}
-                type="button"
-              >
-                {tab.label}
-              </button>
-            ))}
-          </div>
+      <div className="mt-5 rounded-[28px] border border-white/80 bg-white/90 p-4 shadow-[0_24px_80px_rgba(15,23,42,0.10)]">
+        <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-4">
+          {formatTabs.map((tab) => (
+            <button
+              className={`h-10 rounded-2xl px-4 text-sm font-black transition ${
+                activeTab === tab.key ? "bg-slate-950 text-white" : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+              }`}
+              key={tab.key}
+              onClick={() => setActiveTab(tab.key)}
+              type="button"
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      </div>
 
+      {activeTab === "all" ? (
+        <section className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1fr)_420px]">
+          <div className="rounded-[28px] border border-white/80 bg-white/90 p-4 shadow-[0_24px_80px_rgba(15,23,42,0.10)]">
           <div className="mt-4 space-y-3">
             {visibleFormats.map((format) => (
               <article
@@ -705,7 +697,9 @@ export function EngagementLetterDashboard() {
           )}
         </aside>
       </section>
+      ) : null}
 
+      {activeTab === "log" ? (
       <section className="mt-5 rounded-[28px] border border-white/80 bg-white/90 p-4 shadow-[0_24px_80px_rgba(15,23,42,0.10)]">
         <div className="flex flex-col gap-2 border-b border-slate-200 pb-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
@@ -774,6 +768,7 @@ export function EngagementLetterDashboard() {
           </table>
         </div>
       </section>
+      ) : null}
 
       {activeFormat ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55 p-4">
