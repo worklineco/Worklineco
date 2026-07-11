@@ -1,4 +1,4 @@
-import { ArrowLeft, FileSearch, FileText, ScrollText, Wrench } from "lucide-react";
+import { ArrowLeft, FileSearch, FileText, Mic, ScrollText, Wrench } from "lucide-react";
 import Link from "next/link";
 
 const tools = [
@@ -22,6 +22,13 @@ const tools = [
     icon: ScrollText,
     label: "Power of Attorney",
     tone: "bg-amber-100 text-amber-800"
+  },
+  {
+    description: "Record meeting speech, review the transcript, and generate structured minutes.",
+    href: "/minutes-of-meeting",
+    icon: Mic,
+    label: "Minutes of Meeting",
+    tone: "bg-emerald-100 text-emerald-800"
   }
 ];
 

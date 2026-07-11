@@ -106,7 +106,7 @@ const defaultState: DashboardState = {
   ],
   notes: [
     {
-      content: "Use this scratchpad for quick working notes, client calls, and ideas.",
+      content: "1. ",
       id: "note-1",
       title: "Daily Scratchpad",
       updatedAt: new Date().toISOString()
@@ -172,7 +172,7 @@ export function PartnerDashboard() {
     Technical: { priority: "High", title: "" }
   });
   const [expandedTaskLists, setExpandedTaskLists] = useState<Record<string, boolean>>({});
-  const [useNumberedNotes, setUseNumberedNotes] = useState(false);
+  const [useNumberedNotes, setUseNumberedNotes] = useState(true);
   const [threadDraft, setThreadDraft] = useState({ title: "" });
   const [threadMemberSelect, setThreadMemberSelect] = useState("");
   const [selectedThreadMemberIds, setSelectedThreadMemberIds] = useState<string[]>([]);
