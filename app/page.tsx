@@ -21,10 +21,11 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import type { ComponentType } from "react";
-import { useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { MonthCalendar } from "@/components/home/month-calendar";
 import { ProfilePanel } from "@/components/home/profile-panel";
 import { TeamsPanel } from "@/components/home/teams-panel";
+import { supabase } from "@/lib/supabase/client";
 
 const navigation = [
   { href: "/", icon: LayoutDashboard, label: "Overview", tone: "bg-teal-100 text-teal-800" },
@@ -71,7 +72,21 @@ const supportingAreas = [
 
 export default function Home() {
   const [isTeamsVisible, setIsTeamsVisible] = useState(false);
+  const [profileName, setProfileName] = useState("");
   const teamsPanelRef = useRef<HTMLDivElement>(null);
+  const dashboardLabel = useMemo(() => {
+    const firstName = profileName.trim().split(/\s+/)[0];
+
+    return firstName ? `${firstName}'s Dashboard` : "Partner Dashboard";
+  }, [profileName]);
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => {
+      const user = data.user;
+      const metadata = user?.user_metadata ?? {};
+      setProfileName(String(metadata.full_name ?? metadata.name ?? user?.email ?? ""));
+    });
+  }, []);
 
   function toggleTeams() {
     setIsTeamsVisible((current) => {
@@ -110,7 +125,7 @@ export default function Home() {
 
           <nav className="mt-5 space-y-1.5">
             {navigation.map((item) => (
-              <NavItem item={item} key={item.label} />
+              <NavItem item={item.label === "Partner Dashboard" ? { ...item, label: dashboardLabel } : item} key={item.label} />
             ))}
             <NavButton
               icon={UsersRound}
