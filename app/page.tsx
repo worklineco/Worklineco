@@ -7,7 +7,7 @@ import {
   BriefcaseBusiness,
   BookOpenCheck,
   ClipboardCheck,
-  FileSearch,
+  Wrench,
   FileText,
   Gavel,
   LayoutDashboard,
@@ -33,16 +33,9 @@ const navigation = [
   { href: "/gstat", icon: Scale, label: "GSTAT", tone: "bg-fuchsia-100 text-fuchsia-800" },
   { href: "/billing", icon: ReceiptText, label: "Billing", tone: "bg-lime-100 text-lime-800" },
   { href: "/taskline", icon: ListChecks, label: "TaskLine", tone: "bg-rose-100 text-rose-800" },
-  { href: "/engagement-letter", icon: FileText, label: "Engagement Letter", tone: "bg-cyan-100 text-cyan-800" },
+  { href: "/tools", icon: Wrench, label: "Tools", tone: "bg-indigo-100 text-indigo-800" },
   { href: "/dco-policies", icon: BookOpenCheck, label: "DCo Policies", tone: "bg-blue-100 text-blue-800" },
   { href: "/applause-board", icon: Megaphone, label: "Applause Board", tone: "bg-pink-100 text-pink-800" },
-  {
-    href: "/pdf-indexing",
-    icon: FileSearch,
-    label: "PDF & Indexing",
-    status: "Now live",
-    tone: "bg-indigo-100 text-indigo-800"
-  },
   { href: "/client-records", icon: Building2, label: "Client Records", tone: "bg-sky-100 text-sky-800" },
   { href: "#reports", icon: BarChart3, label: "Reports", tone: "bg-emerald-100 text-emerald-800" },
   { href: "/gstat/trash", icon: Trash2, label: "Trash", tone: "bg-emerald-100 text-emerald-800" }
