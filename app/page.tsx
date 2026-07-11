@@ -28,25 +28,24 @@ import { TeamsPanel } from "@/components/home/teams-panel";
 
 const navigation = [
   { href: "/", icon: LayoutDashboard, label: "Overview", tone: "bg-teal-100 text-teal-800" },
-  { href: "/partner-dashboard", icon: BriefcaseBusiness, label: "Partner Dashboard", target: "_blank", tone: "bg-violet-100 text-violet-800" },
-  { href: "/gst", icon: ClipboardCheck, label: "GST Tracker", target: "_blank", tone: "bg-amber-100 text-amber-800" },
-  { href: "/gstat", icon: Scale, label: "GSTAT", target: "_blank", tone: "bg-fuchsia-100 text-fuchsia-800" },
-  { href: "/billing", icon: ReceiptText, label: "Billing", target: "_blank", tone: "bg-lime-100 text-lime-800" },
-  { href: "/taskline", icon: ListChecks, label: "TaskLine", target: "_blank", tone: "bg-rose-100 text-rose-800" },
-  { href: "/engagement-letter", icon: FileText, label: "Engagement Letter", target: "_blank", tone: "bg-cyan-100 text-cyan-800" },
-  { href: "/dco-policies", icon: BookOpenCheck, label: "DCo Policies", target: "_blank", tone: "bg-blue-100 text-blue-800" },
-  { href: "/applause-board", icon: Megaphone, label: "Applause Board", target: "_blank", tone: "bg-pink-100 text-pink-800" },
+  { href: "/partner-dashboard", icon: BriefcaseBusiness, label: "Partner Dashboard", tone: "bg-violet-100 text-violet-800" },
+  { href: "/gst", icon: ClipboardCheck, label: "GST Tracker", tone: "bg-amber-100 text-amber-800" },
+  { href: "/gstat", icon: Scale, label: "GSTAT", tone: "bg-fuchsia-100 text-fuchsia-800" },
+  { href: "/billing", icon: ReceiptText, label: "Billing", tone: "bg-lime-100 text-lime-800" },
+  { href: "/taskline", icon: ListChecks, label: "TaskLine", tone: "bg-rose-100 text-rose-800" },
+  { href: "/engagement-letter", icon: FileText, label: "Engagement Letter", tone: "bg-cyan-100 text-cyan-800" },
+  { href: "/dco-policies", icon: BookOpenCheck, label: "DCo Policies", tone: "bg-blue-100 text-blue-800" },
+  { href: "/applause-board", icon: Megaphone, label: "Applause Board", tone: "bg-pink-100 text-pink-800" },
   {
     href: "/pdf-indexing",
     icon: FileSearch,
     label: "PDF & Indexing",
     status: "Now live",
-    target: "_blank",
     tone: "bg-indigo-100 text-indigo-800"
   },
-  { href: "/client-records", icon: Building2, label: "Client Records", target: "_blank", tone: "bg-sky-100 text-sky-800" },
+  { href: "/client-records", icon: Building2, label: "Client Records", tone: "bg-sky-100 text-sky-800" },
   { href: "#reports", icon: BarChart3, label: "Reports", tone: "bg-emerald-100 text-emerald-800" },
-  { href: "/gstat/trash", icon: Trash2, label: "Trash", target: "_blank", tone: "bg-emerald-100 text-emerald-800" }
+  { href: "/gstat/trash", icon: Trash2, label: "Trash", tone: "bg-emerald-100 text-emerald-800" }
 ];
 
 const productFocus = [
