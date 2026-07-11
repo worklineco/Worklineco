@@ -43,7 +43,7 @@ export async function POST(request: Request) {
   }
 
   const body = (await request.json()) as {
-    action?: "create" | "message";
+    action?: "create" | "message" | "rename";
     memberIds?: string[];
     members?: string;
     message?: string;
@@ -119,6 +119,50 @@ export async function POST(request: Request) {
       .from("partner_threads")
       .update({
         messages,
+        updated_at: new Date().toISOString(),
+        updated_by: auth.user.id
+      })
+      .eq("id", threadId)
+      .eq("organisation_code", organisationCode)
+      .select("*")
+      .single();
+
+    if (updated.error) {
+      return NextResponse.json({ error: updated.error.message }, { status: 500 });
+    }
+
+    return NextResponse.json({ thread: updated.data });
+  }
+
+  if (body.action === "rename") {
+    const threadId = text(body.threadId);
+    const title = text(body.title);
+
+    if (!threadId || !title) {
+      return NextResponse.json({ error: "Thread and title are required." }, { status: 400 });
+    }
+
+    const existing = await admin
+      .from("partner_threads")
+      .select("member_ids")
+      .eq("id", threadId)
+      .eq("organisation_code", organisationCode)
+      .single();
+
+    if (existing.error) {
+      return NextResponse.json({ error: existing.error.message }, { status: 500 });
+    }
+
+    const memberIds = (existing.data.member_ids ?? []) as string[];
+
+    if (!memberIds.includes(auth.user.id)) {
+      return NextResponse.json({ error: "Not allowed to rename this thread." }, { status: 403 });
+    }
+
+    const updated = await admin
+      .from("partner_threads")
+      .update({
+        title,
         updated_at: new Date().toISOString(),
         updated_by: auth.user.id
       })

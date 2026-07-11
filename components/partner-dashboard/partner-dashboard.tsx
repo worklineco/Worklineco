@@ -4,11 +4,13 @@ import { supabase } from "@/lib/supabase/client";
 import {
   CalendarClock,
   CheckCircle2,
+  Pencil,
   FileText,
   MessageSquareText,
   NotebookPen,
   Plus,
   Send,
+  Trash2,
   UserRound
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -148,6 +150,10 @@ function mapApiThread(thread: ApiThread): ThreadItem {
   };
 }
 
+function taskListKey(category: TaskCategory, date: string) {
+  return `${category}-${date}`;
+}
+
 export function PartnerDashboard() {
   const [profileName, setProfileName] = useState("Partner");
   const [profileEmail, setProfileEmail] = useState("");
@@ -165,8 +171,10 @@ export function PartnerDashboard() {
     "Hiring and Resource Management": { priority: "Medium", title: "" },
     Technical: { priority: "High", title: "" }
   });
+  const [expandedTaskLists, setExpandedTaskLists] = useState<Record<string, boolean>>({});
   const [useNumberedNotes, setUseNumberedNotes] = useState(false);
   const [threadDraft, setThreadDraft] = useState({ title: "" });
+  const [threadMemberSelect, setThreadMemberSelect] = useState("");
   const [selectedThreadMemberIds, setSelectedThreadMemberIds] = useState<string[]>([]);
   const [messageDraft, setMessageDraft] = useState("");
   const [followUpDraft, setFollowUpDraft] = useState({ dueDate: "", item: "", owner: "", type: "Callback" });
@@ -264,6 +272,21 @@ export function PartnerDashboard() {
     }));
   }
 
+  function editTask(task: TaskItem) {
+    const title = window.prompt("Edit task", task.title)?.trim();
+
+    if (title) {
+      updateTask(task.id, { title });
+    }
+  }
+
+  function deleteTask(id: string) {
+    setState((current) => ({
+      ...current,
+      tasks: current.tasks.filter((task) => task.id !== id)
+    }));
+  }
+
   function createNote() {
     const nextNumber = state.notes.length + 1;
     const note = {
@@ -287,6 +310,34 @@ export function PartnerDashboard() {
         note.id === activeNote.id ? { ...note, content, updatedAt: new Date().toISOString() } : note
       )
     }));
+  }
+
+  function renameNote(note: NoteFile) {
+    const title = window.prompt("Rename note", note.title)?.trim();
+
+    if (!title) {
+      return;
+    }
+
+    setState((current) => ({
+      ...current,
+      notes: current.notes.map((item) => (item.id === note.id ? { ...item, title, updatedAt: new Date().toISOString() } : item))
+    }));
+  }
+
+  function deleteNote(id: string) {
+    setState((current) => {
+      const notes = current.notes.filter((note) => note.id !== id);
+
+      return {
+        ...current,
+        notes: notes.length ? notes : [{ content: "", id: crypto.randomUUID(), title: "Note 1", updatedAt: new Date().toISOString() }]
+      };
+    });
+    setActiveNoteId((current) => {
+      const remaining = state.notes.filter((note) => note.id !== id);
+      return current === id ? remaining[0]?.id ?? "" : current;
+    });
   }
 
   function numberNoteLines(content: string) {
@@ -356,6 +407,53 @@ export function PartnerDashboard() {
       }
     } catch {
       // Local fallback remains available until the database migration is applied.
+    }
+  }
+
+  function addSelectedThreadMember() {
+    if (!threadMemberSelect) {
+      return;
+    }
+
+    setSelectedThreadMemberIds((current) =>
+      current.includes(threadMemberSelect) ? current : [...current, threadMemberSelect]
+    );
+    setThreadMemberSelect("");
+  }
+
+  async function renameThread(thread: ThreadItem) {
+    const title = window.prompt("Rename thread", thread.title)?.trim();
+
+    if (!title) {
+      return;
+    }
+
+    setState((current) => ({
+      ...current,
+      threads: current.threads.map((item) => (item.id === thread.id ? { ...item, title } : item))
+    }));
+
+    try {
+      const response = await fetch("/api/partner-threads", {
+        body: JSON.stringify({
+          action: "rename",
+          threadId: thread.id,
+          title
+        }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST"
+      });
+      const result = (await response.json()) as { thread?: ApiThread };
+
+      if (response.ok && result.thread) {
+        const savedThread = mapApiThread(result.thread);
+        setState((current) => ({
+          ...current,
+          threads: current.threads.map((item) => (item.id === savedThread.id ? savedThread : item))
+        }));
+      }
+    } catch {
+      // Local rename remains available until the shared thread service is available.
     }
   }
 
@@ -521,17 +619,40 @@ export function PartnerDashboard() {
               </div>
             </div>
 
-            <div className="mt-4 space-y-2">
-              {state.tasks.filter((task) => task.category === category && task.dueDate === activeTaskDates[category]).map((task, index) => (
-                <label className="flex items-center gap-3 rounded-2xl bg-slate-50 p-3" key={task.id}>
-                  <input checked={task.done} className="mt-1" onChange={(event) => updateTask(task.id, { done: event.target.checked })} type="checkbox" />
-                  <span className="text-sm font-black text-slate-400">{index + 1}.</span>
-                  <span className="min-w-0 flex-1">
-                    <span className={`block text-sm font-black ${task.done ? "text-slate-400 line-through" : "text-slate-950"}`}>{task.title}</span>
-                  </span>
-                  <span className={`size-3.5 shrink-0 rounded-full ${priorityDotClass(task.priority)}`} title={`${task.priority} priority`} />
-                </label>
-              ))}
+            <div className="mt-3 space-y-1.5">
+              {(() => {
+                const dateTasks = state.tasks.filter((task) => task.category === category && task.dueDate === activeTaskDates[category]);
+                const listKey = taskListKey(category, activeTaskDates[category]);
+                const isExpanded = expandedTaskLists[listKey];
+                const visibleTasks = isExpanded ? dateTasks : dateTasks.slice(0, 5);
+
+                return (
+                  <>
+                    {visibleTasks.map((task, index) => (
+                      <div className="flex min-h-10 items-center gap-2 rounded-xl bg-slate-50 px-3 py-2" key={task.id}>
+                        <span className="w-6 shrink-0 text-xs font-black text-slate-400">{index + 1}.</span>
+                        <span className="min-w-0 flex-1 truncate text-sm font-black text-slate-950">{task.title}</span>
+                        <span className={`size-3 shrink-0 rounded-full ${priorityDotClass(task.priority)}`} title={`${task.priority} priority`} />
+                        <button className="flex size-7 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-white hover:text-violet-700" onClick={() => editTask(task)} title="Edit task" type="button">
+                          <Pencil className="size-3.5" />
+                        </button>
+                        <button className="flex size-7 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-white hover:text-rose-600" onClick={() => deleteTask(task.id)} title="Delete task" type="button">
+                          <Trash2 className="size-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                    {dateTasks.length > 5 ? (
+                      <button
+                        className="mt-1 text-xs font-black text-violet-700 hover:text-violet-900"
+                        onClick={() => setExpandedTaskLists((current) => ({ ...current, [listKey]: !isExpanded }))}
+                        type="button"
+                      >
+                        {isExpanded ? "Show Less" : "Show More..."}
+                      </button>
+                    ) : null}
+                  </>
+                );
+              })()}
               {state.tasks.filter((task) => task.category === category && task.dueDate === activeTaskDates[category]).length === 0 ? (
                 <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-4 text-sm font-semibold text-slate-500">
                   No tasks added for this date.
@@ -556,9 +677,14 @@ export function PartnerDashboard() {
               </button>
               <div className="mt-3 space-y-2">
                 {state.notes.map((note) => (
-                  <button className={`w-full rounded-xl px-3 py-2 text-left text-sm font-black ${activeNote?.id === note.id ? "bg-violet-100 text-violet-900" : "bg-slate-50 text-slate-700"}`} key={note.id} onClick={() => setActiveNoteId(note.id)} type="button">
-                    {note.title}
-                  </button>
+                  <div className={`flex items-center gap-1 rounded-xl px-2 py-1.5 ${activeNote?.id === note.id ? "bg-violet-100 text-violet-900" : "bg-slate-50 text-slate-700"}`} key={note.id}>
+                    <button className="min-w-0 flex-1 truncate px-1 text-left text-sm font-black" onClick={() => setActiveNoteId(note.id)} onDoubleClick={() => renameNote(note)} title="Double click to rename" type="button">
+                      {note.title}
+                    </button>
+                    <button className="flex size-7 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-white hover:text-rose-600" onClick={() => deleteNote(note.id)} title="Delete note" type="button">
+                      <Trash2 className="size-3.5" />
+                    </button>
+                  </div>
                 ))}
               </div>
             </div>
@@ -572,7 +698,7 @@ export function PartnerDashboard() {
                 Numbered bullets
               </label>
               <textarea
-                className="min-h-72 w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm font-semibold leading-6 outline-none focus:border-violet-500 focus:bg-white"
+                className="min-h-[26rem] w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm font-semibold leading-6 outline-none focus:border-violet-500 focus:bg-white"
                 onChange={(event) => updateActiveNote(useNumberedNotes ? numberNoteLines(event.target.value) : event.target.value)}
                 placeholder="Write notes here"
                 value={activeNote?.content ?? ""}
@@ -590,27 +716,39 @@ export function PartnerDashboard() {
             <input className="h-10 rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-semibold outline-none focus:border-violet-500" onChange={(event) => setThreadDraft((current) => ({ ...current, title: event.target.value }))} placeholder="Thread title" value={threadDraft.title} />
             <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
               <p className="text-xs font-black uppercase text-slate-500">Members</p>
-              <div className="mt-2 flex max-h-36 flex-wrap gap-2 overflow-auto">
-                {teamMembers.map((member) => {
-                  const isSelected = selectedThreadMemberIds.includes(member.id);
-
-                  return (
+              <div className="mt-2 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+                <select
+                  className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm font-black text-slate-700 outline-none focus:border-violet-500"
+                  onChange={(event) => setThreadMemberSelect(event.target.value)}
+                  value={threadMemberSelect}
+                >
+                  <option value="">Select person</option>
+                  {teamMembers
+                    .filter((member) => !selectedThreadMemberIds.includes(member.id))
+                    .map((member) => (
+                      <option key={member.id} value={member.id}>
+                        {member.name || member.email}
+                      </option>
+                    ))}
+                </select>
+                <button className="flex h-10 items-center justify-center rounded-xl bg-violet-700 px-3 text-sm font-black text-white" onClick={addSelectedThreadMember} type="button">
+                  Add
+                </button>
+              </div>
+              <div className="mt-2 flex max-h-24 flex-wrap gap-2 overflow-auto">
+                {teamMembers
+                  .filter((member) => selectedThreadMemberIds.includes(member.id))
+                  .map((member) => (
                     <button
-                      className={`rounded-full px-3 py-1.5 text-xs font-black transition ${
-                        isSelected ? "bg-violet-700 text-white" : "bg-white text-slate-700 hover:bg-violet-100"
-                      }`}
+                      className="rounded-full bg-white px-3 py-1.5 text-xs font-black text-violet-900"
                       key={member.id}
-                      onClick={() =>
-                        setSelectedThreadMemberIds((current) =>
-                          current.includes(member.id) ? current.filter((id) => id !== member.id) : [...current, member.id]
-                        )
-                      }
+                      onClick={() => setSelectedThreadMemberIds((current) => current.filter((id) => id !== member.id))}
+                      title="Remove member"
                       type="button"
                     >
-                      {member.name}
+                      {member.name || member.email}
                     </button>
-                  );
-                })}
+                  ))}
                 {teamMembers.length === 0 ? (
                   <span className="rounded-full bg-white px-3 py-1.5 text-xs font-bold text-slate-500">
                     No signed-in users loaded
@@ -629,7 +767,7 @@ export function PartnerDashboard() {
           <div className="mt-4 grid gap-3 lg:grid-cols-[180px_minmax(0,1fr)]">
             <div className="space-y-2">
               {state.threads.map((thread) => (
-                <button className={`w-full rounded-xl px-3 py-2 text-left text-sm font-black ${activeThread?.id === thread.id ? "bg-violet-100 text-violet-900" : "bg-slate-50 text-slate-700"}`} key={thread.id} onClick={() => setActiveThreadId(thread.id)} type="button">
+                <button className={`w-full rounded-xl px-3 py-2 text-left text-sm font-black ${activeThread?.id === thread.id ? "bg-violet-100 text-violet-900" : "bg-slate-50 text-slate-700"}`} key={thread.id} onClick={() => setActiveThreadId(thread.id)} onDoubleClick={() => renameThread(thread)} title="Double click to rename" type="button">
                   {thread.title}
                 </button>
               ))}
