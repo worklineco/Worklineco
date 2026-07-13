@@ -229,6 +229,7 @@ const importHeaders: Array<{ field: BillingField; label: string }> = [
 export function BillingRegister() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [access, setAccess] = useState<AccessScope>({ canManageMasters: false, canViewAll: false, role: "", team: "" });
+  const [addDraft, setAddDraft] = useState<BillingRecord | null>(null);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [clientRecords, setClientRecords] = useState<ClientRegisterRow[]>([]);
   const [inlineEditor, setInlineEditor] = useState<InlineEditor | null>(null);
@@ -352,19 +353,34 @@ export function BillingRegister() {
     }
   }
 
-  async function addBlankRecord() {
-    const draft = {
+  function openAddForm() {
+    setAddDraft(enrichBillingRecord({
       ...emptyRecord,
       owner_team: access.team,
       source_module: "manual"
-    };
+    }, clientRecords));
+    setMessage("");
+  }
 
-    setMessage("Adding billing row...");
+  function updateAddDraft(field: BillingField, rawValue: string) {
+    setAddDraft((currentDraft) =>
+      currentDraft
+        ? enrichBillingRecord(prepareRecordUpdate(currentDraft, field, rawValue), clientRecords, field)
+        : currentDraft
+    );
+  }
+
+  async function createAddDraft() {
+    if (!addDraft) {
+      return;
+    }
+
+    setMessage("Creating billing row...");
 
     try {
-      const saved = await saveRecord(draft);
+      const saved = await saveRecord(enrichBillingRecord(addDraft, clientRecords));
       setRecords((currentRecords) => [normalizeRecord(saved), ...currentRecords]);
-      setSelectedRecordId(saved.id ?? null);
+      setAddDraft(null);
       setMessage("Billing row added.");
       void loadBilling();
     } catch (error) {
@@ -675,7 +691,7 @@ export function BillingRegister() {
           value={filters.source}
         />
         <div className="flex flex-wrap gap-2">
-          <button className={buttonClass("primary")} onClick={addBlankRecord} type="button">
+          <button className={buttonClass("primary")} onClick={openAddForm} type="button">
             <Plus className="size-4" />
             Add
           </button>
@@ -775,6 +791,16 @@ export function BillingRegister() {
 
       {viewMode === "trash" ? (
         <BillingTrashTable isLoading={isLoading} onRestore={restoreTrashRecord} rows={trashRecords} />
+      ) : null}
+
+      {addDraft ? (
+        <BillingAddForm
+          draft={addDraft}
+          masters={mergedMasters}
+          onChange={updateAddDraft}
+          onClose={() => setAddDraft(null)}
+          onCreate={createAddDraft}
+        />
       ) : null}
 
       {selectedRecordId ? (
@@ -981,6 +1007,128 @@ function BillingCell({
     </td>
   );
 }
+
+function BillingAddForm({
+  draft,
+  masters,
+  onChange,
+  onClose,
+  onCreate
+}: {
+  draft: BillingRecord;
+  masters: Record<string, string[]>;
+  onChange: (field: BillingField, value: string) => void;
+  onClose: () => void;
+  onCreate: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/45 px-4 py-6">
+      <section className="max-h-[90vh] w-full max-w-5xl overflow-hidden rounded-lg border border-slate-200 bg-white shadow-[0_24px_90px_rgba(15,23,42,0.30)]">
+        <header className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
+          <div>
+            <p className="text-xs font-black uppercase tracking-[0.14em] text-teal-700">New billing record</p>
+            <h3 className="mt-1 text-2xl font-black text-slate-950">Create Billing Entry</h3>
+            <p className="mt-1 text-sm font-bold text-slate-500">Enter GSTIN first to auto-fill client, POS, and registration type.</p>
+          </div>
+          <button
+            className="inline-flex size-9 items-center justify-center rounded-md border border-slate-200 text-slate-700 hover:bg-slate-50"
+            onClick={onClose}
+            title="Close form"
+            type="button"
+          >
+            <X className="size-4" />
+          </button>
+        </header>
+
+        <div className="max-h-[68vh] overflow-auto p-5">
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <label>
+              <span className="text-[10px] font-black uppercase text-slate-500">Voucher Type</span>
+              <select
+                className={formControlClass}
+                onChange={(event) => onChange("voucher_type", event.target.value)}
+                value={draft.voucher_type}
+              >
+                {selectOptions("voucher_type", masters).filter(Boolean).map((option) => (
+                  <option key={option} value={option}>{option}</option>
+                ))}
+              </select>
+            </label>
+            <FormInput field="gstin" label="GSTIN" onChange={onChange} value={draft.gstin} />
+            <FormInput field="client" label="Client" onChange={onChange} value={draft.client} />
+            <FormInput field="place_of_supply" label="Place of Supply" onChange={onChange} value={draft.place_of_supply} />
+            <FormInput field="registration_type" label="Registration Type" onChange={onChange} value={draft.registration_type} />
+            <FormInput field="group_name" label="Group" onChange={onChange} value={draft.group_name} />
+            <FormInput field="description" label="Description" onChange={onChange} value={draft.description} wide />
+            <FormInput field="amount" label="Professional Fee" onChange={onChange} type="number" value={String(draft.amount || "")} />
+            <FormInput field="ope" label="OPE" onChange={onChange} type="number" value={String(draft.ope || "")} />
+            <FormInput field="ope_remarks" label="OPE Remarks" onChange={onChange} value={draft.ope_remarks} />
+            <FormInput field="cgst" label="CGST" onChange={onChange} readOnly type="number" value={String(draft.cgst || 0)} />
+            <FormInput field="sgst" label="SGST" onChange={onChange} readOnly type="number" value={String(draft.sgst || 0)} />
+            <FormInput field="igst" label="IGST" onChange={onChange} readOnly type="number" value={String(draft.igst || 0)} />
+            <FormInput field="total" label="Total" onChange={onChange} readOnly type="number" value={String(draft.total || 0)} />
+            <label>
+              <span className="text-[10px] font-black uppercase text-slate-500">Receiving</span>
+              <select
+                className={formControlClass}
+                onChange={(event) => onChange("receiving_status", event.target.value)}
+                value={draft.receiving_status}
+              >
+                {selectOptions("receiving_status", masters).filter(Boolean).map((option) => (
+                  <option key={option} value={option}>{option}</option>
+                ))}
+              </select>
+            </label>
+            <FormInput field="receiving_date" label="Receiving Date" onChange={onChange} type="date" value={draft.receiving_date ?? ""} />
+            <FormInput field="remarks" label="Remarks" onChange={onChange} value={draft.remarks} wide />
+          </div>
+        </div>
+
+        <footer className="flex justify-end gap-2 border-t border-slate-200 px-5 py-4">
+          <button className={buttonClass("light")} onClick={onClose} type="button">Cancel</button>
+          <button className={buttonClass("primary")} onClick={onCreate} type="button">
+            <Plus className="size-4" />
+            Create
+          </button>
+        </footer>
+      </section>
+    </div>
+  );
+}
+
+function FormInput({
+  field,
+  label,
+  onChange,
+  readOnly = false,
+  type = "text",
+  value,
+  wide = false
+}: {
+  field: BillingField;
+  label: string;
+  onChange: (field: BillingField, value: string) => void;
+  readOnly?: boolean;
+  type?: "date" | "number" | "text";
+  value: string;
+  wide?: boolean;
+}) {
+  return (
+    <label className={wide ? "md:col-span-2" : ""}>
+      <span className="text-[10px] font-black uppercase text-slate-500">{label}</span>
+      <input
+        className={`${formControlClass} ${readOnly ? "bg-slate-50 text-slate-600" : ""}`}
+        min={type === "number" ? "0" : undefined}
+        onChange={(event) => onChange(field, event.target.value)}
+        readOnly={readOnly}
+        type={type}
+        value={value}
+      />
+    </label>
+  );
+}
+
+const formControlClass = "mt-1 h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm font-bold text-slate-900 outline-none focus:border-teal-300 focus:ring-2 focus:ring-teal-100";
 
 function Summary({ label, value }: { label: string; value: string }) {
   return (
