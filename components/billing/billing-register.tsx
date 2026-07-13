@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowDown, ArrowUp, Download, History, Link2, Maximize2, Plus, RotateCcw, Search, Settings2, ShieldCheck, Trash2, Upload, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Download, History, Link2, Maximize2, Pencil, Plus, RotateCcw, Search, Settings2, ShieldCheck, Trash2, Upload, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx-js-style";
 
@@ -201,7 +201,7 @@ const billingColumns: BillingColumn[] = [
   { field: "receiving_date", label: "Receiving Date", type: "date", width: 142 },
   { field: "remarks", label: "Remarks", type: "text", width: 220 },
   { field: "gstat_link", label: "GSTAT Link", width: 170 },
-  { field: "actions", label: "Actions", width: 112 }
+  { field: "actions", label: "Actions", width: 150 }
 ];
 const billingColumnByKey = new Map(billingColumns.map((column) => [String(column.field), column]));
 const defaultBillingColumnOrder = billingColumns.map((column) => String(column.field));
@@ -244,6 +244,7 @@ export function BillingRegister() {
   const [columnOrder, setColumnOrder] = useState<string[]>(defaultBillingColumnOrder);
   const [hasLoadedColumnLayout, setHasLoadedColumnLayout] = useState(false);
   const [hiddenColumnKeys, setHiddenColumnKeys] = useState<Set<string>>(() => new Set());
+  const [editDraft, setEditDraft] = useState<BillingRecord | null>(null);
   const [inlineEditor, setInlineEditor] = useState<InlineEditor | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isColumnOptionsOpen, setIsColumnOptionsOpen] = useState(false);
@@ -352,6 +353,9 @@ export function BillingRegister() {
     setAddDraft((currentDraft) =>
       currentDraft ? enrichBillingRecord(currentDraft, clientRecords, currentDraft.client ? "client" : undefined) : currentDraft
     );
+    setEditDraft((currentDraft) =>
+      currentDraft ? enrichBillingRecord(currentDraft, clientRecords, currentDraft.client ? "client" : undefined) : currentDraft
+    );
   }, [clientRecords]);
 
   async function loadClientRecords() {
@@ -413,6 +417,20 @@ export function BillingRegister() {
 
   function updateAddDraft(field: BillingField, rawValue: string) {
     setAddDraft((currentDraft) =>
+      currentDraft
+        ? enrichBillingRecord(prepareRecordUpdate(currentDraft, field, rawValue), clientRecords, field)
+        : currentDraft
+    );
+  }
+
+  function openEditForm(record: BillingRecord) {
+    setInlineEditor(null);
+    setEditDraft(enrichBillingRecord(normalizeRecord(record), clientRecords));
+    setMessage("");
+  }
+
+  function updateEditDraft(field: BillingField, rawValue: string) {
+    setEditDraft((currentDraft) =>
       currentDraft
         ? enrichBillingRecord(prepareRecordUpdate(currentDraft, field, rawValue), clientRecords, field)
         : currentDraft
@@ -555,6 +573,26 @@ export function BillingRegister() {
     setSelectedRecordId((current) => (current === record.id ? null : current));
     setMessage("Billing row moved to trash.");
     void loadBilling();
+  }
+
+  async function saveEditDraft() {
+    if (!editDraft) {
+      return;
+    }
+
+    setMessage("Saving billing row...");
+
+    try {
+      const saved = normalizeRecord(await saveRecord(enrichBillingRecord(editDraft, clientRecords)));
+      setRecords((currentRecords) =>
+        currentRecords.map((item) => (item.id === saved.id ? saved : item))
+      );
+      setEditDraft(null);
+      setMessage("Billing row updated.");
+      void loadBilling();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not update billing row.");
+    }
   }
 
   async function restoreTrashRecord(row: TrashRecord) {
@@ -833,6 +871,7 @@ export function BillingRegister() {
                         matters={matters}
                         onDelete={() => deleteRecord(record)}
                         onEdit={(field, value) => setInlineEditor({ field, recordId: record.id!, value })}
+                        onEditForm={() => openEditForm(record)}
                         onEditorChange={(value) =>
                           setInlineEditor((currentEditor) => (currentEditor ? { ...currentEditor, value } : currentEditor))
                         }
@@ -866,9 +905,21 @@ export function BillingRegister() {
         <BillingAddForm
           draft={addDraft}
           masters={mergedMasters}
+          mode="create"
           onChange={updateAddDraft}
           onClose={() => setAddDraft(null)}
-          onCreate={createAddDraft}
+          onSubmit={createAddDraft}
+        />
+      ) : null}
+
+      {editDraft ? (
+        <BillingAddForm
+          draft={editDraft}
+          masters={mergedMasters}
+          mode="edit"
+          onChange={updateEditDraft}
+          onClose={() => setEditDraft(null)}
+          onSubmit={saveEditDraft}
         />
       ) : null}
 
@@ -934,6 +985,7 @@ function BillingCell({
   matters,
   onDelete,
   onEdit,
+  onEditForm,
   onEditorChange,
   onHistory,
   onDirectSave,
@@ -948,6 +1000,7 @@ function BillingCell({
   matters: GstatMatter[];
   onDelete: () => void;
   onEdit: (field: BillingField, value: string) => void;
+  onEditForm: () => void;
   onEditorChange: (value: string) => void;
   onHistory: () => void;
   onDirectSave: (field: BillingField, value: string) => void;
@@ -968,6 +1021,14 @@ function BillingCell({
     return (
       <td className="border-r border-slate-100 px-3 py-2 last:border-r-0">
         <div className="flex items-center gap-1">
+          <button
+            className="inline-flex size-8 items-center justify-center rounded-md border border-sky-200 text-sky-700 hover:bg-sky-50"
+            onClick={onEditForm}
+            title="Edit billing row"
+            type="button"
+          >
+            <Pencil className="size-4" />
+          </button>
           <button
             className="inline-flex size-8 items-center justify-center rounded-md border border-teal-200 text-teal-700 hover:bg-teal-50"
             onClick={onHistory}
@@ -1074,24 +1135,34 @@ function BillingCell({
 function BillingAddForm({
   draft,
   masters,
+  mode,
   onChange,
   onClose,
-  onCreate
+  onSubmit
 }: {
   draft: BillingRecord;
   masters: Record<string, string[]>;
+  mode: "create" | "edit";
   onChange: (field: BillingField, value: string) => void;
   onClose: () => void;
-  onCreate: () => void;
+  onSubmit: () => void;
 }) {
+  const isEdit = mode === "edit";
+
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/45 px-4 py-6">
       <section className="max-h-[90vh] w-full max-w-5xl overflow-hidden rounded-lg border border-slate-200 bg-white shadow-[0_24px_90px_rgba(15,23,42,0.30)]">
         <header className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
           <div>
-            <p className="text-xs font-black uppercase tracking-[0.14em] text-teal-700">New billing record</p>
-            <h3 className="mt-1 text-2xl font-black text-slate-950">Create Billing Entry</h3>
-            <p className="mt-1 text-sm font-bold text-slate-500">Enter GSTIN first to auto-fill client, POS, and registration type.</p>
+            <p className="text-xs font-black uppercase tracking-[0.14em] text-teal-700">
+              {isEdit ? "Edit billing record" : "New billing record"}
+            </p>
+            <h3 className="mt-1 text-2xl font-black text-slate-950">
+              {isEdit ? "Edit Billing Entry" : "Create Billing Entry"}
+            </h3>
+            <p className="mt-1 text-sm font-bold text-slate-500">
+              {isEdit ? "Update this billing row in one place. Cell editing remains available in the table." : "Enter GSTIN first to auto-fill client, POS, and registration type."}
+            </p>
           </div>
           <button
             className="inline-flex size-9 items-center justify-center rounded-md border border-slate-200 text-slate-700 hover:bg-slate-50"
@@ -1160,9 +1231,9 @@ function BillingAddForm({
 
         <footer className="flex justify-end gap-2 border-t border-slate-200 px-5 py-4">
           <button className={buttonClass("light")} onClick={onClose} type="button">Cancel</button>
-          <button className={buttonClass("primary")} onClick={onCreate} type="button">
-            <Plus className="size-4" />
-            Create
+          <button className={buttonClass("primary")} onClick={onSubmit} type="button">
+            {isEdit ? <Pencil className="size-4" /> : <Plus className="size-4" />}
+            {isEdit ? "Save Changes" : "Create"}
           </button>
         </footer>
       </section>
