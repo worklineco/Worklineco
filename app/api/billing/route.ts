@@ -62,7 +62,6 @@ type AccessScope = {
 
 const defaultOrganisationCode = "DCO1433";
 const tableName = "firm_billing_records";
-const trashTableName = "firm_deleted_billing_records";
 const masterTableName = "firm_billing_master_options";
 const masterTypes = ["cost_center", "voucher_type", "income_head", "group_name", "billing_status", "receiving_status"];
 
@@ -137,17 +136,19 @@ export async function POST(request: Request) {
     }
 
     const trash = await admin
-      .from(trashTableName)
-      .select("*")
+      .from("audit_logs")
+      .select("id,entity_id,old_value")
       .eq("id", payload.trashId)
       .eq("organisation_id", organisation.organisationId)
+      .eq("entity_type", "billing_record")
+      .eq("action", "billing.delete")
       .single();
 
     if (trash.error) {
       return NextResponse.json({ error: trash.error.message }, { status: 404 });
     }
 
-    const data = trash.data.data as BillingRecord;
+    const data = trash.data.old_value as BillingRecord;
 
     if (!canAccessRecord(data as StoredBillingRecord, access)) {
       return NextResponse.json({ error: "Not allowed to restore this billing row." }, { status: 403 });
@@ -157,7 +158,7 @@ export async function POST(request: Request) {
       .from(tableName)
       .insert({
         ...data,
-        id: data.id || trash.data.original_billing_id,
+        id: data.id || trash.data.entity_id,
         organisation_id: organisation.organisationId,
         updated_at: new Date().toISOString(),
         updated_by: auth.user.id
@@ -167,12 +168,6 @@ export async function POST(request: Request) {
 
     if (restored.error) {
       return NextResponse.json({ error: restored.error.message }, { status: 500 });
-    }
-
-    const removed = await admin.from(trashTableName).delete().eq("id", payload.trashId).eq("organisation_id", organisation.organisationId);
-
-    if (removed.error) {
-      return NextResponse.json({ error: removed.error.message }, { status: 500 });
     }
 
     await writeAuditLog(admin, organisation.organisationId, auth.user.id, "billing.restore", null, restored.data);
@@ -326,19 +321,6 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ error: "Not allowed to delete this billing row." }, { status: 403 });
   }
 
-  const trash = await admin.from(trashTableName).insert({
-    data: existing.data,
-    delete_action: "delete",
-    deleted_by: auth.user.id,
-    original_billing_id: id,
-    organisation_code: defaultOrganisationCode,
-    organisation_id: organisation.organisationId
-  });
-
-  if (trash.error) {
-    return NextResponse.json({ error: trash.error.message }, { status: 500 });
-  }
-
   const deleted = await admin.from(tableName).delete().eq("id", id).eq("organisation_id", organisation.organisationId);
 
   if (deleted.error) {
@@ -461,12 +443,42 @@ async function loadTrashRecords(
   organisationId: string,
   access: AccessScope
 ) {
-  const { data } = await admin
-    .from(trashTableName)
-    .select("id,original_billing_id,data,delete_action,deleted_by,deleted_at,expires_at")
+  const { data, error } = await admin
+    .from("audit_logs")
+    .select("id,action,actor_user_id,entity_id,old_value,new_value,created_at")
     .eq("organisation_id", organisationId)
-    .order("deleted_at", { ascending: false });
-  const rows = data ?? [];
+    .eq("entity_type", "billing_record")
+    .in("action", ["billing.delete", "billing.restore"])
+    .order("created_at", { ascending: false })
+    .limit(300);
+
+  if (error) {
+    return [];
+  }
+
+  const restoredIds = new Set(
+    (data ?? [])
+      .filter((log) => log.action === "billing.restore")
+      .map((log) => String(log.entity_id ?? readId(log.new_value)))
+      .filter(Boolean)
+  );
+  const rows = (data ?? [])
+    .filter((log) => log.action === "billing.delete")
+    .filter((log) => !restoredIds.has(String(log.entity_id ?? "")))
+    .map((log) => {
+      const deletedAt = new Date(log.created_at);
+      const expiresAt = new Date(deletedAt.getTime() + 30 * 24 * 60 * 60 * 1000);
+
+      return {
+        data: log.old_value,
+        delete_action: "delete",
+        deleted_at: log.created_at,
+        deleted_by: log.actor_user_id,
+        expires_at: expiresAt.toISOString(),
+        id: log.id,
+        original_billing_id: log.entity_id
+      };
+    });
 
   if (access.canViewAll || !access.team) {
     return rows;
