@@ -16,6 +16,7 @@ type BillingRecord = {
   gstat_appeal_id?: string | null;
   id?: string;
   igst?: number | string;
+  include_ope_in_fees?: string;
   income_head?: string;
   invoice_date?: string | null;
   invoice_no?: string;
@@ -574,8 +575,9 @@ async function writeAuditLog(
 function cleanRecord(record: BillingRecord, userId: string, organisationId: string, access: AccessScope) {
   const amount = toNumber(record.amount);
   const ope = toNumber(record.ope);
+  const includeOpeInFees = yesNo(record.include_ope_in_fees);
   const placeOfSupply = text(record.place_of_supply) || stateFromGstin(record.gstin);
-  const tax = calculateTax(amount, placeOfSupply);
+  const tax = calculateTax(getTaxBase(amount, ope, includeOpeInFees), placeOfSupply);
   const cgst = tax.cgst;
   const sgst = tax.sgst;
   const igst = tax.igst;
@@ -594,6 +596,7 @@ function cleanRecord(record: BillingRecord, userId: string, organisationId: stri
     gstin: text(record.gstin),
     gstat_appeal_id: linkedMatterId || null,
     igst,
+    include_ope_in_fees: includeOpeInFees,
     income_head: text(record.income_head),
     invoice_date: dateOrNull(record.invoice_date),
     invoice_no: text(record.invoice_no),
@@ -626,13 +629,14 @@ function cleanRecord(record: BillingRecord, userId: string, organisationId: stri
 function isMissingCompatibilityColumn(error: unknown) {
   const message = isRecord(error) ? String(error.message ?? "") : String(error ?? "");
 
-  return ["place_of_supply", "registration_type", "receiving_date"].some((column) =>
+  return ["include_ope_in_fees", "place_of_supply", "registration_type", "receiving_date"].some((column) =>
     message.includes(column)
   );
 }
 
 function stripCompatibilityColumns<T extends Record<string, unknown>>(record: T) {
   const {
+    include_ope_in_fees: _includeOpeInFees,
     place_of_supply: _placeOfSupply,
     receiving_date: _receivingDate,
     registration_type: _registrationType,
@@ -815,8 +819,16 @@ function calculateTax(amount: number, placeOfSupply: string) {
   };
 }
 
+function getTaxBase(amount: number, ope: number, includeOpeInFees: string) {
+  return includeOpeInFees === "Yes" ? amount + ope : amount;
+}
+
 function roundMoney(value: number) {
   return Math.round(value * 100) / 100;
+}
+
+function yesNo(value: unknown) {
+  return text(value).toLowerCase() === "yes" ? "Yes" : "No";
 }
 
 function readId(value: unknown) {

@@ -29,6 +29,7 @@ create table if not exists public.firm_billing_records (
   invoice_no text,
   invoice_date date,
   ope numeric not null default 0,
+  include_ope_in_fees text not null default 'No',
   ope_remarks text,
   receiving_status text not null default 'Pending',
   receiving_date date,
@@ -48,6 +49,9 @@ add column if not exists ope numeric not null default 0;
 
 alter table public.firm_billing_records
 add column if not exists ope_remarks text;
+
+alter table public.firm_billing_records
+add column if not exists include_ope_in_fees text not null default 'No';
 
 alter table public.firm_billing_records
 add column if not exists place_of_supply text;

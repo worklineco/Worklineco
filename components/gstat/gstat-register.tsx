@@ -22,6 +22,7 @@ type BillingDraft = {
   client: string;
   gstin: string;
   gstat_appeal_id: string;
+  include_ope_in_fees: string;
   matter_description: string;
   ope: string;
   ope_remarks: string;
@@ -904,6 +905,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
       client: "",
       gstin,
       gstat_appeal_id: row.id,
+      include_ope_in_fees: "No",
       matter_description: description,
       ope: "",
       ope_remarks: "",
@@ -956,6 +958,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
             gstin: billingDraft.gstin,
             gstat_appeal_id: billingDraft.gstat_appeal_id,
             igst: 0,
+            include_ope_in_fees: billingDraft.include_ope_in_fees,
             ope: billingDraft.ope,
             ope_remarks: billingDraft.ope_remarks,
             place_of_supply: billingDraft.place_of_supply,
@@ -2223,6 +2226,17 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                 type="number"
                 value={billingDraft.ope}
               />
+              <label>
+                <span className="text-[10px] font-black uppercase text-slate-500">Include OPE in Fee</span>
+                <select
+                  className="mt-1 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-900 outline-none focus:border-teal-300 focus:ring-2 focus:ring-teal-100"
+                  onChange={(event) => updateBillingDraft("include_ope_in_fees", event.target.value)}
+                  value={billingDraft.include_ope_in_fees}
+                >
+                  <option>No</option>
+                  <option>Yes</option>
+                </select>
+              </label>
               <BillingDraftInput
                 label="OPE Remarks"
                 onChange={(value) => updateBillingDraft("ope_remarks", value)}

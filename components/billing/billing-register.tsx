@@ -17,6 +17,7 @@ type BillingRecord = {
   gstat_appeal_id: string | null;
   id?: string;
   igst: number;
+  include_ope_in_fees: string;
   income_head: string;
   invoice_date: string | null;
   invoice_no: string;
@@ -94,6 +95,7 @@ const emptyRecord: BillingRecord = {
   gstin: "",
   gstat_appeal_id: null,
   igst: 0,
+  include_ope_in_fees: "No",
   income_head: "",
   invoice_date: "",
   invoice_no: "",
@@ -183,6 +185,7 @@ const billingColumns: BillingColumn[] = [
   { field: "sgst", label: "SGST", type: "money", width: 104 },
   { field: "igst", label: "IGST", type: "money", width: 104 },
   { field: "ope", label: "OPE", type: "money", width: 110 },
+  { field: "include_ope_in_fees", label: "Include OPE in Fee", type: "select", width: 150 },
   { field: "ope_remarks", label: "OPE Remarks", type: "text", width: 190 },
   { field: "total", label: "Total", width: 124 },
   { field: "billing_status", label: "Billing", type: "select", width: 140 },
@@ -215,6 +218,7 @@ const importHeaders: Array<{ field: BillingField; label: string }> = [
   { field: "sgst", label: "SGST" },
   { field: "igst", label: "IGST" },
   { field: "ope", label: "OPE" },
+  { field: "include_ope_in_fees", label: "Include OPE in Professional Fees" },
   { field: "ope_remarks", label: "OPE Remarks" },
   { field: "billing_status", label: "Billing Status" },
   { field: "memo_no", label: "Memo No." },
@@ -610,6 +614,7 @@ export function BillingRegister() {
       SGST: record.sgst,
       IGST: record.igst,
       OPE: record.ope,
+      "Include OPE in Professional Fees": record.include_ope_in_fees,
       "OPE Remarks": record.ope_remarks,
       Total: record.total,
       "Billing Status": record.billing_status,
@@ -624,7 +629,7 @@ export function BillingRegister() {
     }));
     const worksheet = XLSX.utils.json_to_sheet(rows.length ? rows : [blankExportRow()]);
 
-    worksheet["!cols"] = Array.from({ length: 29 }, () => ({ wch: 18 }));
+    worksheet["!cols"] = Object.keys(rows.length ? rows[0] : blankExportRow()).map(() => ({ wch: 18 }));
 
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Firm Billing");
@@ -1068,6 +1073,17 @@ function BillingAddForm({
             <FormInput field="description" label="Description" onChange={onChange} value={draft.description} wide />
             <FormInput field="amount" label="Professional Fee" onChange={onChange} type="number" value={String(draft.amount || "")} />
             <FormInput field="ope" label="OPE" onChange={onChange} type="number" value={String(draft.ope || "")} />
+            <label>
+              <span className="text-[10px] font-black uppercase text-slate-500">Include OPE in Fee</span>
+              <select
+                className={formControlClass}
+                onChange={(event) => onChange("include_ope_in_fees", event.target.value)}
+                value={draft.include_ope_in_fees || "No"}
+              >
+                <option>No</option>
+                <option>Yes</option>
+              </select>
+            </label>
             <FormInput field="ope_remarks" label="OPE Remarks" onChange={onChange} value={draft.ope_remarks} />
             <FormInput field="cgst" label="CGST" onChange={onChange} readOnly type="number" value={String(draft.cgst || 0)} />
             <FormInput field="sgst" label="SGST" onChange={onChange} readOnly type="number" value={String(draft.sgst || 0)} />
@@ -1326,7 +1342,9 @@ function enrichBillingRecord(record: BillingRecord, clientRecords: ClientRegiste
   const placeOfSupply = changedField === "place_of_supply"
     ? record.place_of_supply
     : stateFromGstin(record.gstin) || record.place_of_supply;
-  const tax = calculateTax(toNumber(record.amount), placeOfSupply);
+  const ope = toNumber(record.ope);
+  const taxBase = getTaxBase(toNumber(record.amount), ope, record.include_ope_in_fees);
+  const tax = calculateTax(taxBase, placeOfSupply);
 
   return recalc({
     ...record,
@@ -1346,6 +1364,7 @@ function normalizeRecord(record: BillingRecord): BillingRecord {
     amount: toNumber(record.amount),
     cgst: toNumber(record.cgst),
     igst: toNumber(record.igst),
+    include_ope_in_fees: yesNo(record.include_ope_in_fees),
     ope: toNumber(record.ope),
     place_of_supply: record.place_of_supply || stateFromGstin(record.gstin),
     sgst: toNumber(record.sgst),
@@ -1396,6 +1415,10 @@ function selectOptions(field: BillingField, masters: Record<string, string[]>) {
     return ["manual", "gstat", "import"];
   }
 
+  if (field === "include_ope_in_fees") {
+    return ["No", "Yes"];
+  }
+
   return ["", ...(masters[field] ?? [])];
 }
 
@@ -1434,8 +1457,16 @@ function calculateTax(amount: number, placeOfSupply: string) {
   };
 }
 
+function getTaxBase(amount: number, ope: number, includeOpeInFees: string) {
+  return yesNo(includeOpeInFees) === "Yes" ? amount + ope : amount;
+}
+
 function roundMoney(value: number) {
   return Math.round(value * 100) / 100;
+}
+
+function yesNo(value: unknown) {
+  return String(value ?? "").trim().toLowerCase() === "yes" ? "Yes" : "No";
 }
 
 function stateFromGstin(value: unknown) {
