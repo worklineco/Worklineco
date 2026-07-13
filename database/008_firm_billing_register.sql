@@ -12,6 +12,8 @@ create table if not exists public.firm_billing_records (
   group_name text,
   client text not null default '',
   gstin text,
+  place_of_supply text,
+  registration_type text,
   poc_name text,
   poc_mobile text,
   poc_email text,
@@ -29,6 +31,7 @@ create table if not exists public.firm_billing_records (
   ope numeric not null default 0,
   ope_remarks text,
   receiving_status text not null default 'Pending',
+  receiving_date date,
   remarks text,
   version_no integer not null default 1,
   created_by uuid references auth.users(id) on delete set null,
@@ -45,6 +48,15 @@ add column if not exists ope numeric not null default 0;
 
 alter table public.firm_billing_records
 add column if not exists ope_remarks text;
+
+alter table public.firm_billing_records
+add column if not exists place_of_supply text;
+
+alter table public.firm_billing_records
+add column if not exists registration_type text;
+
+alter table public.firm_billing_records
+add column if not exists receiving_date date;
 
 create index if not exists firm_billing_records_team_idx
 on public.firm_billing_records (organisation_id, owner_team);

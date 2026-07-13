@@ -24,11 +24,14 @@ type BillingRecord = {
   ope?: number | string;
   ope_remarks?: string;
   owner_team?: string;
+  place_of_supply?: string;
   person_authorised?: string;
   poc_email?: string;
   poc_mobile?: string;
   poc_name?: string;
+  receiving_date?: string | null;
   receiving_status?: string;
+  registration_type?: string;
   remarks?: string;
   sgst?: number | string;
   source_module?: string;
@@ -64,6 +67,46 @@ const defaultOrganisationCode = "DCO1433";
 const tableName = "firm_billing_records";
 const masterTableName = "firm_billing_master_options";
 const masterTypes = ["cost_center", "voucher_type", "income_head", "group_name", "billing_status", "receiving_status"];
+const gstStateByCode: Record<string, string> = {
+  "01": "Jammu And Kashmir",
+  "02": "Himachal Pradesh",
+  "03": "Punjab",
+  "04": "Chandigarh",
+  "05": "Uttarakhand",
+  "06": "Haryana",
+  "07": "Delhi",
+  "08": "Rajasthan",
+  "09": "Uttar Pradesh",
+  "10": "Bihar",
+  "11": "Sikkim",
+  "12": "Arunachal Pradesh",
+  "13": "Nagaland",
+  "14": "Manipur",
+  "15": "Mizoram",
+  "16": "Tripura",
+  "17": "Meghalaya",
+  "18": "Assam",
+  "19": "West Bengal",
+  "20": "Jharkhand",
+  "21": "Orissa",
+  "22": "Chhattisgarh",
+  "23": "Madhya Pradesh",
+  "24": "Gujarat",
+  "26": "Dadra And Nagar Haveli & Daman And Diu",
+  "27": "Maharashtra",
+  "29": "Karnataka",
+  "30": "Goa",
+  "31": "Lakshadweep",
+  "32": "Kerala",
+  "33": "Tamil Nadu",
+  "34": "Puducherry",
+  "35": "Andaman And Nicobar",
+  "36": "Telangana",
+  "37": "Andhra Pradesh",
+  "38": "Ladakh",
+  "97": "Other Territory",
+  "99": "Other Country"
+};
 
 export async function GET() {
   const auth = await requireUser();
@@ -510,12 +553,13 @@ async function writeAuditLog(
 
 function cleanRecord(record: BillingRecord, userId: string, organisationId: string, access: AccessScope) {
   const amount = toNumber(record.amount);
-  const cgst = toNumber(record.cgst);
-  const sgst = toNumber(record.sgst);
-  const igst = toNumber(record.igst);
   const ope = toNumber(record.ope);
-  const explicitTotal = toNumber(record.total);
-  const total = explicitTotal || amount + cgst + sgst + igst + ope;
+  const placeOfSupply = text(record.place_of_supply) || stateFromGstin(record.gstin);
+  const tax = calculateTax(amount, placeOfSupply);
+  const cgst = tax.cgst;
+  const sgst = tax.sgst;
+  const igst = tax.igst;
+  const total = amount + cgst + sgst + igst + ope;
   const ownerTeam = access.canViewAll ? text(record.owner_team) || access.team : access.team;
   const linkedMatterId = text(record.gstat_appeal_id);
 
@@ -540,18 +584,21 @@ function cleanRecord(record: BillingRecord, userId: string, organisationId: stri
     organisation_code: defaultOrganisationCode,
     organisation_id: organisationId,
     owner_team: ownerTeam,
+    place_of_supply: placeOfSupply,
     person_authorised: text(record.person_authorised),
     poc_email: text(record.poc_email),
     poc_mobile: text(record.poc_mobile),
     poc_name: text(record.poc_name),
+    receiving_date: dateOrNull(record.receiving_date),
     receiving_status: text(record.receiving_status) || "Pending",
+    registration_type: text(record.registration_type),
     remarks: text(record.remarks),
     sgst,
     source_module: linkedMatterId ? "gstat" : text(record.source_module) || "manual",
     total,
     updated_at: new Date().toISOString(),
     updated_by: userId,
-    voucher_type: text(record.voucher_type),
+    voucher_type: text(record.voucher_type) || "Proforma Invoice",
     created_by: record.id ? undefined : userId
   };
 }
@@ -706,6 +753,31 @@ function toNumber(value: unknown) {
 function dateOrNull(value: unknown) {
   const date = text(value);
   return date || null;
+}
+
+function stateFromGstin(value: unknown) {
+  const code = text(value).slice(0, 2);
+  return gstStateByCode[code] ?? "";
+}
+
+function calculateTax(amount: number, placeOfSupply: string) {
+  if (placeOfSupply.trim().toLowerCase() === "rajasthan") {
+    return {
+      cgst: roundMoney(amount * 0.09),
+      igst: 0,
+      sgst: roundMoney(amount * 0.09)
+    };
+  }
+
+  return {
+    cgst: 0,
+    igst: roundMoney(amount * 0.18),
+    sgst: 0
+  };
+}
+
+function roundMoney(value: number) {
+  return Math.round(value * 100) / 100;
 }
 
 function readId(value: unknown) {

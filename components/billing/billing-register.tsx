@@ -25,11 +25,14 @@ type BillingRecord = {
   ope: number;
   ope_remarks: string;
   owner_team: string;
+  place_of_supply: string;
   person_authorised: string;
   poc_email: string;
   poc_mobile: string;
   poc_name: string;
+  receiving_date: string | null;
   receiving_status: string;
+  registration_type: string;
   remarks: string;
   sgst: number;
   source_module: string;
@@ -69,6 +72,7 @@ type TrashRecord = {
   id: string;
   original_billing_id: string | null;
 };
+type ClientRegisterRow = Record<string, string | number>;
 type BillingField = keyof BillingRecord;
 type BillingColumn = {
   field: BillingField | "gstat_link" | "history" | "actions";
@@ -98,17 +102,20 @@ const emptyRecord: BillingRecord = {
   ope: 0,
   ope_remarks: "",
   owner_team: "",
+  place_of_supply: "",
   person_authorised: "",
   poc_email: "",
   poc_mobile: "",
   poc_name: "",
+  receiving_date: "",
   receiving_status: "Pending",
+  registration_type: "",
   remarks: "",
   sgst: 0,
   source_module: "manual",
   total: 0,
   version_no: 1,
-  voucher_type: ""
+  voucher_type: "Proforma Invoice"
 };
 const defaultMasters: Record<string, string[]> = {
   billing_status: ["Draft", "Memo Raised", "Invoice Raised", "Cancelled"],
@@ -116,19 +123,57 @@ const defaultMasters: Record<string, string[]> = {
   group_name: [],
   income_head: [],
   receiving_status: ["Pending", "Received", "Part Received"],
-  voucher_type: ["Tax Invoice", "Debit Note", "Credit Note", "Memo"]
+  voucher_type: ["Proforma Invoice", "Tax Invoice", "Debit Note", "Credit Note"]
+};
+const gstStateByCode: Record<string, string> = {
+  "01": "Jammu And Kashmir",
+  "02": "Himachal Pradesh",
+  "03": "Punjab",
+  "04": "Chandigarh",
+  "05": "Uttarakhand",
+  "06": "Haryana",
+  "07": "Delhi",
+  "08": "Rajasthan",
+  "09": "Uttar Pradesh",
+  "10": "Bihar",
+  "11": "Sikkim",
+  "12": "Arunachal Pradesh",
+  "13": "Nagaland",
+  "14": "Manipur",
+  "15": "Mizoram",
+  "16": "Tripura",
+  "17": "Meghalaya",
+  "18": "Assam",
+  "19": "West Bengal",
+  "20": "Jharkhand",
+  "21": "Orissa",
+  "22": "Chhattisgarh",
+  "23": "Madhya Pradesh",
+  "24": "Gujarat",
+  "26": "Dadra And Nagar Haveli & Daman And Diu",
+  "27": "Maharashtra",
+  "29": "Karnataka",
+  "30": "Goa",
+  "31": "Lakshadweep",
+  "32": "Kerala",
+  "33": "Tamil Nadu",
+  "34": "Puducherry",
+  "35": "Andaman And Nicobar",
+  "36": "Telangana",
+  "37": "Andhra Pradesh",
+  "38": "Ladakh",
+  "97": "Other Territory",
+  "99": "Other Country"
 };
 const billingColumns: BillingColumn[] = [
   { field: "owner_team", label: "Team", type: "text", width: 128 },
   { field: "source_module", label: "Source", type: "select", width: 110 },
-  { field: "gstat_link", label: "GSTAT Link", width: 260 },
-  { field: "cost_center", label: "Cost Center", type: "select", width: 150 },
-  { field: "person_authorised", label: "Authorised", type: "text", width: 160 },
   { field: "voucher_type", label: "Voucher", type: "select", width: 145 },
-  { field: "income_head", label: "Income Head", type: "select", width: 155 },
   { field: "group_name", label: "Group", type: "select", width: 145 },
-  { field: "client", label: "Client", type: "text", width: 220 },
   { field: "gstin", label: "GSTIN", type: "text", width: 160 },
+  { field: "client", label: "Client", type: "text", width: 220 },
+  { field: "place_of_supply", label: "Place of Supply", type: "text", width: 175 },
+  { field: "registration_type", label: "Registration Type", type: "text", width: 170 },
   { field: "poc_name", label: "POC", type: "text", width: 145 },
   { field: "poc_mobile", label: "POC Mobile", type: "text", width: 135 },
   { field: "poc_email", label: "POC Email", type: "text", width: 200 },
@@ -146,20 +191,21 @@ const billingColumns: BillingColumn[] = [
   { field: "invoice_no", label: "Invoice No.", type: "text", width: 140 },
   { field: "invoice_date", label: "Invoice Date", type: "date", width: 132 },
   { field: "receiving_status", label: "Receiving", type: "select", width: 138 },
+  { field: "receiving_date", label: "Receiving Date", type: "date", width: 142 },
   { field: "remarks", label: "Remarks", type: "text", width: 220 },
   { field: "history", label: "History", width: 84 },
+  { field: "gstat_link", label: "GSTAT Link", width: 170 },
   { field: "actions", label: "Actions", width: 84 }
 ];
 const tableWidth = billingColumns.reduce((total, column) => total + column.width, 0);
 const importHeaders: Array<{ field: BillingField; label: string }> = [
   { field: "owner_team", label: "Team" },
-  { field: "cost_center", label: "Cost Center" },
-  { field: "person_authorised", label: "Person Authorised" },
   { field: "voucher_type", label: "Voucher Type" },
-  { field: "income_head", label: "Income Head" },
   { field: "group_name", label: "Group" },
-  { field: "client", label: "Client" },
   { field: "gstin", label: "GSTIN" },
+  { field: "client", label: "Client" },
+  { field: "place_of_supply", label: "Place of Supply" },
+  { field: "registration_type", label: "Registration Type" },
   { field: "poc_name", label: "POC Name" },
   { field: "poc_mobile", label: "POC Mobile" },
   { field: "poc_email", label: "POC Email" },
@@ -176,6 +222,7 @@ const importHeaders: Array<{ field: BillingField; label: string }> = [
   { field: "invoice_no", label: "Invoice No." },
   { field: "invoice_date", label: "Invoice Date" },
   { field: "receiving_status", label: "Receiving Status" },
+  { field: "receiving_date", label: "Receiving Date" },
   { field: "remarks", label: "Remarks" }
 ];
 
@@ -183,6 +230,7 @@ export function BillingRegister() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [access, setAccess] = useState<AccessScope>({ canManageMasters: false, canViewAll: false, role: "", team: "" });
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+  const [clientRecords, setClientRecords] = useState<ClientRegisterRow[]>([]);
   const [inlineEditor, setInlineEditor] = useState<InlineEditor | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -253,7 +301,21 @@ export function BillingRegister() {
 
   useEffect(() => {
     void loadBilling();
+    void loadClientRecords();
   }, []);
+
+  async function loadClientRecords() {
+    try {
+      const response = await fetch("/api/client-records/managed", { cache: "no-store" });
+      const result = (await response.json().catch(() => ({}))) as { rows?: ClientRegisterRow[] };
+
+      if (response.ok) {
+        setClientRecords(result.rows ?? []);
+      }
+    } catch (error) {
+      console.error("Billing client lookup load failed:", error);
+    }
+  }
 
   async function loadBilling() {
     setIsLoading(true);
@@ -323,7 +385,11 @@ export function BillingRegister() {
     }
 
     const rawValue = valueOverride ?? inlineEditor.value;
-    const nextRecord = prepareRecordUpdate(record, inlineEditor.field, rawValue);
+    const nextRecord = enrichBillingRecord(
+      prepareRecordUpdate(record, inlineEditor.field, rawValue),
+      clientRecords,
+      inlineEditor.field
+    );
 
     if (String(record[inlineEditor.field] ?? "") === String(nextRecord[inlineEditor.field] ?? "")) {
       setInlineEditor(null);
@@ -352,7 +418,7 @@ export function BillingRegister() {
   }
 
   async function saveDirectField(record: BillingRecord, field: BillingField, rawValue: string) {
-    let nextRecord = prepareRecordUpdate(record, field, rawValue);
+    let nextRecord = enrichBillingRecord(prepareRecordUpdate(record, field, rawValue), clientRecords, field);
 
     if (field === "gstat_appeal_id") {
       const matter = matters.find((item) => item.id === rawValue);
@@ -364,6 +430,7 @@ export function BillingRegister() {
         gstin: matter?.gstin || nextRecord.gstin,
         owner_team: access.canViewAll ? matter?.owner_team || nextRecord.owner_team : nextRecord.owner_team
       };
+      nextRecord = enrichBillingRecord(nextRecord, clientRecords, "gstin");
     }
 
     setRecords((currentRecords) =>
@@ -471,7 +538,7 @@ export function BillingRegister() {
       });
 
       record.source_module = "import";
-      return recalc(record);
+      return enrichBillingRecord(recalc(record), clientRecords, "gstin");
     }).filter((row) => row.client || row.description || row.invoice_no);
 
     const response = await fetch("/api/billing", {
@@ -506,14 +573,12 @@ export function BillingRegister() {
       "S.no.": index + 1,
       Team: record.owner_team,
       Source: record.source_module,
-      "GSTAT Link": getMatterLabel(record, matters),
-      "Cost Center": record.cost_center,
-      "Person Authorised": record.person_authorised,
       "Voucher Type": record.voucher_type,
-      "Income Head": record.income_head,
       Group: record.group_name,
-      Client: record.client,
       GSTIN: record.gstin,
+      Client: record.client,
+      "Place of Supply": record.place_of_supply,
+      "Registration Type": record.registration_type,
       "POC Name": record.poc_name,
       "POC Mobile": record.poc_mobile,
       "POC Email": record.poc_email,
@@ -531,7 +596,9 @@ export function BillingRegister() {
       "Invoice No.": record.invoice_no,
       "Invoice Date": record.invoice_date ?? "",
       "Receiving Status": record.receiving_status,
-      Remarks: record.remarks
+      "Receiving Date": record.receiving_date ?? "",
+      Remarks: record.remarks,
+      "GSTAT Link": getMatterLabel(record, matters)
     }));
     const worksheet = XLSX.utils.json_to_sheet(rows.length ? rows : [blankExportRow()]);
 
@@ -1100,6 +1167,24 @@ function prepareRecordUpdate(record: BillingRecord, field: BillingField, rawValu
   });
 }
 
+function enrichBillingRecord(record: BillingRecord, clientRecords: ClientRegisterRow[], changedField?: BillingField): BillingRecord {
+  const matchedClient = findClientByGstin(record.gstin, clientRecords);
+  const placeOfSupply = changedField === "place_of_supply"
+    ? record.place_of_supply
+    : stateFromGstin(record.gstin) || record.place_of_supply;
+  const tax = calculateTax(toNumber(record.amount), placeOfSupply);
+
+  return recalc({
+    ...record,
+    cgst: tax.cgst,
+    client: changedField === "client" ? record.client : getClientName(matchedClient) || record.client,
+    igst: tax.igst,
+    place_of_supply: placeOfSupply,
+    registration_type: getRegistrationType(matchedClient) || record.registration_type,
+    sgst: tax.sgst
+  });
+}
+
 function normalizeRecord(record: BillingRecord): BillingRecord {
   return recalc({
     ...emptyRecord,
@@ -1108,6 +1193,7 @@ function normalizeRecord(record: BillingRecord): BillingRecord {
     cgst: toNumber(record.cgst),
     igst: toNumber(record.igst),
     ope: toNumber(record.ope),
+    place_of_supply: record.place_of_supply || stateFromGstin(record.gstin),
     sgst: toNumber(record.sgst),
     total: toNumber(record.total),
     version_no: Number(record.version_no ?? 1)
@@ -1176,6 +1262,53 @@ function blankExportRow() {
     row[header.label] = "";
     return row;
   }, {});
+}
+
+function calculateTax(amount: number, placeOfSupply: string) {
+  if (placeOfSupply.trim().toLowerCase() === "rajasthan") {
+    return {
+      cgst: roundMoney(amount * 0.09),
+      igst: 0,
+      sgst: roundMoney(amount * 0.09)
+    };
+  }
+
+  return {
+    cgst: 0,
+    igst: roundMoney(amount * 0.18),
+    sgst: 0
+  };
+}
+
+function roundMoney(value: number) {
+  return Math.round(value * 100) / 100;
+}
+
+function stateFromGstin(value: unknown) {
+  const code = String(value ?? "").trim().slice(0, 2);
+  return gstStateByCode[code] ?? "";
+}
+
+function findClientByGstin(gstin: string, clientRecords: ClientRegisterRow[]) {
+  const normalizedGstin = normalizeGstin(gstin);
+
+  if (!normalizedGstin) {
+    return null;
+  }
+
+  return clientRecords.find((row) => normalizeGstin(row["GSTIN/UIN"]) === normalizedGstin) ?? null;
+}
+
+function getClientName(row: ClientRegisterRow | null) {
+  return String(row?.Particulars ?? row?.name ?? "").trim();
+}
+
+function getRegistrationType(row: ClientRegisterRow | null) {
+  return String(row?.["Registration Type"] ?? "").trim();
+}
+
+function normalizeGstin(value: unknown) {
+  return String(value ?? "").replace(/[^0-9a-z]/gi, "").toUpperCase();
 }
 
 function auditEntries(value: Partial<BillingRecord> | null) {

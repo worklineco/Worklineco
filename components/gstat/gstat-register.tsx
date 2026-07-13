@@ -25,10 +25,13 @@ type BillingDraft = {
   matter_description: string;
   ope: string;
   ope_remarks: string;
+  place_of_supply: string;
   professional_fee: string;
+  registration_type: string;
   remarks: string;
   rowIndex: number;
   rowLabel: string;
+  voucher_type: string;
 };
 type ClientRegisterRow = Record<string, string | number>;
 type UserAccess = { isPartner: boolean; team: string };
@@ -184,6 +187,47 @@ const statusOptions = [
   "Filed"
 ];
 const billingInlineColumnKeys = new Set(["Billing amount", "Billing remarks"]);
+const billingVoucherOptions = ["Proforma Invoice", "Tax Invoice", "Debit Note", "Credit Note"];
+const gstStateByCode: Record<string, string> = {
+  "01": "Jammu And Kashmir",
+  "02": "Himachal Pradesh",
+  "03": "Punjab",
+  "04": "Chandigarh",
+  "05": "Uttarakhand",
+  "06": "Haryana",
+  "07": "Delhi",
+  "08": "Rajasthan",
+  "09": "Uttar Pradesh",
+  "10": "Bihar",
+  "11": "Sikkim",
+  "12": "Arunachal Pradesh",
+  "13": "Nagaland",
+  "14": "Manipur",
+  "15": "Mizoram",
+  "16": "Tripura",
+  "17": "Meghalaya",
+  "18": "Assam",
+  "19": "West Bengal",
+  "20": "Jharkhand",
+  "21": "Orissa",
+  "22": "Chhattisgarh",
+  "23": "Madhya Pradesh",
+  "24": "Gujarat",
+  "26": "Dadra And Nagar Haveli & Daman And Diu",
+  "27": "Maharashtra",
+  "29": "Karnataka",
+  "30": "Goa",
+  "31": "Lakshadweep",
+  "32": "Kerala",
+  "33": "Tamil Nadu",
+  "34": "Puducherry",
+  "35": "Andaman And Nicobar",
+  "36": "Telangana",
+  "37": "Andhra Pradesh",
+  "38": "Ladakh",
+  "97": "Other Territory",
+  "99": "Other Country"
+};
 const customStatusOption = "__workline_custom_status__";
 const editorSections = [
   {
@@ -853,33 +897,39 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
 
     const gstin = String(row.data["GSTAT Login ID"] || "").trim();
     const apl04No = String(row.data["APL 04 No"] || row.data["APL04"] || "").trim();
-    const fallbackClient = String(row.data["Entity Name"] || row.data.Appellant || "").trim();
     const description = `Professional Fees for GSTAT matter bearing reference no. ${apl04No || "-"}`;
 
     setBillingMessage("");
     setBillingDraft({
-      client: fallbackClient,
+      client: "",
       gstin,
       gstat_appeal_id: row.id,
       matter_description: description,
       ope: "",
       ope_remarks: "",
+      place_of_supply: stateFromGstin(gstin),
       professional_fee: String(row.data["Billing amount"] || ""),
+      registration_type: "",
       remarks: "",
       rowIndex,
-      rowLabel: String(row.row_number || row.data.Sno || rowIndex + 1)
+      rowLabel: String(row.row_number || row.data.Sno || rowIndex + 1),
+      voucher_type: "Proforma Invoice"
     });
 
     if (!gstin) {
       return;
     }
 
-    const matchedClient = await findClientNameByGstin(gstin);
+    const matchedClient = await findClientByGstin(gstin);
 
     if (matchedClient) {
       setBillingDraft((currentDraft) =>
         currentDraft && currentDraft.gstat_appeal_id === row.id
-          ? { ...currentDraft, client: matchedClient }
+          ? {
+              ...currentDraft,
+              client: getClientName(matchedClient) || currentDraft.client,
+              registration_type: getRegistrationType(matchedClient) || currentDraft.registration_type
+            }
           : currentDraft
       );
     }
@@ -908,9 +958,12 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
             igst: 0,
             ope: billingDraft.ope,
             ope_remarks: billingDraft.ope_remarks,
+            place_of_supply: billingDraft.place_of_supply,
+            registration_type: billingDraft.registration_type,
             remarks: billingDraft.remarks,
             sgst: 0,
-            source_module: "gstat"
+            source_module: "gstat",
+            voucher_type: billingDraft.voucher_type
           }
         }),
         headers: { "Content-Type": "application/json" },
@@ -951,11 +1004,11 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
     }
   }
 
-  async function findClientNameByGstin(gstin: string) {
+  async function findClientByGstin(gstin: string) {
     const normalizedGstin = normalizeGstin(gstin);
 
     if (!normalizedGstin) {
-      return "";
+      return null;
     }
 
     try {
@@ -963,15 +1016,13 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
       const result = (await response.json().catch(() => ({}))) as { rows?: ClientRegisterRow[] };
 
       if (!response.ok || !Array.isArray(result.rows)) {
-        return "";
+        return null;
       }
 
-      const matchedClient = result.rows.find((row) => normalizeGstin(row["GSTIN/UIN"]) === normalizedGstin);
-
-      return String(matchedClient?.Particulars ?? matchedClient?.name ?? "").trim();
+      return result.rows.find((row) => normalizeGstin(row["GSTIN/UIN"]) === normalizedGstin) ?? null;
     } catch (error) {
       console.error("Client lookup for billing failed:", error);
-      return "";
+      return null;
     }
   }
 
@@ -1103,6 +1154,31 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
           }
         : currentDraft
     );
+  }
+
+  async function updateBillingGstin(value: string) {
+    setBillingDraft((currentDraft) =>
+      currentDraft
+        ? {
+            ...currentDraft,
+            gstin: value,
+            place_of_supply: stateFromGstin(value)
+          }
+        : currentDraft
+    );
+    const matchedClient = await findClientByGstin(value);
+
+    if (matchedClient) {
+      setBillingDraft((currentDraft) =>
+        currentDraft
+          ? {
+              ...currentDraft,
+              client: getClientName(matchedClient) || currentDraft.client,
+              registration_type: getRegistrationType(matchedClient) || currentDraft.registration_type
+            }
+          : currentDraft
+      );
+    }
   }
 
   function openInlineEditor(rowIndex: number, column: Column, value: string | number | undefined) {
@@ -2092,6 +2168,23 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
             </div>
 
             <div className="mt-4 grid gap-3 md:grid-cols-2 lg:grid-cols-4">
+              <label>
+                <span className="text-[10px] font-black uppercase text-slate-500">Voucher Type</span>
+                <select
+                  className="mt-1 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-900 outline-none focus:border-teal-300 focus:ring-2 focus:ring-teal-100"
+                  onChange={(event) => updateBillingDraft("voucher_type", event.target.value)}
+                  value={billingDraft.voucher_type}
+                >
+                  {billingVoucherOptions.map((option) => (
+                    <option key={option}>{option}</option>
+                  ))}
+                </select>
+              </label>
+              <BillingDraftInput
+                label="GSTIN"
+                onChange={(value) => void updateBillingGstin(value)}
+                value={billingDraft.gstin}
+              />
               <label className="lg:col-span-2">
                 <span className="text-[10px] font-black uppercase text-slate-500">Client</span>
                 <input
@@ -2109,9 +2202,14 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                 />
               </label>
               <BillingDraftInput
-                label="GSTIN"
-                onChange={(value) => updateBillingDraft("gstin", value)}
-                value={billingDraft.gstin}
+                label="Place of Supply"
+                onChange={(value) => updateBillingDraft("place_of_supply", value)}
+                value={billingDraft.place_of_supply}
+              />
+              <BillingDraftInput
+                label="Registration Type"
+                onChange={(value) => updateBillingDraft("registration_type", value)}
+                value={billingDraft.registration_type}
               />
               <BillingDraftInput
                 label="Professional fee"
@@ -3085,6 +3183,19 @@ function BillingDraftInput({
 
 function normalizeGstin(value: unknown) {
   return String(value ?? "").replace(/[^0-9a-z]/gi, "").toUpperCase();
+}
+
+function stateFromGstin(value: unknown) {
+  const code = String(value ?? "").trim().slice(0, 2);
+  return gstStateByCode[code] ?? "";
+}
+
+function getClientName(row: ClientRegisterRow | null) {
+  return String(row?.Particulars ?? row?.name ?? "").trim();
+}
+
+function getRegistrationType(row: ClientRegisterRow | null) {
+  return String(row?.["Registration Type"] ?? "").trim();
 }
 
 function ColumnOptionsPanel({
