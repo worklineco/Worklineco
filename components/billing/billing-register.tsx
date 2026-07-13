@@ -1,6 +1,6 @@
 "use client";
 
-import { Download, History, Link2, Maximize2, Plus, Search, Trash2, Upload } from "lucide-react";
+import { Download, History, Link2, Maximize2, Plus, Search, Trash2, Upload, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx-js-style";
 
@@ -582,7 +582,7 @@ export function BillingRegister() {
         </p>
       ) : null}
 
-      <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+      <div className="mt-4">
         <div className="overflow-auto rounded-md border border-slate-200 bg-white">
           <table className="table-fixed border-collapse text-left text-sm" style={{ minWidth: tableWidth, width: tableWidth }}>
             <colgroup>
@@ -604,7 +604,7 @@ export function BillingRegister() {
                 <tr><td className="px-4 py-8 font-bold text-slate-500" colSpan={billingColumns.length}>Loading billing rows...</td></tr>
               ) : filteredRecords.length ? (
                 filteredRecords.map((record) => (
-                  <tr className={`border-b border-slate-100 last:border-b-0 ${selectedRecordId === record.id ? "bg-teal-50" : ""}`} key={record.id}>
+                  <tr className="border-b border-slate-100 last:border-b-0" key={record.id}>
                     {billingColumns.map((column) => (
                       <BillingCell
                         access={access}
@@ -633,39 +633,58 @@ export function BillingRegister() {
             </tbody>
           </table>
         </div>
+      </div>
 
-        <aside className="rounded-md border border-slate-200 bg-white p-4">
-          <div className="flex items-center justify-between gap-2">
-            <div>
-              <p className="text-xs font-black uppercase tracking-[0.14em] text-slate-500">Audit</p>
-              <h3 className="mt-1 text-lg font-black text-slate-950">
-                {selectedRecord ? selectedRecord.client || selectedRecord.invoice_no || "Selected row" : "Recent changes"}
-              </h3>
-            </div>
-            {selectedRecordId ? (
-              <button className="text-xs font-black uppercase text-teal-700" onClick={() => setSelectedRecordId(null)} type="button">
-                All
-              </button>
-            ) : null}
-          </div>
-
-          <div className="mt-3 max-h-[520px] space-y-2 overflow-auto">
-            {selectedAuditLogs.length ? selectedAuditLogs.map((log) => (
-              <div className="rounded-md border border-slate-200 p-3" key={log.id}>
-                <p className="text-sm font-black text-slate-900">{log.action.replace("billing.", "")}</p>
-                <p className="mt-1 text-xs font-bold text-slate-500">{formatDateTime(log.created_at)}</p>
-                <p className="mt-2 truncate text-xs font-semibold text-slate-600">
-                  {auditSummary(log)}
+      {selectedRecordId ? (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/45 px-4 py-6">
+          <section className="max-h-[86vh] w-full max-w-3xl overflow-hidden rounded-lg border border-slate-200 bg-white shadow-[0_24px_90px_rgba(15,23,42,0.30)]">
+            <header className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
+              <div>
+                <p className="text-xs font-black uppercase tracking-[0.14em] text-teal-700">Row history</p>
+                <h3 className="mt-1 text-xl font-black text-slate-950">
+                  {selectedRecord?.client || selectedRecord?.invoice_no || selectedRecord?.memo_no || "Billing row"}
+                </h3>
+                <p className="mt-1 text-sm font-bold text-slate-500">
+                  {selectedRecord?.owner_team || "No team"} - {selectedRecord?.billing_status || "Draft"}
                 </p>
               </div>
-            )) : (
-              <p className="rounded-md border border-slate-200 px-3 py-6 text-center text-sm font-bold text-slate-500">
-                No audit entries found.
-              </p>
-            )}
-          </div>
-        </aside>
-      </div>
+              <button
+                className="inline-flex size-9 items-center justify-center rounded-md border border-slate-200 text-slate-700 hover:bg-slate-50"
+                onClick={() => setSelectedRecordId(null)}
+                title="Close history"
+                type="button"
+              >
+                <X className="size-4" />
+              </button>
+            </header>
+
+            <div className="max-h-[64vh] overflow-auto p-5">
+              {selectedAuditLogs.length ? (
+                <div className="space-y-3">
+                  {selectedAuditLogs.map((log) => (
+                    <article className="rounded-md border border-slate-200 p-4" key={log.id}>
+                      <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                        <p className="text-sm font-black uppercase text-slate-950">
+                          {log.action.replace("billing.", "")}
+                        </p>
+                        <p className="text-xs font-bold text-slate-500">{formatDateTime(log.created_at)}</p>
+                      </div>
+                      <div className="mt-3 grid gap-3 md:grid-cols-2">
+                        <AuditValue label="Previous data" value={log.old_value} />
+                        <AuditValue label="Updated data" value={log.new_value} />
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <p className="rounded-md border border-slate-200 px-3 py-8 text-center text-sm font-bold text-slate-500">
+                  No history entries found for this billing row.
+                </p>
+              )}
+            </div>
+          </section>
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -856,6 +875,28 @@ function SelectFilter({
   );
 }
 
+function AuditValue({ label, value }: { label: string; value: Partial<BillingRecord> | null }) {
+  const entries = auditEntries(value);
+
+  return (
+    <div className="rounded-md bg-slate-50 p-3">
+      <p className="text-xs font-black uppercase tracking-[0.12em] text-slate-500">{label}</p>
+      {entries.length ? (
+        <dl className="mt-2 space-y-1">
+          {entries.map(([key, entryValue]) => (
+            <div className="grid grid-cols-[120px_minmax(0,1fr)] gap-2 text-xs" key={key}>
+              <dt className="font-black text-slate-600">{auditLabel(key)}</dt>
+              <dd className="min-w-0 break-words font-semibold text-slate-900">{entryValue}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : (
+        <p className="mt-2 text-xs font-bold text-slate-500">No data</p>
+      )}
+    </div>
+  );
+}
+
 function prepareRecordUpdate(record: BillingRecord, field: BillingField, rawValue: string): BillingRecord {
   const nextRecord = {
     ...record,
@@ -947,9 +988,41 @@ function blankExportRow() {
   }, {});
 }
 
-function auditSummary(log: AuditLog) {
-  const next = log.new_value ?? log.old_value ?? {};
-  return [next.owner_team, next.client, next.invoice_no || next.memo_no].filter(Boolean).join(" - ") || "Billing register change";
+function auditEntries(value: Partial<BillingRecord> | null) {
+  if (!value) {
+    return [];
+  }
+
+  return [
+    ["owner_team", value.owner_team],
+    ["client", value.client],
+    ["invoice_no", value.invoice_no],
+    ["invoice_date", value.invoice_date],
+    ["memo_no", value.memo_no],
+    ["billing_status", value.billing_status],
+    ["receiving_status", value.receiving_status],
+    ["amount", formatAuditMoney(value.amount)],
+    ["cgst", formatAuditMoney(value.cgst)],
+    ["sgst", formatAuditMoney(value.sgst)],
+    ["igst", formatAuditMoney(value.igst)],
+    ["total", formatAuditMoney(value.total)],
+    ["remarks", value.remarks]
+  ].filter((entry): entry is [string, string] => Boolean(String(entry[1] ?? "").trim()));
+}
+
+function auditLabel(value: string) {
+  return value
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function isDefined(value: unknown) {
+  return value !== null && value !== undefined && value !== "";
+}
+
+function formatAuditMoney(value: unknown) {
+  return isDefined(value) ? formatMoney(String(value)) : "";
 }
 
 function formatDateTime(value: string) {
