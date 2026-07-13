@@ -457,17 +457,23 @@ function filterRowsForAccess<T extends AppealRow>(rows: T[], access: AccessScope
 }
 
 async function getBillRaisedAppealIds(admin: ReturnType<typeof createAdminClient>) {
-  const { data, error } = await admin
+  const firmRecords = await admin
+    .from("firm_billing_records")
+    .select("gstat_appeal_id")
+    .eq("organisation_code", organisationCode)
+    .not("gstat_appeal_id", "is", null);
+
+  if (!firmRecords.error) {
+    return new Set((firmRecords.data ?? []).map((record) => String(record.gstat_appeal_id ?? "")).filter(Boolean));
+  }
+
+  const legacyRecords = await admin
     .from("gstat_billing_records")
     .select("gstat_appeal_id")
     .eq("organisation_code", organisationCode)
     .not("gstat_appeal_id", "is", null);
 
-  if (error) {
-    return new Set<string>();
-  }
-
-  return new Set((data ?? []).map((record) => String(record.gstat_appeal_id ?? "")).filter(Boolean));
+  return new Set((legacyRecords.data ?? []).map((record) => String(record.gstat_appeal_id ?? "")).filter(Boolean));
 }
 
 function markBillRaised<T extends AppealRow>(rows: T[], billRaisedAppealIds: Set<string>) {

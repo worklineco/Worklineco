@@ -19,8 +19,9 @@ export default function BillingPage() {
                 Billing Register
               </h1>
               <p className="mt-3 max-w-3xl text-sm font-semibold leading-6 text-slate-600">
-                Maintain billing records for GSTAT matters, track invoice status,
-                and keep payment realisation visible from one register.
+                Maintain firm-wide billing, team ownership, invoice status, and
+                receiving follow-up. GSTAT matters can be linked when a bill comes
+                from the litigation register.
               </p>
             </div>
 
