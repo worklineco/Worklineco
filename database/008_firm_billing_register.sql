@@ -90,57 +90,62 @@ using (
   or organisation_code = 'DCO1433'
 );
 
-insert into public.firm_billing_records (
-  amount,
-  billing_status,
-  cgst,
-  client,
-  description,
-  gstin,
-  gstat_appeal_id,
-  igst,
-  invoice_date,
-  invoice_no,
-  organisation_code,
-  organisation_id,
-  receiving_status,
-  remarks,
-  sgst,
-  source_module,
-  total,
-  created_by,
-  updated_by,
-  created_at,
-  updated_at
-)
-select
-  legacy.professional_fee,
-  legacy.billing_status,
-  legacy.cgst,
-  legacy.client,
-  legacy.matter_description,
-  legacy.gstin,
-  legacy.gstat_appeal_id,
-  legacy.igst,
-  legacy.invoice_date,
-  legacy.invoice_number,
-  legacy.organisation_code,
-  (select id from public.organisations where slug = lower(legacy.organisation_code) limit 1),
-  coalesce(nullif(legacy.payment_status, ''), 'Pending'),
-  legacy.remarks,
-  legacy.sgst,
-  'gstat',
-  legacy.total,
-  legacy.created_by,
-  legacy.updated_by,
-  legacy.created_at,
-  legacy.updated_at
-from public.gstat_billing_records legacy
-where not exists (
-  select 1
-  from public.firm_billing_records firm
-  where firm.organisation_code = legacy.organisation_code
-    and coalesce(firm.gstat_appeal_id::text, '') = coalesce(legacy.gstat_appeal_id::text, '')
-    and coalesce(firm.invoice_no, '') = coalesce(legacy.invoice_number, '')
-    and coalesce(firm.client, '') = coalesce(legacy.client, '')
-);
+do $$
+begin
+  if to_regclass('public.gstat_billing_records') is not null then
+    insert into public.firm_billing_records (
+      amount,
+      billing_status,
+      cgst,
+      client,
+      description,
+      gstin,
+      gstat_appeal_id,
+      igst,
+      invoice_date,
+      invoice_no,
+      organisation_code,
+      organisation_id,
+      receiving_status,
+      remarks,
+      sgst,
+      source_module,
+      total,
+      created_by,
+      updated_by,
+      created_at,
+      updated_at
+    )
+    select
+      legacy.professional_fee,
+      legacy.billing_status,
+      legacy.cgst,
+      legacy.client,
+      legacy.matter_description,
+      legacy.gstin,
+      legacy.gstat_appeal_id,
+      legacy.igst,
+      legacy.invoice_date,
+      legacy.invoice_number,
+      legacy.organisation_code,
+      (select id from public.organisations where slug = lower(legacy.organisation_code) limit 1),
+      coalesce(nullif(legacy.payment_status, ''), 'Pending'),
+      legacy.remarks,
+      legacy.sgst,
+      'gstat',
+      legacy.total,
+      legacy.created_by,
+      legacy.updated_by,
+      legacy.created_at,
+      legacy.updated_at
+    from public.gstat_billing_records legacy
+    where not exists (
+      select 1
+      from public.firm_billing_records firm
+      where firm.organisation_code = legacy.organisation_code
+        and coalesce(firm.gstat_appeal_id::text, '') = coalesce(legacy.gstat_appeal_id::text, '')
+        and coalesce(firm.invoice_no, '') = coalesce(legacy.invoice_number, '')
+        and coalesce(firm.client, '') = coalesce(legacy.client, '')
+    );
+  end if;
+end $$;
