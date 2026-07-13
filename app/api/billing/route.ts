@@ -821,8 +821,61 @@ function toNumber(value: unknown) {
 }
 
 function dateOrNull(value: unknown) {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return toIsoDate(value);
+  }
+
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return excelSerialDateToIso(value);
+  }
+
   const date = text(value);
-  return date || null;
+
+  if (!date) {
+    return null;
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return date;
+  }
+
+  const excelSerial = Number(date);
+
+  if (/^\d{4,6}(\.0+)?$/.test(date) && Number.isFinite(excelSerial)) {
+    return excelSerialDateToIso(excelSerial);
+  }
+
+  const dayMonthYear = date.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{2}|\d{4})$/);
+
+  if (dayMonthYear) {
+    const day = Number(dayMonthYear[1]);
+    const month = Number(dayMonthYear[2]);
+    const year = Number(dayMonthYear[3].length === 2 ? `20${dayMonthYear[3]}` : dayMonthYear[3]);
+    return makeIsoDate(year, month, day);
+  }
+
+  const parsed = new Date(date);
+  return Number.isNaN(parsed.getTime()) ? null : toIsoDate(parsed);
+}
+
+function excelSerialDateToIso(value: number) {
+  const date = new Date(Date.UTC(1899, 11, 30));
+  date.setUTCDate(date.getUTCDate() + Math.floor(value));
+  return toIsoDate(date);
+}
+
+function makeIsoDate(year: number, month: number, day: number) {
+  const date = new Date(Date.UTC(year, month - 1, day));
+
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) {
+    return null;
+  }
+
+  return toIsoDate(date);
+}
+
+function toIsoDate(value: Date) {
+  return value.toISOString().slice(0, 10);
 }
 
 function stateFromGstin(value: unknown) {

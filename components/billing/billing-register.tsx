@@ -637,7 +637,7 @@ export function BillingRegister() {
 
       importHeaders.forEach(({ field, label }) => {
         const value = row[label] ?? row[field] ?? "";
-        importedRecord[field] = value;
+        importedRecord[field] = isDateField(field) ? normalizeDateInput(value) : value;
       });
 
       record.source_module = "import";
@@ -696,11 +696,11 @@ export function BillingRegister() {
       Total: record.total,
       "Billing Status": record.billing_status,
       "Memo No.": record.memo_no,
-      "Memo Date": record.memo_date ?? "",
+      "Memo Date": formatDateForExport(record.memo_date),
       "Invoice No.": record.invoice_no,
-      "Invoice Date": record.invoice_date ?? "",
+      "Invoice Date": formatDateForExport(record.invoice_date),
       "Receiving Status": record.receiving_status,
-      "Receiving Date": record.receiving_date ?? "",
+      "Receiving Date": formatDateForExport(record.receiving_date),
       Remarks: record.remarks,
       "GSTAT Link": getMatterLabel(record, matters)
     }));
@@ -1108,7 +1108,8 @@ function BillingCell({
               onSave(String(record[field] ?? ""));
             }
           }}
-          type={column.type === "date" ? "date" : column.type === "money" ? "number" : "text"}
+          placeholder={column.type === "date" ? "dd-mm-yyyy" : undefined}
+          type={column.type === "money" ? "number" : "text"}
           value={editorValue}
         />
       ) : (
@@ -1119,7 +1120,7 @@ function BillingCell({
           disabled={isReadOnly || isSaving}
           onClick={() => {
             if (!isReadOnly && record.id) {
-              onEdit(field, String(record[field] ?? ""));
+              onEdit(field, column.type === "date" ? formatDateForInput(record[field]) : String(record[field] ?? ""));
             }
           }}
           title={String(displayValue || "")}
@@ -1224,7 +1225,7 @@ function BillingAddForm({
                 ))}
               </select>
             </label>
-            <FormInput field="receiving_date" label="Receiving Date" onChange={onChange} type="date" value={draft.receiving_date ?? ""} />
+            <FormInput field="receiving_date" label="Receiving Date" onChange={onChange} placeholder="dd-mm-yyyy" value={formatDateForInput(draft.receiving_date)} />
             <FormInput field="remarks" label="Remarks" onChange={onChange} value={draft.remarks} wide />
           </div>
         </div>
@@ -1245,6 +1246,7 @@ function FormInput({
   field,
   label,
   onChange,
+  placeholder,
   readOnly = false,
   type = "text",
   value,
@@ -1253,8 +1255,9 @@ function FormInput({
   field: BillingField;
   label: string;
   onChange: (field: BillingField, value: string) => void;
+  placeholder?: string;
   readOnly?: boolean;
-  type?: "date" | "number" | "text";
+  type?: "number" | "text";
   value: string;
   wide?: boolean;
 }) {
@@ -1265,6 +1268,7 @@ function FormInput({
         className={`${formControlClass} ${readOnly ? "bg-slate-50 text-slate-600" : ""}`}
         min={type === "number" ? "0" : undefined}
         onChange={(event) => onChange(field, event.target.value)}
+        placeholder={placeholder}
         readOnly={readOnly}
         type={type}
         value={value}
@@ -1687,6 +1691,10 @@ function getDisplayValue(record: BillingRecord, column: BillingColumn, matters: 
     return formatMoney(value as number);
   }
 
+  if (column.type === "date") {
+    return formatDate(String(value ?? ""));
+  }
+
   return String(value ?? "");
 }
 
@@ -1704,6 +1712,10 @@ function getColumnLabel(field: BillingField) {
 
 function isMoneyField(field: BillingField) {
   return ["amount", "cgst", "sgst", "igst", "ope", "total"].includes(field);
+}
+
+function isDateField(field: BillingField) {
+  return ["invoice_date", "memo_date", "receiving_date"].includes(field);
 }
 
 function selectOptions(field: BillingField, masters: Record<string, string[]>) {
@@ -1940,20 +1952,103 @@ function formatDateTime(value: string) {
     return "-";
   }
 
-  return new Intl.DateTimeFormat("en-IN", {
-    dateStyle: "medium",
-    timeStyle: "short"
-  }).format(new Date(value));
-}
+  const date = new Date(value);
 
-function formatDate(value: string) {
-  if (!value) {
+  if (Number.isNaN(date.getTime())) {
     return "-";
   }
 
-  return new Intl.DateTimeFormat("en-IN", {
-    dateStyle: "medium"
-  }).format(new Date(value));
+  const time = new Intl.DateTimeFormat("en-IN", {
+    hour: "numeric",
+    hour12: true,
+    minute: "2-digit"
+  }).format(date);
+
+  return `${pad2(date.getDate())}-${pad2(date.getMonth() + 1)}-${date.getFullYear()}, ${time}`;
+}
+
+function formatDate(value: string) {
+  const normalized = normalizeDateInput(value);
+
+  if (!normalized) {
+    return "-";
+  }
+
+  const [year, month, day] = normalized.split("-");
+  return `${day}-${month}-${year}`;
+}
+
+function formatDateForExport(value: unknown) {
+  const formatted = formatDate(String(value ?? ""));
+  return formatted === "-" ? "" : formatted;
+}
+
+function formatDateForInput(value: unknown) {
+  const rawValue = String(value ?? "").trim();
+  const formatted = formatDate(rawValue);
+  return formatted === "-" ? rawValue : formatted;
+}
+
+function normalizeDateInput(value: unknown) {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return toIsoDate(value);
+  }
+
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return excelSerialDateToIso(value);
+  }
+
+  const rawValue = String(value ?? "").trim();
+
+  if (!rawValue) {
+    return "";
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(rawValue)) {
+    return rawValue;
+  }
+
+  const excelSerial = Number(rawValue);
+
+  if (/^\d{4,6}(\.0+)?$/.test(rawValue) && Number.isFinite(excelSerial)) {
+    return excelSerialDateToIso(excelSerial);
+  }
+
+  const dayMonthYear = rawValue.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{2}|\d{4})$/);
+
+  if (dayMonthYear) {
+    const day = Number(dayMonthYear[1]);
+    const month = Number(dayMonthYear[2]);
+    const year = Number(dayMonthYear[3].length === 2 ? `20${dayMonthYear[3]}` : dayMonthYear[3]);
+    return makeIsoDate(year, month, day);
+  }
+
+  const parsed = new Date(rawValue);
+  return Number.isNaN(parsed.getTime()) ? "" : toIsoDate(parsed);
+}
+
+function excelSerialDateToIso(value: number) {
+  const date = new Date(Date.UTC(1899, 11, 30));
+  date.setUTCDate(date.getUTCDate() + Math.floor(value));
+  return toIsoDate(date);
+}
+
+function makeIsoDate(year: number, month: number, day: number) {
+  const date = new Date(Date.UTC(year, month - 1, day));
+
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) {
+    return "";
+  }
+
+  return toIsoDate(date);
+}
+
+function toIsoDate(value: Date) {
+  return value.toISOString().slice(0, 10);
+}
+
+function pad2(value: number) {
+  return String(value).padStart(2, "0");
 }
 
 function formatMoney(value: number | string) {
