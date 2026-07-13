@@ -8,6 +8,7 @@ type RegisterRow = Record<string, string | number>;
 
 const defaultOrganisationCode = "DCO1433";
 const sourceKey = "client_records_register";
+const fetchBatchSize = 1000;
 const columns = [
   "S.no.",
   "Group",
@@ -37,12 +38,7 @@ export async function GET() {
     return organisation.error;
   }
 
-  const { data, error } = await admin
-    .from("clients")
-    .select("id,name,custom_values,created_at")
-    .eq("organisation_id", organisation.organisationId)
-    .eq("custom_values->>source", sourceKey)
-    .order("created_at", { ascending: true });
+  const { data, error } = await fetchAllClientRows(admin, organisation.organisationId);
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
@@ -101,17 +97,46 @@ export async function POST(request: Request) {
     ? await admin
         .from("clients")
         .insert(insertRows)
-        .select("id,name,custom_values,created_at")
-        .order("created_at", { ascending: true })
     : { data: [], error: null };
 
   if (inserted.error) {
     return NextResponse.json({ error: inserted.error.message }, { status: 500 });
   }
 
+  const reloaded = await fetchAllClientRows(admin, organisation.organisationId);
+
+  if (reloaded.error) {
+    return NextResponse.json({ error: reloaded.error.message }, { status: 500 });
+  }
+
   return NextResponse.json({
-    rows: (inserted.data ?? []).map((client, index) => normalizeClientRow(client, index))
+    rows: (reloaded.data ?? []).map((client, index) => normalizeClientRow(client, index))
   });
+}
+
+async function fetchAllClientRows(admin: ReturnType<typeof createAdminClient>, organisationId: string) {
+  const rows: Array<{ custom_values: RegisterRow | null; name: string }> = [];
+
+  for (let from = 0; ; from += fetchBatchSize) {
+    const to = from + fetchBatchSize - 1;
+    const { data, error } = await admin
+      .from("clients")
+      .select("id,name,custom_values,created_at")
+      .eq("organisation_id", organisationId)
+      .eq("custom_values->>source", sourceKey)
+      .order("created_at", { ascending: true })
+      .range(from, to);
+
+    if (error) {
+      return { data: null, error };
+    }
+
+    rows.push(...((data ?? []) as Array<{ custom_values: RegisterRow | null; name: string }>));
+
+    if ((data ?? []).length < fetchBatchSize) {
+      return { data: rows, error: null };
+    }
+  }
 }
 
 function createAdminClient() {

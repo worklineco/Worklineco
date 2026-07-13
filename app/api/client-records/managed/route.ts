@@ -16,6 +16,7 @@ type ClientRecord = {
 const activeSourceKey = "client_records_register";
 const trashSourceKey = "client_records_trash";
 const defaultOrganisationCode = "DCO1433";
+const fetchBatchSize = 1000;
 const maxBulkDeleteRows = 5;
 const columns = [
   "S.no.",
@@ -297,12 +298,37 @@ function loadClients(
   source: string,
   ascending: boolean
 ) {
-  return admin
-    .from("clients")
-    .select("id,name,custom_values,created_at,updated_at")
-    .eq("organisation_id", organisationId)
-    .eq("custom_values->>source", source)
-    .order("created_at", { ascending });
+  return fetchAllClientRows(admin, organisationId, source, ascending);
+}
+
+async function fetchAllClientRows(
+  admin: ReturnType<typeof createAdminClient>,
+  organisationId: string,
+  source: string,
+  ascending: boolean
+) {
+  const rows: ClientRecord[] = [];
+
+  for (let from = 0; ; from += fetchBatchSize) {
+    const to = from + fetchBatchSize - 1;
+    const { data, error } = await admin
+      .from("clients")
+      .select("id,name,custom_values,created_at,updated_at")
+      .eq("organisation_id", organisationId)
+      .eq("custom_values->>source", source)
+      .order("created_at", { ascending })
+      .range(from, to);
+
+    if (error) {
+      return { data: null, error };
+    }
+
+    rows.push(...((data ?? []) as ClientRecord[]));
+
+    if ((data ?? []).length < fetchBatchSize) {
+      return { data: rows, error: null };
+    }
+  }
 }
 
 async function loadAuditLogs(admin: ReturnType<typeof createAdminClient>, organisationId: string) {
