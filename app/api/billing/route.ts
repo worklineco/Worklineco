@@ -225,9 +225,15 @@ export async function POST(request: Request) {
     const rows = payload.rows.map((row) =>
       cleanRecord(row, auth.user.id, organisation.organisationId, access)
     );
-    const inserted = rows.length
+    let inserted = rows.length
       ? await admin.from(tableName).insert(rows).select("*")
       : { data: [], error: null };
+
+    if (inserted.error && isMissingCompatibilityColumn(inserted.error)) {
+      inserted = rows.length
+        ? await admin.from(tableName).insert(rows.map(stripCompatibilityColumns)).select("*")
+        : { data: [], error: null };
+    }
 
     if (inserted.error) {
       return NextResponse.json({ error: inserted.error.message }, { status: 500 });
@@ -302,13 +308,23 @@ export async function POST(request: Request) {
       );
     }
 
-    const saved = await admin
+    let saved = await admin
       .from(tableName)
       .update({ ...cleaned, version_no: Number(existing.data.version_no ?? 1) + 1 })
       .eq("id", record.id)
       .eq("organisation_id", organisation.organisationId)
       .select("*")
       .single();
+
+    if (saved.error && isMissingCompatibilityColumn(saved.error)) {
+      saved = await admin
+        .from(tableName)
+        .update(stripCompatibilityColumns({ ...cleaned, version_no: Number(existing.data.version_no ?? 1) + 1 }))
+        .eq("id", record.id)
+        .eq("organisation_id", organisation.organisationId)
+        .select("*")
+        .single();
+    }
 
     if (saved.error) {
       return NextResponse.json({ error: saved.error.message }, { status: 500 });
@@ -318,7 +334,11 @@ export async function POST(request: Request) {
     return NextResponse.json({ record: saved.data });
   }
 
-  const saved = await admin.from(tableName).insert(cleaned).select("*").single();
+  let saved = await admin.from(tableName).insert(cleaned).select("*").single();
+
+  if (saved.error && isMissingCompatibilityColumn(saved.error)) {
+    saved = await admin.from(tableName).insert(stripCompatibilityColumns(cleaned)).select("*").single();
+  }
 
   if (saved.error) {
     return NextResponse.json({ error: saved.error.message }, { status: 500 });
@@ -601,6 +621,25 @@ function cleanRecord(record: BillingRecord, userId: string, organisationId: stri
     voucher_type: text(record.voucher_type) || "Proforma Invoice",
     created_by: record.id ? undefined : userId
   };
+}
+
+function isMissingCompatibilityColumn(error: unknown) {
+  const message = isRecord(error) ? String(error.message ?? "") : String(error ?? "");
+
+  return ["place_of_supply", "registration_type", "receiving_date"].some((column) =>
+    message.includes(column)
+  );
+}
+
+function stripCompatibilityColumns<T extends Record<string, unknown>>(record: T) {
+  const {
+    place_of_supply: _placeOfSupply,
+    receiving_date: _receivingDate,
+    registration_type: _registrationType,
+    ...compatibleRecord
+  } = record;
+
+  return compatibleRecord;
 }
 
 function formatMatter(matter: GstatMatter) {
