@@ -305,6 +305,12 @@ export function BillingRegister() {
     void loadClientRecords();
   }, []);
 
+  useEffect(() => {
+    setAddDraft((currentDraft) =>
+      currentDraft ? enrichBillingRecord(currentDraft, clientRecords, currentDraft.client ? "client" : undefined) : currentDraft
+    );
+  }, [clientRecords]);
+
   async function loadClientRecords() {
     try {
       const response = await fetch("/api/client-records/managed", { cache: "no-store" });
@@ -1444,20 +1450,49 @@ function findClientByGstin(gstin: string, clientRecords: ClientRegisterRow[]) {
     return null;
   }
 
-  return clientRecords.find((row) => normalizeGstin(row["GSTIN/UIN"]) === normalizedGstin) ?? null;
+  return clientRecords.find((row) => normalizeGstin(getFirstValue(row, gstinKeys)) === normalizedGstin) ?? null;
 }
 
 function getClientName(row: ClientRegisterRow | null) {
-  return String(row?.Particulars ?? row?.name ?? "").trim();
+  return getFirstValue(row, clientNameKeys);
 }
 
 function getRegistrationType(row: ClientRegisterRow | null) {
-  return String(row?.["Registration Type"] ?? "").trim();
+  return getFirstValue(row, registrationTypeKeys);
 }
 
 function normalizeGstin(value: unknown) {
   return String(value ?? "").replace(/[^0-9a-z]/gi, "").toUpperCase();
 }
+
+function getFirstValue(row: ClientRegisterRow | null, keys: string[]) {
+  if (!row) {
+    return "";
+  }
+
+  const normalizedRow = Object.entries(row).reduce<Record<string, string | number>>((result, [key, value]) => {
+    result[normalizeLookupKey(key)] = value;
+    return result;
+  }, {});
+
+  for (const key of keys) {
+    const value = normalizedRow[normalizeLookupKey(key)];
+
+    if (String(value ?? "").trim()) {
+      return String(value).trim();
+    }
+  }
+
+  return "";
+}
+
+function normalizeLookupKey(key: string) {
+  return key.replace(/[^0-9a-z]/gi, "").toLowerCase();
+}
+
+const gstinKeys = ["GSTIN/UIN", "GSTIN", "GSTIN No", "GSTIN No.", "GST No", "GST Number", "GSTAT Login ID"];
+const clientNameKeys = ["Particulars", "Client", "Client Name", "Name", "Legal Name", "Trade Name"];
+const registrationTypeKeys = ["Registration Type", "Reg Type", "GST Registration Type", "Registration"];
 
 function auditEntries(value: Partial<BillingRecord> | null) {
   if (!value) {
