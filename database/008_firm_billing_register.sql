@@ -52,6 +52,21 @@ on public.firm_billing_records (organisation_id, owner_team);
 create index if not exists firm_billing_records_gstat_appeal_idx
 on public.firm_billing_records (gstat_appeal_id);
 
+create table if not exists public.firm_deleted_billing_records (
+  id uuid primary key default gen_random_uuid(),
+  organisation_id uuid references public.organisations(id) on delete cascade,
+  organisation_code text not null default 'DCO1433',
+  original_billing_id uuid,
+  data jsonb not null default '{}'::jsonb,
+  delete_action text not null default 'delete',
+  deleted_by uuid references auth.users(id) on delete set null,
+  deleted_at timestamptz not null default now(),
+  expires_at timestamptz not null default (now() + interval '30 days')
+);
+
+create index if not exists firm_deleted_billing_records_org_idx
+on public.firm_deleted_billing_records (organisation_id, deleted_at desc);
+
 create table if not exists public.firm_billing_master_options (
   id uuid primary key default gen_random_uuid(),
   organisation_id uuid references public.organisations(id) on delete cascade,
@@ -70,11 +85,21 @@ create index if not exists firm_billing_master_options_org_type_idx
 on public.firm_billing_master_options (organisation_id, option_type, label);
 
 alter table public.firm_billing_records enable row level security;
+alter table public.firm_deleted_billing_records enable row level security;
 alter table public.firm_billing_master_options enable row level security;
 
 drop policy if exists "members read firm billing records in own organisation" on public.firm_billing_records;
 create policy "members read firm billing records in own organisation"
 on public.firm_billing_records for select
+to authenticated
+using (
+  organisation_id = public.current_user_organisation_id()
+  or organisation_code = 'DCO1433'
+);
+
+drop policy if exists "members read deleted firm billing records in own organisation" on public.firm_deleted_billing_records;
+create policy "members read deleted firm billing records in own organisation"
+on public.firm_deleted_billing_records for select
 to authenticated
 using (
   organisation_id = public.current_user_organisation_id()

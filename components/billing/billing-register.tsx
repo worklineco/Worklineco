@@ -1,6 +1,6 @@
 "use client";
 
-import { Download, History, Link2, Maximize2, Plus, Search, Trash2, Upload, X } from "lucide-react";
+import { Download, History, Link2, Maximize2, Plus, RotateCcw, Search, ShieldCheck, Trash2, Upload, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx-js-style";
 
@@ -60,6 +60,15 @@ type AuditLog = {
   new_value: Partial<BillingRecord> | null;
   old_value: Partial<BillingRecord> | null;
 };
+type TrashRecord = {
+  data: Partial<BillingRecord>;
+  delete_action: string;
+  deleted_at: string;
+  deleted_by: string | null;
+  expires_at: string;
+  id: string;
+  original_billing_id: string | null;
+};
 type BillingField = keyof BillingRecord;
 type BillingColumn = {
   field: BillingField | "gstat_link" | "history" | "actions";
@@ -68,6 +77,7 @@ type BillingColumn = {
   width: number;
 };
 type InlineEditor = { field: BillingField; recordId: string; value: string };
+type BillingView = "audit" | "register" | "trash";
 
 const emptyRecord: BillingRecord = {
   amount: 0,
@@ -181,6 +191,8 @@ export function BillingRegister() {
   const [records, setRecords] = useState<BillingRecord[]>([]);
   const [savingCell, setSavingCell] = useState<InlineEditor | null>(null);
   const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null);
+  const [trashRecords, setTrashRecords] = useState<TrashRecord[]>([]);
+  const [viewMode, setViewMode] = useState<BillingView>("register");
   const [filters, setFilters] = useState({ search: "", status: "", team: "", source: "" });
   const [masters, setMasters] = useState(defaultMasters);
 
@@ -256,6 +268,7 @@ export function BillingRegister() {
         masters?: Record<string, string[]>;
         matters?: GstatMatter[];
         records?: BillingRecord[];
+        trashRecords?: TrashRecord[];
       };
 
       if (!response.ok) {
@@ -268,6 +281,7 @@ export function BillingRegister() {
       setMasters({ ...defaultMasters, ...(result.masters ?? {}) });
       setMatters(result.matters ?? []);
       setRecords((result.records ?? []).map(normalizeRecord));
+      setTrashRecords(result.trashRecords ?? []);
     } catch (error) {
       console.error("Billing load error:", error);
       setMessage("Could not load billing register.");
@@ -407,8 +421,39 @@ export function BillingRegister() {
 
     setRecords((currentRecords) => currentRecords.filter((item) => item.id !== record.id));
     setSelectedRecordId((current) => (current === record.id ? null : current));
-    setMessage("Billing row deleted.");
+    setMessage("Billing row moved to trash.");
     void loadBilling();
+  }
+
+  async function restoreTrashRecord(row: TrashRecord) {
+    const client = String(row.data.client || row.data.invoice_no || "this billing row");
+
+    if (!window.confirm(`Restore ${client} to Billing Register?`)) {
+      return;
+    }
+
+    setMessage("Restoring billing row...");
+    const response = await fetch("/api/billing", {
+      body: JSON.stringify({ action: "restore", trashId: row.id }),
+      headers: { "Content-Type": "application/json" },
+      method: "POST"
+    });
+    const result = (await response.json()) as {
+      auditLogs?: AuditLog[];
+      error?: string;
+      records?: BillingRecord[];
+      trashRecords?: TrashRecord[];
+    };
+
+    if (!response.ok) {
+      setMessage(result.error ?? "Could not restore billing row.");
+      return;
+    }
+
+    setAuditLogs(result.auditLogs ?? []);
+    setRecords((result.records ?? []).map(normalizeRecord));
+    setTrashRecords(result.trashRecords ?? []);
+    setMessage("Billing row restored.");
   }
 
   async function importWorkbook(file: File) {
@@ -439,8 +484,9 @@ export function BillingRegister() {
       auditLogs?: AuditLog[];
       error?: string;
       matters?: GstatMatter[];
-      records?: BillingRecord[];
-    };
+        records?: BillingRecord[];
+        trashRecords?: TrashRecord[];
+      };
 
     if (!response.ok) {
       setMessage(result.error ?? "Could not import billing rows.");
@@ -451,6 +497,7 @@ export function BillingRegister() {
     setAuditLogs(result.auditLogs ?? []);
     setMatters(result.matters ?? []);
     setRecords((result.records ?? []).map(normalizeRecord));
+    setTrashRecords(result.trashRecords ?? []);
     setMessage(`Imported ${billingRows.length} billing rows from ${file.name}.`);
   }
 
@@ -525,6 +572,13 @@ export function BillingRegister() {
         </div>
       </div>
 
+      <div className="mt-4 flex flex-wrap gap-2 border-b border-slate-200 pb-3">
+        <ViewButton active={viewMode === "register"} label="Register" onClick={() => setViewMode("register")} />
+        <ViewButton active={viewMode === "audit"} label="Audit Trail" onClick={() => setViewMode("audit")} />
+        <ViewButton active={viewMode === "trash"} label={`Trash (${trashRecords.length})`} onClick={() => setViewMode("trash")} />
+      </div>
+
+      {viewMode === "register" ? (
       <div className="mt-4 grid gap-2 lg:grid-cols-[minmax(220px,1fr)_160px_150px_140px_auto]">
         <label className="flex h-11 items-center gap-2 rounded-md border border-slate-200 bg-white px-3">
           <Search className="size-4 text-slate-400" />
@@ -585,6 +639,7 @@ export function BillingRegister() {
           />
         </div>
       </div>
+      ) : null}
 
       {message ? (
         <p className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-bold text-emerald-900">
@@ -592,6 +647,7 @@ export function BillingRegister() {
         </p>
       ) : null}
 
+      {viewMode === "register" ? (
       <div className="mt-4">
         <div className="overflow-auto rounded-md border border-slate-200 bg-white">
           <table className="table-fixed border-collapse text-left text-sm" style={{ minWidth: tableWidth, width: tableWidth }}>
@@ -644,6 +700,15 @@ export function BillingRegister() {
           </table>
         </div>
       </div>
+      ) : null}
+
+      {viewMode === "audit" ? (
+        <BillingAuditTable logs={auditLogs} isLoading={isLoading} />
+      ) : null}
+
+      {viewMode === "trash" ? (
+        <BillingTrashTable isLoading={isLoading} onRestore={restoreTrashRecord} rows={trashRecords} />
+      ) : null}
 
       {selectedRecordId ? (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/45 px-4 py-6">
@@ -885,6 +950,120 @@ function SelectFilter({
   );
 }
 
+function ViewButton({ active, label, onClick }: { active: boolean; label: string; onClick: () => void }) {
+  return (
+    <button
+      className={`inline-flex h-10 items-center justify-center rounded-md px-4 text-xs font-black uppercase transition ${
+        active ? "bg-slate-950 text-white" : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+      }`}
+      onClick={onClick}
+      type="button"
+    >
+      {label}
+    </button>
+  );
+}
+
+function BillingAuditTable({ isLoading, logs }: { isLoading: boolean; logs: AuditLog[] }) {
+  return (
+    <div className="mt-4 overflow-auto rounded-md border border-slate-200 bg-white">
+      <table className="min-w-[1180px] border-separate border-spacing-0 text-left text-xs">
+        <thead className="sticky top-0 z-10 bg-slate-950 text-white">
+          <tr>
+            {["Time", "Action", "Team", "Client", "Invoice/Memo", "Old Value", "New Value"].map((heading) => (
+              <th className="border-b border-r border-white/15 px-3 py-3 font-black" key={heading}>{heading}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {logs.map((log) => {
+            const oldValue = log.old_value ?? {};
+            const newValue = log.new_value ?? {};
+            const summary = { ...oldValue, ...newValue };
+
+            return (
+              <tr className="odd:bg-white even:bg-slate-50/80" key={log.id}>
+                <td className="border-b border-r border-slate-200 px-3 py-2 font-semibold text-slate-700">{formatDateTime(log.created_at)}</td>
+                <td className="border-b border-r border-slate-200 px-3 py-2 font-black text-slate-900">{log.action.replace("billing.", "")}</td>
+                <td className="border-b border-r border-slate-200 px-3 py-2 font-semibold text-slate-700">{summary.owner_team ?? "-"}</td>
+                <td className="border-b border-r border-slate-200 px-3 py-2 font-semibold text-slate-700">{summary.client ?? "-"}</td>
+                <td className="border-b border-r border-slate-200 px-3 py-2 font-semibold text-slate-700">{summary.invoice_no || summary.memo_no || "-"}</td>
+                <td className="max-w-xs border-b border-r border-slate-200 px-3 py-2 font-semibold text-slate-600">
+                  <span className="block truncate" title={formatAuditObject(oldValue)}>{formatAuditObject(oldValue)}</span>
+                </td>
+                <td className="max-w-xs border-b border-r border-slate-200 px-3 py-2 font-semibold text-slate-600">
+                  <span className="block truncate" title={formatAuditObject(newValue)}>{formatAuditObject(newValue)}</span>
+                </td>
+              </tr>
+            );
+          })}
+          {!logs.length && !isLoading ? (
+            <tr>
+              <td className="px-3 py-8 text-center text-sm font-bold text-slate-500" colSpan={7}>
+                <span className="inline-flex items-center gap-2"><ShieldCheck className="size-4" /> No billing audit entries found.</span>
+              </td>
+            </tr>
+          ) : null}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function BillingTrashTable({
+  isLoading,
+  onRestore,
+  rows
+}: {
+  isLoading: boolean;
+  onRestore: (row: TrashRecord) => void;
+  rows: TrashRecord[];
+}) {
+  return (
+    <div className="mt-4 overflow-auto rounded-md border border-slate-200 bg-white">
+      <table className="min-w-[1120px] border-separate border-spacing-0 text-left text-xs">
+        <thead className="sticky top-0 z-10 bg-slate-950 text-white">
+          <tr>
+            {["Deleted", "Expires", "Action", "Team", "Client", "GSTIN", "Amount", "Restore"].map((heading) => (
+              <th className="border-b border-r border-white/15 px-3 py-3 font-black" key={heading}>{heading}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr className="odd:bg-white even:bg-slate-50/80" key={row.id}>
+              <td className="border-b border-r border-slate-200 px-3 py-2 font-semibold text-slate-700">{formatDateTime(row.deleted_at)}</td>
+              <td className="border-b border-r border-slate-200 px-3 py-2 font-semibold text-slate-700">{formatDate(row.expires_at)}</td>
+              <td className="border-b border-r border-slate-200 px-3 py-2 font-black text-slate-900">{row.delete_action}</td>
+              <td className="border-b border-r border-slate-200 px-3 py-2 font-semibold text-slate-700">{row.data.owner_team || "-"}</td>
+              <td className="border-b border-r border-slate-200 px-3 py-2 font-semibold text-slate-700">{row.data.client || "-"}</td>
+              <td className="border-b border-r border-slate-200 px-3 py-2 font-semibold text-slate-700">{row.data.gstin || "-"}</td>
+              <td className="border-b border-r border-slate-200 px-3 py-2 font-semibold text-slate-700">{formatMoney(String(row.data.total ?? 0))}</td>
+              <td className="border-b border-r border-slate-200 px-3 py-2">
+                <button
+                  className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 text-xs font-black uppercase text-emerald-800 transition hover:bg-emerald-100"
+                  onClick={() => onRestore(row)}
+                  type="button"
+                >
+                  <RotateCcw className="size-3.5" />
+                  Restore
+                </button>
+              </td>
+            </tr>
+          ))}
+          {!rows.length && !isLoading ? (
+            <tr>
+              <td className="px-3 py-8 text-center text-sm font-bold text-slate-500" colSpan={8}>
+                <span className="inline-flex items-center gap-2"><Trash2 className="size-4" /> No deleted billing rows are currently in trash.</span>
+              </td>
+            </tr>
+          ) : null}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function AuditValue({ label, value }: { label: string; value: Partial<BillingRecord> | null }) {
   const entries = auditEntries(value);
 
@@ -1047,6 +1226,24 @@ function formatDateTime(value: string) {
     dateStyle: "medium",
     timeStyle: "short"
   }).format(new Date(value));
+}
+
+function formatDate(value: string) {
+  if (!value) {
+    return "-";
+  }
+
+  return new Intl.DateTimeFormat("en-IN", {
+    dateStyle: "medium"
+  }).format(new Date(value));
+}
+
+function formatAuditObject(value: Partial<BillingRecord> | null) {
+  if (!value || !Object.keys(value).length) {
+    return "-";
+  }
+
+  return JSON.stringify(value);
 }
 
 function formatMoney(value: number | string) {

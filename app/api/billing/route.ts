@@ -62,6 +62,7 @@ type AccessScope = {
 
 const defaultOrganisationCode = "DCO1433";
 const tableName = "firm_billing_records";
+const trashTableName = "firm_deleted_billing_records";
 const masterTableName = "firm_billing_master_options";
 const masterTypes = ["cost_center", "voucher_type", "income_head", "group_name", "billing_status", "receiving_status"];
 
@@ -80,11 +81,12 @@ export async function GET() {
   }
 
   const access = getAccessScope(auth.user);
-  const [records, matters, masters, auditLogs] = await Promise.all([
+  const [records, matters, masters, auditLogs, trashRecords] = await Promise.all([
     loadBillingRecords(admin, organisation.organisationId, access),
     loadGstatMatters(admin, access),
     loadMasters(admin, organisation.organisationId),
-    loadAuditLogs(admin, organisation.organisationId, access)
+    loadAuditLogs(admin, organisation.organisationId, access),
+    loadTrashRecords(admin, organisation.organisationId, access)
   ]);
 
   if (records.error) {
@@ -100,7 +102,8 @@ export async function GET() {
     auditLogs,
     masters,
     matters: ((matters.data ?? []) as GstatMatter[]).map(formatMatter),
-    records: records.data ?? []
+    records: records.data ?? [],
+    trashRecords
   });
 }
 
@@ -116,6 +119,7 @@ export async function POST(request: Request) {
     master?: { label?: string; option_type?: string };
     record?: BillingRecord;
     rows?: BillingRecord[];
+    trashId?: string;
   };
   const action = payload.action ?? "save";
   const admin = createAdminClient();
@@ -126,6 +130,54 @@ export async function POST(request: Request) {
   }
 
   const access = getAccessScope(auth.user);
+
+  if (action === "restore") {
+    if (!payload.trashId) {
+      return NextResponse.json({ error: "Trash record id is required." }, { status: 400 });
+    }
+
+    const trash = await admin
+      .from(trashTableName)
+      .select("*")
+      .eq("id", payload.trashId)
+      .eq("organisation_id", organisation.organisationId)
+      .single();
+
+    if (trash.error) {
+      return NextResponse.json({ error: trash.error.message }, { status: 404 });
+    }
+
+    const data = trash.data.data as BillingRecord;
+
+    if (!canAccessRecord(data as StoredBillingRecord, access)) {
+      return NextResponse.json({ error: "Not allowed to restore this billing row." }, { status: 403 });
+    }
+
+    const restored = await admin
+      .from(tableName)
+      .insert({
+        ...data,
+        id: data.id || trash.data.original_billing_id,
+        organisation_id: organisation.organisationId,
+        updated_at: new Date().toISOString(),
+        updated_by: auth.user.id
+      })
+      .select("*")
+      .single();
+
+    if (restored.error) {
+      return NextResponse.json({ error: restored.error.message }, { status: 500 });
+    }
+
+    const removed = await admin.from(trashTableName).delete().eq("id", payload.trashId).eq("organisation_id", organisation.organisationId);
+
+    if (removed.error) {
+      return NextResponse.json({ error: removed.error.message }, { status: 500 });
+    }
+
+    await writeAuditLog(admin, organisation.organisationId, auth.user.id, "billing.restore", null, restored.data);
+    return loadResponse(admin, organisation.organisationId, access);
+  }
 
   if (action === "import") {
     if (!Array.isArray(payload.rows)) {
@@ -274,6 +326,19 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ error: "Not allowed to delete this billing row." }, { status: 403 });
   }
 
+  const trash = await admin.from(trashTableName).insert({
+    data: existing.data,
+    delete_action: "delete",
+    deleted_by: auth.user.id,
+    original_billing_id: id,
+    organisation_code: defaultOrganisationCode,
+    organisation_id: organisation.organisationId
+  });
+
+  if (trash.error) {
+    return NextResponse.json({ error: trash.error.message }, { status: 500 });
+  }
+
   const deleted = await admin.from(tableName).delete().eq("id", id).eq("organisation_id", organisation.organisationId);
 
   if (deleted.error) {
@@ -289,11 +354,12 @@ async function loadResponse(
   organisationId: string,
   access: AccessScope
 ) {
-  const [records, matters, masters, auditLogs] = await Promise.all([
+  const [records, matters, masters, auditLogs, trashRecords] = await Promise.all([
     loadBillingRecords(admin, organisationId, access),
     loadGstatMatters(admin, access),
     loadMasters(admin, organisationId),
-    loadAuditLogs(admin, organisationId, access)
+    loadAuditLogs(admin, organisationId, access),
+    loadTrashRecords(admin, organisationId, access)
   ]);
 
   if (records.error) {
@@ -309,7 +375,8 @@ async function loadResponse(
     auditLogs,
     masters,
     matters: ((matters.data ?? []) as GstatMatter[]).map(formatMatter),
-    records: records.data ?? []
+    records: records.data ?? [],
+    trashRecords
   });
 }
 
@@ -387,6 +454,25 @@ async function loadAuditLogs(
     const newTeam = readTeam(log.new_value);
     return oldTeam === access.team || newTeam === access.team;
   });
+}
+
+async function loadTrashRecords(
+  admin: ReturnType<typeof createAdminClient>,
+  organisationId: string,
+  access: AccessScope
+) {
+  const { data } = await admin
+    .from(trashTableName)
+    .select("id,original_billing_id,data,delete_action,deleted_by,deleted_at,expires_at")
+    .eq("organisation_id", organisationId)
+    .order("deleted_at", { ascending: false });
+  const rows = data ?? [];
+
+  if (access.canViewAll || !access.team) {
+    return rows;
+  }
+
+  return rows.filter((row) => readTeam(row.data) === access.team);
 }
 
 async function writeAuditLog(
