@@ -4,7 +4,7 @@ import { downloadGstatPoa } from "@/lib/gstat/poa-document";
 import { supabase } from "@/lib/supabase/client";
 import { ArrowDown, ArrowLeft, ArrowUp, ChevronDown, ChevronUp, Download, Expand, ExternalLink, FileSpreadsheet, FileText, Filter, History, Pencil, Plus, ReceiptText, Scale, Search, Settings2, ShieldCheck, Trash2, Upload, X } from "lucide-react";
 import Link from "next/link";
-import { ChangeEvent, FormEvent, memo, useDeferredValue, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { ChangeEvent, memo, useDeferredValue, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { createPortal } from "react-dom";
 import * as XLSX from "xlsx-js-style";
 
@@ -19,23 +19,18 @@ type AppealRow = {
 type ExportRow = { displayIndex: number; row: AppealRow };
 type EditorState = { draft: RowData; isNew?: boolean; row: AppealRow; rowIndex: number };
 type BillingDraft = {
-  billing_status: string;
-  cgst: string;
   client: string;
   gstin: string;
   gstat_appeal_id: string;
-  igst: string;
-  invoice_date: string;
-  invoice_number: string;
   matter_description: string;
-  payment_date: string;
-  payment_status: string;
+  ope: string;
+  ope_remarks: string;
   professional_fee: string;
   remarks: string;
   rowIndex: number;
   rowLabel: string;
-  sgst: string;
 };
+type ClientRegisterRow = Record<string, string | number>;
 type UserAccess = { isPartner: boolean; team: string };
 type CellStyle = NonNullable<XLSX.CellObject["s"]>;
 type SortDirection = "asc" | "desc";
@@ -188,8 +183,6 @@ const statusOptions = [
   "Pending for upload",
   "Filed"
 ];
-const billingStatusOptions = ["Draft", "Raised", "Cancelled"];
-const paymentStatusOptions = ["Unpaid", "Part Paid", "Paid"];
 const billingInlineColumnKeys = new Set(["Billing amount", "Billing remarks"]);
 const customStatusOption = "__workline_custom_status__";
 const editorSections = [
@@ -852,36 +845,47 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
     await saveRowOperation("row_delete", rowIndex, `Deleted row ${rowLabel}. Audit log updated.`);
   }
 
-  function openBillingDraft(rowIndex: number, row: AppealRow) {
+  async function openBillingDraft(rowIndex: number, row: AppealRow) {
     if (!row.id) {
       setMessage("Save this GSTAT row before creating a bill.");
       return;
     }
 
+    const gstin = String(row.data["GSTAT Login ID"] || "").trim();
+    const apl04No = String(row.data["APL 04 No"] || row.data["APL04"] || "").trim();
+    const fallbackClient = String(row.data["Entity Name"] || row.data.Appellant || "").trim();
+    const description = `Professional Fees for GSTAT matter bearing reference no. ${apl04No || "-"}`;
+
     setBillingMessage("");
     setBillingDraft({
-      billing_status: "Draft",
-      cgst: "",
-      client: String(row.data["Entity Name"] || row.data.Appellant || ""),
-      gstin: "",
+      client: fallbackClient,
+      gstin,
       gstat_appeal_id: row.id,
-      igst: "",
-      invoice_date: "",
-      invoice_number: "",
-      matter_description: String(row.data["Issue in brief"] || row.data.Remark || ""),
-      payment_date: "",
-      payment_status: "Unpaid",
-      professional_fee: "",
+      matter_description: description,
+      ope: "",
+      ope_remarks: "",
+      professional_fee: String(row.data["Billing amount"] || ""),
       remarks: "",
       rowIndex,
-      rowLabel: String(row.row_number || row.data.Sno || rowIndex + 1),
-      sgst: ""
+      rowLabel: String(row.row_number || row.data.Sno || rowIndex + 1)
     });
+
+    if (!gstin) {
+      return;
+    }
+
+    const matchedClient = await findClientNameByGstin(gstin);
+
+    if (matchedClient) {
+      setBillingDraft((currentDraft) =>
+        currentDraft && currentDraft.gstat_appeal_id === row.id
+          ? { ...currentDraft, client: matchedClient }
+          : currentDraft
+      );
+    }
   }
 
-  async function saveBillingDraft(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
+  async function saveBillingDraft({ openBilling }: { openBilling: boolean }) {
     if (!billingDraft || isSavingBilling) {
       return;
     }
@@ -894,20 +898,19 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
       const response = await fetch("/api/billing", {
         body: JSON.stringify({
           record: {
-            billing_status: billingDraft.billing_status,
-            cgst: billingDraft.cgst,
+            amount: billingDraft.professional_fee,
+            billing_status: "Draft",
+            cgst: 0,
             client: billingDraft.client,
+            description: billingDraft.matter_description,
             gstin: billingDraft.gstin,
             gstat_appeal_id: billingDraft.gstat_appeal_id,
-            igst: billingDraft.igst,
-            invoice_date: billingDraft.invoice_date,
-            invoice_number: billingDraft.invoice_number,
-            matter_description: billingDraft.matter_description,
-            payment_date: billingDraft.payment_date,
-            payment_status: billingDraft.payment_status,
-            professional_fee: billingDraft.professional_fee,
+            igst: 0,
+            ope: billingDraft.ope,
+            ope_remarks: billingDraft.ope_remarks,
             remarks: billingDraft.remarks,
-            sgst: billingDraft.sgst
+            sgst: 0,
+            source_module: "gstat"
           }
         }),
         headers: { "Content-Type": "application/json" },
@@ -933,14 +936,42 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
             : currentRow
         )
       );
-      setBillingMessage("Billing record created. Opening Billing...");
+      setBillingMessage(openBilling ? "Billing record created. Opening Billing..." : "Billing record created.");
       setBillingDraft(null);
-      window.location.assign("/billing");
+      setIsSavingBilling(false);
+
+      if (openBilling) {
+        window.location.assign("/billing");
+      }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Could not create billing record.";
       setBillingMessage(errorMessage);
       setMessage(errorMessage);
       setIsSavingBilling(false);
+    }
+  }
+
+  async function findClientNameByGstin(gstin: string) {
+    const normalizedGstin = normalizeGstin(gstin);
+
+    if (!normalizedGstin) {
+      return "";
+    }
+
+    try {
+      const response = await fetch("/api/client-records/managed", { cache: "no-store" });
+      const result = (await response.json().catch(() => ({}))) as { rows?: ClientRegisterRow[] };
+
+      if (!response.ok || !Array.isArray(result.rows)) {
+        return "";
+      }
+
+      const matchedClient = result.rows.find((row) => normalizeGstin(row["GSTIN/UIN"]) === normalizedGstin);
+
+      return String(matchedClient?.Particulars ?? matchedClient?.name ?? "").trim();
+    } catch (error) {
+      console.error("Client lookup for billing failed:", error);
+      return "";
     }
   }
 
@@ -1778,7 +1809,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                               aria-label={`Create bill for row ${row.data.Sno || visibleIndex + 1}`}
                               className="inline-flex size-6 items-center justify-center rounded-md border border-lime-200 bg-white text-lime-700 transition hover:bg-lime-50 disabled:cursor-not-allowed disabled:opacity-50"
                               disabled={row.data["Bill raised"] === "Yes"}
-                              onClick={() => openBillingDraft(originalIndex, row)}
+                              onClick={() => void openBillingDraft(originalIndex, row)}
                               title={row.data["Bill raised"] === "Yes" ? "Bill already raised" : "Create billing record"}
                               type="button"
                             >
@@ -2041,14 +2072,14 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
           />
           <form
             className="relative w-full max-w-4xl rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl"
-            onSubmit={saveBillingDraft}
+            onSubmit={(event) => event.preventDefault()}
           >
             <div className="flex flex-col gap-3 border-b border-slate-200 pb-4 sm:flex-row sm:items-start sm:justify-between">
               <div>
                 <p className="text-xs font-black uppercase tracking-[0.14em] text-lime-700">Create billing record</p>
                 <h3 className="mt-1 text-xl font-black text-slate-950">GSTAT row {billingDraft.rowLabel}</h3>
                 <p className="mt-1 text-sm font-semibold text-slate-500">
-                  Enter billing details that are not available in the GSTAT register.
+                  Review the billing details picked from GSTAT and client records before creating the bill.
                 </p>
               </div>
               <button
@@ -2064,30 +2095,19 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
               <label className="lg:col-span-2">
                 <span className="text-[10px] font-black uppercase text-slate-500">Client</span>
                 <input
-                  className="mt-1 h-10 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-bold text-slate-700"
-                  readOnly
+                  className="mt-1 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-900 outline-none focus:border-teal-300 focus:ring-2 focus:ring-teal-100"
+                  onChange={(event) => updateBillingDraft("client", event.target.value)}
                   value={billingDraft.client}
                 />
               </label>
               <label className="lg:col-span-2">
                 <span className="text-[10px] font-black uppercase text-slate-500">Matter description</span>
                 <input
-                  className="mt-1 h-10 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-bold text-slate-700"
-                  readOnly
+                  className="mt-1 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-900 outline-none focus:border-teal-300 focus:ring-2 focus:ring-teal-100"
+                  onChange={(event) => updateBillingDraft("matter_description", event.target.value)}
                   value={billingDraft.matter_description}
                 />
               </label>
-              <BillingDraftInput
-                label="Invoice number"
-                onChange={(value) => updateBillingDraft("invoice_number", value)}
-                value={billingDraft.invoice_number}
-              />
-              <BillingDraftInput
-                label="Invoice date"
-                onChange={(value) => updateBillingDraft("invoice_date", value)}
-                type="date"
-                value={billingDraft.invoice_date}
-              />
               <BillingDraftInput
                 label="GSTIN"
                 onChange={(value) => updateBillingDraft("gstin", value)}
@@ -2100,52 +2120,15 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                 value={billingDraft.professional_fee}
               />
               <BillingDraftInput
-                label="CGST"
-                onChange={(value) => updateBillingDraft("cgst", value)}
+                label="OPE"
+                onChange={(value) => updateBillingDraft("ope", value)}
                 type="number"
-                value={billingDraft.cgst}
+                value={billingDraft.ope}
               />
               <BillingDraftInput
-                label="SGST"
-                onChange={(value) => updateBillingDraft("sgst", value)}
-                type="number"
-                value={billingDraft.sgst}
-              />
-              <BillingDraftInput
-                label="IGST"
-                onChange={(value) => updateBillingDraft("igst", value)}
-                type="number"
-                value={billingDraft.igst}
-              />
-              <label>
-                <span className="text-[10px] font-black uppercase text-slate-500">Billing status</span>
-                <select
-                  className="mt-1 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-900 outline-none focus:border-teal-300 focus:ring-2 focus:ring-teal-100"
-                  onChange={(event) => updateBillingDraft("billing_status", event.target.value)}
-                  value={billingDraft.billing_status}
-                >
-                  {billingStatusOptions.map((status) => (
-                    <option key={status}>{status}</option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                <span className="text-[10px] font-black uppercase text-slate-500">Payment status</span>
-                <select
-                  className="mt-1 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-900 outline-none focus:border-teal-300 focus:ring-2 focus:ring-teal-100"
-                  onChange={(event) => updateBillingDraft("payment_status", event.target.value)}
-                  value={billingDraft.payment_status}
-                >
-                  {paymentStatusOptions.map((status) => (
-                    <option key={status}>{status}</option>
-                  ))}
-                </select>
-              </label>
-              <BillingDraftInput
-                label="Payment date"
-                onChange={(value) => updateBillingDraft("payment_date", value)}
-                type="date"
-                value={billingDraft.payment_date}
+                label="OPE Remarks"
+                onChange={(value) => updateBillingDraft("ope_remarks", value)}
+                value={billingDraft.ope_remarks}
               />
               <BillingDraftInput
                 label="Remarks"
@@ -2169,9 +2152,18 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                 Cancel
               </button>
               <button
+                className="inline-flex h-10 items-center justify-center rounded-xl border border-lime-200 bg-white px-4 text-xs font-black uppercase text-lime-800 transition hover:bg-lime-50 disabled:opacity-50"
+                disabled={isSavingBilling}
+                onClick={() => void saveBillingDraft({ openBilling: false })}
+                type="button"
+              >
+                {isSavingBilling ? "Creating..." : "Create"}
+              </button>
+              <button
                 className="inline-flex h-10 items-center justify-center rounded-xl bg-lime-700 px-4 text-xs font-black uppercase text-white transition hover:bg-lime-800 disabled:opacity-50"
                 disabled={isSavingBilling}
-                type="submit"
+                onClick={() => void saveBillingDraft({ openBilling: true })}
+                type="button"
               >
                 {isSavingBilling ? "Creating..." : "Create and open Billing"}
               </button>
@@ -3089,6 +3081,10 @@ function BillingDraftInput({
       />
     </label>
   );
+}
+
+function normalizeGstin(value: unknown) {
+  return String(value ?? "").replace(/[^0-9a-z]/gi, "").toUpperCase();
 }
 
 function ColumnOptionsPanel({

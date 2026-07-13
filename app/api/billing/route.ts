@@ -21,6 +21,8 @@ type BillingRecord = {
   invoice_no?: string;
   memo_date?: string | null;
   memo_no?: string;
+  ope?: number | string;
+  ope_remarks?: string;
   owner_team?: string;
   person_authorised?: string;
   poc_email?: string;
@@ -413,8 +415,9 @@ function cleanRecord(record: BillingRecord, userId: string, organisationId: stri
   const cgst = toNumber(record.cgst);
   const sgst = toNumber(record.sgst);
   const igst = toNumber(record.igst);
+  const ope = toNumber(record.ope);
   const explicitTotal = toNumber(record.total);
-  const total = explicitTotal || amount + cgst + sgst + igst;
+  const total = explicitTotal || amount + cgst + sgst + igst + ope;
   const ownerTeam = access.canViewAll ? text(record.owner_team) || access.team : access.team;
   const linkedMatterId = text(record.gstat_appeal_id);
 
@@ -434,6 +437,8 @@ function cleanRecord(record: BillingRecord, userId: string, organisationId: stri
     invoice_no: text(record.invoice_no),
     memo_date: dateOrNull(record.memo_date),
     memo_no: text(record.memo_no),
+    ope,
+    ope_remarks: text(record.ope_remarks),
     organisation_code: defaultOrganisationCode,
     organisation_id: organisationId,
     owner_team: ownerTeam,

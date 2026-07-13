@@ -26,6 +26,8 @@ create table if not exists public.firm_billing_records (
   memo_date date,
   invoice_no text,
   invoice_date date,
+  ope numeric not null default 0,
+  ope_remarks text,
   receiving_status text not null default 'Pending',
   remarks text,
   version_no integer not null default 1,
@@ -37,6 +39,12 @@ create table if not exists public.firm_billing_records (
 
 create index if not exists firm_billing_records_org_idx
 on public.firm_billing_records (organisation_id, organisation_code, invoice_date desc, created_at desc);
+
+alter table public.firm_billing_records
+add column if not exists ope numeric not null default 0;
+
+alter table public.firm_billing_records
+add column if not exists ope_remarks text;
 
 create index if not exists firm_billing_records_team_idx
 on public.firm_billing_records (organisation_id, owner_team);

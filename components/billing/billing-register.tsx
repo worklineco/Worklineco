@@ -22,6 +22,8 @@ type BillingRecord = {
   invoice_no: string;
   memo_date: string | null;
   memo_no: string;
+  ope: number;
+  ope_remarks: string;
   owner_team: string;
   person_authorised: string;
   poc_email: string;
@@ -83,6 +85,8 @@ const emptyRecord: BillingRecord = {
   invoice_no: "",
   memo_date: "",
   memo_no: "",
+  ope: 0,
+  ope_remarks: "",
   owner_team: "",
   person_authorised: "",
   poc_email: "",
@@ -123,6 +127,8 @@ const billingColumns: BillingColumn[] = [
   { field: "cgst", label: "CGST", type: "money", width: 104 },
   { field: "sgst", label: "SGST", type: "money", width: 104 },
   { field: "igst", label: "IGST", type: "money", width: 104 },
+  { field: "ope", label: "OPE", type: "money", width: 110 },
+  { field: "ope_remarks", label: "OPE Remarks", type: "text", width: 190 },
   { field: "total", label: "Total", width: 124 },
   { field: "billing_status", label: "Billing", type: "select", width: 140 },
   { field: "memo_no", label: "Memo No.", type: "text", width: 135 },
@@ -152,6 +158,8 @@ const importHeaders: Array<{ field: BillingField; label: string }> = [
   { field: "cgst", label: "CGST" },
   { field: "sgst", label: "SGST" },
   { field: "igst", label: "IGST" },
+  { field: "ope", label: "OPE" },
+  { field: "ope_remarks", label: "OPE Remarks" },
   { field: "billing_status", label: "Billing Status" },
   { field: "memo_no", label: "Memo No." },
   { field: "memo_date", label: "Memo Date" },
@@ -467,6 +475,8 @@ export function BillingRegister() {
       CGST: record.cgst,
       SGST: record.sgst,
       IGST: record.igst,
+      OPE: record.ope,
+      "OPE Remarks": record.ope_remarks,
       Total: record.total,
       "Billing Status": record.billing_status,
       "Memo No.": record.memo_no,
@@ -478,7 +488,7 @@ export function BillingRegister() {
     }));
     const worksheet = XLSX.utils.json_to_sheet(rows.length ? rows : [blankExportRow()]);
 
-    worksheet["!cols"] = Array.from({ length: 27 }, () => ({ wch: 18 }));
+    worksheet["!cols"] = Array.from({ length: 29 }, () => ({ wch: 18 }));
 
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Firm Billing");
@@ -918,6 +928,7 @@ function normalizeRecord(record: BillingRecord): BillingRecord {
     amount: toNumber(record.amount),
     cgst: toNumber(record.cgst),
     igst: toNumber(record.igst),
+    ope: toNumber(record.ope),
     sgst: toNumber(record.sgst),
     total: toNumber(record.total),
     version_no: Number(record.version_no ?? 1)
@@ -927,7 +938,7 @@ function normalizeRecord(record: BillingRecord): BillingRecord {
 function recalc(record: BillingRecord): BillingRecord {
   return {
     ...record,
-    total: toNumber(record.amount) + toNumber(record.cgst) + toNumber(record.sgst) + toNumber(record.igst)
+    total: toNumber(record.amount) + toNumber(record.cgst) + toNumber(record.sgst) + toNumber(record.igst) + toNumber(record.ope)
   };
 }
 
@@ -958,7 +969,7 @@ function getColumnLabel(field: BillingField) {
 }
 
 function isMoneyField(field: BillingField) {
-  return ["amount", "cgst", "sgst", "igst", "total"].includes(field);
+  return ["amount", "cgst", "sgst", "igst", "ope", "total"].includes(field);
 }
 
 function selectOptions(field: BillingField, masters: Record<string, string[]>) {
@@ -1005,6 +1016,8 @@ function auditEntries(value: Partial<BillingRecord> | null) {
     ["cgst", formatAuditMoney(value.cgst)],
     ["sgst", formatAuditMoney(value.sgst)],
     ["igst", formatAuditMoney(value.igst)],
+    ["ope", formatAuditMoney(value.ope)],
+    ["ope_remarks", value.ope_remarks],
     ["total", formatAuditMoney(value.total)],
     ["remarks", value.remarks]
   ].filter((entry): entry is [string, string] => Boolean(String(entry[1] ?? "").trim()));
