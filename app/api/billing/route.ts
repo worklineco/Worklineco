@@ -489,7 +489,7 @@ async function loadAuditLogs(
     .order("created_at", { ascending: false })
     .limit(150);
 
-  const logs = data ?? [];
+  const logs = await attachActorNames(admin, data ?? []);
 
   if (access.canViewAll || !access.team) {
     return logs;
@@ -500,6 +500,33 @@ async function loadAuditLogs(
     const newTeam = readTeam(log.new_value);
     return oldTeam === access.team || newTeam === access.team;
   });
+}
+
+async function attachActorNames<T extends { actor_user_id?: unknown }>(
+  admin: ReturnType<typeof createAdminClient>,
+  logs: T[]
+) {
+  const actorIds = Array.from(new Set(logs.map((log) => text(log.actor_user_id)).filter(Boolean)));
+
+  if (!actorIds.length) {
+    return logs.map((log) => ({ ...log, actor_name: null }));
+  }
+
+  const { data } = await admin
+    .from("users")
+    .select("id,full_name,email")
+    .in("id", actorIds);
+  const namesById = new Map(
+    (data ?? []).map((user) => [
+      String(user.id),
+      text(user.full_name) || text(user.email) || "Unknown user"
+    ])
+  );
+
+  return logs.map((log) => ({
+    ...log,
+    actor_name: namesById.get(text(log.actor_user_id)) ?? "Unknown user"
+  }));
 }
 
 async function loadTrashRecords(

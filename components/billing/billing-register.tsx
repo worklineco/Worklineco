@@ -1,6 +1,6 @@
 "use client";
 
-import { Download, History, Link2, Maximize2, Plus, RotateCcw, Search, ShieldCheck, Trash2, Upload, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Download, History, Link2, Maximize2, Plus, RotateCcw, Search, Settings2, ShieldCheck, Trash2, Upload, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx-js-style";
 
@@ -58,12 +58,15 @@ type AccessScope = {
 };
 type AuditLog = {
   action: string;
+  actor_name?: string | null;
+  actor_user_id?: string | null;
   created_at: string;
   entity_id: string | null;
   id: string;
   new_value: Partial<BillingRecord> | null;
   old_value: Partial<BillingRecord> | null;
 };
+type AuditChange = { field: string; label: string; newValue: string; oldValue: string };
 type TrashRecord = {
   data: Partial<BillingRecord>;
   delete_action: string;
@@ -76,11 +79,12 @@ type TrashRecord = {
 type ClientRegisterRow = Record<string, string | number>;
 type BillingField = keyof BillingRecord;
 type BillingColumn = {
-  field: BillingField | "gstat_link" | "history" | "actions";
+  field: BillingField | "gstat_link" | "actions";
   label: string;
   type?: "date" | "money" | "select" | "text";
   width: number;
 };
+type BillingColumnLayout = { hiddenColumnKeys: string[]; order: string[] };
 type InlineEditor = { field: BillingField; recordId: string; value: string };
 type BillingView = "audit" | "register" | "trash";
 
@@ -196,11 +200,12 @@ const billingColumns: BillingColumn[] = [
   { field: "receiving_status", label: "Receiving", type: "select", width: 138 },
   { field: "receiving_date", label: "Receiving Date", type: "date", width: 142 },
   { field: "remarks", label: "Remarks", type: "text", width: 220 },
-  { field: "history", label: "History", width: 84 },
   { field: "gstat_link", label: "GSTAT Link", width: 170 },
-  { field: "actions", label: "Actions", width: 84 }
+  { field: "actions", label: "Actions", width: 112 }
 ];
-const tableWidth = billingColumns.reduce((total, column) => total + column.width, 0);
+const billingColumnByKey = new Map(billingColumns.map((column) => [String(column.field), column]));
+const defaultBillingColumnOrder = billingColumns.map((column) => String(column.field));
+const billingColumnLayoutStorageKey = "workline:billing-column-layout:v1";
 const importHeaders: Array<{ field: BillingField; label: string }> = [
   { field: "owner_team", label: "Team" },
   { field: "voucher_type", label: "Voucher Type" },
@@ -236,8 +241,12 @@ export function BillingRegister() {
   const [addDraft, setAddDraft] = useState<BillingRecord | null>(null);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [clientRecords, setClientRecords] = useState<ClientRegisterRow[]>([]);
+  const [columnOrder, setColumnOrder] = useState<string[]>(defaultBillingColumnOrder);
+  const [hasLoadedColumnLayout, setHasLoadedColumnLayout] = useState(false);
+  const [hiddenColumnKeys, setHiddenColumnKeys] = useState<Set<string>>(() => new Set());
   const [inlineEditor, setInlineEditor] = useState<InlineEditor | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isColumnOptionsOpen, setIsColumnOptionsOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [matters, setMatters] = useState<GstatMatter[]>([]);
   const [message, setMessage] = useState("");
@@ -260,6 +269,21 @@ export function BillingRegister() {
   const teams = useMemo(
     () => Array.from(new Set(records.map((record) => record.owner_team).filter(Boolean))).sort(),
     [records]
+  );
+  const orderedBillingColumns = useMemo(
+    () =>
+      columnOrder
+        .map((columnKey) => billingColumnByKey.get(columnKey))
+        .filter((column): column is BillingColumn => Boolean(column)),
+    [columnOrder]
+  );
+  const visibleBillingColumns = useMemo(
+    () => orderedBillingColumns.filter((column) => column.field === "actions" || !hiddenColumnKeys.has(String(column.field))),
+    [hiddenColumnKeys, orderedBillingColumns]
+  );
+  const visibleTableWidth = useMemo(
+    () => visibleBillingColumns.reduce((total, column) => total + column.width, 0),
+    [visibleBillingColumns]
   );
   const filteredRecords = useMemo(() => {
     const search = filters.search.trim().toLowerCase();
@@ -307,7 +331,22 @@ export function BillingRegister() {
   useEffect(() => {
     void loadBilling();
     void loadClientRecords();
+    const savedLayout = getSavedBillingColumnLayout();
+    setColumnOrder(savedLayout.order);
+    setHiddenColumnKeys(new Set(savedLayout.hiddenColumnKeys));
+    setHasLoadedColumnLayout(true);
   }, []);
+
+  useEffect(() => {
+    if (!hasLoadedColumnLayout) {
+      return;
+    }
+
+    saveBillingColumnLayout({
+      hiddenColumnKeys: Array.from(hiddenColumnKeys),
+      order: columnOrder
+    });
+  }, [columnOrder, hasLoadedColumnLayout, hiddenColumnKeys]);
 
   useEffect(() => {
     setAddDraft((currentDraft) =>
@@ -702,6 +741,25 @@ export function BillingRegister() {
           value={filters.source}
         />
         <div className="flex flex-wrap gap-2">
+          <div className="relative">
+            <button className={buttonClass("light")} onClick={() => setIsColumnOptionsOpen((current) => !current)} type="button">
+              <Settings2 className="size-4" />
+              Columns
+            </button>
+            {isColumnOptionsOpen ? (
+              <BillingColumnOptionsPanel
+                hiddenColumnKeys={hiddenColumnKeys}
+                onApply={(layout) => {
+                  const normalizedLayout = normalizeBillingColumnLayout(layout);
+                  setColumnOrder(normalizedLayout.order);
+                  setHiddenColumnKeys(new Set(normalizedLayout.hiddenColumnKeys));
+                  setIsColumnOptionsOpen(false);
+                }}
+                onClose={() => setIsColumnOptionsOpen(false)}
+                orderedColumns={orderedBillingColumns}
+              />
+            ) : null}
+          </div>
           <button className={buttonClass("primary")} onClick={openAddForm} type="button">
             <Plus className="size-4" />
             Add
@@ -744,15 +802,15 @@ export function BillingRegister() {
       {viewMode === "register" ? (
       <div className="mt-4">
         <div className="overflow-auto rounded-md border border-slate-200 bg-white">
-          <table className="table-fixed border-collapse text-left text-sm" style={{ minWidth: tableWidth, width: tableWidth }}>
+          <table className="table-fixed border-collapse text-left text-sm" style={{ minWidth: visibleTableWidth, width: visibleTableWidth }}>
             <colgroup>
-              {billingColumns.map((column) => (
+              {visibleBillingColumns.map((column) => (
                 <col key={column.field} style={{ width: column.width }} />
               ))}
             </colgroup>
             <thead className="sticky top-0 z-10 bg-slate-950 text-xs font-black uppercase text-white">
               <tr>
-                {billingColumns.map((column) => (
+                {visibleBillingColumns.map((column) => (
                   <th className="border-r border-white/10 px-3 py-3 last:border-r-0" key={column.field}>
                     {column.label}
                   </th>
@@ -761,11 +819,11 @@ export function BillingRegister() {
             </thead>
             <tbody>
               {isLoading ? (
-                <tr><td className="px-4 py-8 font-bold text-slate-500" colSpan={billingColumns.length}>Loading billing rows...</td></tr>
+                <tr><td className="px-4 py-8 font-bold text-slate-500" colSpan={visibleBillingColumns.length}>Loading billing rows...</td></tr>
               ) : filteredRecords.length ? (
                 filteredRecords.map((record) => (
                   <tr className="border-b border-slate-100 last:border-b-0" key={record.id}>
-                    {billingColumns.map((column) => (
+                    {visibleBillingColumns.map((column) => (
                       <BillingCell
                         access={access}
                         column={column}
@@ -788,7 +846,7 @@ export function BillingRegister() {
                   </tr>
                 ))
               ) : (
-                <tr><td className="px-4 py-8 font-bold text-slate-500" colSpan={billingColumns.length}>No billing rows match the current filters.</td></tr>
+                <tr><td className="px-4 py-8 font-bold text-slate-500" colSpan={visibleBillingColumns.length}>No billing rows match the current filters.</td></tr>
               )}
             </tbody>
           </table>
@@ -843,15 +901,15 @@ export function BillingRegister() {
                   {selectedAuditLogs.map((log) => (
                     <article className="rounded-md border border-slate-200 p-4" key={log.id}>
                       <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-                        <p className="text-sm font-black uppercase text-slate-950">
-                          {log.action.replace("billing.", "")}
-                        </p>
+                        <div>
+                          <p className="text-sm font-black uppercase text-slate-950">
+                            {log.action.replace("billing.", "")}
+                          </p>
+                          <p className="text-xs font-bold text-slate-500">Updated by {log.actor_name || "Unknown user"}</p>
+                        </div>
                         <p className="text-xs font-bold text-slate-500">{formatDateTime(log.created_at)}</p>
                       </div>
-                      <div className="mt-3 grid gap-3 md:grid-cols-2">
-                        <AuditValue label="Previous data" value={log.old_value} />
-                        <AuditValue label="Updated data" value={log.new_value} />
-                      </div>
+                      <AuditChangesList changes={getAuditChanges(log)} />
                     </article>
                   ))}
                 </div>
@@ -898,7 +956,6 @@ function BillingCell({
   savingCell: InlineEditor | null;
 }) {
   const isActions = column.field === "actions";
-  const isHistory = column.field === "history";
   const isGstatLink = column.field === "gstat_link";
   const field = column.field as BillingField;
   const isReadOnly = column.field === "total" || (!access.canViewAll && column.field === "owner_team");
@@ -910,29 +967,24 @@ function BillingCell({
   if (isActions) {
     return (
       <td className="border-r border-slate-100 px-3 py-2 last:border-r-0">
-        <button
-          className="inline-flex size-8 items-center justify-center rounded-md border border-rose-200 text-rose-700 hover:bg-rose-50"
-          onClick={onDelete}
-          title="Delete billing row"
-          type="button"
-        >
-          <Trash2 className="size-4" />
-        </button>
-      </td>
-    );
-  }
-
-  if (isHistory) {
-    return (
-      <td className="border-r border-slate-100 px-3 py-2 last:border-r-0">
-        <button
-          className="inline-flex size-8 items-center justify-center rounded-md border border-teal-200 text-teal-700 hover:bg-teal-50"
-          onClick={onHistory}
-          title="View row history"
-          type="button"
-        >
-          <History className="size-4" />
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            className="inline-flex size-8 items-center justify-center rounded-md border border-teal-200 text-teal-700 hover:bg-teal-50"
+            onClick={onHistory}
+            title="View row history"
+            type="button"
+          >
+            <History className="size-4" />
+          </button>
+          <button
+            className="inline-flex size-8 items-center justify-center rounded-md border border-rose-200 text-rose-700 hover:bg-rose-50"
+            onClick={onDelete}
+            title="Delete billing row"
+            type="button"
+          >
+            <Trash2 className="size-4" />
+          </button>
+        </div>
       </td>
     );
   }
@@ -1201,13 +1253,171 @@ function ViewButton({ active, label, onClick }: { active: boolean; label: string
   );
 }
 
+function BillingColumnOptionsPanel({
+  hiddenColumnKeys,
+  onApply,
+  onClose,
+  orderedColumns
+}: {
+  hiddenColumnKeys: Set<string>;
+  onApply: (layout: BillingColumnLayout) => void;
+  onClose: () => void;
+  orderedColumns: BillingColumn[];
+}) {
+  const [draftOrder, setDraftOrder] = useState<string[]>(() => orderedColumns.map((column) => String(column.field)));
+  const [draftHiddenColumnKeys, setDraftHiddenColumnKeys] = useState<Set<string>>(() => new Set(hiddenColumnKeys));
+  const draftColumns = useMemo(
+    () =>
+      draftOrder
+        .map((columnKey) => billingColumnByKey.get(columnKey))
+        .filter((column): column is BillingColumn => Boolean(column)),
+    [draftOrder]
+  );
+  const visibleCount = useMemo(
+    () => draftColumns.filter((column) => column.field === "actions" || !draftHiddenColumnKeys.has(String(column.field))).length,
+    [draftColumns, draftHiddenColumnKeys]
+  );
+
+  function toggleDraftColumn(column: BillingColumn) {
+    if (column.field === "actions") {
+      return;
+    }
+
+    setDraftHiddenColumnKeys((currentKeys) => {
+      const nextKeys = new Set(currentKeys);
+      const columnKey = String(column.field);
+
+      if (nextKeys.has(columnKey)) {
+        nextKeys.delete(columnKey);
+      } else {
+        nextKeys.add(columnKey);
+      }
+
+      return nextKeys;
+    });
+  }
+
+  function moveDraftColumn(column: BillingColumn, direction: "up" | "down") {
+    setDraftOrder((currentOrder) => {
+      const columnKey = String(column.field);
+      const currentIndex = currentOrder.indexOf(columnKey);
+
+      if (currentIndex < 0) {
+        return currentOrder;
+      }
+
+      const nextIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1;
+
+      if (nextIndex < 0 || nextIndex >= currentOrder.length) {
+        return currentOrder;
+      }
+
+      const nextOrder = [...currentOrder];
+      [nextOrder[currentIndex], nextOrder[nextIndex]] = [nextOrder[nextIndex], nextOrder[currentIndex]];
+      return nextOrder;
+    });
+  }
+
+  return (
+    <div className="absolute left-0 top-12 z-[80] w-[360px] overflow-hidden rounded-lg border border-slate-200 bg-white text-slate-950 shadow-2xl">
+      <div className="flex items-center justify-between border-b border-slate-200 px-3 py-2">
+        <div>
+          <p className="text-xs font-black uppercase text-slate-950">Column Options</p>
+          <p className="text-[11px] font-bold text-slate-500">{visibleCount} visible columns</p>
+        </div>
+        <div className="flex items-center gap-1">
+          <button
+            className="inline-flex h-8 items-center rounded-md border border-slate-200 bg-white px-2 text-[11px] font-black uppercase text-slate-700 transition hover:bg-slate-50"
+            onClick={() => {
+              setDraftOrder(defaultBillingColumnOrder);
+              setDraftHiddenColumnKeys(new Set());
+            }}
+            type="button"
+          >
+            Reset
+          </button>
+          <button
+            aria-label="Close column options"
+            className="inline-flex size-8 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-700 transition hover:bg-slate-50"
+            onClick={onClose}
+            type="button"
+          >
+            <X className="size-4" />
+          </button>
+        </div>
+      </div>
+
+      <div className="max-h-[420px] overflow-y-auto p-2">
+        {draftColumns.map((column, index) => {
+          const columnKey = String(column.field);
+          const isActions = column.field === "actions";
+          const isHidden = !isActions && draftHiddenColumnKeys.has(columnKey);
+
+          return (
+            <div
+              className={`mb-1 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-md border px-2 py-2 ${
+                isHidden ? "border-slate-200 bg-slate-50 text-slate-500" : "border-slate-200 bg-white text-slate-950"
+              }`}
+              key={columnKey}
+            >
+              <label className={`flex min-w-0 items-center gap-2 ${isActions ? "cursor-not-allowed opacity-70" : "cursor-pointer"}`}>
+                <input
+                  checked={!isHidden}
+                  className="size-4 accent-slate-950"
+                  disabled={isActions}
+                  onChange={() => toggleDraftColumn(column)}
+                  type="checkbox"
+                />
+                <span className="min-w-0 truncate text-xs font-black" title={column.label}>
+                  {column.label}
+                </span>
+              </label>
+              <div className="flex items-center gap-1">
+                <button
+                  aria-label={`Move ${column.label} up`}
+                  className="inline-flex size-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-35"
+                  disabled={index === 0}
+                  onClick={() => moveDraftColumn(column, "up")}
+                  type="button"
+                >
+                  <ArrowUp className="size-3.5" />
+                </button>
+                <button
+                  aria-label={`Move ${column.label} down`}
+                  className="inline-flex size-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-35"
+                  disabled={index === draftColumns.length - 1}
+                  onClick={() => moveDraftColumn(column, "down")}
+                  type="button"
+                >
+                  <ArrowDown className="size-3.5" />
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="flex justify-end gap-2 border-t border-slate-200 bg-slate-50 px-3 py-2">
+        <button className={buttonClass("light")} onClick={onClose} type="button">Cancel</button>
+        <button
+          className={buttonClass("dark")}
+          onClick={() => onApply({ hiddenColumnKeys: Array.from(draftHiddenColumnKeys), order: draftOrder })}
+          type="button"
+        >
+          Save
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function BillingAuditTable({ isLoading, logs }: { isLoading: boolean; logs: AuditLog[] }) {
   return (
     <div className="mt-4 overflow-auto rounded-md border border-slate-200 bg-white">
       <table className="min-w-[1180px] border-separate border-spacing-0 text-left text-xs">
         <thead className="sticky top-0 z-10 bg-slate-950 text-white">
           <tr>
-            {["Time", "Action", "Team", "Client", "Invoice/Memo", "Old Value", "New Value"].map((heading) => (
+            {["Time", "Action", "Updated By", "Team", "Client", "Changed Data"].map((heading) => (
               <th className="border-b border-r border-white/15 px-3 py-3 font-black" key={heading}>{heading}</th>
             ))}
           </tr>
@@ -1217,26 +1427,37 @@ function BillingAuditTable({ isLoading, logs }: { isLoading: boolean; logs: Audi
             const oldValue = log.old_value ?? {};
             const newValue = log.new_value ?? {};
             const summary = { ...oldValue, ...newValue };
+            const changes = getAuditChanges(log);
 
             return (
               <tr className="odd:bg-white even:bg-slate-50/80" key={log.id}>
                 <td className="border-b border-r border-slate-200 px-3 py-2 font-semibold text-slate-700">{formatDateTime(log.created_at)}</td>
                 <td className="border-b border-r border-slate-200 px-3 py-2 font-black text-slate-900">{log.action.replace("billing.", "")}</td>
+                <td className="border-b border-r border-slate-200 px-3 py-2 font-semibold text-slate-700">{log.actor_name || "Unknown user"}</td>
                 <td className="border-b border-r border-slate-200 px-3 py-2 font-semibold text-slate-700">{summary.owner_team ?? "-"}</td>
                 <td className="border-b border-r border-slate-200 px-3 py-2 font-semibold text-slate-700">{summary.client ?? "-"}</td>
-                <td className="border-b border-r border-slate-200 px-3 py-2 font-semibold text-slate-700">{summary.invoice_no || summary.memo_no || "-"}</td>
-                <td className="max-w-xs border-b border-r border-slate-200 px-3 py-2 font-semibold text-slate-600">
-                  <span className="block truncate" title={formatAuditObject(oldValue)}>{formatAuditObject(oldValue)}</span>
-                </td>
-                <td className="max-w-xs border-b border-r border-slate-200 px-3 py-2 font-semibold text-slate-600">
-                  <span className="block truncate" title={formatAuditObject(newValue)}>{formatAuditObject(newValue)}</span>
+                <td className="max-w-xl border-b border-r border-slate-200 px-3 py-2 font-semibold text-slate-700">
+                  {changes.length ? (
+                    <div className="space-y-1">
+                      {changes.map((change) => (
+                        <p className="text-xs" key={change.field}>
+                          <span className="font-black text-slate-950">{change.label}:</span>{" "}
+                          <span className="text-slate-500">{change.oldValue || "-"}</span>
+                          <span className="px-1 text-slate-400">to</span>
+                          <span className="text-slate-900">{change.newValue || "-"}</span>
+                        </p>
+                      ))}
+                    </div>
+                  ) : (
+                    <span className="text-slate-400">No field-level change captured.</span>
+                  )}
                 </td>
               </tr>
             );
           })}
           {!logs.length && !isLoading ? (
             <tr>
-              <td className="px-3 py-8 text-center text-sm font-bold text-slate-500" colSpan={7}>
+              <td className="px-3 py-8 text-center text-sm font-bold text-slate-500" colSpan={6}>
                 <span className="inline-flex items-center gap-2"><ShieldCheck className="size-4" /> No billing audit entries found.</span>
               </td>
             </tr>
@@ -1301,24 +1522,24 @@ function BillingTrashTable({
   );
 }
 
-function AuditValue({ label, value }: { label: string; value: Partial<BillingRecord> | null }) {
-  const entries = auditEntries(value);
+function AuditChangesList({ changes }: { changes: AuditChange[] }) {
+  if (!changes.length) {
+    return (
+      <p className="mt-3 rounded-md border border-slate-200 px-3 py-3 text-sm font-bold text-slate-500">
+        No field-level change captured.
+      </p>
+    );
+  }
 
   return (
-    <div className="rounded-md bg-slate-50 p-3">
-      <p className="text-xs font-black uppercase tracking-[0.12em] text-slate-500">{label}</p>
-      {entries.length ? (
-        <dl className="mt-2 space-y-1">
-          {entries.map(([key, entryValue]) => (
-            <div className="grid grid-cols-[120px_minmax(0,1fr)] gap-2 text-xs" key={key}>
-              <dt className="font-black text-slate-600">{auditLabel(key)}</dt>
-              <dd className="min-w-0 break-words font-semibold text-slate-900">{entryValue}</dd>
-            </div>
-          ))}
-        </dl>
-      ) : (
-        <p className="mt-2 text-xs font-bold text-slate-500">No data</p>
-      )}
+    <div className="mt-3 overflow-hidden rounded-md border border-slate-200">
+      {changes.map((change) => (
+        <div className="grid gap-2 border-b border-slate-100 px-3 py-2 text-xs last:border-b-0 sm:grid-cols-[160px_minmax(0,1fr)_minmax(0,1fr)]" key={change.field}>
+          <p className="font-black text-slate-700">{change.label}</p>
+          <p className="min-w-0 break-words font-semibold text-slate-500">From: {change.oldValue || "-"}</p>
+          <p className="min-w-0 break-words font-semibold text-slate-950">To: {change.newValue || "-"}</p>
+        </div>
+      ))}
     </div>
   );
 }
@@ -1385,7 +1606,7 @@ function getDisplayValue(record: BillingRecord, column: BillingColumn, matters: 
     return getMatterLabel(record, matters);
   }
 
-  if (column.field === "history" || column.field === "actions") {
+  if (column.field === "actions") {
     return "";
   }
 
@@ -1403,6 +1624,10 @@ function getMatterLabel(record: BillingRecord, matters: GstatMatter[]) {
 }
 
 function getColumnLabel(field: BillingField) {
+  if (field === "gstat_appeal_id") {
+    return "GSTAT Link";
+  }
+
   return billingColumns.find((column) => column.field === field)?.label ?? field;
 }
 
@@ -1492,6 +1717,43 @@ function getRegistrationType(row: ClientRegisterRow | null) {
   return getFirstValue(row, registrationTypeKeys);
 }
 
+function getSavedBillingColumnLayout(): BillingColumnLayout {
+  if (typeof window === "undefined") {
+    return { hiddenColumnKeys: [], order: defaultBillingColumnOrder };
+  }
+
+  try {
+    const savedLayout = window.localStorage.getItem(billingColumnLayoutStorageKey);
+
+    if (!savedLayout) {
+      return { hiddenColumnKeys: [], order: defaultBillingColumnOrder };
+    }
+
+    return normalizeBillingColumnLayout(JSON.parse(savedLayout) as Partial<BillingColumnLayout>);
+  } catch {
+    return { hiddenColumnKeys: [], order: defaultBillingColumnOrder };
+  }
+}
+
+function saveBillingColumnLayout(layout: BillingColumnLayout) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.localStorage.setItem(billingColumnLayoutStorageKey, JSON.stringify(normalizeBillingColumnLayout(layout)));
+}
+
+function normalizeBillingColumnLayout(layout: Partial<BillingColumnLayout>): BillingColumnLayout {
+  const knownColumnKeys = new Set(defaultBillingColumnOrder);
+  const savedOrder = Array.isArray(layout.order) ? layout.order.filter((key) => knownColumnKeys.has(key)) : [];
+  const order = [...savedOrder, ...defaultBillingColumnOrder.filter((key) => !savedOrder.includes(key))];
+  const hiddenColumnKeys = Array.isArray(layout.hiddenColumnKeys)
+    ? layout.hiddenColumnKeys.filter((key) => knownColumnKeys.has(key) && key !== "actions")
+    : [];
+
+  return { hiddenColumnKeys, order };
+}
+
 function normalizeGstin(value: unknown) {
   return String(value ?? "").replace(/[^0-9a-z]/gi, "").toUpperCase();
 }
@@ -1525,43 +1787,81 @@ const gstinKeys = ["GSTIN/UIN", "GSTIN", "GSTIN No", "GSTIN No.", "GST No", "GST
 const clientNameKeys = ["Particulars", "Client", "Client Name", "Name", "Legal Name", "Trade Name"];
 const registrationTypeKeys = ["Registration Type", "Reg Type", "GST Registration Type", "Registration"];
 
-function auditEntries(value: Partial<BillingRecord> | null) {
-  if (!value) {
-    return [];
-  }
+const auditFields: BillingField[] = [
+  "owner_team",
+  "source_module",
+  "voucher_type",
+  "group_name",
+  "gstin",
+  "client",
+  "place_of_supply",
+  "registration_type",
+  "description",
+  "amount",
+  "cgst",
+  "sgst",
+  "igst",
+  "ope",
+  "include_ope_in_fees",
+  "ope_remarks",
+  "total",
+  "billing_status",
+  "memo_no",
+  "memo_date",
+  "invoice_no",
+  "invoice_date",
+  "receiving_status",
+  "receiving_date",
+  "remarks",
+  "gstat_appeal_id"
+];
 
-  return [
-    ["owner_team", value.owner_team],
-    ["client", value.client],
-    ["invoice_no", value.invoice_no],
-    ["invoice_date", value.invoice_date],
-    ["memo_no", value.memo_no],
-    ["billing_status", value.billing_status],
-    ["receiving_status", value.receiving_status],
-    ["amount", formatAuditMoney(value.amount)],
-    ["cgst", formatAuditMoney(value.cgst)],
-    ["sgst", formatAuditMoney(value.sgst)],
-    ["igst", formatAuditMoney(value.igst)],
-    ["ope", formatAuditMoney(value.ope)],
-    ["ope_remarks", value.ope_remarks],
-    ["total", formatAuditMoney(value.total)],
-    ["remarks", value.remarks]
-  ].filter((entry): entry is [string, string] => Boolean(String(entry[1] ?? "").trim()));
-}
+function getAuditChanges(log: AuditLog): AuditChange[] {
+  const oldValue = log.old_value ?? {};
+  const newValue = log.new_value ?? {};
 
-function auditLabel(value: string) {
-  return value
-    .split("_")
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
+  return auditFields
+    .map((field) => {
+      const oldFieldValue = formatAuditField(field, oldValue[field]);
+      const newFieldValue = formatAuditField(field, newValue[field]);
+      return {
+        field,
+        label: getColumnLabel(field),
+        newValue: newFieldValue,
+        oldValue: oldFieldValue
+      };
+    })
+    .filter((change) => {
+      if (log.action === "billing.create") {
+        return Boolean(change.newValue);
+      }
+
+      if (log.action === "billing.delete") {
+        return Boolean(change.oldValue);
+      }
+
+      return change.oldValue !== change.newValue;
+    });
 }
 
 function isDefined(value: unknown) {
   return value !== null && value !== undefined && value !== "";
 }
 
-function formatAuditMoney(value: unknown) {
-  return isDefined(value) ? formatMoney(String(value)) : "";
+function formatAuditField(field: BillingField, value: unknown) {
+  if (!isDefined(value)) {
+    return "";
+  }
+
+  if (isMoneyField(field) || field === "total") {
+    return formatMoney(String(value));
+  }
+
+  if (field.endsWith("_date")) {
+    return formatDate(String(value));
+  }
+
+  return String(value);
 }
 
 function formatDateTime(value: string) {
@@ -1583,14 +1883,6 @@ function formatDate(value: string) {
   return new Intl.DateTimeFormat("en-IN", {
     dateStyle: "medium"
   }).format(new Date(value));
-}
-
-function formatAuditObject(value: Partial<BillingRecord> | null) {
-  if (!value || !Object.keys(value).length) {
-    return "-";
-  }
-
-  return JSON.stringify(value);
 }
 
 function formatMoney(value: number | string) {
