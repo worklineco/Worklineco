@@ -112,7 +112,7 @@ const gstStateByCode: Record<string, string> = {
   "99": "Other Country"
 };
 
-export async function GET() {
+export async function GET(request: Request) {
   const auth = await requireUser();
 
   if ("error" in auth) {
@@ -127,12 +127,23 @@ export async function GET() {
   }
 
   const access = getAccessScope(auth.user);
-  const [records, matters, masters, auditLogs, trashRecords] = await Promise.all([
+
+  if (new URL(request.url).searchParams.get("scope") === "activity") {
+    const [auditLogs, trashRecords] = await Promise.all([
+      loadAuditLogs(admin, organisation.organisationId, access),
+      loadTrashRecords(admin, organisation.organisationId, access)
+    ]);
+
+    return NextResponse.json({
+      auditLogs,
+      trashRecords
+    });
+  }
+
+  const [records, matters, masters] = await Promise.all([
     loadBillingRecords(admin, organisation.organisationId, access),
     loadGstatMatters(admin, access),
-    loadMasters(admin, organisation.organisationId),
-    loadAuditLogs(admin, organisation.organisationId, access),
-    loadTrashRecords(admin, organisation.organisationId, access)
+    loadMasters(admin, organisation.organisationId)
   ]);
 
   if (records.error) {
@@ -145,11 +156,9 @@ export async function GET() {
 
   return NextResponse.json({
     access,
-    auditLogs,
     masters,
     matters: ((matters.data ?? []) as GstatMatter[]).map(formatMatter),
-    records: records.data ?? [],
-    trashRecords
+    records: records.data ?? []
   });
 }
 

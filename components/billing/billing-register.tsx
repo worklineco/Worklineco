@@ -263,6 +263,7 @@ export function BillingRegister() {
   const [inlineEditor, setInlineEditor] = useState<InlineEditor | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isColumnOptionsOpen, setIsColumnOptionsOpen] = useState(false);
+  const [isActivityLoading, setIsActivityLoading] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [matters, setMatters] = useState<GstatMatter[]>([]);
   const [message, setMessage] = useState("");
@@ -360,6 +361,7 @@ export function BillingRegister() {
 
   useEffect(() => {
     void loadBilling();
+    void loadBillingActivity();
     void loadClientRecords();
     const savedLayout = getSavedBillingColumnLayout();
     setColumnOrder(savedLayout.order);
@@ -405,15 +407,13 @@ export function BillingRegister() {
     setMessage("");
 
     try {
-      const response = await fetch("/api/billing", { cache: "no-store" });
+      const response = await fetch("/api/billing?scope=register", { cache: "no-store" });
       const result = (await response.json()) as {
         access?: AccessScope;
-        auditLogs?: AuditLog[];
         error?: string;
         masters?: Record<string, string[]>;
         matters?: GstatMatter[];
         records?: BillingRecord[];
-        trashRecords?: TrashRecord[];
       };
 
       if (!response.ok) {
@@ -422,16 +422,39 @@ export function BillingRegister() {
       }
 
       setAccess(result.access ?? access);
-      setAuditLogs(result.auditLogs ?? []);
       setMasters({ ...defaultMasters, ...(result.masters ?? {}) });
       setMatters(result.matters ?? []);
       setRecords((result.records ?? []).map(normalizeRecord));
-      setTrashRecords(result.trashRecords ?? []);
     } catch (error) {
       console.error("Billing load error:", error);
       setMessage("Could not load billing register.");
     } finally {
       setIsLoading(false);
+    }
+  }
+
+  async function loadBillingActivity() {
+    setIsActivityLoading(true);
+
+    try {
+      const response = await fetch("/api/billing?scope=activity", { cache: "no-store" });
+      const result = (await response.json().catch(() => ({}))) as {
+        auditLogs?: AuditLog[];
+        error?: string;
+        trashRecords?: TrashRecord[];
+      };
+
+      if (!response.ok) {
+        console.error("Billing activity load failed:", result.error);
+        return;
+      }
+
+      setAuditLogs(result.auditLogs ?? []);
+      setTrashRecords(result.trashRecords ?? []);
+    } catch (error) {
+      console.error("Billing activity load error:", error);
+    } finally {
+      setIsActivityLoading(false);
     }
   }
 
@@ -601,7 +624,7 @@ export function BillingRegister() {
     setRecords((currentRecords) => currentRecords.filter((item) => item.id !== record.id));
     setSelectedRecordId((current) => (current === record.id ? null : current));
     setMessage("Billing row moved to trash.");
-    void loadBilling();
+    void loadBillingActivity();
   }
 
   async function saveEditDraft() {
@@ -783,8 +806,8 @@ export function BillingRegister() {
 
       <div className="mt-4 flex flex-wrap gap-2 border-b border-slate-200 pb-3">
         <ViewButton active={viewMode === "register"} label="Register" onClick={() => setViewMode("register")} />
-        <ViewButton active={viewMode === "audit"} label="Audit Trail" onClick={() => setViewMode("audit")} />
-        <ViewButton active={viewMode === "trash"} label={`Trash (${trashRecords.length})`} onClick={() => setViewMode("trash")} />
+        <ViewButton active={viewMode === "audit"} label="Audit Trail" onClick={() => { setViewMode("audit"); void loadBillingActivity(); }} />
+        <ViewButton active={viewMode === "trash"} label={`Trash (${trashRecords.length})`} onClick={() => { setViewMode("trash"); void loadBillingActivity(); }} />
       </div>
 
       {viewMode === "register" ? (
@@ -945,7 +968,10 @@ export function BillingRegister() {
                         onEditorChange={(value) =>
                           setInlineEditor((currentEditor) => (currentEditor ? { ...currentEditor, value } : currentEditor))
                         }
-                        onHistory={() => setSelectedRecordId(record.id ?? null)}
+                        onHistory={() => {
+                          setSelectedRecordId(record.id ?? null);
+                          void loadBillingActivity();
+                        }}
                         onDirectSave={(field, value) => saveDirectField(record, field, value)}
                         onSave={saveInlineEditor}
                         record={record}
@@ -964,11 +990,11 @@ export function BillingRegister() {
       ) : null}
 
       {viewMode === "audit" ? (
-        <BillingAuditTable logs={auditLogs} isLoading={isLoading} />
+        <BillingAuditTable logs={auditLogs} isLoading={isActivityLoading} />
       ) : null}
 
       {viewMode === "trash" ? (
-        <BillingTrashTable isLoading={isLoading} onRestore={restoreTrashRecord} rows={trashRecords} />
+        <BillingTrashTable isLoading={isActivityLoading} onRestore={restoreTrashRecord} rows={trashRecords} />
       ) : null}
 
       {addDraft ? (
