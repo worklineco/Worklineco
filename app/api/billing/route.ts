@@ -345,14 +345,16 @@ export async function POST(request: Request) {
     }
 
     const existing = (existingRows.data ?? []) as unknown as StoredBillingRecord[];
+    const matchedUpdateIds = new Set<string>();
     const updateResults = await Promise.all(
       updateRows.map(async (row) => {
-        const matched = findMatchingBillingRecord(existing, row.raw);
+        const matched = findMatchingBillingRecord(existing, row.raw, matchedUpdateIds);
 
         if (!matched) {
           return { skipped: true };
         }
 
+        matchedUpdateIds.add(matched.id);
         const updateRecord = preserveAccountsOnlyFields(row.cleaned, matched, access);
         let saved = await admin
           .from(tableName)
@@ -385,9 +387,21 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: updateError.message }, { status: 500 });
     }
 
-    const deleteMatches = deleteRows
-      .map((row) => findMatchingBillingRecord(existing, row.raw))
-      .filter((row): row is StoredBillingRecord => Boolean(row));
+    const matchedDeleteIds = new Set<string>();
+    const deleteMatches: StoredBillingRecord[] = [];
+    let skippedDeletes = 0;
+
+    deleteRows.forEach((row) => {
+      const matched = findMatchingBillingRecord(existing, row.raw, matchedDeleteIds);
+
+      if (!matched) {
+        skippedDeletes += 1;
+        return;
+      }
+
+      matchedDeleteIds.add(matched.id);
+      deleteMatches.push(matched);
+    });
     const uniqueDeleteMatches = Array.from(new Map(deleteMatches.map((row) => [row.id, row])).values());
     const deleteResult = uniqueDeleteMatches.length
       ? await admin
@@ -413,9 +427,23 @@ export async function POST(request: Request) {
       added: addRows.length,
       deleted: uniqueDeleteMatches.length,
       row_count: importRows.length,
+      skipped_deletes: skippedDeletes,
+      skipped_updates: updateResults.filter((result) => result.skipped).length,
       updated: updateRows.length - updateResults.filter((result) => result.skipped).length
     });
-    return loadResponse(admin, organisation.organisationId, access);
+    const response = await loadResponse(admin, organisation.organisationId, access);
+    const body = await response.json();
+
+    return NextResponse.json({
+      ...body,
+      importSummary: {
+        added: addRows.length,
+        deleted: uniqueDeleteMatches.length,
+        skippedDeletes,
+        skippedUpdates: updateResults.filter((result) => result.skipped).length,
+        updated: updateRows.length - updateResults.filter((result) => result.skipped).length
+      }
+    });
   }
 
   if (action === "master") {
@@ -1155,12 +1183,13 @@ function normalizeImportAction(value: unknown) {
   return "add";
 }
 
-function findMatchingBillingRecord(rows: StoredBillingRecord[], incoming: BillingRecord) {
+function findMatchingBillingRecord(rows: StoredBillingRecord[], incoming: BillingRecord, excludedIds = new Set<string>()) {
   const incomingId = normalizeLookupValue(incoming.id);
   const incomingSerial = Number(incoming.serial_no);
+  const candidates = rows.filter((row) => !excludedIds.has(row.id));
 
   if (incomingId) {
-    const matchedById = rows.find((row) => normalizeLookupValue(row.id) === incomingId);
+    const matchedById = candidates.find((row) => normalizeLookupValue(row.id) === incomingId);
 
     if (matchedById) {
       return matchedById;
@@ -1168,7 +1197,7 @@ function findMatchingBillingRecord(rows: StoredBillingRecord[], incoming: Billin
   }
 
   if (Number.isFinite(incomingSerial) && incomingSerial > 0) {
-    const matchedBySerial = rows.find((row) => Number(row.serial_no) === incomingSerial);
+    const matchedBySerial = candidates.find((row) => Number(row.serial_no) === incomingSerial);
 
     if (matchedBySerial) {
       return matchedBySerial;
@@ -1181,7 +1210,7 @@ function findMatchingBillingRecord(rows: StoredBillingRecord[], incoming: Billin
   const incomingClient = normalizeLookupValue(incoming.client);
   const incomingDescription = normalizeLookupValue(incoming.description);
 
-  return rows.find((row) => {
+  return candidates.find((row) => {
     const matchesInvoice = incomingInvoice && normalizeLookupValue(row.invoice_no) === incomingInvoice;
     const matchesMemo = incomingMemo && normalizeLookupValue(row.memo_no) === incomingMemo;
     const matchesMatter = incoming.gstat_appeal_id && row.gstat_appeal_id === incoming.gstat_appeal_id;

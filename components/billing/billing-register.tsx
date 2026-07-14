@@ -214,6 +214,7 @@ const billingColumnByKey = new Map(billingColumns.map((column) => [String(column
 const defaultBillingColumnOrder = billingColumns.map((column) => String(column.field));
 const billingColumnLayoutStorageKey = "workline:billing-column-layout:v1";
 const importHeaders: Array<{ field: BillingField; label: string }> = [
+  { field: "id", label: "Billing ID" },
   { field: "serial_no", label: "S.No." },
   { field: "owner_team", label: "Team" },
   { field: "voucher_type", label: "Voucher Type" },
@@ -720,7 +721,7 @@ export function BillingRegister() {
         ...enrichBillingRecord(recalc(record), lookupRows, "gstin"),
         import_action: importAction
       };
-    }).filter((row) => row.serial_no || row.client || row.description || row.invoice_no);
+    }).filter((row) => row.id || row.serial_no || row.client || row.description || row.invoice_no);
 
     const response = await fetch("/api/billing", {
       body: JSON.stringify({ action: "import", rows: billingRows }),
@@ -731,10 +732,17 @@ export function BillingRegister() {
       access?: AccessScope;
       auditLogs?: AuditLog[];
       error?: string;
-      matters?: GstatMatter[];
-        records?: BillingRecord[];
-        trashRecords?: TrashRecord[];
+      importSummary?: {
+        added: number;
+        deleted: number;
+        skippedDeletes: number;
+        skippedUpdates: number;
+        updated: number;
       };
+      matters?: GstatMatter[];
+      records?: BillingRecord[];
+      trashRecords?: TrashRecord[];
+    };
 
     if (!response.ok) {
       setMessage(result.error ?? "Could not import billing rows.");
@@ -746,12 +754,13 @@ export function BillingRegister() {
     setMatters(result.matters ?? []);
     setRecords((result.records ?? []).map(normalizeRecord));
     setTrashRecords(result.trashRecords ?? []);
-    setMessage(`Processed ${billingRows.length} billing import rows from ${file.name}.`);
+    setMessage(formatImportSummary(file.name, billingRows.length, result.importSummary));
   }
 
   function exportWorkbook() {
     const rows = filteredRecords.map((record) => ({
       [importActionColumn]: "Update",
+      "Billing ID": record.id ?? "",
       "S.No.": record.serial_no ?? "",
       Team: record.owner_team,
       Source: record.source_module,
@@ -1964,6 +1973,30 @@ function blankExportRow() {
     row[header.label] = "";
     return row;
   }, {});
+}
+
+function formatImportSummary(
+  fileName: string,
+  rowCount: number,
+  summary?: { added: number; deleted: number; skippedDeletes: number; skippedUpdates: number; updated: number }
+) {
+  if (!summary) {
+    return `Processed ${rowCount} billing import rows from ${fileName}.`;
+  }
+
+  const skipped = summary.skippedDeletes + summary.skippedUpdates;
+  const parts = [
+    `Processed ${rowCount} billing import rows from ${fileName}`,
+    `${summary.added} added`,
+    `${summary.updated} updated`,
+    `${summary.deleted} deleted`
+  ];
+
+  if (skipped) {
+    parts.push(`${skipped} skipped because no matching billing row was found`);
+  }
+
+  return `${parts.join(" - ")}.`;
 }
 
 function normalizeImportAction(value: unknown) {
