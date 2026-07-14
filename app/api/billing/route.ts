@@ -17,6 +17,7 @@ type BillingRecord = {
   id?: string;
   igst?: number | string;
   include_ope_in_fees?: string;
+  import_action?: string;
   income_head?: string;
   invoice_date?: string | null;
   invoice_no?: string;
@@ -223,16 +224,27 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Rows are required for billing import." }, { status: 400 });
     }
 
-    const rows = payload.rows.map((row) =>
-      cleanRecord(row, auth.user.id, organisation.organisationId, access)
-    );
-    let inserted = rows.length
-      ? await admin.from(tableName).insert(rows).select("*")
+    const existingRows = await loadBillingRecords(admin, organisation.organisationId, access);
+
+    if (existingRows.error) {
+      return NextResponse.json({ error: existingRows.error.message }, { status: 500 });
+    }
+
+    const importRows = payload.rows.map((row) => ({
+      action: normalizeImportAction(row.import_action),
+      cleaned: cleanRecord(row, auth.user.id, organisation.organisationId, access),
+      raw: row
+    }));
+    const addRows = importRows.filter((row) => row.action === "add").map((row) => row.cleaned);
+    const updateRows = importRows.filter((row) => row.action === "update");
+    const deleteRows = importRows.filter((row) => row.action === "delete");
+    let inserted = addRows.length
+      ? await admin.from(tableName).insert(addRows).select("*")
       : { data: [], error: null };
 
     if (inserted.error && isMissingCompatibilityColumn(inserted.error)) {
-      inserted = rows.length
-        ? await admin.from(tableName).insert(rows.map(stripCompatibilityColumns)).select("*")
+      inserted = addRows.length
+        ? await admin.from(tableName).insert(addRows.map(stripCompatibilityColumns)).select("*")
         : { data: [], error: null };
     }
 
@@ -240,8 +252,75 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: inserted.error.message }, { status: 500 });
     }
 
+    const existing = (existingRows.data ?? []) as StoredBillingRecord[];
+    const updateResults = await Promise.all(
+      updateRows.map(async (row) => {
+        const matched = findMatchingBillingRecord(existing, row.raw);
+
+        if (!matched) {
+          return { skipped: true };
+        }
+
+        let saved = await admin
+          .from(tableName)
+          .update({ ...row.cleaned, version_no: Number(matched.version_no ?? 1) + 1 })
+          .eq("id", matched.id)
+          .eq("organisation_id", organisation.organisationId)
+          .select("*")
+          .single();
+
+        if (saved.error && isMissingCompatibilityColumn(saved.error)) {
+          saved = await admin
+            .from(tableName)
+            .update(stripCompatibilityColumns({ ...row.cleaned, version_no: Number(matched.version_no ?? 1) + 1 }))
+            .eq("id", matched.id)
+            .eq("organisation_id", organisation.organisationId)
+            .select("*")
+            .single();
+        }
+
+        if (!saved.error) {
+          await writeAuditLog(admin, organisation.organisationId, auth.user.id, "billing.update", matched, saved.data);
+        }
+
+        return { error: saved.error, skipped: false };
+      })
+    );
+    const updateError = updateResults.find((result) => result.error)?.error;
+
+    if (updateError) {
+      return NextResponse.json({ error: updateError.message }, { status: 500 });
+    }
+
+    const deleteMatches = deleteRows
+      .map((row) => findMatchingBillingRecord(existing, row.raw))
+      .filter((row): row is StoredBillingRecord => Boolean(row));
+    const uniqueDeleteMatches = Array.from(new Map(deleteMatches.map((row) => [row.id, row])).values());
+    const deleteResult = uniqueDeleteMatches.length
+      ? await admin
+          .from(tableName)
+          .delete()
+          .eq("organisation_id", organisation.organisationId)
+          .in("id", uniqueDeleteMatches.map((row) => row.id))
+      : { error: null };
+
+    if (deleteResult.error) {
+      return NextResponse.json({ error: deleteResult.error.message }, { status: 500 });
+    }
+
+    if (uniqueDeleteMatches.length) {
+      await Promise.all(
+        uniqueDeleteMatches.map((row) =>
+          writeAuditLog(admin, organisation.organisationId, auth.user.id, "billing.delete", row, null)
+        )
+      );
+    }
+
     await writeAuditLog(admin, organisation.organisationId, auth.user.id, "billing.import", null, {
-      row_count: rows.length
+      added: addRows.length,
+      deleted: uniqueDeleteMatches.length,
+      row_count: importRows.length,
+      updated: updateRows.length - updateResults.filter((result) => result.skipped).length
     });
     return loadResponse(admin, organisation.organisationId, access);
   }
@@ -909,6 +988,55 @@ function roundMoney(value: number) {
 
 function yesNo(value: unknown) {
   return text(value).toLowerCase() === "yes" ? "Yes" : "No";
+}
+
+function normalizeImportAction(value: unknown) {
+  const action = text(value).toLowerCase();
+
+  if (action === "update") {
+    return "update";
+  }
+
+  if (action === "delete") {
+    return "delete";
+  }
+
+  return "add";
+}
+
+function findMatchingBillingRecord(rows: StoredBillingRecord[], incoming: BillingRecord) {
+  const incomingId = normalizeLookupValue(incoming.id);
+
+  if (incomingId) {
+    const matchedById = rows.find((row) => normalizeLookupValue(row.id) === incomingId);
+
+    if (matchedById) {
+      return matchedById;
+    }
+  }
+
+  const incomingInvoice = normalizeLookupValue(incoming.invoice_no);
+  const incomingMemo = normalizeLookupValue(incoming.memo_no);
+  const incomingGstin = normalizeLookupValue(incoming.gstin);
+  const incomingClient = normalizeLookupValue(incoming.client);
+  const incomingDescription = normalizeLookupValue(incoming.description);
+
+  return rows.find((row) => {
+    const matchesInvoice = incomingInvoice && normalizeLookupValue(row.invoice_no) === incomingInvoice;
+    const matchesMemo = incomingMemo && normalizeLookupValue(row.memo_no) === incomingMemo;
+    const matchesMatter = incoming.gstat_appeal_id && row.gstat_appeal_id === incoming.gstat_appeal_id;
+    const matchesClientMatter =
+      incomingGstin &&
+      normalizeLookupValue(row.gstin) === incomingGstin &&
+      ((incomingClient && normalizeLookupValue(row.client) === incomingClient) ||
+        (incomingDescription && normalizeLookupValue(row.description) === incomingDescription));
+
+    return matchesInvoice || matchesMemo || matchesMatter || matchesClientMatter;
+  }) ?? null;
+}
+
+function normalizeLookupValue(value: unknown) {
+  return text(value).replace(/[^0-9a-z]/gi, "").toLowerCase();
 }
 
 function readId(value: unknown) {

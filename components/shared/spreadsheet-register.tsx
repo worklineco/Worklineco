@@ -5,6 +5,8 @@ import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "re
 import * as XLSX from "xlsx-js-style";
 
 type RegisterRow = Record<string, string | number>;
+const importActionColumn = "Import Action";
+const importActionOptions = ["Add", "Update", "Delete"];
 
 type SpreadsheetRegisterProps = {
   apiPath?: string;
@@ -131,7 +133,13 @@ export function SpreadsheetRegister({
         .slice(headerIndex >= 0 ? headerIndex + 1 : 1)
         .filter((row) => row.some((value) => String(value).trim()))
         .map((row, rowIndex) =>
-          columns.reduce<RegisterRow>((record, column, columnIndex) => {
+          [importActionColumn, ...columns].reduce<RegisterRow>((record, column, columnIndex) => {
+            if (column === importActionColumn) {
+              const sourceIndex = headerRow.findIndex((header) => normalizeHeader(header) === normalizeHeader(importActionColumn));
+              record[column] = normalizeImportAction(row[sourceIndex >= 0 ? sourceIndex : 0]);
+              return record;
+            }
+
             if (column === autoSerialColumn) {
               record[column] = rowIndex + 1;
               return record;
@@ -144,12 +152,13 @@ export function SpreadsheetRegister({
             return record;
           }, {})
         );
+      const nextRows = applyImportActions(rows, dataRows, autoSerialColumn);
 
       if (apiPath && dataRows.length) {
-        await saveRows(dataRows, `Imported and saved ${dataRows.length} rows from ${file.name}.`);
+        await saveRows(nextRows, `Processed and saved ${dataRows.length} import rows from ${file.name}.`);
       } else {
-        setRows(dataRows);
-        setMessage(dataRows.length ? `Imported ${dataRows.length} rows from ${file.name}.` : "No rows found in the selected Excel file.");
+        setRows(nextRows);
+        setMessage(dataRows.length ? `Processed ${dataRows.length} import rows from ${file.name}.` : "No rows found in the selected Excel file.");
       }
     } catch (error) {
       console.error(`${title} import error:`, error);
@@ -186,12 +195,16 @@ export function SpreadsheetRegister({
   }
 
   function exportExcel() {
-    const exportRows = visibleRows.length ? visibleRows : [createBlankRow(columns)];
-    const worksheet = XLSX.utils.json_to_sheet(exportRows, { header: columns });
-    worksheet["!cols"] = columns.map((column) => ({ wch: Math.max(14, column.length + 3) }));
+    const exportColumns = [importActionColumn, ...columns];
+    const exportRows = visibleRows.length
+      ? visibleRows.map((row) => ({ [importActionColumn]: "Update", ...row }))
+      : [createBlankRow(exportColumns)];
+    const worksheet = XLSX.utils.json_to_sheet(exportRows, { header: exportColumns });
+    worksheet["!cols"] = exportColumns.map((column) => ({ wch: Math.max(14, column.length + 3) }));
     worksheet["!autofilter"] = {
-      ref: XLSX.utils.encode_range({ e: { c: columns.length - 1, r: Math.max(visibleRows.length, 1) }, s: { c: 0, r: 0 } })
+      ref: XLSX.utils.encode_range({ e: { c: exportColumns.length - 1, r: Math.max(visibleRows.length, 1) }, s: { c: 0, r: 0 } })
     };
+    addImportActionDropdown(worksheet, Math.max(exportRows.length + 100, 500));
 
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, title.slice(0, 31));
@@ -360,7 +373,7 @@ export function SpreadsheetRegister({
 
 function createBlankRow(columns: string[]) {
   return columns.reduce<RegisterRow>((row, column) => {
-    row[column] = "";
+    row[column] = column === importActionColumn ? "Add" : "";
     return row;
   }, {});
 }
@@ -378,4 +391,97 @@ function withAutoSerial(rows: RegisterRow[], autoSerialColumn?: string) {
     ...row,
     [autoSerialColumn]: index + 1
   }));
+}
+
+function applyImportActions(
+  currentRows: RegisterRow[],
+  importedRows: RegisterRow[],
+  autoSerialColumn?: string
+) {
+  const nextRows = [...currentRows];
+
+  importedRows.forEach((importedRow, rowIndex) => {
+    const action = normalizeImportAction(importedRow[importActionColumn]);
+    const cleanRow = stripImportAction(importedRow);
+    const targetIndex = findMatchingRowIndex(nextRows, cleanRow, rowIndex, autoSerialColumn);
+
+    if (action === "Delete") {
+      if (targetIndex >= 0) {
+        nextRows.splice(targetIndex, 1);
+      }
+      return;
+    }
+
+    if (action === "Update") {
+      if (targetIndex >= 0) {
+        nextRows[targetIndex] = cleanRow;
+      } else {
+        nextRows.push(cleanRow);
+      }
+      return;
+    }
+
+    nextRows.push(cleanRow);
+  });
+
+  return nextRows;
+}
+
+function findMatchingRowIndex(
+  rows: RegisterRow[],
+  importedRow: RegisterRow,
+  fallbackIndex: number,
+  autoSerialColumn?: string
+) {
+  if (autoSerialColumn) {
+    const importedSerial = String(importedRow[autoSerialColumn] ?? "").trim();
+
+    if (importedSerial) {
+      const matchedIndex = rows.findIndex((row) => String(row[autoSerialColumn] ?? "").trim() === importedSerial);
+
+      if (matchedIndex >= 0) {
+        return matchedIndex;
+      }
+    }
+  }
+
+  return fallbackIndex < rows.length ? fallbackIndex : -1;
+}
+
+function stripImportAction(row: RegisterRow) {
+  const { [importActionColumn]: _action, ...cleanRow } = row;
+  return cleanRow;
+}
+
+function normalizeImportAction(value: unknown) {
+  const action = String(value ?? "").trim().toLowerCase();
+
+  if (action === "update") {
+    return "Update";
+  }
+
+  if (action === "delete") {
+    return "Delete";
+  }
+
+  return "Add";
+}
+
+function normalizeHeader(value: string) {
+  return value.replace(/[^0-9a-z]/gi, "").toLowerCase();
+}
+
+function addImportActionDropdown(worksheet: XLSX.WorkSheet, rowCount: number) {
+  const worksheetWithValidation = worksheet as XLSX.WorkSheet & {
+    "!dataValidation"?: Array<Record<string, unknown>>;
+  };
+
+  worksheetWithValidation["!dataValidation"] = [
+    {
+      allowBlank: false,
+      formula1: `"${importActionOptions.join(",")}"`,
+      sqref: `A2:A${Math.max(rowCount, 2)}`,
+      type: "list"
+    }
+  ];
 }

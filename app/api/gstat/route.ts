@@ -7,6 +7,7 @@ type CookieToSet = { name: string; options: CookieOptions; value: string };
 type AppealRow = {
   data: Record<string, string | number>;
   id?: string;
+  import_action?: string;
   row_number?: number;
 };
 type ExistingAppealRow = AppealRow & { id: string };
@@ -132,7 +133,121 @@ export async function POST(request: Request) {
   }));
 
   if (auditAction === "import") {
-    return appendRows(admin, auth.user.id, scopedRows, previous.data?.length ?? 0, access);
+    const importRows = scopedRows.map((row) => ({
+      action: normalizeImportAction(row.import_action),
+      row
+    }));
+    const addRows = importRows.filter((item) => item.action === "add").map((item) => item.row);
+    const updateRows = importRows.filter((item) => item.action === "update");
+    const deleteRows = importRows.filter((item) => item.action === "delete");
+    const existingRows = filterRowsForAccess((previous.data ?? []) as ExistingAppealRow[], access);
+    const appendedResponse = addRows.length
+      ? await appendRows(admin, auth.user.id, addRows, previous.data?.length ?? 0, access, false)
+      : null;
+
+    if (appendedResponse && appendedResponse.status >= 400) {
+      return appendedResponse;
+    }
+
+    const updateResults = await Promise.all(
+      updateRows.map(async (item) => {
+        const matched = findMatchingGstatRow(existingRows, item.row);
+
+        if (!matched) {
+          return { skipped: true };
+        }
+
+        const nextData = {
+          ...item.row.data,
+          Sno: matched.row_number ?? item.row.data.Sno ?? 1
+        };
+        const changes = changedFields(matched.data ?? {}, nextData);
+
+        if (!changes.length) {
+          return { skipped: false };
+        }
+
+        const updated = await admin
+          .from("gstat_appeals")
+          .update({
+            data: nextData,
+            updated_at: new Date().toISOString(),
+            updated_by: auth.user.id
+          })
+          .eq("id", matched.id)
+          .select("id,row_number,data,updated_at")
+          .single();
+
+        if (!updated.error) {
+          await admin.from("gstat_audit_logs").insert(
+            changes.map((change) => ({
+              action: "update",
+              actor_user_id: auth.user.id,
+              appeal_id: matched.id,
+              field_name: change.field,
+              new_value: change.newValue,
+              old_value: change.oldValue,
+              organisation_code: organisationCode
+            }))
+          );
+        }
+
+        return { error: updated.error, skipped: false };
+      })
+    );
+    const updateError = updateResults.find((result) => result.error)?.error;
+
+    if (updateError) {
+      return NextResponse.json({ error: updateError.message }, { status: 500 });
+    }
+
+    const deleteMatches = deleteRows
+      .map((item) => findMatchingGstatRow(existingRows, item.row))
+      .filter((row): row is ExistingAppealRow => Boolean(row));
+    const uniqueDeleteMatches = Array.from(new Map(deleteMatches.map((row) => [row.id, row])).values());
+    const trashError = await saveRowsToTrash(admin, auth.user.id, "import_delete", uniqueDeleteMatches);
+
+    if (trashError) {
+      return NextResponse.json({ error: trashError.message }, { status: 500 });
+    }
+
+    if (uniqueDeleteMatches.length) {
+      const deleted = await admin
+        .from("gstat_appeals")
+        .delete()
+        .eq("organisation_code", organisationCode)
+        .in("id", uniqueDeleteMatches.map((row) => row.id));
+
+      if (deleted.error) {
+        return NextResponse.json({ error: deleted.error.message }, { status: 500 });
+      }
+    }
+
+    await admin.from("gstat_audit_logs").insert({
+      action: "import",
+      actor_user_id: auth.user.id,
+      field_name: "import",
+      new_value: {
+        added: addRows.length,
+        deleted: uniqueDeleteMatches.length,
+        row_count: importRows.length,
+        updated: updateRows.length - updateResults.filter((result) => result.skipped).length
+      },
+      old_value: { row_count: previous.data?.length ?? 0 },
+      organisation_code: organisationCode
+    });
+
+    const current = await admin
+      .from("gstat_appeals")
+      .select("id,row_number,data,updated_at")
+      .eq("organisation_code", organisationCode)
+      .order("row_number", { ascending: true });
+
+    if (current.error) {
+      return NextResponse.json({ error: current.error.message }, { status: 500 });
+    }
+
+    return NextResponse.json({ rows: filterRowsForAccess(current.data ?? [], access) });
   }
 
   return replaceRows(
@@ -216,7 +331,8 @@ async function appendRows(
   userId: string,
   rows: AppealRow[],
   previousRowCount: number,
-  access: AccessScope
+  access: AccessScope,
+  writeAudit = true
 ) {
   const nextRowNumber = await getNextRowNumber(admin);
   const insertRows = rows.map((row, index) => {
@@ -242,14 +358,16 @@ async function appendRows(
     return NextResponse.json({ error: inserted.error.message }, { status: 500 });
   }
 
-  await admin.from("gstat_audit_logs").insert({
-    action: "import",
-    actor_user_id: userId,
-    field_name: "import",
-    new_value: { added_row_count: rows.length, row_count: previousRowCount + rows.length },
-    old_value: { row_count: previousRowCount },
-    organisation_code: organisationCode
-  });
+  if (writeAudit) {
+    await admin.from("gstat_audit_logs").insert({
+      action: "import",
+      actor_user_id: userId,
+      field_name: "import",
+      new_value: { added_row_count: rows.length, row_count: previousRowCount + rows.length },
+      old_value: { row_count: previousRowCount },
+      organisation_code: organisationCode
+    });
+  }
 
   const current = await admin
     .from("gstat_appeals")
@@ -454,6 +572,38 @@ function filterRowsForAccess<T extends AppealRow>(rows: T[], access: AccessScope
   }
 
   return rows.filter((row) => canAccessRow(row, access));
+}
+
+function normalizeImportAction(value: unknown) {
+  const action = String(value ?? "").trim().toLowerCase();
+
+  if (action === "update") {
+    return "update";
+  }
+
+  if (action === "delete") {
+    return "delete";
+  }
+
+  return "add";
+}
+
+function findMatchingGstatRow(rows: ExistingAppealRow[], incoming: AppealRow) {
+  if (incoming.id) {
+    const matchedById = rows.find((row) => row.id === incoming.id);
+
+    if (matchedById) {
+      return matchedById;
+    }
+  }
+
+  const incomingSno = Number(incoming.row_number ?? incoming.data?.Sno);
+
+  if (Number.isFinite(incomingSno) && incomingSno > 0) {
+    return rows.find((row) => Number(row.row_number ?? row.data?.Sno) === incomingSno) ?? null;
+  }
+
+  return null;
 }
 
 async function getBillRaisedAppealIds(admin: ReturnType<typeof createAdminClient>) {

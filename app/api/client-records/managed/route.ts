@@ -18,6 +18,7 @@ const trashSourceKey = "client_records_trash";
 const defaultOrganisationCode = "DCO1433";
 const fetchBatchSize = 1000;
 const maxBulkDeleteRows = 5;
+const importActionColumn = "Import Action";
 const columns = [
   "S.no.",
   "Group",
@@ -222,26 +223,70 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Rows are required." }, { status: 400 });
     }
 
-    const deleted = await admin
-      .from("clients")
-      .delete()
-      .eq("organisation_id", organisation.organisationId)
-      .eq("custom_values->>source", activeSourceKey);
+    const activeRows = await loadClients(admin, organisation.organisationId, activeSourceKey, true);
 
-    if (deleted.error) {
-      return NextResponse.json({ error: deleted.error.message }, { status: 500 });
+    if (activeRows.error) {
+      return NextResponse.json({ error: activeRows.error.message }, { status: 500 });
     }
 
+    const existingRows = ((activeRows.data ?? []) as ClientRecord[]);
     const cleanedRows = payload.rows
-      .map((row, index) => normalizeIncomingRow(row, index))
-      .filter((row) => columns.some((column) => column !== "S.no." && String(row[column] ?? "").trim()));
-    const inserted = await insertRows(admin, organisation.organisationId, auth.user.id, cleanedRows);
+      .map((row, index) => ({
+        action: normalizeImportAction(row[importActionColumn]),
+        row: normalizeIncomingRow(row, index)
+      }))
+      .filter((item) => columns.some((column) => column !== "S.no." && String(item.row[column] ?? "").trim()));
+    const addRows = cleanedRows.filter((item) => item.action === "add").map((item) => item.row);
+    const updateItems = cleanedRows.filter((item) => item.action === "update");
+    const deleteItems = cleanedRows.filter((item) => item.action === "delete");
+    const inserted = await insertRows(admin, organisation.organisationId, auth.user.id, addRows);
 
     if (inserted.error) {
       return NextResponse.json({ error: inserted.error.message }, { status: 500 });
     }
 
-    await writeAuditLog(admin, organisation.organisationId, auth.user.id, "client_record.import", null, { row_count: cleanedRows.length });
+    const updateResults = await Promise.all(
+      updateItems.map(async (item) => {
+        const existing = findMatchingClientRecord(existingRows, item.row);
+
+        if (!existing) {
+          return { error: null, skipped: true };
+        }
+
+        const updated = await admin
+          .from("clients")
+          .update({
+            custom_values: { ...item.row, source: activeSourceKey },
+            name: getClientName(item.row),
+            updated_at: new Date().toISOString()
+          })
+          .eq("id", existing.id)
+          .eq("organisation_id", organisation.organisationId);
+
+        return { error: updated.error, skipped: false };
+      })
+    );
+    const updateError = updateResults.find((result) => result.error)?.error;
+
+    if (updateError) {
+      return NextResponse.json({ error: updateError.message }, { status: 500 });
+    }
+
+    const deleteMatches = deleteItems
+      .map((item) => findMatchingClientRecord(existingRows, item.row))
+      .filter((row): row is ClientRecord => Boolean(row));
+    const deleteError = await moveClientRowsToTrash(admin, organisation.organisationId, auth.user.id, deleteMatches);
+
+    if (deleteError) {
+      return NextResponse.json({ error: deleteError.message }, { status: 500 });
+    }
+
+    await writeAuditLog(admin, organisation.organisationId, auth.user.id, "client_record.import", null, {
+      added: addRows.length,
+      deleted: deleteMatches.length,
+      row_count: cleanedRows.length,
+      updated: updateItems.length - updateResults.filter((result) => result.skipped).length
+    });
     return loadResponse(admin, organisation.organisationId);
   }
 
@@ -290,6 +335,43 @@ function insertRows(
   return insertRows.length
     ? admin.from("clients").insert(insertRows).select("id,name,custom_values,created_at,updated_at")
     : { data: [], error: null };
+}
+
+async function moveClientRowsToTrash(
+  admin: ReturnType<typeof createAdminClient>,
+  organisationId: string,
+  userId: string,
+  rows: ClientRecord[]
+) {
+  const uniqueRows = Array.from(new Map(rows.map((row) => [row.id, row])).values());
+
+  if (!uniqueRows.length) {
+    return null;
+  }
+
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString();
+  const updates = await Promise.all(
+    uniqueRows.map((row) =>
+      admin
+        .from("clients")
+        .update({
+          custom_values: {
+            ...(row.custom_values ?? {}),
+            deleted_at: now.toISOString(),
+            deleted_by: userId,
+            expires_at: expiresAt,
+            source: trashSourceKey
+          },
+          status: "inactive",
+          updated_at: now.toISOString()
+        })
+        .eq("id", row.id)
+        .eq("organisation_id", organisationId)
+    )
+  );
+
+  return updates.find((update) => update.error)?.error ?? null;
 }
 
 function loadClients(
@@ -516,4 +598,47 @@ function normalizeIncomingRow(row: RegisterRow, index: number) {
 
 function getClientName(row: RegisterRow) {
   return String(row.Particulars ?? "").trim() || `Client ${row["S.no."]}`;
+}
+
+function normalizeImportAction(value: unknown) {
+  const action = String(value ?? "").trim().toLowerCase();
+
+  if (action === "update") {
+    return "update";
+  }
+
+  if (action === "delete") {
+    return "delete";
+  }
+
+  return "add";
+}
+
+function findMatchingClientRecord(rows: ClientRecord[], incomingRow: RegisterRow) {
+  const incomingId = normalizeLookupValue(incomingRow.id);
+
+  if (incomingId) {
+    const matchedById = rows.find((row) => normalizeLookupValue(row.id) === incomingId);
+
+    if (matchedById) {
+      return matchedById;
+    }
+  }
+
+  const incomingGstin = normalizeLookupValue(incomingRow["GSTIN/UIN"]);
+  const incomingPan = normalizeLookupValue(incomingRow["PAN/IT No."]);
+  const incomingName = normalizeLookupValue(incomingRow.Particulars);
+
+  return rows.find((row) => {
+    const values = row.custom_values ?? {};
+    return (
+      (incomingGstin && normalizeLookupValue(values["GSTIN/UIN"]) === incomingGstin) ||
+      (incomingPan && normalizeLookupValue(values["PAN/IT No."]) === incomingPan) ||
+      (incomingName && normalizeLookupValue(values.Particulars) === incomingName)
+    );
+  }) ?? null;
+}
+
+function normalizeLookupValue(value: unknown) {
+  return String(value ?? "").replace(/[^0-9a-z]/gi, "").toLowerCase();
 }

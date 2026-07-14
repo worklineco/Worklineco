@@ -44,6 +44,8 @@ const columns = [
   "GSTIN/UIN",
   "PAN/IT No."
 ];
+const importActionColumn = "Import Action";
+const importActionOptions = ["Add", "Update", "Delete"];
 const maxDeleteRows = 5;
 const buttonClass =
   "inline-flex h-11 items-center justify-center gap-2 rounded-2xl bg-white px-4 text-sm font-black text-slate-800 ring-1 ring-slate-200 transition hover:bg-slate-50";
@@ -171,7 +173,13 @@ export function ClientRecordsRegister() {
         .slice(headerIndex >= 0 ? headerIndex + 1 : 1)
         .filter((row) => row.some((value) => String(value).trim()))
         .map((row, rowIndex) =>
-          columns.reduce<RegisterRow>((record, column, columnIndex) => {
+          [importActionColumn, ...columns].reduce<RegisterRow>((record, column, columnIndex) => {
+            if (column === importActionColumn) {
+              const sourceIndex = headerRow.findIndex((header) => normalizeHeader(header) === normalizeHeader(importActionColumn));
+              record[column] = normalizeImportAction(row[sourceIndex >= 0 ? sourceIndex : 0]);
+              return record;
+            }
+
             if (column === "S.no.") {
               record[column] = rowIndex + 1;
               return record;
@@ -185,7 +193,7 @@ export function ClientRecordsRegister() {
           }, {})
         );
 
-      await saveAction({ action: "import", rows: nextRows }, `Imported ${nextRows.length} client records.`);
+      await saveAction({ action: "import", rows: nextRows }, `Processed ${nextRows.length} client record import rows.`);
     } catch (error) {
       console.error("Client records import error:", error);
       setMessage("Could not import the selected Excel file.");
@@ -195,12 +203,16 @@ export function ClientRecordsRegister() {
   }
 
   function exportExcel() {
-    const exportRows = filteredRows.length ? filteredRows.map(stripInternalFields) : [createBlankRow()];
-    const worksheet = XLSX.utils.json_to_sheet(exportRows, { header: columns });
-    worksheet["!cols"] = columns.map((column) => ({ wch: Math.max(14, column.length + 3) }));
+    const exportColumns = [importActionColumn, ...columns];
+    const exportRows = filteredRows.length
+      ? filteredRows.map((row) => ({ [importActionColumn]: "Update", ...stripInternalFields(row) }))
+      : [createBlankRow()];
+    const worksheet = XLSX.utils.json_to_sheet(exportRows, { header: exportColumns });
+    worksheet["!cols"] = exportColumns.map((column) => ({ wch: Math.max(14, column.length + 3) }));
     worksheet["!autofilter"] = {
-      ref: XLSX.utils.encode_range({ e: { c: columns.length - 1, r: Math.max(exportRows.length, 1) }, s: { c: 0, r: 0 } })
+      ref: XLSX.utils.encode_range({ e: { c: exportColumns.length - 1, r: Math.max(exportRows.length, 1) }, s: { c: 0, r: 0 } })
     };
+    addImportActionDropdown(worksheet, Math.max(exportRows.length + 100, 500));
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Client Records");
     XLSX.writeFile(workbook, "workline-client-records.xlsx");
@@ -529,7 +541,12 @@ export function ClientRecordsRegister() {
 }
 
 function createBlankRow() {
-  return columns.reduce<RegisterRow>((row, column) => {
+  return [importActionColumn, ...columns].reduce<RegisterRow>((row, column) => {
+    if (column === importActionColumn) {
+      row[column] = "Add";
+      return row;
+    }
+
     row[column] = "";
     return row;
   }, {});
@@ -547,6 +564,39 @@ function withSerial(rows: RegisterRow[]): RegisterRow[] {
     ...row,
     "S.no.": index + 1
   }));
+}
+
+function normalizeImportAction(value: unknown) {
+  const action = String(value ?? "").trim().toLowerCase();
+
+  if (action === "update") {
+    return "Update";
+  }
+
+  if (action === "delete") {
+    return "Delete";
+  }
+
+  return "Add";
+}
+
+function normalizeHeader(value: string) {
+  return value.replace(/[^0-9a-z]/gi, "").toLowerCase();
+}
+
+function addImportActionDropdown(worksheet: XLSX.WorkSheet, rowCount: number) {
+  const worksheetWithValidation = worksheet as XLSX.WorkSheet & {
+    "!dataValidation"?: Array<Record<string, unknown>>;
+  };
+
+  worksheetWithValidation["!dataValidation"] = [
+    {
+      allowBlank: false,
+      sqref: `A2:A${Math.max(rowCount, 2)}`,
+      type: "list",
+      formula1: `"${importActionOptions.join(",")}"`
+    }
+  ];
 }
 
 function formatDate(value: unknown) {

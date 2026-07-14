@@ -13,6 +13,7 @@ type RowData = Record<string, string | number>;
 type AppealRow = {
   data: RowData;
   id?: string;
+  import_action?: string;
   row_number: number;
   updated_at?: string;
 };
@@ -112,6 +113,8 @@ const demandColumns: Column[] = groupedColumns.flatMap((group) =>
 );
 const billingColumns: Column[] = ["Billing amount", "Billing remarks"].map((label) => ({ key: label, label }));
 const columns = [...baseColumns, ...demandColumns, ...billingColumns];
+const importActionColumn = "Import Action";
+const importActionOptions = ["Add", "Update", "Delete"];
 const defaultColumnOrder = columns.map((column) => column.key);
 const columnByKey = new Map(columns.map((column) => [column.key, column]));
 const defaultColumnWidth = 92;
@@ -760,40 +763,47 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
       "OIA No"
     );
     const headerRowOne = [
+      importActionColumn,
       ...baseColumns.map((column) => column.label),
       ...groupedColumns.flatMap((group) => [group.label, "", ""]),
       ...billingColumns.map((column) => column.label)
     ];
     const headerRowTwo = [
+      "",
       ...baseColumns.map(() => ""),
       ...groupedColumns.flatMap((group) => group.columns),
       ...billingColumns.map(() => "")
     ];
     const dataRows = exportRows.map(({ displayIndex, row }) =>
-      columns.map((column) =>
-        column.key === "Sno"
-          ? row.row_number || row.data.Sno || displayIndex
-          : dateFields.has(column.key)
-            ? formatDateForDisplay(row.data[column.key])
-            : row.data[column.key] ?? ""
-      )
+      [
+        "Update",
+        ...columns.map((column) =>
+          column.key === "Sno"
+            ? row.row_number || row.data.Sno || displayIndex
+            : dateFields.has(column.key)
+              ? formatDateForDisplay(row.data[column.key])
+              : row.data[column.key] ?? ""
+        )
+      ]
     );
     const worksheet = XLSX.utils.aoa_to_sheet([headerRowOne, headerRowTwo, ...dataRows]);
 
     worksheet["!merges"] = [
-      ...baseColumns.map((_, index) => ({ e: { c: index, r: 1 }, s: { c: index, r: 0 } })),
+      { e: { c: 0, r: 1 }, s: { c: 0, r: 0 } },
+      ...baseColumns.map((_, index) => ({ e: { c: index + 1, r: 1 }, s: { c: index + 1, r: 0 } })),
       ...groupedColumns.map((_, index) => {
-        const start = baseColumns.length + index * 3;
+        const start = 1 + baseColumns.length + index * 3;
         return { e: { c: start + 2, r: 0 }, s: { c: start, r: 0 } };
       }),
       ...billingColumns.map((_, index) => {
-        const start = baseColumns.length + demandColumns.length + index;
+        const start = 1 + baseColumns.length + demandColumns.length + index;
         return { e: { c: start, r: 1 }, s: { c: start, r: 0 } };
       })
     ];
-    worksheet["!cols"] = columns.map((column) => ({ wch: Math.max(14, column.label.length + 3) }));
-    worksheet["!autofilter"] = { ref: XLSX.utils.encode_range({ e: { c: columns.length - 1, r: 1 }, s: { c: 0, r: 1 } }) };
+    worksheet["!cols"] = [{ wch: 16 }, ...columns.map((column) => ({ wch: Math.max(14, column.label.length + 3) }))];
+    worksheet["!autofilter"] = { ref: XLSX.utils.encode_range({ e: { c: columns.length, r: 1 }, s: { c: 0, r: 1 } }) };
     worksheet["!freeze"] = { xSplit: 1, ySplit: 2 };
+    addImportActionDropdown(worksheet, Math.max(exportRows.length + 100, 500));
 
     styleGstatWorksheet(worksheet, exportRows, exportDuplicateDrc07Numbers, exportDuplicateOiaNumbers);
 
@@ -824,22 +834,33 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
         header: 1
       });
       const headerIndex = findHeaderRow(rawRows);
-      const dataStartIndex = headerIndex + 1;
+      const headerRow = rawRows[headerIndex]?.map((value) => String(value).trim()) ?? [];
+      const secondHeaderRow = rawRows[headerIndex + 1]?.map((value) => String(value).trim()) ?? [];
+      const headerMap = createGstatImportHeaderMap(headerRow, secondHeaderRow);
+      const hasSecondHeaderRow = demandColumns.some((column) => headerMap.get(normalizeHeader(column.key)) !== undefined);
+      const dataStartIndex = headerIndex + (hasSecondHeaderRow ? 2 : 1);
       const nextRows = rawRows
         .slice(dataStartIndex)
         .filter((rawRow) => rawRow.some((value) => String(value).trim()))
-        .map((rawRow, rowIndex) => ({
+        .map((rawRow, rowIndex) => {
+          const actionIndex = headerMap.get(normalizeHeader(importActionColumn));
+
+          return {
           data: columns.reduce<RowData>((row, column, columnIndex) => {
+            const sourceIndex = headerMap.get(normalizeHeader(column.key)) ?? headerMap.get(normalizeHeader(column.label));
+            const value = rawRow[sourceIndex ?? columnIndex];
             row[column.key] =
               column.key === "Sno"
-                ? rowIndex + 1
+                ? value || rowIndex + 1
                 : dateFields.has(column.key)
-                  ? normalizeDateValue(rawRow[columnIndex])
-                  : rawRow[columnIndex] ?? "";
+                  ? normalizeDateValue(value)
+                  : value ?? "";
             return row;
           }, {}),
+          import_action: normalizeImportAction(rawRow[actionIndex ?? 0]),
           row_number: rowIndex + 1
-        }));
+        };
+        });
 
       if (!nextRows.length) {
         setMessage("No GSTAT rows found in the selected Excel file.");
@@ -862,7 +883,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
 
       setRows(result.rows?.length ? normalizeRows(result.rows) : rows);
       setSelectedRowKeys(new Set());
-      setMessage(`${nextRows.length} row${nextRows.length === 1 ? "" : "s"} added from ${file.name}. Audit log updated.`);
+      setMessage(`${nextRows.length} GSTAT import row${nextRows.length === 1 ? "" : "s"} processed from ${file.name}. Audit log updated.`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Could not read the selected Excel file.");
     } finally {
@@ -2368,10 +2389,12 @@ function styleGstatWorksheet(
   const blankRequiredStyle = createExcelCellStyle("fff1f2", "9f1239", true);
 
   for (let rowIndex = 0; rowIndex < 2; rowIndex += 1) {
+    setCellStyle(worksheet, rowIndex, 0, headerStyle);
+
     for (let columnIndex = 0; columnIndex < columns.length; columnIndex += 1) {
       const isUngroupedColumn =
         columnIndex < baseColumns.length || columnIndex >= baseColumns.length + demandColumns.length;
-      setCellStyle(worksheet, rowIndex, columnIndex, isUngroupedColumn ? headerStyle : groupHeaderStyle);
+      setCellStyle(worksheet, rowIndex, columnIndex + 1, isUngroupedColumn ? headerStyle : groupHeaderStyle);
     }
   }
 
@@ -2387,6 +2410,8 @@ function styleGstatWorksheet(
           ? baseCellStyle
           : alternateCellStyle;
 
+    setCellStyle(worksheet, worksheetRowIndex, 0, rowStyle);
+
     columns.forEach((column, columnIndex) => {
       const cellValue = row.data[column.key];
       const isDuplicateDrc07 = hasDuplicateDrc07 && column.key === "DRC 07 No";
@@ -2398,7 +2423,7 @@ function styleGstatWorksheet(
       setCellStyle(
         worksheet,
         worksheetRowIndex,
-        columnIndex,
+        columnIndex + 1,
         isDuplicateDrc07
           ? duplicateDrcStyle
           : isDuplicateOia
@@ -3438,4 +3463,59 @@ function findHeaderRow(rawRows: Array<Array<string | number>>) {
   }
 
   return headerIndex;
+}
+
+function createGstatImportHeaderMap(firstHeaderRow: string[], secondHeaderRow: string[]) {
+  const headerMap = new Map<string, number>();
+
+  firstHeaderRow.forEach((header, index) => {
+    const normalizedHeader = normalizeHeader(header);
+
+    if (normalizedHeader) {
+      headerMap.set(normalizedHeader, index);
+    }
+  });
+
+  secondHeaderRow.forEach((header, index) => {
+    const normalizedHeader = normalizeHeader(header);
+
+    if (normalizedHeader) {
+      headerMap.set(normalizedHeader, index);
+    }
+  });
+
+  return headerMap;
+}
+
+function normalizeImportAction(value: unknown) {
+  const action = String(value ?? "").trim().toLowerCase();
+
+  if (action === "update") {
+    return "Update";
+  }
+
+  if (action === "delete") {
+    return "Delete";
+  }
+
+  return "Add";
+}
+
+function normalizeHeader(value: string) {
+  return value.replace(/[^0-9a-z]/gi, "").toLowerCase();
+}
+
+function addImportActionDropdown(worksheet: XLSX.WorkSheet, rowCount: number) {
+  const worksheetWithValidation = worksheet as XLSX.WorkSheet & {
+    "!dataValidation"?: Array<Record<string, unknown>>;
+  };
+
+  worksheetWithValidation["!dataValidation"] = [
+    {
+      allowBlank: false,
+      formula1: `"${importActionOptions.join(",")}"`,
+      sqref: `A3:A${Math.max(rowCount + 2, 3)}`,
+      type: "list"
+    }
+  ];
 }

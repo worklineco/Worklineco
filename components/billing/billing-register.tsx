@@ -234,6 +234,8 @@ const importHeaders: Array<{ field: BillingField; label: string }> = [
   { field: "receiving_date", label: "Receiving Date" },
   { field: "remarks", label: "Remarks" }
 ];
+const importActionColumn = "Import Action";
+const importActionOptions = ["Add", "Update", "Delete"];
 
 export function BillingRegister() {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -634,6 +636,7 @@ export function BillingRegister() {
     const billingRows = rows.map((row) => {
       const record = { ...emptyRecord };
       const importedRecord = record as unknown as Record<BillingField, unknown>;
+      const importAction = normalizeImportAction(row[importActionColumn]);
 
       importHeaders.forEach(({ field, label }) => {
         const value = row[label] ?? row[field] ?? "";
@@ -641,7 +644,10 @@ export function BillingRegister() {
       });
 
       record.source_module = "import";
-      return enrichBillingRecord(recalc(record), clientRecords, "gstin");
+      return {
+        ...enrichBillingRecord(recalc(record), clientRecords, "gstin"),
+        import_action: importAction
+      };
     }).filter((row) => row.client || row.description || row.invoice_no);
 
     const response = await fetch("/api/billing", {
@@ -668,11 +674,12 @@ export function BillingRegister() {
     setMatters(result.matters ?? []);
     setRecords((result.records ?? []).map(normalizeRecord));
     setTrashRecords(result.trashRecords ?? []);
-    setMessage(`Imported ${billingRows.length} billing rows from ${file.name}.`);
+    setMessage(`Processed ${billingRows.length} billing import rows from ${file.name}.`);
   }
 
   function exportWorkbook() {
     const rows = filteredRecords.map((record, index) => ({
+      [importActionColumn]: "Update",
       "S.no.": index + 1,
       Team: record.owner_team,
       Source: record.source_module,
@@ -707,6 +714,7 @@ export function BillingRegister() {
     const worksheet = XLSX.utils.json_to_sheet(rows.length ? rows : [blankExportRow()]);
 
     worksheet["!cols"] = Object.keys(rows.length ? rows[0] : blankExportRow()).map(() => ({ wch: 18 }));
+    addImportActionDropdown(worksheet, Math.max(rows.length + 100, 500));
 
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Firm Billing");
@@ -716,10 +724,12 @@ export function BillingRegister() {
 
   function downloadTemplate() {
     const worksheet = XLSX.utils.json_to_sheet([importHeaders.reduce<Record<string, string>>((row, header) => {
+      row[importActionColumn] = row[importActionColumn] || "Add";
       row[header.label] = "";
       return row;
     }, {})]);
-    worksheet["!cols"] = importHeaders.map(() => ({ wch: 20 }));
+    worksheet["!cols"] = [importActionColumn, ...importHeaders.map((header) => header.label)].map(() => ({ wch: 20 }));
+    addImportActionDropdown(worksheet, 500);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Billing Import");
     XLSX.writeFile(workbook, "workline-billing-import-template.xlsx");
@@ -1744,9 +1754,39 @@ function buttonClass(kind: "dark" | "light" | "primary") {
 
 function blankExportRow() {
   return importHeaders.reduce<Record<string, string>>((row, header) => {
+    row[importActionColumn] = row[importActionColumn] || "Add";
     row[header.label] = "";
     return row;
   }, {});
+}
+
+function normalizeImportAction(value: unknown) {
+  const action = String(value ?? "").trim().toLowerCase();
+
+  if (action === "update") {
+    return "Update";
+  }
+
+  if (action === "delete") {
+    return "Delete";
+  }
+
+  return "Add";
+}
+
+function addImportActionDropdown(worksheet: XLSX.WorkSheet, rowCount: number) {
+  const worksheetWithValidation = worksheet as XLSX.WorkSheet & {
+    "!dataValidation"?: Array<Record<string, unknown>>;
+  };
+
+  worksheetWithValidation["!dataValidation"] = [
+    {
+      allowBlank: false,
+      formula1: `"${importActionOptions.join(",")}"`,
+      sqref: `A2:A${Math.max(rowCount, 2)}`,
+      type: "list"
+    }
+  ];
 }
 
 function calculateTax(amount: number, placeOfSupply: string) {
