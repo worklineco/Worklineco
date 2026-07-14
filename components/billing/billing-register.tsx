@@ -767,8 +767,9 @@ export function BillingRegister() {
     setMessage(formatImportSummary(file.name, billingRows.length, summary));
   }
 
-  function exportWorkbook() {
-    const rows = filteredRecords.map((record) => ({
+  function exportWorkbook(scope: "full" | "view") {
+    const exportRecords = scope === "full" ? records : filteredRecords;
+    const rows = exportRecords.map((record) => ({
       [importActionColumn]: "Update",
       "Billing ID": record.id ?? "",
       "S.No.": record.serial_no ?? "",
@@ -810,8 +811,8 @@ export function BillingRegister() {
 
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Firm Billing");
-    XLSX.writeFile(workbook, "workline-firm-billing-register.xlsx");
-    setMessage(`Exported ${filteredRecords.length} billing rows.`);
+    XLSX.writeFile(workbook, scope === "full" ? "workline-firm-billing-full-table.xlsx" : "workline-firm-billing-current-view.xlsx");
+    setMessage(`Exported ${exportRecords.length} billing rows from ${scope === "full" ? "full table" : "current view"}.`);
   }
 
   function downloadTemplate() {
@@ -911,9 +912,13 @@ export function BillingRegister() {
             <Plus className="size-4" />
             Add
           </button>
-          <button className={buttonClass("dark")} onClick={exportWorkbook} type="button">
+          <button className={buttonClass("dark")} onClick={() => exportWorkbook("view")} type="button">
             <Download className="size-4" />
-            Export
+            Export View
+          </button>
+          <button className={buttonClass("light")} onClick={() => exportWorkbook("full")} type="button">
+            <Download className="size-4" />
+            Export Full
           </button>
           <button className={buttonClass("light")} onClick={downloadTemplate} type="button">
             Template

@@ -69,6 +69,7 @@ type AccessScope = {
 };
 
 const defaultOrganisationCode = "DCO1433";
+const fetchBatchSize = 1000;
 const tableName = "firm_billing_records";
 const masterTableName = "firm_billing_master_options";
 const masterTypes = ["cost_center", "voucher_type", "income_head", "group_name", "billing_status", "receiving_status"];
@@ -639,14 +640,44 @@ function loadBillingRecords(
   organisationId: string,
   access: AccessScope
 ) {
-  return selectBillingRecords(admin, organisationId, access, billingSelectColumns);
+  return fetchAllBillingRecords(admin, organisationId, access, billingSelectColumns);
 }
 
-async function selectBillingRecords(
+async function fetchAllBillingRecords(
   admin: ReturnType<typeof createAdminClient>,
   organisationId: string,
   access: AccessScope,
   columns: string
+) {
+  const rows: unknown[] = [];
+
+  for (let from = 0; ; from += fetchBatchSize) {
+    const to = from + fetchBatchSize - 1;
+    const result = await selectBillingRecordsPage(admin, organisationId, access, columns, from, to);
+
+    if (result.error && isMissingCompatibilityColumn(result.error) && columns !== fallbackBillingSelectColumns) {
+      return fetchAllBillingRecords(admin, organisationId, access, fallbackBillingSelectColumns);
+    }
+
+    if (result.error) {
+      return result;
+    }
+
+    rows.push(...(result.data ?? []));
+
+    if ((result.data ?? []).length < fetchBatchSize) {
+      return { data: rows, error: null };
+    }
+  }
+}
+
+async function selectBillingRecordsPage(
+  admin: ReturnType<typeof createAdminClient>,
+  organisationId: string,
+  access: AccessScope,
+  columns: string,
+  from: number,
+  to: number
 ) {
   let query = admin.from(tableName).select(columns).eq("organisation_id", organisationId);
 
@@ -658,13 +689,7 @@ async function selectBillingRecords(
     ? query.order("serial_no", { ascending: true, nullsFirst: false }).order("created_at", { ascending: true })
     : query.order("invoice_date", { ascending: false, nullsFirst: false }).order("created_at", { ascending: false });
 
-  const result = await orderedQuery;
-
-  if (result.error && isMissingCompatibilityColumn(result.error) && columns !== fallbackBillingSelectColumns) {
-    return selectBillingRecords(admin, organisationId, access, fallbackBillingSelectColumns);
-  }
-
-  return result;
+  return orderedQuery.range(from, to);
 }
 
 function loadGstatMatters(admin: ReturnType<typeof createAdminClient>, access: AccessScope) {
