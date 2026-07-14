@@ -36,6 +36,7 @@ type BillingRecord = {
   receiving_status: string;
   registration_type: string;
   remarks: string;
+  serial_no?: number;
   sgst: number;
   source_module: string;
   total: number;
@@ -120,6 +121,7 @@ const emptyRecord: BillingRecord = {
   receiving_status: "Pending",
   registration_type: "",
   remarks: "",
+  serial_no: undefined,
   sgst: 0,
   source_module: "manual",
   total: 0,
@@ -175,6 +177,7 @@ const gstStateByCode: Record<string, string> = {
   "99": "Other Country"
 };
 const billingColumns: BillingColumn[] = [
+  { field: "serial_no", label: "S.No.", type: "text", width: 90 },
   { field: "owner_team", label: "Team", type: "text", width: 128 },
   { field: "source_module", label: "Source", type: "select", width: 110 },
   { field: "voucher_type", label: "Voucher", type: "select", width: 145 },
@@ -211,6 +214,7 @@ const billingColumnByKey = new Map(billingColumns.map((column) => [String(column
 const defaultBillingColumnOrder = billingColumns.map((column) => String(column.field));
 const billingColumnLayoutStorageKey = "workline:billing-column-layout:v1";
 const importHeaders: Array<{ field: BillingField; label: string }> = [
+  { field: "serial_no", label: "S.No." },
   { field: "owner_team", label: "Team" },
   { field: "voucher_type", label: "Voucher Type" },
   { field: "group_name", label: "Group" },
@@ -362,7 +366,6 @@ export function BillingRegister() {
   useEffect(() => {
     void loadBilling();
     void loadBillingActivity();
-    void loadClientRecords();
     const savedLayout = getSavedBillingColumnLayout();
     setColumnOrder(savedLayout.order);
     setHiddenColumnKeys(new Set(savedLayout.hiddenColumnKeys));
@@ -390,16 +393,24 @@ export function BillingRegister() {
   }, [clientRecords]);
 
   async function loadClientRecords() {
+    if (clientRecords.length) {
+      return clientRecords;
+    }
+
     try {
       const response = await fetch("/api/client-records/managed", { cache: "no-store" });
       const result = (await response.json().catch(() => ({}))) as { rows?: ClientRegisterRow[] };
 
       if (response.ok) {
-        setClientRecords(result.rows ?? []);
+        const rows = result.rows ?? [];
+        setClientRecords(rows);
+        return rows;
       }
     } catch (error) {
       console.error("Billing client lookup load failed:", error);
     }
+
+    return clientRecords;
   }
 
   async function loadBilling() {
@@ -459,6 +470,7 @@ export function BillingRegister() {
   }
 
   function openAddForm() {
+    void loadClientRecords();
     setAddDraft(enrichBillingRecord({
       ...emptyRecord,
       owner_team: access.team,
@@ -468,6 +480,10 @@ export function BillingRegister() {
   }
 
   function updateAddDraft(field: BillingField, rawValue: string) {
+    if (!clientRecords.length && (field === "gstin" || field === "client")) {
+      void loadClientRecords();
+    }
+
     setAddDraft((currentDraft) =>
       currentDraft
         ? enrichBillingRecord(prepareRecordUpdate(currentDraft, field, rawValue), clientRecords, field)
@@ -476,12 +492,17 @@ export function BillingRegister() {
   }
 
   function openEditForm(record: BillingRecord) {
+    void loadClientRecords();
     setInlineEditor(null);
     setEditDraft(enrichBillingRecord(normalizeRecord(record), clientRecords));
     setMessage("");
   }
 
   function updateEditDraft(field: BillingField, rawValue: string) {
+    if (!clientRecords.length && (field === "gstin" || field === "client")) {
+      void loadClientRecords();
+    }
+
     setEditDraft((currentDraft) =>
       currentDraft
         ? enrichBillingRecord(prepareRecordUpdate(currentDraft, field, rawValue), clientRecords, field)
@@ -679,6 +700,7 @@ export function BillingRegister() {
   }
 
   async function importWorkbook(file: File) {
+    const lookupRows = clientRecords.length ? clientRecords : await loadClientRecords();
     const data = await file.arrayBuffer();
     const workbook = XLSX.read(data);
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
@@ -695,10 +717,10 @@ export function BillingRegister() {
 
       record.source_module = "import";
       return {
-        ...enrichBillingRecord(recalc(record), clientRecords, "gstin"),
+        ...enrichBillingRecord(recalc(record), lookupRows, "gstin"),
         import_action: importAction
       };
-    }).filter((row) => row.client || row.description || row.invoice_no);
+    }).filter((row) => row.serial_no || row.client || row.description || row.invoice_no);
 
     const response = await fetch("/api/billing", {
       body: JSON.stringify({ action: "import", rows: billingRows }),
@@ -728,9 +750,9 @@ export function BillingRegister() {
   }
 
   function exportWorkbook() {
-    const rows = filteredRecords.map((record, index) => ({
+    const rows = filteredRecords.map((record) => ({
       [importActionColumn]: "Update",
-      "S.no.": index + 1,
+      "S.No.": record.serial_no ?? "",
       Team: record.owner_team,
       Source: record.source_module,
       "Voucher Type": record.voucher_type,
@@ -1111,6 +1133,7 @@ function BillingCell({
   const field = column.field as BillingField;
   const isAccountsOnly = accountsOnlyFields.has(field);
   const isReadOnly =
+    column.field === "serial_no" ||
     column.field === "total" ||
     (!access.canViewAll && column.field === "owner_team") ||
     (isAccountsOnly && !access.canEditAccountsFields);
@@ -1831,6 +1854,7 @@ function normalizeRecord(record: BillingRecord): BillingRecord {
     include_ope_in_fees: yesNo(record.include_ope_in_fees),
     ope: toNumber(record.ope),
     place_of_supply: record.place_of_supply || stateFromGstin(record.gstin),
+    serial_no: record.serial_no ? Number(record.serial_no) : undefined,
     sgst: toNumber(record.sgst),
     total: toNumber(record.total),
     version_no: Number(record.version_no ?? 1)

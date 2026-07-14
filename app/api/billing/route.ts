@@ -36,6 +36,7 @@ type BillingRecord = {
   receiving_status?: string;
   registration_type?: string;
   remarks?: string;
+  serial_no?: number | string | null;
   sgst?: number | string;
   source_module?: string;
   total?: number | string;
@@ -71,6 +72,50 @@ const defaultOrganisationCode = "DCO1433";
 const tableName = "firm_billing_records";
 const masterTableName = "firm_billing_master_options";
 const masterTypes = ["cost_center", "voucher_type", "income_head", "group_name", "billing_status", "receiving_status"];
+const billingSelectColumns = [
+  "id",
+  "serial_no",
+  "organisation_id",
+  "organisation_code",
+  "owner_team",
+  "source_module",
+  "gstat_appeal_id",
+  "cost_center",
+  "person_authorised",
+  "voucher_type",
+  "income_head",
+  "group_name",
+  "client",
+  "gstin",
+  "place_of_supply",
+  "address",
+  "registration_type",
+  "poc_name",
+  "poc_mobile",
+  "poc_email",
+  "description",
+  "amount",
+  "cgst",
+  "sgst",
+  "igst",
+  "total",
+  "billing_status",
+  "memo_no",
+  "memo_date",
+  "invoice_no",
+  "invoice_date",
+  "ope",
+  "include_ope_in_fees",
+  "ope_remarks",
+  "receiving_status",
+  "receiving_date",
+  "remarks",
+  "version_no",
+  "created_by",
+  "updated_by",
+  "created_at",
+  "updated_at"
+].join(",");
 const gstStateByCode: Record<string, string> = {
   "01": "Jammu And Kashmir",
   "02": "Himachal Pradesh",
@@ -263,7 +308,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: inserted.error.message }, { status: 500 });
     }
 
-    const existing = (existingRows.data ?? []) as StoredBillingRecord[];
+    const existing = (existingRows.data ?? []) as unknown as StoredBillingRecord[];
     const updateResults = await Promise.all(
       updateRows.map(async (row) => {
         const matched = findMatchingBillingRecord(existing, row.raw);
@@ -523,18 +568,32 @@ function loadBillingRecords(
   organisationId: string,
   access: AccessScope
 ) {
-  let query = admin
-    .from(tableName)
-    .select("*")
-    .eq("organisation_id", organisationId)
-    .order("invoice_date", { ascending: false, nullsFirst: false })
-    .order("created_at", { ascending: false });
+  return selectBillingRecords(admin, organisationId, access, billingSelectColumns);
+}
+
+async function selectBillingRecords(
+  admin: ReturnType<typeof createAdminClient>,
+  organisationId: string,
+  access: AccessScope,
+  columns: string
+) {
+  let query = admin.from(tableName).select(columns).eq("organisation_id", organisationId);
 
   if (!access.canViewAll && access.team) {
     query = query.eq("owner_team", access.team);
   }
 
-  return query;
+  const orderedQuery = columns.includes("serial_no")
+    ? query.order("serial_no", { ascending: true, nullsFirst: false }).order("created_at", { ascending: true })
+    : query.order("invoice_date", { ascending: false, nullsFirst: false }).order("created_at", { ascending: false });
+
+  const result = await orderedQuery;
+
+  if (result.error && isMissingCompatibilityColumn(result.error) && columns.includes("serial_no")) {
+    return selectBillingRecords(admin, organisationId, access, billingSelectColumns.replace("serial_no,", ""));
+  }
+
+  return result;
 }
 
 function loadGstatMatters(admin: ReturnType<typeof createAdminClient>, access: AccessScope) {
@@ -736,6 +795,7 @@ function cleanRecord(record: BillingRecord, userId: string, organisationId: stri
     receiving_status: text(record.receiving_status) || "Pending",
     registration_type: text(record.registration_type),
     remarks: text(record.remarks),
+    serial_no: record.id && record.serial_no ? Number(record.serial_no) : undefined,
     sgst,
     source_module: linkedMatterId ? "gstat" : text(record.source_module) || "manual",
     total,
@@ -763,7 +823,7 @@ function cleanRecord(record: BillingRecord, userId: string, organisationId: stri
 function isMissingCompatibilityColumn(error: unknown) {
   const message = isRecord(error) ? String(error.message ?? "") : String(error ?? "");
 
-  return ["address", "include_ope_in_fees", "place_of_supply", "registration_type", "receiving_date"].some((column) =>
+  return ["address", "include_ope_in_fees", "place_of_supply", "registration_type", "receiving_date", "serial_no"].some((column) =>
     message.includes(column)
   );
 }
@@ -775,6 +835,7 @@ function stripCompatibilityColumns<T extends Record<string, unknown>>(record: T)
     place_of_supply: _placeOfSupply,
     receiving_date: _receivingDate,
     registration_type: _registrationType,
+    serial_no: _serialNo,
     ...compatibleRecord
   } = record;
 
@@ -820,7 +881,8 @@ function preserveAccountsOnlyFields<T extends Record<string, unknown>>(
     memo_date: existingRecord.memo_date ?? null,
     memo_no: text(existingRecord.memo_no),
     receiving_date: existingRecord.receiving_date ?? null,
-    receiving_status: text(existingRecord.receiving_status) || "Pending"
+    receiving_status: text(existingRecord.receiving_status) || "Pending",
+    serial_no: existingRecord.serial_no ?? nextRecord.serial_no
   };
 
   return cleaned;
@@ -1059,12 +1121,21 @@ function normalizeImportAction(value: unknown) {
 
 function findMatchingBillingRecord(rows: StoredBillingRecord[], incoming: BillingRecord) {
   const incomingId = normalizeLookupValue(incoming.id);
+  const incomingSerial = Number(incoming.serial_no);
 
   if (incomingId) {
     const matchedById = rows.find((row) => normalizeLookupValue(row.id) === incomingId);
 
     if (matchedById) {
       return matchedById;
+    }
+  }
+
+  if (Number.isFinite(incomingSerial) && incomingSerial > 0) {
+    const matchedBySerial = rows.find((row) => Number(row.serial_no) === incomingSerial);
+
+    if (matchedBySerial) {
+      return matchedBySerial;
     }
   }
 
