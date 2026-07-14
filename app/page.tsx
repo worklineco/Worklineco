@@ -6,6 +6,7 @@ import {
   Building2,
   BriefcaseBusiness,
   BookOpenCheck,
+  CalendarDays,
   ClipboardCheck,
   Wrench,
   FileText,
@@ -33,6 +34,7 @@ const navigation = [
   { href: "/gst", icon: ClipboardCheck, label: "GST Tracker", tone: "bg-amber-100 text-amber-800" },
   { href: "/gstat", icon: Scale, label: "GSTAT", tone: "bg-fuchsia-100 text-fuchsia-800" },
   { href: "/billing", icon: ReceiptText, label: "Billing", tone: "bg-lime-100 text-lime-800" },
+  { href: "/meeting-room", icon: CalendarDays, label: "Meeting Room", tone: "bg-cyan-100 text-cyan-800" },
   { href: "/taskline", icon: ListChecks, label: "TaskLine", tone: "bg-rose-100 text-rose-800" },
   { href: "/tools", icon: Wrench, label: "Tools", tone: "bg-indigo-100 text-indigo-800" },
   { href: "/dco-policies", icon: BookOpenCheck, label: "DCo Policies", tone: "bg-blue-100 text-blue-800" },
@@ -48,26 +50,48 @@ const productFocus = [
     description: "Track GSTINs, return periods, filing status, due dates, ARN details, and portal source in one focused workspace.",
     href: "/gst",
     icon: ClipboardCheck,
-    label: "Upcoming",
+    label: "Tracker",
     target: "_blank",
     title: "GST Tracker",
     tone: "from-amber-300 via-orange-300 to-rose-300"
   },
   {
-    action: "Prepare workspace",
-    description: "GSTAT matters, appeal stages, hearing dates, documents, and action ownership will sit here as the next priority.",
+    action: "Open register",
+    description: "Manage appeal stages, hearing dates, documents, billing links, and action ownership for GSTAT matters.",
     href: "/gstat",
     icon: Scale,
     label: "Now live",
     target: "_blank",
     title: "GSTAT",
     tone: "from-teal-300 via-sky-300 to-fuchsia-300"
+  },
+  {
+    action: "Open billing",
+    description: "Maintain firm-wide billing, GSTAT links, receiving status, audit trail, imports, and trash recovery.",
+    href: "/billing",
+    icon: ReceiptText,
+    label: "Firm-wide",
+    target: "_blank",
+    title: "Billing",
+    tone: "from-lime-200 via-emerald-200 to-teal-300"
+  },
+  {
+    action: "Book a room",
+    description: "Reserve meeting rooms by floor, prevent clashes, and keep the day board visible for office scheduling.",
+    href: "/meeting-room",
+    icon: CalendarDays,
+    label: "Office",
+    target: "_blank",
+    title: "Meeting Room",
+    tone: "from-cyan-200 via-sky-200 to-indigo-200"
   }
 ];
 
 const supportingAreas = [
-  { icon: FileText, label: "Documents", text: "Organised filing material and working papers." },
-  { icon: Gavel, label: "Litigation", text: "Matter movement and responsibility tracking." }
+  { icon: Building2, label: "Client Records", text: "Central client master for GSTIN, registration, contacts, and billing lookup." },
+  { icon: FileText, label: "Documents", text: "Reusable formats, filing material, and working papers." },
+  { icon: Gavel, label: "Litigation", text: "Matter movement, responsibility tracking, and billing linkage." },
+  { icon: ListChecks, label: "Tasks", text: "Daily follow-ups, team ownership, and operating discipline." }
 ];
 
 export default function Home() {
@@ -147,20 +171,20 @@ export default function Home() {
                   WorkLine Co workspace
                 </div>
                 <h1 className="mt-4 max-w-3xl text-4xl font-black leading-tight text-slate-950 sm:text-5xl">
-                  GSTAT matters, filings, and responsibility in one workspace.
+                  A firm-wide operating workspace for matters, billing, clients, and office scheduling.
                 </h1>
                 <p className="mt-4 max-w-2xl text-base font-semibold leading-7 text-slate-600">
-                  Track appeals, documents, hearings, and team ownership without clutter.
+                  Run professional-service work from one place: client records, GST/GSTAT, billing, tasks, documents, and meeting room bookings.
                 </p>
               </div>
 
               <div className="rounded-3xl border border-white/15 bg-slate-950 p-5 text-white shadow-[0_18px_50px_rgba(15,23,42,0.20)]">
                 <p className="text-xs font-black uppercase tracking-[0.16em] text-teal-200">
-                  Current priority
+                  Current workspace
                 </p>
-                <h2 className="mt-3 text-3xl font-black">GSTAT</h2>
+                <h2 className="mt-3 text-3xl font-black">Firm Operations</h2>
                 <p className="mt-3 text-sm font-semibold leading-6 text-slate-300">
-                  The compliance and appeals workspace is the primary product surface.
+                  WorkLine now brings compliance, litigation, billing, client master data, and office coordination into one product surface.
                 </p>
               </div>
             </div>
