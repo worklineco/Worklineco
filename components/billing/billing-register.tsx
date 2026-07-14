@@ -185,8 +185,8 @@ const billingColumns: BillingColumn[] = [
   { field: "gstin", label: "GSTIN", type: "text", width: 160 },
   { field: "client", label: "Client", type: "text", width: 220 },
   { field: "place_of_supply", label: "Place of Supply", type: "text", width: 175 },
-  { field: "registration_type", label: "Registration Type", type: "text", width: 170 },
   { field: "address", label: "Address", type: "text", width: 260 },
+  { field: "registration_type", label: "Registration Type", type: "text", width: 170 },
   { field: "poc_name", label: "POC", type: "text", width: 145 },
   { field: "poc_mobile", label: "POC Mobile", type: "text", width: 135 },
   { field: "poc_email", label: "POC Email", type: "text", width: 200 },
@@ -222,8 +222,8 @@ const importHeaders: Array<{ field: BillingField; label: string }> = [
   { field: "gstin", label: "GSTIN" },
   { field: "client", label: "Client" },
   { field: "place_of_supply", label: "Place of Supply" },
-  { field: "registration_type", label: "Registration Type" },
   { field: "address", label: "Address" },
+  { field: "registration_type", label: "Registration Type" },
   { field: "poc_name", label: "POC Name" },
   { field: "poc_mobile", label: "POC Mobile" },
   { field: "poc_email", label: "POC Email" },
@@ -2112,12 +2112,22 @@ function saveBillingColumnLayout(layout: BillingColumnLayout) {
 function normalizeBillingColumnLayout(layout: Partial<BillingColumnLayout>): BillingColumnLayout {
   const knownColumnKeys = new Set(defaultBillingColumnOrder);
   const savedOrder = Array.isArray(layout.order) ? layout.order.filter((key) => knownColumnKeys.has(key)) : [];
-  const order = [...savedOrder, ...defaultBillingColumnOrder.filter((key) => !savedOrder.includes(key))];
+  const order = pinBillingColumnOrder([...savedOrder, ...defaultBillingColumnOrder.filter((key) => !savedOrder.includes(key))]);
   const hiddenColumnKeys = Array.isArray(layout.hiddenColumnKeys)
-    ? layout.hiddenColumnKeys.filter((key) => knownColumnKeys.has(key) && key !== "actions")
+    ? layout.hiddenColumnKeys.filter((key) => knownColumnKeys.has(key) && key !== "actions" && key !== "serial_no")
     : [];
 
   return { hiddenColumnKeys, order };
+}
+
+function pinBillingColumnOrder(order: string[]) {
+  const withoutPinned = order.filter((key) => !["address", "place_of_supply", "serial_no"].includes(key));
+  const clientIndex = withoutPinned.indexOf("client");
+  const insertAt = clientIndex >= 0 ? clientIndex + 1 : 0;
+
+  withoutPinned.splice(insertAt, 0, "place_of_supply", "address");
+
+  return ["serial_no", ...withoutPinned.filter((key) => key !== "serial_no")];
 }
 
 function normalizeGstin(value: unknown) {
