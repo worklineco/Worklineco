@@ -11,6 +11,7 @@ type BillingRecord = {
   client?: string;
   cost_center?: string;
   description?: string;
+  escalation_1?: string;
   group_name?: string;
   gstin?: string;
   gstat_appeal_id?: string | null;
@@ -95,6 +96,7 @@ const billingSelectColumns = [
   "poc_mobile",
   "poc_email",
   "description",
+  "escalation_1",
   "amount",
   "cgst",
   "sgst",
@@ -209,8 +211,9 @@ export async function GET(request: Request) {
   }
 
   const access = getAccessScope(auth.user);
+  const searchParams = new URL(request.url).searchParams;
 
-  if (new URL(request.url).searchParams.get("scope") === "activity") {
+  if (searchParams.get("scope") === "activity") {
     const [auditLogs, trashRecords] = await Promise.all([
       loadAuditLogs(admin, organisation.organisationId, access),
       loadTrashRecords(admin, organisation.organisationId, access)
@@ -222,8 +225,9 @@ export async function GET(request: Request) {
     });
   }
 
+  const loadRecords = searchParams.get("fast") === "1" ? loadBillingRecordsFast : loadBillingRecords;
   const [records, matters, masters] = await Promise.all([
-    loadBillingRecords(admin, organisation.organisationId, access),
+    loadRecords(admin, organisation.organisationId, access),
     loadGstatMatters(admin, access),
     loadMasters(admin, organisation.organisationId)
   ]);
@@ -648,6 +652,20 @@ function loadBillingRecords(
   return fetchAllBillingRecords(admin, organisationId, access, billingSelectColumns);
 }
 
+async function loadBillingRecordsFast(
+  admin: ReturnType<typeof createAdminClient>,
+  organisationId: string,
+  access: AccessScope
+) {
+  const result = await selectBillingRecordsPage(admin, organisationId, access, billingSelectColumns, 0, fetchBatchSize - 1);
+
+  if (result.error && isMissingCompatibilityColumn(result.error)) {
+    return selectBillingRecordsPage(admin, organisationId, access, fallbackBillingSelectColumns, 0, fetchBatchSize - 1);
+  }
+
+  return result;
+}
+
 async function fetchAllBillingRecords(
   admin: ReturnType<typeof createAdminClient>,
   organisationId: string,
@@ -877,6 +895,7 @@ function cleanRecord(
     client: text(record.client),
     cost_center: text(record.cost_center),
     description: text(record.description),
+    escalation_1: text(record.escalation_1),
     group_name: text(record.group_name),
     gstin: text(record.gstin),
     gstat_appeal_id: linkedMatterId || null,
@@ -930,7 +949,7 @@ function cleanRecord(
 function isMissingCompatibilityColumn(error: unknown) {
   const message = isRecord(error) ? String(error.message ?? "") : String(error ?? "");
 
-  return ["address", "include_ope_in_fees", "place_of_supply", "registration_type", "receiving_date", "serial_no"].some((column) =>
+  return ["address", "escalation_1", "include_ope_in_fees", "place_of_supply", "registration_type", "receiving_date", "serial_no"].some((column) =>
     message.includes(column)
   );
 }
@@ -939,6 +958,7 @@ function stripCompatibilityColumns<T extends Record<string, unknown>>(record: T)
   const {
     include_ope_in_fees: _includeOpeInFees,
     address: _address,
+    escalation_1: _escalation1,
     place_of_supply: _placeOfSupply,
     receiving_date: _receivingDate,
     registration_type: _registrationType,

@@ -21,6 +21,7 @@ create table if not exists public.firm_billing_records (
   poc_name text,
   poc_mobile text,
   poc_email text,
+  escalation_1 text,
   description text,
   amount numeric not null default 0,
   cgst numeric not null default 0,
@@ -98,6 +99,9 @@ add column if not exists address text;
 
 alter table public.firm_billing_records
 add column if not exists receiving_date date;
+
+alter table public.firm_billing_records
+add column if not exists escalation_1 text;
 
 create index if not exists firm_billing_records_team_idx
 on public.firm_billing_records (organisation_id, owner_team);

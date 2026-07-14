@@ -29,6 +29,7 @@ type BillingRecord = {
   place_of_supply: string;
   address: string;
   person_authorised: string;
+  escalation_1: string;
   poc_email: string;
   poc_mobile: string;
   poc_name: string;
@@ -114,6 +115,7 @@ const emptyRecord: BillingRecord = {
   place_of_supply: "",
   address: "",
   person_authorised: "",
+  escalation_1: "",
   poc_email: "",
   poc_mobile: "",
   poc_name: "",
@@ -187,9 +189,10 @@ const billingColumns: BillingColumn[] = [
   { field: "place_of_supply", label: "Place of Supply", type: "text", width: 175 },
   { field: "address", label: "Address", type: "text", width: 260 },
   { field: "registration_type", label: "Registration Type", type: "text", width: 170 },
-  { field: "poc_name", label: "POC", type: "text", width: 145 },
-  { field: "poc_mobile", label: "POC Mobile", type: "text", width: 135 },
-  { field: "poc_email", label: "POC Email", type: "text", width: 200 },
+  { field: "poc_name", label: "SPOC", type: "text", width: 145 },
+  { field: "poc_mobile", label: "SPOC Mobile", type: "text", width: 135 },
+  { field: "poc_email", label: "SPOC Email", type: "text", width: 200 },
+  { field: "escalation_1", label: "Escalation 1", type: "text", width: 170 },
   { field: "description", label: "Description", type: "text", width: 260 },
   { field: "amount", label: "Amount", type: "money", width: 118 },
   { field: "cgst", label: "CGST", type: "money", width: 104 },
@@ -204,7 +207,7 @@ const billingColumns: BillingColumn[] = [
   { field: "memo_date", label: "Memo Date", type: "date", width: 132 },
   { field: "invoice_no", label: "Invoice No.", type: "text", width: 140 },
   { field: "invoice_date", label: "Invoice Date", type: "date", width: 132 },
-  { field: "receiving_status", label: "Receiving", type: "select", width: 138 },
+  { field: "receiving_status", label: "Receipt Status", type: "select", width: 150 },
   { field: "receiving_date", label: "Receiving Date", type: "date", width: 142 },
   { field: "remarks", label: "Remarks", type: "text", width: 220 },
   { field: "gstat_link", label: "GSTAT Link", width: 170 },
@@ -224,9 +227,10 @@ const importHeaders: Array<{ field: BillingField; label: string }> = [
   { field: "place_of_supply", label: "Place of Supply" },
   { field: "address", label: "Address" },
   { field: "registration_type", label: "Registration Type" },
-  { field: "poc_name", label: "POC Name" },
-  { field: "poc_mobile", label: "POC Mobile" },
-  { field: "poc_email", label: "POC Email" },
+  { field: "poc_name", label: "SPOC Name" },
+  { field: "poc_mobile", label: "SPOC Mobile" },
+  { field: "poc_email", label: "SPOC Email" },
+  { field: "escalation_1", label: "Escalation 1" },
   { field: "description", label: "Description" },
   { field: "amount", label: "Amount" },
   { field: "cgst", label: "CGST" },
@@ -240,7 +244,7 @@ const importHeaders: Array<{ field: BillingField; label: string }> = [
   { field: "memo_date", label: "Memo Date" },
   { field: "invoice_no", label: "Invoice No." },
   { field: "invoice_date", label: "Invoice Date" },
-  { field: "receiving_status", label: "Receiving Status" },
+  { field: "receiving_status", label: "Receipt Status" },
   { field: "receiving_date", label: "Receiving Date" },
   { field: "remarks", label: "Remarks" }
 ];
@@ -248,7 +252,10 @@ const importHeaderAliases: Partial<Record<BillingField, string[]>> = {
   amount: ["Professional Fee", "Professional Fees", "Amount"],
   billing_status: ["Billing Status", "Billing"],
   include_ope_in_fees: ["Include OPE in Professional Fees", "Include OPE in Fee"],
-  receiving_status: ["Receiving Status", "Receiving"],
+  poc_email: ["POC Email", "SPOC Email"],
+  poc_mobile: ["POC Mobile", "SPOC Mobile"],
+  poc_name: ["POC Name", "POC", "SPOC Name", "SPOC"],
+  receiving_status: ["Receipt Status", "Receiving Status", "Receiving"],
   voucher_type: ["Voucher Type", "Voucher"]
 };
 const importActionColumn = "Import Action";
@@ -278,6 +285,7 @@ export function BillingRegister() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isColumnOptionsOpen, setIsColumnOptionsOpen] = useState(false);
   const [isActivityLoading, setIsActivityLoading] = useState(false);
+  const [isFullTableLoading, setIsFullTableLoading] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [matters, setMatters] = useState<GstatMatter[]>([]);
   const [message, setMessage] = useState("");
@@ -444,7 +452,7 @@ export function BillingRegister() {
     setMessage("");
 
     try {
-      const response = await fetch("/api/billing?scope=register", { cache: "no-store" });
+      const response = await fetch("/api/billing?scope=register&fast=1", { cache: "no-store" });
       const result = (await response.json()) as {
         access?: AccessScope;
         error?: string;
@@ -462,11 +470,41 @@ export function BillingRegister() {
       setMasters({ ...defaultMasters, ...(result.masters ?? {}) });
       setMatters(result.matters ?? []);
       setRecords((result.records ?? []).map(normalizeRecord));
+      void loadFullBilling();
     } catch (error) {
       console.error("Billing load error:", error);
       setMessage("Could not load billing register.");
     } finally {
       setIsLoading(false);
+    }
+  }
+
+  async function loadFullBilling() {
+    setIsFullTableLoading(true);
+
+    try {
+      const response = await fetch("/api/billing?scope=register", { cache: "no-store" });
+      const result = (await response.json()) as {
+        access?: AccessScope;
+        error?: string;
+        masters?: Record<string, string[]>;
+        matters?: GstatMatter[];
+        records?: BillingRecord[];
+      };
+
+      if (!response.ok) {
+        console.error("Full billing load failed:", result.error);
+        return;
+      }
+
+      setAccess(result.access ?? access);
+      setMasters({ ...defaultMasters, ...(result.masters ?? {}) });
+      setMatters(result.matters ?? []);
+      setRecords((result.records ?? []).map(normalizeRecord));
+    } catch (error) {
+      console.error("Full billing load error:", error);
+    } finally {
+      setIsFullTableLoading(false);
     }
   }
 
@@ -787,11 +825,12 @@ export function BillingRegister() {
       GSTIN: record.gstin,
       Client: record.client,
       "Place of Supply": record.place_of_supply,
-      "Registration Type": record.registration_type,
       Address: record.address,
-      "POC Name": record.poc_name,
-      "POC Mobile": record.poc_mobile,
-      "POC Email": record.poc_email,
+      "Registration Type": record.registration_type,
+      "SPOC Name": record.poc_name,
+      "SPOC Mobile": record.poc_mobile,
+      "SPOC Email": record.poc_email,
+      "Escalation 1": record.escalation_1,
       Description: record.description,
       Amount: record.amount,
       CGST: record.cgst,
@@ -806,7 +845,7 @@ export function BillingRegister() {
       "Memo Date": formatDateForExport(record.memo_date),
       "Invoice No.": record.invoice_no,
       "Invoice Date": formatDateForExport(record.invoice_date),
-      "Receiving Status": record.receiving_status,
+      "Receipt Status": record.receiving_status,
       "Receiving Date": formatDateForExport(record.receiving_date),
       Remarks: record.remarks,
       "GSTAT Link": getMatterLabel(record, matters)
@@ -843,6 +882,7 @@ export function BillingRegister() {
           <h2 className="mt-1 text-2xl font-black text-slate-950">Billing Register</h2>
           <p className="mt-1 text-sm font-bold text-slate-500">
             {isLoading ? "Loading" : `${filteredRecords.length} visible of ${records.length} rows`} - total {formatMoney(totals.billed)}
+            {isFullTableLoading ? " - loading full table..." : ""}
           </p>
         </div>
 
@@ -1378,6 +1418,7 @@ function BillingAddForm({
             <FormInput field="place_of_supply" label="Place of Supply" onChange={onChange} value={draft.place_of_supply} />
             <FormInput field="registration_type" label="Registration Type" onChange={onChange} value={draft.registration_type} />
             <FormInput field="address" label="Address" onChange={onChange} value={draft.address} wide />
+            <FormInput field="escalation_1" label="Escalation 1" onChange={onChange} value={draft.escalation_1} />
             <FormInput field="group_name" label="Group" onChange={onChange} value={draft.group_name} />
             <FormInput field="description" label="Description" onChange={onChange} value={draft.description} wide />
             <FormInput field="amount" label="Professional Fee" onChange={onChange} type="number" value={String(draft.amount || "")} />
@@ -1403,7 +1444,7 @@ function BillingAddForm({
             <FormInput field="invoice_no" label="Invoice No." onChange={onChange} readOnly={!access.canEditAccountsFields} value={draft.invoice_no} />
             <FormInput field="invoice_date" label="Invoice Date" onChange={onChange} placeholder="dd-mm-yyyy" readOnly={!access.canEditAccountsFields} value={formatDateForInput(draft.invoice_date)} />
             <label>
-              <span className="text-[10px] font-black uppercase text-slate-500">Receiving</span>
+              <span className="text-[10px] font-black uppercase text-slate-500">Receipt Status</span>
               <select
                 className={formControlClass}
                 onChange={(event) => onChange("receiving_status", event.target.value)}
@@ -1415,7 +1456,7 @@ function BillingAddForm({
                 ))}
               </select>
             </label>
-            <FormInput field="receiving_date" label="Receiving Date" onChange={onChange} placeholder="dd-mm-yyyy" readOnly={!access.canEditAccountsFields} value={formatDateForInput(draft.receiving_date)} />
+            <FormInput field="receiving_date" label="Receipt Date" onChange={onChange} placeholder="dd-mm-yyyy" readOnly={!access.canEditAccountsFields} value={formatDateForInput(draft.receiving_date)} />
             <FormInput field="remarks" label="Remarks" onChange={onChange} value={draft.remarks} wide />
           </div>
         </div>
@@ -1487,7 +1528,7 @@ function BillingSummaryPanel({
           <p className="text-xs font-bold text-slate-500">total billing value</p>
         </div>
         <SummaryGroup items={summary.billingStatus} onSelect={onFilterStatus} title="Billing Status" />
-        <SummaryGroup items={summary.receivingStatus} title="Receiving Status" />
+        <SummaryGroup items={summary.receivingStatus} title="Receipt Status" />
         <SummaryGroup items={summary.sources} title="Source" />
       </div>
     </section>
