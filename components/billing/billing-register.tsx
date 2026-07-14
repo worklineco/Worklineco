@@ -246,6 +246,7 @@ const importHeaders: Array<{ field: BillingField; label: string }> = [
 ];
 const importActionColumn = "Import Action";
 const importActionOptions = ["Add", "Update", "Delete"];
+const billingImportBatchSize = 100;
 const billingPageSize = 100;
 const accountsOnlyFields = new Set<BillingField>([
   "invoice_date",
@@ -740,38 +741,30 @@ export function BillingRegister() {
       };
     }).filter((row) => row.id || row.serial_no || row.client || row.description || row.invoice_no);
 
-    const response = await fetch("/api/billing", {
-      body: JSON.stringify({ action: "import", rows: billingRows }),
-      headers: { "Content-Type": "application/json" },
-      method: "POST"
-    });
-    const result = (await response.json()) as {
-      access?: AccessScope;
-      auditLogs?: AuditLog[];
-      error?: string;
-      importSummary?: {
-        added: number;
-        deleted: number;
-        skippedDeletes: number;
-        skippedUpdates: number;
-        updated: number;
-      };
-      matters?: GstatMatter[];
-      records?: BillingRecord[];
-      trashRecords?: TrashRecord[];
-    };
-
-    if (!response.ok) {
-      setMessage(result.error ?? "Could not import billing rows.");
+    if (!billingRows.length) {
+      setMessage(`No billing rows found in ${file.name}.`);
       return;
     }
 
-    setAccess(result.access ?? access);
-    setAuditLogs(result.auditLogs ?? []);
-    setMatters(result.matters ?? []);
-    setRecords((result.records ?? []).map(normalizeRecord));
-    setTrashRecords(result.trashRecords ?? []);
-    setMessage(formatImportSummary(file.name, billingRows.length, result.importSummary));
+    setMessage(`Importing ${billingRows.length} billing rows from ${file.name}...`);
+
+    const summary = emptyImportSummary();
+
+    try {
+      for (let index = 0; index < billingRows.length; index += billingImportBatchSize) {
+        const batch = billingRows.slice(index, index + billingImportBatchSize);
+        const result = await postBillingImportBatch(batch);
+        mergeImportSummary(summary, result.importSummary);
+        setMessage(`Importing ${file.name}: ${Math.min(index + billingImportBatchSize, billingRows.length)} of ${billingRows.length} rows processed...`);
+      }
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not import billing rows.");
+      return;
+    }
+
+    await loadBilling();
+    void loadBillingActivity();
+    setMessage(formatImportSummary(file.name, billingRows.length, summary));
   }
 
   function exportWorkbook() {
@@ -2040,6 +2033,54 @@ function formatImportSummary(
   }
 
   return `${parts.join(" - ")}.`;
+}
+
+function emptyImportSummary() {
+  return {
+    added: 0,
+    deleted: 0,
+    skippedDeletes: 0,
+    skippedUpdates: 0,
+    updated: 0
+  };
+}
+
+function mergeImportSummary(
+  target: ReturnType<typeof emptyImportSummary>,
+  source?: Partial<ReturnType<typeof emptyImportSummary>>
+) {
+  target.added += Number(source?.added ?? 0);
+  target.deleted += Number(source?.deleted ?? 0);
+  target.skippedDeletes += Number(source?.skippedDeletes ?? 0);
+  target.skippedUpdates += Number(source?.skippedUpdates ?? 0);
+  target.updated += Number(source?.updated ?? 0);
+}
+
+async function postBillingImportBatch(rows: BillingRecord[]) {
+  const response = await fetch("/api/billing", {
+    body: JSON.stringify({ action: "import", refresh: false, rows }),
+    headers: { "Content-Type": "application/json" },
+    method: "POST"
+  });
+  const body = await response.text();
+  const result = safeParseJson<{
+    error?: string;
+    importSummary?: ReturnType<typeof emptyImportSummary>;
+  }>(body);
+
+  if (!response.ok) {
+    throw new Error(result.error || body || `Import failed with status ${response.status}.`);
+  }
+
+  return result;
+}
+
+function safeParseJson<T>(value: string): T {
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return {} as T;
+  }
 }
 
 function normalizeImportAction(value: unknown) {

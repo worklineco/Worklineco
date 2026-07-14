@@ -254,6 +254,7 @@ export async function POST(request: Request) {
     action?: string;
     master?: { label?: string; option_type?: string };
     record?: BillingRecord;
+    refresh?: boolean;
     rows?: BillingRecord[];
     trashId?: string;
   };
@@ -431,18 +432,24 @@ export async function POST(request: Request) {
       skipped_updates: updateResults.filter((result) => result.skipped).length,
       updated: updateRows.length - updateResults.filter((result) => result.skipped).length
     });
+    const importSummary = {
+      added: addRows.length,
+      deleted: uniqueDeleteMatches.length,
+      skippedDeletes,
+      skippedUpdates: updateResults.filter((result) => result.skipped).length,
+      updated: updateRows.length - updateResults.filter((result) => result.skipped).length
+    };
+
+    if (payload.refresh === false) {
+      return NextResponse.json({ importSummary });
+    }
+
     const response = await loadResponse(admin, organisation.organisationId, access);
     const body = await response.json();
 
     return NextResponse.json({
       ...body,
-      importSummary: {
-        added: addRows.length,
-        deleted: uniqueDeleteMatches.length,
-        skippedDeletes,
-        skippedUpdates: updateResults.filter((result) => result.skipped).length,
-        updated: updateRows.length - updateResults.filter((result) => result.skipped).length
-      }
+      importSummary
     });
   }
 
