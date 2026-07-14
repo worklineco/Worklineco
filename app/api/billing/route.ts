@@ -1036,7 +1036,7 @@ function getAccessScope(user: User): AccessScope {
   const role = text(user.user_metadata?.role).toLowerCase();
   const team = text(user.user_metadata?.team);
   const canViewAll = role === "partner" || role === "accounts" || role === "owner" || role === "admin";
-  const canEditAccountsFields = role === "accounts" || role.includes("account");
+  const canEditAccountsFields = role === "partner" || role.includes("partner") || role === "accounts" || role.includes("account");
 
   return {
     canEditAccountsFields,
