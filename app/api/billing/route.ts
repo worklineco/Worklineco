@@ -60,6 +60,7 @@ type GstatMatter = {
   row_number: number;
 };
 type AccessScope = {
+  canEditAccountsFields: boolean;
   canManageMasters: boolean;
   canViewAll: boolean;
   role: string;
@@ -262,9 +263,10 @@ export async function POST(request: Request) {
           return { skipped: true };
         }
 
+        const updateRecord = preserveAccountsOnlyFields(row.cleaned, matched, access);
         let saved = await admin
           .from(tableName)
-          .update({ ...row.cleaned, version_no: Number(matched.version_no ?? 1) + 1 })
+          .update({ ...updateRecord, version_no: Number(matched.version_no ?? 1) + 1 })
           .eq("id", matched.id)
           .eq("organisation_id", organisation.organisationId)
           .select("*")
@@ -273,7 +275,7 @@ export async function POST(request: Request) {
         if (saved.error && isMissingCompatibilityColumn(saved.error)) {
           saved = await admin
             .from(tableName)
-            .update(stripCompatibilityColumns({ ...row.cleaned, version_no: Number(matched.version_no ?? 1) + 1 }))
+            .update(stripCompatibilityColumns({ ...updateRecord, version_no: Number(matched.version_no ?? 1) + 1 }))
             .eq("id", matched.id)
             .eq("organisation_id", organisation.organisationId)
             .select("*")
@@ -389,9 +391,10 @@ export async function POST(request: Request) {
       );
     }
 
+    const updateRecord = preserveAccountsOnlyFields(cleaned, existing.data as StoredBillingRecord, access);
     let saved = await admin
       .from(tableName)
-      .update({ ...cleaned, version_no: Number(existing.data.version_no ?? 1) + 1 })
+      .update({ ...updateRecord, version_no: Number(existing.data.version_no ?? 1) + 1 })
       .eq("id", record.id)
       .eq("organisation_id", organisation.organisationId)
       .select("*")
@@ -400,7 +403,7 @@ export async function POST(request: Request) {
     if (saved.error && isMissingCompatibilityColumn(saved.error)) {
       saved = await admin
         .from(tableName)
-        .update(stripCompatibilityColumns({ ...cleaned, version_no: Number(existing.data.version_no ?? 1) + 1 }))
+        .update(stripCompatibilityColumns({ ...updateRecord, version_no: Number(existing.data.version_no ?? 1) + 1 }))
         .eq("id", record.id)
         .eq("organisation_id", organisation.organisationId)
         .select("*")
@@ -692,7 +695,7 @@ function cleanRecord(record: BillingRecord, userId: string, organisationId: stri
   const ownerTeam = access.canViewAll ? text(record.owner_team) || access.team : access.team;
   const linkedMatterId = text(record.gstat_appeal_id);
 
-  return {
+  const cleaned = {
     amount,
     billing_status: text(record.billing_status) || "Draft",
     cgst,
@@ -731,6 +734,20 @@ function cleanRecord(record: BillingRecord, userId: string, organisationId: stri
     updated_by: userId,
     voucher_type: text(record.voucher_type) || "Proforma Invoice",
     created_by: record.id ? undefined : userId
+  };
+
+  if (access.canEditAccountsFields || record.id) {
+    return cleaned;
+  }
+
+  return {
+    ...cleaned,
+    invoice_date: null,
+    invoice_no: "",
+    memo_date: null,
+    memo_no: "",
+    receiving_date: null,
+    receiving_status: "Pending"
   };
 }
 
@@ -778,12 +795,36 @@ function canAccessRecord(record: StoredBillingRecord, access: AccessScope) {
   return access.canViewAll || !access.team || record.owner_team === access.team;
 }
 
+function preserveAccountsOnlyFields<T extends Record<string, unknown>>(
+  nextRecord: T,
+  existingRecord: Record<string, unknown>,
+  access: AccessScope
+) {
+  if (access.canEditAccountsFields) {
+    return nextRecord;
+  }
+
+  const cleaned = {
+    ...nextRecord,
+    invoice_date: existingRecord.invoice_date ?? null,
+    invoice_no: text(existingRecord.invoice_no),
+    memo_date: existingRecord.memo_date ?? null,
+    memo_no: text(existingRecord.memo_no),
+    receiving_date: existingRecord.receiving_date ?? null,
+    receiving_status: text(existingRecord.receiving_status) || "Pending"
+  };
+
+  return cleaned;
+}
+
 function getAccessScope(user: User): AccessScope {
   const role = text(user.user_metadata?.role).toLowerCase();
   const team = text(user.user_metadata?.team);
   const canViewAll = role === "partner" || role === "accounts" || role === "owner" || role === "admin";
+  const canEditAccountsFields = role === "accounts" || role.includes("account");
 
   return {
+    canEditAccountsFields,
     canManageMasters: canViewAll || role.includes("account"),
     canViewAll,
     role,

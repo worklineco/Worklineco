@@ -52,6 +52,7 @@ type GstatMatter = {
   row_number: number;
 };
 type AccessScope = {
+  canEditAccountsFields: boolean;
   canManageMasters: boolean;
   canViewAll: boolean;
   role: string;
@@ -240,10 +241,18 @@ const importHeaders: Array<{ field: BillingField; label: string }> = [
 ];
 const importActionColumn = "Import Action";
 const importActionOptions = ["Add", "Update", "Delete"];
+const accountsOnlyFields = new Set<BillingField>([
+  "invoice_date",
+  "invoice_no",
+  "memo_date",
+  "memo_no",
+  "receiving_date",
+  "receiving_status"
+]);
 
 export function BillingRegister() {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [access, setAccess] = useState<AccessScope>({ canManageMasters: false, canViewAll: false, role: "", team: "" });
+  const [access, setAccess] = useState<AccessScope>({ canEditAccountsFields: false, canManageMasters: false, canViewAll: false, role: "", team: "" });
   const [addDraft, setAddDraft] = useState<BillingRecord | null>(null);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [clientRecords, setClientRecords] = useState<ClientRegisterRow[]>([]);
@@ -263,6 +272,7 @@ export function BillingRegister() {
   const [trashRecords, setTrashRecords] = useState<TrashRecord[]>([]);
   const [viewMode, setViewMode] = useState<BillingView>("register");
   const [filters, setFilters] = useState({ search: "", status: "", team: "", source: "" });
+  const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
   const [masters, setMasters] = useState(defaultMasters);
 
   const mergedMasters = useMemo(
@@ -310,14 +320,25 @@ export function BillingRegister() {
           getMatterLabel(record, matters)
         ].some((value) => String(value ?? "").toLowerCase().includes(search));
 
+      const matchesColumnFilters = visibleBillingColumns.every((column) => {
+        const filter = String(columnFilters[String(column.field)] ?? "").trim().toLowerCase();
+
+        if (!filter || column.field === "actions") {
+          return true;
+        }
+
+        return getDisplayValue(record, column, matters).toLowerCase().includes(filter);
+      });
+
       return (
         matchesSearch &&
+        matchesColumnFilters &&
         (!filters.status || record.billing_status === filters.status) &&
         (!filters.team || record.owner_team === filters.team) &&
         (!filters.source || record.source_module === filters.source)
       );
     });
-  }, [filters, matters, records]);
+  }, [columnFilters, filters, matters, records, visibleBillingColumns]);
   const selectedRecord = records.find((record) => record.id === selectedRecordId) ?? null;
   const selectedAuditLogs = selectedRecordId
     ? auditLogs.filter((log) => log.entity_id === selectedRecordId)
@@ -334,6 +355,8 @@ export function BillingRegister() {
       ),
     [filteredRecords]
   );
+  const billingSummary = useMemo(() => getBillingSummary(filteredRecords), [filteredRecords]);
+  const hasActiveColumnFilters = Object.values(columnFilters).some((value) => value.trim());
 
   useEffect(() => {
     void loadBilling();
@@ -765,6 +788,13 @@ export function BillingRegister() {
       </div>
 
       {viewMode === "register" ? (
+        <BillingSummaryPanel
+          onFilterStatus={(status) => setFilters((current) => ({ ...current, status }))}
+          summary={billingSummary}
+        />
+      ) : null}
+
+      {viewMode === "register" ? (
       <div className="mt-4 grid gap-2 lg:grid-cols-[minmax(220px,1fr)_160px_150px_140px_auto]">
         <label className="flex h-11 items-center gap-2 rounded-md border border-slate-200 bg-white px-3">
           <Search className="size-4 text-slate-400" />
@@ -831,6 +861,11 @@ export function BillingRegister() {
           <button className={buttonClass("light")} onClick={() => setIsFullscreen((current) => !current)} type="button">
             <Maximize2 className="size-4" />
           </button>
+          {hasActiveColumnFilters ? (
+            <button className={buttonClass("light")} onClick={() => setColumnFilters({})} type="button">
+              Clear column filters
+            </button>
+          ) : null}
           <input
             accept=".xlsx,.xls,.csv"
             className="hidden"
@@ -866,6 +901,26 @@ export function BillingRegister() {
                 {visibleBillingColumns.map((column) => (
                   <th className="border-r border-white/10 px-3 py-3 last:border-r-0" key={column.field}>
                     {column.label}
+                  </th>
+                ))}
+              </tr>
+              <tr className="bg-slate-900">
+                {visibleBillingColumns.map((column) => (
+                  <th className="border-r border-white/10 px-2 py-2 last:border-r-0" key={`filter-${column.field}`}>
+                    {column.field === "actions" ? null : (
+                      <input
+                        aria-label={`Filter ${column.label}`}
+                        className="h-8 w-full rounded-md border border-white/10 bg-white px-2 text-xs font-bold normal-case text-slate-950 outline-none"
+                        onChange={(event) =>
+                          setColumnFilters((current) => ({
+                            ...current,
+                            [String(column.field)]: event.target.value
+                          }))
+                        }
+                        placeholder="Filter"
+                        value={columnFilters[String(column.field)] ?? ""}
+                      />
+                    )}
                   </th>
                 ))}
               </tr>
@@ -918,6 +973,7 @@ export function BillingRegister() {
 
       {addDraft ? (
         <BillingAddForm
+          access={access}
           draft={addDraft}
           masters={mergedMasters}
           mode="create"
@@ -929,6 +985,7 @@ export function BillingRegister() {
 
       {editDraft ? (
         <BillingAddForm
+          access={access}
           draft={editDraft}
           masters={mergedMasters}
           mode="edit"
@@ -1026,7 +1083,11 @@ function BillingCell({
   const isActions = column.field === "actions";
   const isGstatLink = column.field === "gstat_link";
   const field = column.field as BillingField;
-  const isReadOnly = column.field === "total" || (!access.canViewAll && column.field === "owner_team");
+  const isAccountsOnly = accountsOnlyFields.has(field);
+  const isReadOnly =
+    column.field === "total" ||
+    (!access.canViewAll && column.field === "owner_team") ||
+    (isAccountsOnly && !access.canEditAccountsFields);
   const isEditing = Boolean(inlineEditor && inlineEditor.recordId === record.id && inlineEditor.field === field);
   const isSaving = Boolean(savingCell && savingCell.recordId === record.id && savingCell.field === field);
   const editorValue = isEditing ? inlineEditor?.value ?? "" : "";
@@ -1149,6 +1210,7 @@ function BillingCell({
 }
 
 function BillingAddForm({
+  access,
   draft,
   masters,
   mode,
@@ -1156,6 +1218,7 @@ function BillingAddForm({
   onClose,
   onSubmit
 }: {
+  access: AccessScope;
   draft: BillingRecord;
   masters: Record<string, string[]>;
   mode: "create" | "edit";
@@ -1229,11 +1292,16 @@ function BillingAddForm({
             <FormInput field="sgst" label="SGST" onChange={onChange} readOnly type="number" value={String(draft.sgst || 0)} />
             <FormInput field="igst" label="IGST" onChange={onChange} readOnly type="number" value={String(draft.igst || 0)} />
             <FormInput field="total" label="Total" onChange={onChange} readOnly type="number" value={String(draft.total || 0)} />
+            <FormInput field="memo_no" label="Memo No." onChange={onChange} readOnly={!access.canEditAccountsFields} value={draft.memo_no} />
+            <FormInput field="memo_date" label="Memo Date" onChange={onChange} placeholder="dd-mm-yyyy" readOnly={!access.canEditAccountsFields} value={formatDateForInput(draft.memo_date)} />
+            <FormInput field="invoice_no" label="Invoice No." onChange={onChange} readOnly={!access.canEditAccountsFields} value={draft.invoice_no} />
+            <FormInput field="invoice_date" label="Invoice Date" onChange={onChange} placeholder="dd-mm-yyyy" readOnly={!access.canEditAccountsFields} value={formatDateForInput(draft.invoice_date)} />
             <label>
               <span className="text-[10px] font-black uppercase text-slate-500">Receiving</span>
               <select
                 className={formControlClass}
                 onChange={(event) => onChange("receiving_status", event.target.value)}
+                disabled={!access.canEditAccountsFields}
                 value={draft.receiving_status}
               >
                 {selectOptions("receiving_status", masters).filter(Boolean).map((option) => (
@@ -1241,7 +1309,7 @@ function BillingAddForm({
                 ))}
               </select>
             </label>
-            <FormInput field="receiving_date" label="Receiving Date" onChange={onChange} placeholder="dd-mm-yyyy" value={formatDateForInput(draft.receiving_date)} />
+            <FormInput field="receiving_date" label="Receiving Date" onChange={onChange} placeholder="dd-mm-yyyy" readOnly={!access.canEditAccountsFields} value={formatDateForInput(draft.receiving_date)} />
             <FormInput field="remarks" label="Remarks" onChange={onChange} value={draft.remarks} wide />
           </div>
         </div>
@@ -1294,6 +1362,63 @@ function FormInput({
 }
 
 const formControlClass = "mt-1 h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm font-bold text-slate-900 outline-none focus:border-teal-300 focus:ring-2 focus:ring-teal-100";
+
+function BillingSummaryPanel({
+  onFilterStatus,
+  summary
+}: {
+  onFilterStatus: (status: string) => void;
+  summary: ReturnType<typeof getBillingSummary>;
+}) {
+  return (
+    <section className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-3">
+      <div className="grid gap-3 xl:grid-cols-[260px_1fr_1fr_1fr]">
+        <div className="rounded-md border border-slate-200 bg-white p-3">
+          <p className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">Summary</p>
+          <p className="mt-2 text-2xl font-black text-slate-950">{summary.rowCount}</p>
+          <p className="mt-1 text-xs font-bold text-slate-500">visible billing row{summary.rowCount === 1 ? "" : "s"}</p>
+          <p className="mt-3 text-sm font-black text-slate-950">{formatMoney(summary.total)}</p>
+          <p className="text-xs font-bold text-slate-500">total billing value</p>
+        </div>
+        <SummaryGroup items={summary.billingStatus} onSelect={onFilterStatus} title="Billing Status" />
+        <SummaryGroup items={summary.receivingStatus} title="Receiving Status" />
+        <SummaryGroup items={summary.sources} title="Source" />
+      </div>
+    </section>
+  );
+}
+
+function SummaryGroup({
+  items,
+  onSelect,
+  title
+}: {
+  items: Array<{ amount: number; count: number; label: string }>;
+  onSelect?: (label: string) => void;
+  title: string;
+}) {
+  return (
+    <div className="rounded-md border border-slate-200 bg-white p-3">
+      <p className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">{title}</p>
+      <div className="mt-2 grid gap-1.5">
+        {items.length ? items.slice(0, 8).map((item) => (
+          <button
+            className={`grid grid-cols-[minmax(0,1fr)_auto] gap-2 rounded-md px-2 py-1.5 text-left ${onSelect ? "hover:bg-slate-50" : "cursor-default"}`}
+            disabled={!onSelect}
+            key={item.label}
+            onClick={() => onSelect?.(item.label)}
+            type="button"
+          >
+            <span className="min-w-0 truncate text-xs font-black text-slate-700">{item.label || "Not set"}</span>
+            <span className="text-xs font-bold text-slate-500">{item.count} / {formatMoney(item.amount)}</span>
+          </button>
+        )) : (
+          <p className="py-3 text-xs font-bold text-slate-500">No rows.</p>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function Summary({ label, value }: { label: string; value: string }) {
   return (
@@ -1713,6 +1838,30 @@ function getDisplayValue(record: BillingRecord, column: BillingColumn, matters: 
   }
 
   return String(value ?? "");
+}
+
+function getBillingSummary(records: BillingRecord[]) {
+  return {
+    billingStatus: summarizeBy(records, (record) => record.billing_status || "Not set"),
+    receivingStatus: summarizeBy(records, (record) => record.receiving_status || "Not set"),
+    rowCount: records.length,
+    sources: summarizeBy(records, (record) => record.source_module || "manual"),
+    total: records.reduce((sum, record) => sum + toNumber(record.total), 0)
+  };
+}
+
+function summarizeBy(records: BillingRecord[], getKey: (record: BillingRecord) => string) {
+  const groups = new Map<string, { amount: number; count: number; label: string }>();
+
+  records.forEach((record) => {
+    const label = getKey(record);
+    const current = groups.get(label) ?? { amount: 0, count: 0, label };
+    current.amount += toNumber(record.total);
+    current.count += 1;
+    groups.set(label, current);
+  });
+
+  return Array.from(groups.values()).sort((first, second) => second.count - first.count || first.label.localeCompare(second.label));
 }
 
 function getMatterLabel(record: BillingRecord, matters: GstatMatter[]) {
