@@ -116,6 +116,42 @@ const billingSelectColumns = [
   "created_at",
   "updated_at"
 ].join(",");
+const fallbackBillingSelectColumns = [
+  "id",
+  "organisation_id",
+  "organisation_code",
+  "owner_team",
+  "source_module",
+  "gstat_appeal_id",
+  "cost_center",
+  "person_authorised",
+  "voucher_type",
+  "income_head",
+  "group_name",
+  "client",
+  "gstin",
+  "poc_name",
+  "poc_mobile",
+  "poc_email",
+  "description",
+  "amount",
+  "cgst",
+  "sgst",
+  "igst",
+  "total",
+  "billing_status",
+  "memo_no",
+  "memo_date",
+  "invoice_no",
+  "invoice_date",
+  "receiving_status",
+  "remarks",
+  "version_no",
+  "created_by",
+  "updated_by",
+  "created_at",
+  "updated_at"
+].join(",");
 const gstStateByCode: Record<string, string> = {
   "01": "Jammu And Kashmir",
   "02": "Himachal Pradesh",
@@ -589,8 +625,8 @@ async function selectBillingRecords(
 
   const result = await orderedQuery;
 
-  if (result.error && isMissingCompatibilityColumn(result.error) && columns.includes("serial_no")) {
-    return selectBillingRecords(admin, organisationId, access, billingSelectColumns.replace("serial_no,", ""));
+  if (result.error && isMissingCompatibilityColumn(result.error) && columns !== fallbackBillingSelectColumns) {
+    return selectBillingRecords(admin, organisationId, access, fallbackBillingSelectColumns);
   }
 
   return result;
