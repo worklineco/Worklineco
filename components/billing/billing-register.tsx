@@ -246,6 +246,7 @@ const importHeaders: Array<{ field: BillingField; label: string }> = [
 ];
 const importActionColumn = "Import Action";
 const importActionOptions = ["Add", "Update", "Delete"];
+const billingPageSize = 100;
 const accountsOnlyFields = new Set<BillingField>([
   "invoice_date",
   "invoice_no",
@@ -275,6 +276,7 @@ export function BillingRegister() {
   const [records, setRecords] = useState<BillingRecord[]>([]);
   const [savingCell, setSavingCell] = useState<InlineEditor | null>(null);
   const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null);
+  const [tablePage, setTablePage] = useState(1);
   const [trashRecords, setTrashRecords] = useState<TrashRecord[]>([]);
   const [viewMode, setViewMode] = useState<BillingView>("register");
   const [filters, setFilters] = useState({ search: "", status: "", team: "", source: "" });
@@ -363,6 +365,13 @@ export function BillingRegister() {
   );
   const billingSummary = useMemo(() => getBillingSummary(filteredRecords), [filteredRecords]);
   const hasActiveColumnFilters = Object.values(columnFilters).some((value) => value.trim());
+  const pageCount = Math.max(1, Math.ceil(filteredRecords.length / billingPageSize));
+  const pagedRecords = useMemo(() => {
+    const startIndex = (tablePage - 1) * billingPageSize;
+    return filteredRecords.slice(startIndex, startIndex + billingPageSize);
+  }, [filteredRecords, tablePage]);
+  const pageStart = filteredRecords.length ? (tablePage - 1) * billingPageSize + 1 : 0;
+  const pageEnd = Math.min(tablePage * billingPageSize, filteredRecords.length);
 
   useEffect(() => {
     void loadBilling();
@@ -383,6 +392,14 @@ export function BillingRegister() {
       order: columnOrder
     });
   }, [columnOrder, hasLoadedColumnLayout, hiddenColumnKeys]);
+
+  useEffect(() => {
+    setTablePage(1);
+  }, [columnFilters, filters.search, filters.source, filters.status, filters.team]);
+
+  useEffect(() => {
+    setTablePage((currentPage) => Math.min(currentPage, pageCount));
+  }, [pageCount]);
 
   useEffect(() => {
     setAddDraft((currentDraft) =>
@@ -943,6 +960,32 @@ export function BillingRegister() {
 
       {viewMode === "register" ? (
       <div className="mt-4">
+        <div className="mb-2 flex flex-col gap-2 text-sm font-bold text-slate-600 sm:flex-row sm:items-center sm:justify-between">
+          <p>
+            Showing {pageStart}-{pageEnd} of {filteredRecords.length} matching billing rows
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              className={buttonClass("light")}
+              disabled={tablePage <= 1}
+              onClick={() => setTablePage((currentPage) => Math.max(1, currentPage - 1))}
+              type="button"
+            >
+              Previous
+            </button>
+            <span className="rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-black uppercase text-slate-600">
+              Page {tablePage} of {pageCount}
+            </span>
+            <button
+              className={buttonClass("light")}
+              disabled={tablePage >= pageCount}
+              onClick={() => setTablePage((currentPage) => Math.min(pageCount, currentPage + 1))}
+              type="button"
+            >
+              Next
+            </button>
+          </div>
+        </div>
         <div className="overflow-auto rounded-md border border-slate-200 bg-white">
           <table className="table-fixed border-collapse text-left text-sm" style={{ minWidth: visibleTableWidth, width: visibleTableWidth }}>
             <colgroup>
@@ -983,7 +1026,7 @@ export function BillingRegister() {
               {isLoading ? (
                 <tr><td className="px-4 py-8 font-bold text-slate-500" colSpan={visibleBillingColumns.length}>Loading billing rows...</td></tr>
               ) : filteredRecords.length ? (
-                filteredRecords.map((record) => (
+                pagedRecords.map((record) => (
                   <tr className="border-b border-slate-100 last:border-b-0" key={record.id}>
                     {visibleBillingColumns.map((column) => (
                       <BillingCell
