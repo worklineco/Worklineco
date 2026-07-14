@@ -13,6 +13,7 @@ create table if not exists public.firm_billing_records (
   client text not null default '',
   gstin text,
   place_of_supply text,
+  address text,
   registration_type text,
   poc_name text,
   poc_mobile text,
@@ -58,6 +59,9 @@ add column if not exists place_of_supply text;
 
 alter table public.firm_billing_records
 add column if not exists registration_type text;
+
+alter table public.firm_billing_records
+add column if not exists address text;
 
 alter table public.firm_billing_records
 add column if not exists receiving_date date;

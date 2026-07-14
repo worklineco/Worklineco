@@ -27,6 +27,7 @@ type BillingRecord = {
   ope_remarks?: string;
   owner_team?: string;
   place_of_supply?: string;
+  address?: string;
   person_authorised?: string;
   poc_email?: string;
   poc_mobile?: string;
@@ -714,6 +715,7 @@ function cleanRecord(record: BillingRecord, userId: string, organisationId: stri
     organisation_id: organisationId,
     owner_team: ownerTeam,
     place_of_supply: placeOfSupply,
+    address: text(record.address),
     person_authorised: text(record.person_authorised),
     poc_email: text(record.poc_email),
     poc_mobile: text(record.poc_mobile),
@@ -735,7 +737,7 @@ function cleanRecord(record: BillingRecord, userId: string, organisationId: stri
 function isMissingCompatibilityColumn(error: unknown) {
   const message = isRecord(error) ? String(error.message ?? "") : String(error ?? "");
 
-  return ["include_ope_in_fees", "place_of_supply", "registration_type", "receiving_date"].some((column) =>
+  return ["address", "include_ope_in_fees", "place_of_supply", "registration_type", "receiving_date"].some((column) =>
     message.includes(column)
   );
 }
@@ -743,6 +745,7 @@ function isMissingCompatibilityColumn(error: unknown) {
 function stripCompatibilityColumns<T extends Record<string, unknown>>(record: T) {
   const {
     include_ope_in_fees: _includeOpeInFees,
+    address: _address,
     place_of_supply: _placeOfSupply,
     receiving_date: _receivingDate,
     registration_type: _registrationType,

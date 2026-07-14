@@ -27,6 +27,7 @@ type BillingRecord = {
   ope_remarks: string;
   owner_team: string;
   place_of_supply: string;
+  address: string;
   person_authorised: string;
   poc_email: string;
   poc_mobile: string;
@@ -109,6 +110,7 @@ const emptyRecord: BillingRecord = {
   ope_remarks: "",
   owner_team: "",
   place_of_supply: "",
+  address: "",
   person_authorised: "",
   poc_email: "",
   poc_mobile: "",
@@ -180,6 +182,7 @@ const billingColumns: BillingColumn[] = [
   { field: "client", label: "Client", type: "text", width: 220 },
   { field: "place_of_supply", label: "Place of Supply", type: "text", width: 175 },
   { field: "registration_type", label: "Registration Type", type: "text", width: 170 },
+  { field: "address", label: "Address", type: "text", width: 260 },
   { field: "poc_name", label: "POC", type: "text", width: 145 },
   { field: "poc_mobile", label: "POC Mobile", type: "text", width: 135 },
   { field: "poc_email", label: "POC Email", type: "text", width: 200 },
@@ -214,6 +217,7 @@ const importHeaders: Array<{ field: BillingField; label: string }> = [
   { field: "client", label: "Client" },
   { field: "place_of_supply", label: "Place of Supply" },
   { field: "registration_type", label: "Registration Type" },
+  { field: "address", label: "Address" },
   { field: "poc_name", label: "POC Name" },
   { field: "poc_mobile", label: "POC Mobile" },
   { field: "poc_email", label: "POC Email" },
@@ -689,6 +693,7 @@ export function BillingRegister() {
       Client: record.client,
       "Place of Supply": record.place_of_supply,
       "Registration Type": record.registration_type,
+      Address: record.address,
       "POC Name": record.poc_name,
       "POC Mobile": record.poc_mobile,
       "POC Email": record.poc_email,
@@ -1203,6 +1208,7 @@ function BillingAddForm({
             <FormInput field="client" label="Client" onChange={onChange} value={draft.client} />
             <FormInput field="place_of_supply" label="Place of Supply" onChange={onChange} value={draft.place_of_supply} />
             <FormInput field="registration_type" label="Registration Type" onChange={onChange} value={draft.registration_type} />
+            <FormInput field="address" label="Address" onChange={onChange} value={draft.address} wide />
             <FormInput field="group_name" label="Group" onChange={onChange} value={draft.group_name} />
             <FormInput field="description" label="Description" onChange={onChange} value={draft.description} wide />
             <FormInput field="amount" label="Professional Fee" onChange={onChange} type="number" value={String(draft.amount || "")} />
@@ -1654,6 +1660,7 @@ function enrichBillingRecord(record: BillingRecord, clientRecords: ClientRegiste
 
   return recalc({
     ...record,
+    address: changedField === "address" ? record.address : getClientAddress(matchedClient) || record.address,
     cgst: tax.cgst,
     client: changedField === "client" ? record.client : getClientName(matchedClient) || record.client,
     igst: tax.igst,
@@ -1840,6 +1847,10 @@ function getRegistrationType(row: ClientRegisterRow | null) {
   return getFirstValue(row, registrationTypeKeys);
 }
 
+function getClientAddress(row: ClientRegisterRow | null) {
+  return getFirstValue(row, clientAddressKeys);
+}
+
 function getSavedBillingColumnLayout(): BillingColumnLayout {
   if (typeof window === "undefined") {
     return { hiddenColumnKeys: [], order: defaultBillingColumnOrder };
@@ -1908,6 +1919,7 @@ function normalizeLookupKey(key: string) {
 
 const gstinKeys = ["GSTIN/UIN", "GSTIN", "GSTIN No", "GSTIN No.", "GST No", "GST Number", "GSTAT Login ID"];
 const clientNameKeys = ["Particulars", "Client", "Client Name", "Name", "Legal Name", "Trade Name"];
+const clientAddressKeys = ["Address", "Client Address", "Billing Address", "Registered Address", "Principal Place of Business"];
 const registrationTypeKeys = ["Registration Type", "Reg Type", "GST Registration Type", "Registration"];
 
 const auditFields: BillingField[] = [
@@ -1919,6 +1931,7 @@ const auditFields: BillingField[] = [
   "client",
   "place_of_supply",
   "registration_type",
+  "address",
   "description",
   "amount",
   "cgst",
