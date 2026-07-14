@@ -20,6 +20,7 @@ type AccessScope = {
 
 const defaultOrganisationCode = "DCO1433";
 const tableName = "meeting_room_bookings";
+const logTableName = "meeting_room_booking_logs";
 const maxDurationMinutes = 120;
 const rooms = new Map([
   ["Manthan", "3rd Floor"],
@@ -50,7 +51,9 @@ export async function GET() {
     return NextResponse.json({ error: formatSetupError(error.message) }, { status: 500 });
   }
 
-  return NextResponse.json({ bookings: data ?? [] });
+  const logs = await loadLogs(admin, access);
+
+  return NextResponse.json({ bookings: data ?? [], logs });
 }
 
 export async function POST(request: Request) {
@@ -73,6 +76,17 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Booking id is required." }, { status: 400 });
     }
 
+    const existing = await admin
+      .from(tableName)
+      .select("*")
+      .eq("id", payload.id)
+      .eq("organisation_code", access.organisationCode)
+      .maybeSingle();
+
+    if (existing.error) {
+      return NextResponse.json({ error: formatSetupError(existing.error.message) }, { status: 500 });
+    }
+
     const deleted = await admin
       .from(tableName)
       .delete()
@@ -83,6 +97,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: formatSetupError(deleted.error.message) }, { status: 500 });
     }
 
+    await writeLog(admin, auth.user, access, "delete", payload.id, existing.data ?? null, null);
     return loadResponse(admin, access);
   }
 
@@ -104,6 +119,19 @@ export async function POST(request: Request) {
   }
 
   const id = text(payload.booking?.id);
+  const existing = id
+    ? await admin
+        .from(tableName)
+        .select("*")
+        .eq("id", id)
+        .eq("organisation_code", access.organisationCode)
+        .maybeSingle()
+    : null;
+
+  if (existing?.error) {
+    return NextResponse.json({ error: formatSetupError(existing.error.message) }, { status: 500 });
+  }
+
   const { id: _bookingId, ...bookingData } = booking;
   const saved = id
     ? await admin
@@ -131,6 +159,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: formatSetupError(saved.error.message) }, { status: 500 });
   }
 
+  await writeLog(admin, auth.user, access, id ? "update" : "create", saved.data.id, existing?.data ?? null, saved.data);
   return loadResponse(admin, access);
 }
 
@@ -146,7 +175,44 @@ async function loadResponse(admin: ReturnType<typeof createAdminClient>, access:
     return NextResponse.json({ error: formatSetupError(error.message) }, { status: 500 });
   }
 
-  return NextResponse.json({ bookings: data ?? [] });
+  const logs = await loadLogs(admin, access);
+
+  return NextResponse.json({ bookings: data ?? [], logs });
+}
+
+async function loadLogs(admin: ReturnType<typeof createAdminClient>, access: AccessScope) {
+  const { data, error } = await admin
+    .from(logTableName)
+    .select("*")
+    .eq("organisation_code", access.organisationCode)
+    .order("created_at", { ascending: false })
+    .limit(100);
+
+  if (error) {
+    return [];
+  }
+
+  return data ?? [];
+}
+
+async function writeLog(
+  admin: ReturnType<typeof createAdminClient>,
+  user: User,
+  access: AccessScope,
+  action: string,
+  bookingId: string | null | undefined,
+  oldValue: unknown,
+  newValue: unknown
+) {
+  await admin.from(logTableName).insert({
+    action,
+    actor_name: text(user.user_metadata?.full_name) || text(user.user_metadata?.name) || user.email || "WorkLine user",
+    actor_user_id: user.id,
+    booking_id: bookingId || null,
+    new_value: newValue,
+    old_value: oldValue,
+    organisation_code: access.organisationCode
+  });
 }
 
 function cleanBooking(booking: MeetingBooking, user: User, access: AccessScope) {
@@ -231,8 +297,8 @@ function getAccessScope(user: User): AccessScope {
 }
 
 function formatSetupError(message: string) {
-  return message.includes(tableName)
-    ? "Meeting room booking table is not set up yet. Apply database/010_meeting_room_bookings.sql in Supabase."
+  return message.includes(tableName) || message.includes(logTableName)
+    ? "Meeting room setup is pending. Run database/010_meeting_room_bookings.sql in Supabase SQL editor once."
     : message;
 }
 

@@ -19,6 +19,15 @@ type TeamMember = {
   name: string;
   team: string;
 };
+type BookingLog = {
+  action: string;
+  actor_name?: string;
+  created_at: string;
+  id: string;
+  new_value?: Partial<Booking> | null;
+  old_value?: Partial<Booking> | null;
+};
+type ViewMode = "board" | "log";
 
 const rooms = [
   { floor: "3rd Floor", name: "Manthan" },
@@ -64,8 +73,10 @@ export function MeetingRoomBooking() {
   const [editingId, setEditingId] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [logs, setLogs] = useState<BookingLog[]>([]);
   const [message, setMessage] = useState("");
   const [teams, setTeams] = useState<string[]>(fallbackTeams);
+  const [viewMode, setViewMode] = useState<ViewMode>("board");
   const visibleRooms = rooms.filter((room) => activeFloor === "All" || room.floor === activeFloor);
   const stats = useMemo(() => {
     const dayBookings = bookings.filter((booking) => booking.booking_date === boardDate);
@@ -85,7 +96,7 @@ export function MeetingRoomBooking() {
 
     try {
       const response = await fetch("/api/meeting-room", { cache: "no-store" });
-      const result = (await response.json()) as { bookings?: Booking[]; error?: string };
+      const result = (await response.json()) as { bookings?: Booking[]; error?: string; logs?: BookingLog[] };
 
       if (!response.ok) {
         setMessage(result.error ?? "Could not load meeting room bookings.");
@@ -93,6 +104,7 @@ export function MeetingRoomBooking() {
       }
 
       setBookings(result.bookings ?? []);
+      setLogs(result.logs ?? []);
       setMessage("");
     } catch (error) {
       console.error("Meeting room load error:", error);
@@ -150,7 +162,7 @@ export function MeetingRoomBooking() {
         headers: { "Content-Type": "application/json" },
         method: "POST"
       });
-      const result = (await response.json()) as { bookings?: Booking[]; error?: string };
+      const result = (await response.json()) as { bookings?: Booking[]; error?: string; logs?: BookingLog[] };
 
       if (!response.ok) {
         setMessage(result.error ?? "Could not save booking.");
@@ -158,6 +170,7 @@ export function MeetingRoomBooking() {
       }
 
       setBookings(result.bookings ?? []);
+      setLogs(result.logs ?? []);
       resetForm(draft.booking_date);
       setMessage(editingId ? "Booking updated." : "Booking added.");
     } catch (error) {
@@ -181,7 +194,7 @@ export function MeetingRoomBooking() {
         headers: { "Content-Type": "application/json" },
         method: "POST"
       });
-      const result = (await response.json()) as { bookings?: Booking[]; error?: string };
+      const result = (await response.json()) as { bookings?: Booking[]; error?: string; logs?: BookingLog[] };
 
       if (!response.ok) {
         setMessage(result.error ?? "Could not delete booking.");
@@ -189,6 +202,7 @@ export function MeetingRoomBooking() {
       }
 
       setBookings(result.bookings ?? []);
+      setLogs(result.logs ?? []);
       if (editingId === booking.id) {
         resetForm(boardDate);
       }
@@ -341,8 +355,12 @@ export function MeetingRoomBooking() {
           <section className="workline-panel rounded-[24px] p-5">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
               <div>
-                <p className="text-xs font-black uppercase tracking-[0.14em] text-teal-700">Booking Board</p>
-                <h2 className="mt-1 text-2xl font-black text-slate-950">{formatDate(boardDate)} Bookings</h2>
+                <p className="text-xs font-black uppercase tracking-[0.14em] text-teal-700">
+                  {viewMode === "board" ? "Booking Board" : "Booking Log"}
+                </p>
+                <h2 className="mt-1 text-2xl font-black text-slate-950">
+                  {viewMode === "board" ? `${formatDate(boardDate)} Bookings` : "Meeting Room Booking Log"}
+                </h2>
               </div>
               <div className="grid gap-2 sm:grid-cols-[130px_130px_180px]">
                 <Summary label="Bookings" value={String(stats.booked)} />
@@ -365,6 +383,25 @@ export function MeetingRoomBooking() {
               </div>
             </div>
 
+            <div className="mt-4 flex flex-wrap gap-2 border-b border-slate-200 pb-3">
+              <button
+                className={`h-10 rounded-md px-3 text-sm font-black ${viewMode === "board" ? "bg-slate-950 text-white" : "border border-slate-200 bg-white text-slate-700"}`}
+                onClick={() => setViewMode("board")}
+                type="button"
+              >
+                Board
+              </button>
+              <button
+                className={`h-10 rounded-md px-3 text-sm font-black ${viewMode === "log" ? "bg-slate-950 text-white" : "border border-slate-200 bg-white text-slate-700"}`}
+                onClick={() => setViewMode("log")}
+                type="button"
+              >
+                Booking Log
+              </button>
+            </div>
+
+            {viewMode === "board" ? (
+              <>
             <div className="mt-4 flex flex-wrap gap-2">
               {floors.map((floor) => (
                 <button
@@ -430,6 +467,10 @@ export function MeetingRoomBooking() {
                 );
               })}
             </div>
+              </>
+            ) : (
+              <BookingLogTable logs={logs} />
+            )}
           </section>
         </section>
       </section>
@@ -451,6 +492,49 @@ function Summary({ label, value }: { label: string; value: string }) {
     <div className="rounded-md border border-slate-200 bg-white px-3 py-2">
       <p className="text-[10px] font-black uppercase text-slate-500">{label}</p>
       <p className="mt-1 text-lg font-black text-slate-950">{value}</p>
+    </div>
+  );
+}
+
+function BookingLogTable({ logs }: { logs: BookingLog[] }) {
+  return (
+    <div className="mt-5 overflow-auto rounded-lg border border-slate-200">
+      <table className="min-w-[980px] w-full border-collapse text-left text-sm">
+        <thead className="bg-slate-950 text-xs font-black uppercase text-white">
+          <tr>
+            {["Time", "Action", "Updated By", "Room", "Date", "Time Slot", "Team", "Purpose"].map((heading) => (
+              <th className="border-r border-white/10 px-3 py-3 last:border-r-0" key={heading}>{heading}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {logs.length ? (
+            logs.map((log) => {
+              const booking = log.new_value ?? log.old_value ?? {};
+              return (
+                <tr className="border-b border-slate-100 last:border-b-0" key={log.id}>
+                  <td className="px-3 py-3 font-semibold text-slate-700">{formatDateTime(log.created_at)}</td>
+                  <td className="px-3 py-3 font-black capitalize text-slate-950">{log.action}</td>
+                  <td className="px-3 py-3 font-semibold text-slate-700">{log.actor_name || "-"}</td>
+                  <td className="px-3 py-3 font-semibold text-slate-700">{booking.room_name || "-"}</td>
+                  <td className="px-3 py-3 font-semibold text-slate-700">{formatDate(String(booking.booking_date ?? ""))}</td>
+                  <td className="px-3 py-3 font-semibold text-slate-700">
+                    {booking.from_time && booking.to_time ? `${formatTime(String(booking.from_time))} - ${formatTime(String(booking.to_time))}` : "-"}
+                  </td>
+                  <td className="px-3 py-3 font-semibold text-slate-700">{booking.team_name || "-"}</td>
+                  <td className="max-w-[280px] px-3 py-3 font-semibold text-slate-700">{booking.purpose || "-"}</td>
+                </tr>
+              );
+            })
+          ) : (
+            <tr>
+              <td className="px-3 py-8 text-center font-bold text-slate-500" colSpan={8}>
+                No meeting room booking log entries yet.
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -504,6 +588,20 @@ function formatDate(value: string) {
 
   const [year, month, day] = value.split("-");
   return `${day}-${month}-${year}`;
+}
+
+function formatDateTime(value: string) {
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return "-";
+  }
+
+  return `${String(date.getDate()).padStart(2, "0")}-${String(date.getMonth() + 1).padStart(2, "0")}-${date.getFullYear()}, ${date.toLocaleTimeString("en-IN", {
+    hour: "numeric",
+    hour12: true,
+    minute: "2-digit"
+  })}`;
 }
 
 function formatTime(value: string) {
