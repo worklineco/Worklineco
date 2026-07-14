@@ -244,6 +244,13 @@ const importHeaders: Array<{ field: BillingField; label: string }> = [
   { field: "receiving_date", label: "Receiving Date" },
   { field: "remarks", label: "Remarks" }
 ];
+const importHeaderAliases: Partial<Record<BillingField, string[]>> = {
+  amount: ["Professional Fee", "Professional Fees", "Amount"],
+  billing_status: ["Billing Status", "Billing"],
+  include_ope_in_fees: ["Include OPE in Professional Fees", "Include OPE in Fee"],
+  receiving_status: ["Receiving Status", "Receiving"],
+  voucher_type: ["Voucher Type", "Voucher"]
+};
 const importActionColumn = "Import Action";
 const importActionOptions = ["Add", "Update", "Delete"];
 const billingImportBatchSize = 100;
@@ -730,7 +737,7 @@ export function BillingRegister() {
       const importAction = normalizeImportAction(row[importActionColumn]);
 
       importHeaders.forEach(({ field, label }) => {
-        const value = row[label] ?? row[field] ?? "";
+        const value = getImportCellValue(row, field, label);
         importedRecord[field] = isDateField(field) ? normalizeDateInput(value) : value;
       });
 
@@ -2014,6 +2021,24 @@ function blankExportRow() {
     row[header.label] = "";
     return row;
   }, {});
+}
+
+function getImportCellValue(row: Record<string, unknown>, field: BillingField, label: string) {
+  const normalizedRow = Object.entries(row).reduce<Record<string, unknown>>((result, [key, value]) => {
+    result[normalizeLookupKey(key)] = value;
+    return result;
+  }, {});
+  const keys = [label, field, ...(importHeaderAliases[field] ?? [])];
+
+  for (const key of keys) {
+    const value = normalizedRow[normalizeLookupKey(key)];
+
+    if (String(value ?? "").trim()) {
+      return value;
+    }
+  }
+
+  return "";
 }
 
 function formatImportSummary(

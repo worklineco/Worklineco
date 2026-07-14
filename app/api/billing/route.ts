@@ -326,10 +326,14 @@ export async function POST(request: Request) {
 
     const importRows = payload.rows.map((row) => ({
       action: normalizeImportAction(row.import_action),
-      cleaned: cleanRecord(row, auth.user.id, organisation.organisationId, access),
+      cleaned: cleanRecord(row, auth.user.id, organisation.organisationId, access, { allowAccountsFields: true }),
       raw: row
     }));
-    const addRows = importRows.filter((row) => row.action === "add").map((row) => row.cleaned);
+    const addRows = await assignSerialNumbers(
+      admin,
+      organisation.organisationId,
+      importRows.filter((row) => row.action === "add").map((row) => row.cleaned)
+    );
     const updateRows = importRows.filter((row) => row.action === "update");
     const deleteRows = importRows.filter((row) => row.action === "delete");
     let inserted = addRows.length
@@ -357,7 +361,7 @@ export async function POST(request: Request) {
         }
 
         matchedUpdateIds.add(matched.id);
-        const updateRecord = preserveAccountsOnlyFields(row.cleaned, matched, access);
+        const updateRecord = preserveAccountsOnlyFields(row.cleaned, matched, access, true);
         let saved = await admin
           .from(tableName)
           .update({ ...updateRecord, version_no: Number(matched.version_no ?? 1) + 1 })
@@ -544,10 +548,11 @@ export async function POST(request: Request) {
     return NextResponse.json({ record: saved.data });
   }
 
-  let saved = await admin.from(tableName).insert(cleaned).select("*").single();
+  const [createRecord] = await assignSerialNumbers(admin, organisation.organisationId, [cleaned]);
+  let saved = await admin.from(tableName).insert(createRecord).select("*").single();
 
   if (saved.error && isMissingCompatibilityColumn(saved.error)) {
-    saved = await admin.from(tableName).insert(stripCompatibilityColumns(cleaned)).select("*").single();
+    saved = await admin.from(tableName).insert(stripCompatibilityColumns(createRecord)).select("*").single();
   }
 
   if (saved.error) {
@@ -846,7 +851,13 @@ async function writeAuditLog(
   });
 }
 
-function cleanRecord(record: BillingRecord, userId: string, organisationId: string, access: AccessScope) {
+function cleanRecord(
+  record: BillingRecord,
+  userId: string,
+  organisationId: string,
+  access: AccessScope,
+  options: { allowAccountsFields?: boolean } = {}
+) {
   const amount = toNumber(record.amount);
   const ope = toNumber(record.ope);
   const includeOpeInFees = yesNo(record.include_ope_in_fees);
@@ -901,7 +912,7 @@ function cleanRecord(record: BillingRecord, userId: string, organisationId: stri
     created_by: record.id ? undefined : userId
   };
 
-  if (access.canEditAccountsFields || record.id) {
+  if (options.allowAccountsFields || access.canEditAccountsFields || record.id) {
     return cleaned;
   }
 
@@ -961,12 +972,49 @@ function canAccessRecord(record: StoredBillingRecord, access: AccessScope) {
   return access.canViewAll || !access.team || record.owner_team === access.team;
 }
 
+async function assignSerialNumbers<T extends Record<string, unknown>>(
+  admin: ReturnType<typeof createAdminClient>,
+  organisationId: string,
+  rows: T[]
+) {
+  const rowsNeedingSerial = rows.filter((row) => !Number(row.serial_no));
+
+  if (!rowsNeedingSerial.length) {
+    return rows;
+  }
+
+  const { data, error } = await admin
+    .from(tableName)
+    .select("serial_no")
+    .eq("organisation_id", organisationId)
+    .order("serial_no", { ascending: false, nullsFirst: false })
+    .limit(1);
+
+  if (error && isMissingCompatibilityColumn(error)) {
+    return rows;
+  }
+
+  let nextSerial = Number(data?.[0]?.serial_no ?? 0) + 1;
+
+  return rows.map((row) => {
+    if (Number(row.serial_no)) {
+      return row;
+    }
+
+    return {
+      ...row,
+      serial_no: nextSerial++
+    };
+  });
+}
+
 function preserveAccountsOnlyFields<T extends Record<string, unknown>>(
   nextRecord: T,
   existingRecord: Record<string, unknown>,
-  access: AccessScope
+  access: AccessScope,
+  allowAccountsFields = false
 ) {
-  if (access.canEditAccountsFields) {
+  if (allowAccountsFields || access.canEditAccountsFields) {
     return nextRecord;
   }
 
