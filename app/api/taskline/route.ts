@@ -29,6 +29,11 @@ type AuditLog = {
   new_value: unknown;
   old_value: unknown;
 };
+type AccessScope = {
+  canViewAll: boolean;
+  role: string;
+  team: string;
+};
 
 const defaultOrganisationCode = "DCO1433";
 const fetchBatchSize = 1000;
@@ -94,9 +99,10 @@ export async function GET() {
     return organisation.error;
   }
 
+  const access = getAccess(auth.user);
   const [records, auditLogs] = await Promise.all([
-    loadTaskLineRecords(admin, organisation.organisationId),
-    loadAuditLogs(admin, organisation.organisationId)
+    loadTaskLineRecords(admin, organisation.organisationId, access),
+    loadAuditLogs(admin, organisation.organisationId, access)
   ]);
 
   if (records.error) {
@@ -137,9 +143,14 @@ async function handlePost(request: Request) {
   if ("error" in organisation) {
     return organisation.error;
   }
+  const access = getAccess(auth.user);
+
+  if (!access.canViewAll && !access.team) {
+    return NextResponse.json({ error: "Your profile does not have a team assigned for TaskLine access." }, { status: 403 });
+  }
 
   if (payload.action === "import") {
-    return importRows(admin, organisation.organisationId, auth.user, payload.importRows ?? [], payload.returnRows !== false);
+    return importRows(admin, organisation.organisationId, auth.user, access, payload.importRows ?? [], payload.returnRows !== false);
   }
 
   const record = payload.record;
@@ -149,7 +160,7 @@ async function handlePost(request: Request) {
   }
 
   const existingId = text(record.__id);
-  const cleaned = cleanRecord(record);
+  const cleaned = applyTeamAccess(cleanRecord(record), access);
   const values = toTaskValues(cleaned);
 
   if (existingId) {
@@ -164,7 +175,7 @@ async function handlePost(request: Request) {
       return NextResponse.json({ error: existing.error.message }, { status: 500 });
     }
 
-    if (existing.data && isTaskLineRecord(existing.data as TaskRecord)) {
+    if (existing.data && isTaskLineRecord(existing.data as TaskRecord) && canAccessRecord(existing.data as TaskRecord, access)) {
       const saved = await admin
         .from("tasks")
         .update({
@@ -189,6 +200,8 @@ async function handlePost(request: Request) {
         auditValue(saved.data as TaskRecord)
       );
       return NextResponse.json({ record: formatRecord(saved.data as TaskRecord) });
+    } else if (existing.data) {
+      return NextResponse.json({ error: "You can only update TaskLine rows for your own team." }, { status: 403 });
     }
   }
 
@@ -230,6 +243,7 @@ export async function DELETE(request: Request) {
   if ("error" in organisation) {
     return organisation.error;
   }
+  const access = getAccess(auth.user);
 
   const existing = await admin
     .from("tasks")
@@ -240,6 +254,10 @@ export async function DELETE(request: Request) {
 
   if (existing.error || !isTaskLineRecord(existing.data as TaskRecord | null)) {
     return NextResponse.json({ error: existing.error?.message ?? "TaskLine record not found." }, { status: 404 });
+  }
+
+  if (!canAccessRecord(existing.data as TaskRecord, access)) {
+    return NextResponse.json({ error: "You can only delete TaskLine rows for your own team." }, { status: 403 });
   }
 
   const deleted = await admin.from("tasks").delete().eq("id", id).eq("organisation_id", organisation.organisationId);
@@ -256,10 +274,11 @@ async function importRows(
   admin: ReturnType<typeof createAdminClient>,
   organisationId: string,
   user: User,
+  access: AccessScope,
   rows: Array<TaskLineRow & { import_action?: string; serial_no?: string }>,
   returnRows: boolean
 ) {
-  const existing = await loadTaskLineRecords(admin, organisationId);
+  const existing = await loadTaskLineRecords(admin, organisationId, access);
 
   if (existing.error) {
     return NextResponse.json({ error: existing.error.message }, { status: 500 });
@@ -285,10 +304,11 @@ async function importRows(
 
     if (action === "update") {
       if (target?.id) {
+        const cleaned = applyTeamAccess(cleanRecord(row), access);
         const updatedRow = await admin
           .from("tasks")
           .update({
-            ...toTaskValues(cleanRecord(row)),
+            ...toTaskValues(cleaned),
             updated_at: new Date().toISOString()
           })
           .eq("id", target.id)
@@ -306,8 +326,9 @@ async function importRows(
     }
 
     if (hasValue(row)) {
+      const cleaned = applyTeamAccess(cleanRecord(row), access);
       const inserted = await admin.from("tasks").insert({
-        ...toTaskValues(cleanRecord(row)),
+        ...toTaskValues(cleaned),
         created_by: null,
         organisation_id: organisationId,
         priority: "normal"
@@ -329,7 +350,7 @@ async function importRows(
     });
   }
 
-  const refreshed = await loadTaskLineRecords(admin, organisationId);
+  const refreshed = await loadTaskLineRecords(admin, organisationId, access);
 
   if (refreshed.error) {
     return NextResponse.json({ error: refreshed.error.message }, { status: 500 });
@@ -341,7 +362,7 @@ async function importRows(
   });
 }
 
-async function loadTaskLineRecords(admin: ReturnType<typeof createAdminClient>, organisationId: string) {
+async function loadTaskLineRecords(admin: ReturnType<typeof createAdminClient>, organisationId: string, access: AccessScope) {
   const rows: TaskRecord[] = [];
 
   for (let from = 0; ; from += fetchBatchSize) {
@@ -357,7 +378,7 @@ async function loadTaskLineRecords(admin: ReturnType<typeof createAdminClient>, 
       return { data: null, error };
     }
 
-    rows.push(...((data ?? []) as TaskRecord[]).filter(isTaskLineRecord));
+    rows.push(...((data ?? []) as TaskRecord[]).filter((record) => isTaskLineRecord(record) && canAccessRecord(record, access)));
 
     if ((data ?? []).length < fetchBatchSize) {
       return { data: rows, error: null };
@@ -365,7 +386,7 @@ async function loadTaskLineRecords(admin: ReturnType<typeof createAdminClient>, 
   }
 }
 
-async function loadAuditLogs(admin: ReturnType<typeof createAdminClient>, organisationId: string) {
+async function loadAuditLogs(admin: ReturnType<typeof createAdminClient>, organisationId: string, access: AccessScope) {
   const logs = await admin
     .from("audit_logs")
     .select("id,action,entity_id,old_value,new_value,created_at,actor_user_id")
@@ -378,7 +399,17 @@ async function loadAuditLogs(admin: ReturnType<typeof createAdminClient>, organi
     return [];
   }
 
-  return (logs.data ?? []) as AuditLog[];
+  const taskLineLogs = (logs.data ?? []) as AuditLog[];
+
+  if (access.canViewAll) {
+    return taskLineLogs;
+  }
+
+  if (!access.team) {
+    return [];
+  }
+
+  return taskLineLogs.filter((log) => canAccessAuditValue(log.old_value, access) || canAccessAuditValue(log.new_value, access));
 }
 
 async function writeAuditLog(
@@ -437,6 +468,50 @@ function cleanRecord(record: TaskLineRow) {
 
 function hasValue(row: TaskLineRow) {
   return taskLineColumns.some((key) => text(row[key]));
+}
+
+function applyTeamAccess(row: TaskLineRow, access: AccessScope) {
+  if (access.canViewAll || !access.team) {
+    return row;
+  }
+
+  return {
+    ...row,
+    team: access.team
+  };
+}
+
+function canAccessRecord(record: TaskRecord, access: AccessScope) {
+  return canAccessTaskLineRow(record.custom_values?.taskline_data ?? {}, access);
+}
+
+function canAccessAuditValue(value: unknown, access: AccessScope) {
+  if (access.canViewAll) {
+    return true;
+  }
+
+  if (!access.team) {
+    return false;
+  }
+
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const auditValue = value as { data?: TaskLineRow } & TaskLineRow;
+  return canAccessTaskLineRow(auditValue.data ?? auditValue, access);
+}
+
+function canAccessTaskLineRow(row: TaskLineRow, access: AccessScope) {
+  if (access.canViewAll) {
+    return true;
+  }
+
+  if (!access.team) {
+    return false;
+  }
+
+  return normalizeTeam(row.team) === normalizeTeam(access.team);
 }
 
 function isTaskLineRecord(record: TaskRecord | null): record is TaskRecord {
@@ -538,6 +613,18 @@ function createAdminClient() {
   });
 }
 
+function getAccess(user: User): AccessScope {
+  const role = text(user.user_metadata?.role).toLowerCase();
+  const team = text(user.user_metadata?.team);
+  const canViewAll = role === "partner" || role.includes("partner") || role === "owner" || role === "admin";
+
+  return {
+    canViewAll,
+    role,
+    team
+  };
+}
+
 async function getOrganisationId(admin: ReturnType<typeof createAdminClient>, user: User) {
   const { data, error } = await admin
     .from("users")
@@ -606,6 +693,10 @@ async function requireUser() {
 
 function text(value: unknown) {
   return String(value ?? "").trim();
+}
+
+function normalizeTeam(value: unknown) {
+  return text(value).toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
 function errorMessage(error: unknown) {
