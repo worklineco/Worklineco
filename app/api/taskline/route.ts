@@ -109,6 +109,15 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  try {
+    return await handlePost(request);
+  } catch (error) {
+    console.error("TaskLine POST error:", error);
+    return NextResponse.json({ error: `TaskLine request failed: ${errorMessage(error)}` }, { status: 500 });
+  }
+}
+
+async function handlePost(request: Request) {
   const auth = await requireUser();
 
   if ("error" in auth) {
@@ -185,7 +194,7 @@ export async function POST(request: Request) {
     .from("tasks")
     .insert({
       ...values,
-      created_by: auth.user.id,
+      created_by: null,
       organisation_id: organisation.organisationId,
       priority: "normal"
     })
@@ -296,7 +305,7 @@ async function importRows(
     if (hasValue(row)) {
       const inserted = await admin.from("tasks").insert({
         ...toTaskValues(cleanRecord(row)),
-        created_by: user.id,
+        created_by: null,
         organisation_id: organisationId,
         priority: "normal"
       });
@@ -528,4 +537,8 @@ async function requireUser() {
 
 function text(value: unknown) {
   return String(value ?? "").trim();
+}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : "Unknown error";
 }

@@ -357,7 +357,7 @@ export function TaskLineRegister() {
       };
 
       if (!response.ok) {
-        setMessage(result.error ?? "Could not import TaskLine rows.");
+        setMessage(result.error ?? `Could not import TaskLine rows. Server returned ${response.status}.`);
         return;
       }
 
