@@ -853,8 +853,8 @@ function TaskLineAuditTable({ logs }: { logs: TaskLineAuditLog[] }) {
                 <td className="px-3 py-3 font-black text-slate-900">{formatAuditAction(log.action)}</td>
                 <td className="px-3 py-3 font-semibold text-slate-700">{log.rowLabel || "-"}</td>
                 <td className="px-3 py-3 font-semibold text-slate-700">{log.field || "-"}</td>
-                <td className="max-w-[260px] truncate px-3 py-3 font-semibold text-slate-500" title={log.oldValue || ""}>{log.oldValue || "-"}</td>
-                <td className="max-w-[320px] truncate px-3 py-3 font-semibold text-slate-900" title={log.newValue || ""}>{log.newValue || "-"}</td>
+                <td className="max-w-[320px] px-3 py-3 font-semibold text-slate-500" title={log.oldValue || ""}>{log.oldValue || "-"}</td>
+                <td className="max-w-[520px] whitespace-normal px-3 py-3 font-semibold leading-6 text-slate-900" title={log.newValue || ""}>{log.newValue || "-"}</td>
               </tr>
             )) : (
               <tr>
@@ -1089,8 +1089,51 @@ function summarizeAuditValue(value: TaskLineRow | null) {
     return "";
   }
 
-  const summary = [value.task, value.entity, value.status_open_close].map(text).filter(Boolean).join(" | ");
-  return summary || JSON.stringify(toDisplayRow(value));
+  if ("added" in value || "updated" in value || "deleted" in value) {
+    return [
+      `Added: ${text(value.added) || "0"}`,
+      `Updated: ${text(value.updated) || "0"}`,
+      `Deleted: ${text(value.deleted) || "0"}`
+    ].join("; ");
+  }
+
+  const priorityKeys = [
+    "name",
+    "entity",
+    "entity_group",
+    "task",
+    "due_date",
+    "stage",
+    "status_open_close",
+    "poc",
+    "pending_from",
+    "billing_status",
+    "tax_invoice_no",
+    "amount_raised",
+    "amount_realised"
+  ];
+  const summaryParts = priorityKeys
+    .map((key) => {
+      const column = taskLineColumnByKey.get(key);
+      const fieldValue = text(value[key]);
+      return fieldValue ? `${column?.label ?? key}: ${fieldValue}` : "";
+    })
+    .filter(Boolean)
+    .slice(0, 8);
+
+  if (summaryParts.length) {
+    return summaryParts.join("; ");
+  }
+
+  const filledFields = taskLineColumns
+    .map((column) => {
+      const fieldValue = text(value[column.key]);
+      return fieldValue ? `${column.label}: ${fieldValue}` : "";
+    })
+    .filter(Boolean)
+    .slice(0, 8);
+
+  return filledFields.length ? filledFields.join("; ") : "Blank row";
 }
 
 function getAuditRowLabel(value: TaskLineRow | null) {
