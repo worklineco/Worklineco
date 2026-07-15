@@ -5,15 +5,19 @@ import { NextResponse } from "next/server";
 
 type CookieToSet = { name: string; options: CookieOptions; value: string };
 type TaskLineRow = Record<string, string>;
-type StoredTaskLineRecord = {
+type TaskRecord = {
   created_at: string;
   created_by: string | null;
-  data: TaskLineRow;
+  custom_values: {
+    taskline_data?: TaskLineRow;
+    workline_module?: string;
+  } | null;
+  description: string | null;
+  due_at: string | null;
   id: string;
-  organisation_code: string;
   organisation_id: string;
+  title: string;
   updated_at: string;
-  updated_by: string | null;
 };
 type AuditLog = {
   action: string;
@@ -27,7 +31,8 @@ type AuditLog = {
 };
 
 const defaultOrganisationCode = "DCO1433";
-const tableName = "firm_taskline_records";
+const fetchBatchSize = 1000;
+const moduleKey = "taskline";
 const taskLineColumns = [
   "team",
   "name",
@@ -89,11 +94,7 @@ export async function GET() {
   }
 
   const [records, auditLogs] = await Promise.all([
-    admin
-      .from(tableName)
-      .select("id,organisation_id,organisation_code,data,created_by,updated_by,created_at,updated_at")
-      .eq("organisation_id", organisation.organisationId)
-      .order("created_at", { ascending: true }),
+    loadTaskLineRecords(admin, organisation.organisationId),
     loadAuditLogs(admin, organisation.organisationId)
   ]);
 
@@ -103,7 +104,7 @@ export async function GET() {
 
   return NextResponse.json({
     auditLogs,
-    rows: ((records.data ?? []) as StoredTaskLineRecord[]).map(formatRecord)
+    rows: (records.data ?? []).map(formatRecord)
   });
 }
 
@@ -138,11 +139,12 @@ export async function POST(request: Request) {
 
   const existingId = text(record.__id);
   const cleaned = cleanRecord(record);
+  const values = toTaskValues(cleaned);
 
   if (existingId) {
     const existing = await admin
-      .from(tableName)
-      .select("*")
+      .from("tasks")
+      .select("id,organisation_id,title,description,due_at,custom_values,created_by,created_at,updated_at")
       .eq("id", existingId)
       .eq("organisation_id", organisation.organisationId)
       .maybeSingle();
@@ -151,42 +153,51 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: existing.error.message }, { status: 500 });
     }
 
-    if (existing.data) {
+    if (existing.data && isTaskLineRecord(existing.data as TaskRecord)) {
       const saved = await admin
-        .from(tableName)
-        .update({ data: cleaned, updated_by: auth.user.id, updated_at: new Date().toISOString() })
+        .from("tasks")
+        .update({
+          ...values,
+          updated_at: new Date().toISOString()
+        })
         .eq("id", existingId)
         .eq("organisation_id", organisation.organisationId)
-        .select()
+        .select("id,organisation_id,title,description,due_at,custom_values,created_by,created_at,updated_at")
         .single();
 
       if (saved.error) {
         return NextResponse.json({ error: saved.error.message }, { status: 500 });
       }
 
-      await writeAuditLog(admin, organisation.organisationId, auth.user.id, "taskline.update", existing.data, saved.data);
-      return NextResponse.json({ record: formatRecord(saved.data as StoredTaskLineRecord) });
+      await writeAuditLog(
+        admin,
+        organisation.organisationId,
+        auth.user.id,
+        "taskline.update",
+        auditValue(existing.data as TaskRecord),
+        auditValue(saved.data as TaskRecord)
+      );
+      return NextResponse.json({ record: formatRecord(saved.data as TaskRecord) });
     }
   }
 
   const saved = await admin
-    .from(tableName)
+    .from("tasks")
     .insert({
-      data: cleaned,
+      ...values,
       created_by: auth.user.id,
-      organisation_code: text(auth.user.user_metadata?.organisation_id) || defaultOrganisationCode,
       organisation_id: organisation.organisationId,
-      updated_by: auth.user.id
+      priority: "normal"
     })
-    .select()
+    .select("id,organisation_id,title,description,due_at,custom_values,created_by,created_at,updated_at")
     .single();
 
   if (saved.error) {
     return NextResponse.json({ error: saved.error.message }, { status: 500 });
   }
 
-  await writeAuditLog(admin, organisation.organisationId, auth.user.id, "taskline.create", null, saved.data);
-  return NextResponse.json({ record: formatRecord(saved.data as StoredTaskLineRecord) });
+  await writeAuditLog(admin, organisation.organisationId, auth.user.id, "taskline.create", null, auditValue(saved.data as TaskRecord));
+  return NextResponse.json({ record: formatRecord(saved.data as TaskRecord) });
 }
 
 export async function DELETE(request: Request) {
@@ -210,23 +221,23 @@ export async function DELETE(request: Request) {
   }
 
   const existing = await admin
-    .from(tableName)
-    .select("*")
+    .from("tasks")
+    .select("id,organisation_id,title,description,due_at,custom_values,created_by,created_at,updated_at")
     .eq("id", id)
     .eq("organisation_id", organisation.organisationId)
     .single();
 
-  if (existing.error) {
-    return NextResponse.json({ error: existing.error.message }, { status: 404 });
+  if (existing.error || !isTaskLineRecord(existing.data as TaskRecord | null)) {
+    return NextResponse.json({ error: existing.error?.message ?? "TaskLine record not found." }, { status: 404 });
   }
 
-  const deleted = await admin.from(tableName).delete().eq("id", id).eq("organisation_id", organisation.organisationId);
+  const deleted = await admin.from("tasks").delete().eq("id", id).eq("organisation_id", organisation.organisationId);
 
   if (deleted.error) {
     return NextResponse.json({ error: deleted.error.message }, { status: 500 });
   }
 
-  await writeAuditLog(admin, organisation.organisationId, auth.user.id, "taskline.delete", existing.data, null);
+  await writeAuditLog(admin, organisation.organisationId, auth.user.id, "taskline.delete", auditValue(existing.data as TaskRecord), null);
   return NextResponse.json({ ok: true });
 }
 
@@ -236,17 +247,13 @@ async function importRows(
   user: User,
   rows: Array<TaskLineRow & { import_action?: string; serial_no?: string }>
 ) {
-  const existing = await admin
-    .from(tableName)
-    .select("*")
-    .eq("organisation_id", organisationId)
-    .order("created_at", { ascending: true });
+  const existing = await loadTaskLineRecords(admin, organisationId);
 
   if (existing.error) {
     return NextResponse.json({ error: existing.error.message }, { status: 500 });
   }
 
-  const existingRows = (existing.data ?? []) as StoredTaskLineRecord[];
+  const existingRows = existing.data ?? [];
   let added = 0;
   let updated = 0;
   let deleted = 0;
@@ -258,7 +265,7 @@ async function importRows(
 
     if (action === "delete") {
       if (target?.id) {
-        await admin.from(tableName).delete().eq("id", target.id).eq("organisation_id", organisationId);
+        await admin.from("tasks").delete().eq("id", target.id).eq("organisation_id", organisationId);
         deleted += 1;
       }
       continue;
@@ -266,39 +273,78 @@ async function importRows(
 
     if (action === "update") {
       if (target?.id) {
-        await admin
-          .from(tableName)
-          .update({ data: cleanRecord(row), updated_by: user.id, updated_at: new Date().toISOString() })
+        const updatedRow = await admin
+          .from("tasks")
+          .update({
+            ...toTaskValues(cleanRecord(row)),
+            updated_at: new Date().toISOString()
+          })
           .eq("id", target.id)
-          .eq("organisation_id", organisationId);
+          .eq("organisation_id", organisationId)
+          .select("id,organisation_id,title,description,due_at,custom_values,created_by,created_at,updated_at")
+          .single();
+
+        if (updatedRow.error) {
+          return NextResponse.json({ error: updatedRow.error.message }, { status: 500 });
+        }
+
         updated += 1;
       }
       continue;
     }
 
     if (hasValue(row)) {
-      await admin.from(tableName).insert({
-        data: cleanRecord(row),
+      const inserted = await admin.from("tasks").insert({
+        ...toTaskValues(cleanRecord(row)),
         created_by: user.id,
-        organisation_code: text(user.user_metadata?.organisation_id) || defaultOrganisationCode,
         organisation_id: organisationId,
-        updated_by: user.id
+        priority: "normal"
       });
+
+      if (inserted.error) {
+        return NextResponse.json({ error: inserted.error.message }, { status: 500 });
+      }
+
       added += 1;
     }
   }
 
   await writeAuditLog(admin, organisationId, user.id, "taskline.import", null, { added, deleted, updated });
-  const refreshed = await admin
-    .from(tableName)
-    .select("id,organisation_id,organisation_code,data,created_by,updated_by,created_at,updated_at")
-    .eq("organisation_id", organisationId)
-    .order("created_at", { ascending: true });
+  const refreshed = await loadTaskLineRecords(admin, organisationId);
+
+  if (refreshed.error) {
+    return NextResponse.json({ error: refreshed.error.message }, { status: 500 });
+  }
 
   return NextResponse.json({
     summary: { added, deleted, updated },
-    rows: ((refreshed.data ?? []) as StoredTaskLineRecord[]).map(formatRecord)
+    rows: (refreshed.data ?? []).map(formatRecord)
   });
+}
+
+async function loadTaskLineRecords(admin: ReturnType<typeof createAdminClient>, organisationId: string) {
+  const rows: TaskRecord[] = [];
+
+  for (let from = 0; ; from += fetchBatchSize) {
+    const to = from + fetchBatchSize - 1;
+    const { data, error } = await admin
+      .from("tasks")
+      .select("id,organisation_id,title,description,due_at,custom_values,created_by,created_at,updated_at")
+      .eq("organisation_id", organisationId)
+      .eq("custom_values->>workline_module", moduleKey)
+      .order("created_at", { ascending: true })
+      .range(from, to);
+
+    if (error) {
+      return { data: null, error };
+    }
+
+    rows.push(...((data ?? []) as TaskRecord[]).filter(isTaskLineRecord));
+
+    if ((data ?? []).length < fetchBatchSize) {
+      return { data: rows, error: null };
+    }
+  }
 }
 
 async function loadAuditLogs(admin: ReturnType<typeof createAdminClient>, organisationId: string) {
@@ -338,10 +384,29 @@ async function writeAuditLog(
   });
 }
 
-function formatRecord(record: StoredTaskLineRecord): TaskLineRow {
+function toTaskValues(row: TaskLineRow) {
+  return {
+    custom_values: {
+      taskline_data: row,
+      workline_module: moduleKey
+    },
+    description: text(row.remarks || row.issue) || null,
+    due_at: toDateTime(row.due_date),
+    title: text(row.task || row.name || row.entity || row.entity_group) || "TaskLine row"
+  };
+}
+
+function auditValue(record: TaskRecord) {
+  return {
+    data: cleanRecord(record.custom_values?.taskline_data ?? {}),
+    id: record.id
+  };
+}
+
+function formatRecord(record: TaskRecord): TaskLineRow {
   return {
     __id: record.id,
-    ...cleanRecord(record.data ?? {})
+    ...cleanRecord(record.custom_values?.taskline_data ?? {})
   };
 }
 
@@ -356,6 +421,10 @@ function hasValue(row: TaskLineRow) {
   return taskLineColumns.some((key) => text(row[key]));
 }
 
+function isTaskLineRecord(record: TaskRecord | null): record is TaskRecord {
+  return record?.custom_values?.workline_module === moduleKey;
+}
+
 function readId(value: unknown) {
   if (!value || typeof value !== "object") {
     return null;
@@ -363,6 +432,17 @@ function readId(value: unknown) {
 
   const maybeRecord = value as { id?: unknown };
   return text(maybeRecord.id) || null;
+}
+
+function toDateTime(value: unknown) {
+  const raw = text(value);
+
+  if (!raw) {
+    return null;
+  }
+
+  const date = new Date(raw);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
 function createAdminClient() {
