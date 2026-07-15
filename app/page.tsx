@@ -163,6 +163,12 @@ export default function Home() {
         </aside>
 
         <section className="min-w-0">
+          <nav className="workline-frame mb-5 flex gap-2 overflow-x-auto rounded-[22px] p-3 lg:hidden">
+            {navigation.map((item) => (
+              <MobileNavItem item={item.label === "Partner Dashboard" ? { ...item, label: dashboardLabel } : item} key={item.label} />
+            ))}
+          </nav>
+
           <header className="workline-frame rounded-[26px] p-5 md:p-7">
             <div className="grid gap-6 xl:grid-cols-[1fr_360px] xl:items-center">
               <div>
@@ -238,6 +244,31 @@ export default function Home() {
         </section>
       </div>
     </main>
+  );
+}
+
+function MobileNavItem({
+  item
+}: {
+  item: {
+    href: string;
+    icon: ComponentType<{ className?: string }>;
+    label: string;
+    tone: string;
+  };
+}) {
+  const Icon = item.icon;
+
+  return (
+    <Link
+      className="flex min-w-max items-center gap-2 rounded-xl bg-white px-3 py-2 text-xs font-black text-slate-800 shadow-sm ring-1 ring-slate-950/5"
+      href={item.href}
+    >
+      <span className={`flex size-7 items-center justify-center rounded-lg ${item.tone}`}>
+        <Icon className="size-3.5" />
+      </span>
+      {item.label}
+    </Link>
   );
 }
 
