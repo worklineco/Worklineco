@@ -1,7 +1,7 @@
 "use client";
 
-import { ArrowDown, ArrowUp, Download, History, Plus, Search, Settings2, Upload } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
+import { ArrowDown, ArrowUp, Download, History, Pencil, Plus, Search, Settings2, Trash2, Upload, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx-js-style";
 
 type TaskLineColumn = {
@@ -26,6 +26,9 @@ type TaskLineView = "audit" | "register";
 const importActionColumn = "Import Action";
 const importActionOptions = ["Add", "Update", "Delete"];
 const taskLineColumnLayoutStorageKey = "workline:taskline-column-layout:v1";
+const taskLineRowsStorageKey = "workline:taskline-rows:v1";
+const taskLineAuditStorageKey = "workline:taskline-audit:v1";
+const actionColumnWidth = 132;
 const taskLineColumns: TaskLineColumn[] = [
   { key: "team", label: "Team", width: 120 },
   { key: "serial_no", label: "S. No.", width: 82 },
@@ -82,11 +85,13 @@ export function TaskLineRegister() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
   const [columnOrder, setColumnOrder] = useState(() => getSavedTaskLineColumnLayout().order);
-  const [auditLogs, setAuditLogs] = useState<TaskLineAuditLog[]>([]);
+  const [auditLogs, setAuditLogs] = useState<TaskLineAuditLog[]>(() => getSavedTaskLineAuditLogs());
+  const [formDraft, setFormDraft] = useState<TaskLineRow | null>(null);
   const [hiddenColumnKeys, setHiddenColumnKeys] = useState<Set<string>>(() => new Set(getSavedTaskLineColumnLayout().hiddenColumnKeys));
   const [isColumnOptionsOpen, setIsColumnOptionsOpen] = useState(false);
   const [message, setMessage] = useState("");
-  const [rows, setRows] = useState<TaskLineRow[]>(defaultRows);
+  const [editingRowId, setEditingRowId] = useState<string | null>(null);
+  const [rows, setRows] = useState<TaskLineRow[]>(() => getSavedTaskLineRows());
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [viewMode, setViewMode] = useState<TaskLineView>("register");
@@ -99,7 +104,7 @@ export function TaskLineRegister() {
     () => orderedColumns.filter((column) => !hiddenColumnKeys.has(column.key)),
     [hiddenColumnKeys, orderedColumns]
   );
-  const tableWidth = useMemo(() => visibleColumns.reduce((total, column) => total + column.width, 0), [visibleColumns]);
+  const tableWidth = useMemo(() => actionColumnWidth + visibleColumns.reduce((total, column) => total + column.width, 0), [visibleColumns]);
   const filteredRows = useMemo(() => {
     const query = search.trim().toLowerCase();
 
@@ -116,10 +121,47 @@ export function TaskLineRegister() {
   }, [columnFilters, rows, search, statusFilter, visibleColumns]);
   const hasActiveColumnFilters = Object.values(columnFilters).some((value) => value.trim());
 
+  useEffect(() => {
+    saveTaskLineRows(rows);
+  }, [rows]);
+
+  useEffect(() => {
+    saveTaskLineAuditLogs(auditLogs);
+  }, [auditLogs]);
+
   function addRow() {
-    setRows((current) => [createEmptyRow(`draft-${crypto.randomUUID()}`), ...current]);
-    addAuditLog({ action: "taskline.add_row", newValue: "Blank row added" });
-    setMessage("Added a blank TaskLine row.");
+    setEditingRowId(null);
+    setFormDraft(createEmptyRow(`draft-${crypto.randomUUID()}`));
+  }
+
+  function openEditForm(row: TaskLineRow) {
+    setEditingRowId(row.__id);
+    setFormDraft({ ...row });
+  }
+
+  function saveFormDraft() {
+    if (!formDraft) {
+      return;
+    }
+
+    if (editingRowId) {
+      const existingRow = rows.find((row) => row.__id === editingRowId);
+      setRows((current) => current.map((row) => (row.__id === editingRowId ? { ...formDraft, __id: row.__id } : row)));
+      addAuditLog({
+        action: "taskline.edit_row",
+        newValue: getChangedFields(existingRow, formDraft).join(", ") || "Row saved",
+        rowLabel: getRowLabel(existingRow, rows)
+      });
+      setMessage("TaskLine row updated.");
+    } else {
+      const nextRow = { ...formDraft, __id: formDraft.__id || `draft-${crypto.randomUUID()}` };
+      setRows((current) => [nextRow, ...current]);
+      addAuditLog({ action: "taskline.add_row", newValue: getRowLabel(nextRow, [nextRow]) || "New row added" });
+      setMessage("TaskLine row added.");
+    }
+
+    setEditingRowId(null);
+    setFormDraft(null);
   }
 
   function updateRow(rowId: string, key: string, value: string) {
@@ -137,6 +179,21 @@ export function TaskLineRegister() {
     }
 
     setRows((current) => current.map((row) => (row.__id === rowId ? { ...row, [key]: value } : row)));
+  }
+
+  function deleteRow(row: TaskLineRow) {
+    if (!window.confirm(`Delete ${getRowLabel(row, rows) || "this TaskLine row"}?`)) {
+      return;
+    }
+
+    setRows((current) => current.filter((item) => item.__id !== row.__id));
+    addAuditLog({ action: "taskline.delete_row", oldValue: JSON.stringify(toDisplayRow(row)), rowLabel: getRowLabel(row, rows) });
+    setMessage("TaskLine row deleted.");
+  }
+
+  function viewRowHistory(row: TaskLineRow) {
+    setViewMode("audit");
+    setMessage(`Showing audit trail. Row selected: ${getRowLabel(row, rows) || "TaskLine row"}.`);
   }
 
   function downloadTemplate() {
@@ -355,13 +412,15 @@ export function TaskLineRegister() {
               ))}
             </colgroup>
             <thead className="sticky top-0 z-10 bg-slate-950 text-xs font-black uppercase text-white">
-              <tr>
-                {visibleColumns.map((column) => (
-                  <th className="border-r border-white/10 px-3 py-3 last:border-r-0" key={column.key}>{column.label}</th>
-                ))}
-              </tr>
-              <tr className="bg-slate-900">
-                {visibleColumns.map((column) => (
+            <tr>
+              <th className="border-r border-white/10 px-3 py-3" style={{ width: actionColumnWidth }}>Actions</th>
+              {visibleColumns.map((column) => (
+                <th className="border-r border-white/10 px-3 py-3 last:border-r-0" key={column.key}>{column.label}</th>
+              ))}
+            </tr>
+            <tr className="bg-slate-900">
+              <th className="border-r border-white/10 px-2 py-2" />
+              {visibleColumns.map((column) => (
                   <th className="border-r border-white/10 px-2 py-2 last:border-r-0" key={`filter-${column.key}`}>
                     {column.key === "serial_no" ? null : (
                       <input
@@ -379,6 +438,19 @@ export function TaskLineRegister() {
             <tbody>
               {filteredRows.map((row, rowIndex) => (
                 <tr className="border-b border-slate-100 last:border-b-0" key={row.__id}>
+                  <td className="border-r border-slate-100 px-2 py-2">
+                    <div className="flex items-center gap-1">
+                      <button className="inline-flex size-8 items-center justify-center rounded-md border border-sky-200 text-sky-700 hover:bg-sky-50" onClick={() => openEditForm(row)} title="Edit row" type="button">
+                        <Pencil className="size-4" />
+                      </button>
+                      <button className="inline-flex size-8 items-center justify-center rounded-md border border-teal-200 text-teal-700 hover:bg-teal-50" onClick={() => viewRowHistory(row)} title="View history" type="button">
+                        <History className="size-4" />
+                      </button>
+                      <button className="inline-flex size-8 items-center justify-center rounded-md border border-rose-200 text-rose-700 hover:bg-rose-50" onClick={() => deleteRow(row)} title="Delete row" type="button">
+                        <Trash2 className="size-4" />
+                      </button>
+                    </div>
+                  </td>
                   {visibleColumns.map((column) => (
                     <TaskLineCell
                       column={column}
@@ -398,6 +470,19 @@ export function TaskLineRegister() {
 
       {viewMode === "audit" ? (
         <TaskLineAuditTable logs={auditLogs} />
+      ) : null}
+
+      {formDraft ? (
+        <TaskLineForm
+          draft={formDraft}
+          isEdit={Boolean(editingRowId)}
+          onChange={(key, value) => setFormDraft((current) => (current ? { ...current, [key]: value } : current))}
+          onClose={() => {
+            setEditingRowId(null);
+            setFormDraft(null);
+          }}
+          onSubmit={saveFormDraft}
+        />
       ) : null}
     </section>
   );
@@ -449,6 +534,74 @@ function TaskLineCell({
     </td>
   );
 }
+
+function TaskLineForm({
+  draft,
+  isEdit,
+  onChange,
+  onClose,
+  onSubmit
+}: {
+  draft: TaskLineRow;
+  isEdit: boolean;
+  onChange: (key: string, value: string) => void;
+  onClose: () => void;
+  onSubmit: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/45 px-4 py-6">
+      <section className="max-h-[90vh] w-full max-w-6xl overflow-hidden rounded-lg border border-slate-200 bg-white shadow-[0_24px_90px_rgba(15,23,42,0.30)]">
+        <header className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
+          <div>
+            <p className="text-xs font-black uppercase tracking-[0.14em] text-rose-700">{isEdit ? "Edit TaskLine row" : "New TaskLine row"}</p>
+            <h3 className="mt-1 text-2xl font-black text-slate-950">{isEdit ? "Update task entry" : "Create task entry"}</h3>
+          </div>
+          <button className="inline-flex size-9 items-center justify-center rounded-md border border-slate-200 text-slate-700 hover:bg-slate-50" onClick={onClose} title="Close form" type="button">
+            <X className="size-4" />
+          </button>
+        </header>
+
+        <div className="max-h-[68vh] overflow-auto p-5">
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            {taskLineColumns.filter((column) => column.key !== "serial_no").map((column) => (
+              <label className={["remarks", "issue", "document_link", "el_reference", "fee_comments"].includes(column.key) ? "xl:col-span-2" : ""} key={column.key}>
+                <span className="text-[10px] font-black uppercase text-slate-500">{column.label}</span>
+                {column.type === "select" ? (
+                  <select
+                    className={formControlClass}
+                    onChange={(event) => onChange(column.key, event.target.value)}
+                    value={draft[column.key] ?? ""}
+                  >
+                    {statusOptions.map((option) => (
+                      <option key={option} value={option}>{option || "-"}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    className={formControlClass}
+                    onChange={(event) => onChange(column.key, event.target.value)}
+                    type={column.type === "date" ? "date" : column.type === "number" || column.type === "money" ? "number" : "text"}
+                    value={draft[column.key] ?? ""}
+                  />
+                )}
+              </label>
+            ))}
+          </div>
+        </div>
+
+        <footer className="flex justify-end gap-2 border-t border-slate-200 px-5 py-4">
+          <button className={buttonClass("light")} onClick={onClose} type="button">Cancel</button>
+          <button className={buttonClass("primary")} onClick={onSubmit} type="button">
+            {isEdit ? <Pencil className="size-4" /> : <Plus className="size-4" />}
+            {isEdit ? "Save Changes" : "Create"}
+          </button>
+        </footer>
+      </section>
+    </div>
+  );
+}
+
+const formControlClass = "mt-1 h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm font-bold text-slate-900 outline-none focus:border-rose-300 focus:ring-2 focus:ring-rose-100";
 
 function TaskLineColumnOptionsPanel({
   hiddenColumnKeys,
@@ -660,6 +813,23 @@ function getRowLabel(row: TaskLineRow | undefined, rows: TaskLineRow[]) {
   return [serialNumber ? `#${serialNumber}` : "", name].filter(Boolean).join(" - ");
 }
 
+function getChangedFields(oldRow: TaskLineRow | undefined, nextRow: TaskLineRow) {
+  if (!oldRow) {
+    return ["Row saved"];
+  }
+
+  return taskLineColumns
+    .filter((column) => text(oldRow[column.key]) !== text(nextRow[column.key]))
+    .map((column) => column.label);
+}
+
+function toDisplayRow(row: TaskLineRow) {
+  return taskLineColumns.reduce<Record<string, string>>((result, column) => {
+    result[column.label] = row[column.key] ?? "";
+    return result;
+  }, {});
+}
+
 function formatAuditAction(action: string) {
   return action.replace("taskline.", "").replace(/_/g, " ");
 }
@@ -726,6 +896,53 @@ function getSavedTaskLineColumnLayout() {
       : { hiddenColumnKeys: [], order: defaultTaskLineColumnOrder };
   } catch {
     return { hiddenColumnKeys: [], order: defaultTaskLineColumnOrder };
+  }
+}
+
+function saveTaskLineRows(rows: TaskLineRow[]) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.localStorage.setItem(taskLineRowsStorageKey, JSON.stringify(rows));
+}
+
+function getSavedTaskLineRows() {
+  if (typeof window === "undefined") {
+    return defaultRows;
+  }
+
+  try {
+    const savedRows = window.localStorage.getItem(taskLineRowsStorageKey);
+    if (!savedRows) {
+      return defaultRows;
+    }
+
+    const parsed = JSON.parse(savedRows) as TaskLineRow[];
+    return parsed.length ? parsed.map((row, index) => ({ ...createEmptyRow(`saved-${index + 1}`), ...row, __id: row.__id || `saved-${index + 1}` })) : defaultRows;
+  } catch {
+    return defaultRows;
+  }
+}
+
+function saveTaskLineAuditLogs(logs: TaskLineAuditLog[]) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.localStorage.setItem(taskLineAuditStorageKey, JSON.stringify(logs.slice(0, 500)));
+}
+
+function getSavedTaskLineAuditLogs() {
+  if (typeof window === "undefined") {
+    return [];
+  }
+
+  try {
+    const savedLogs = window.localStorage.getItem(taskLineAuditStorageKey);
+    return savedLogs ? (JSON.parse(savedLogs) as TaskLineAuditLog[]) : [];
+  } catch {
+    return [];
   }
 }
 
