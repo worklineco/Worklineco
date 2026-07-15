@@ -128,6 +128,7 @@ async function handlePost(request: Request) {
     action?: "import" | "save";
     importRows?: Array<TaskLineRow & { import_action?: string; serial_no?: string }>;
     record?: TaskLineRow;
+    returnRows?: boolean;
   };
   const admin = createAdminClient();
   const organisation = await getOrganisationId(admin, auth.user);
@@ -137,7 +138,7 @@ async function handlePost(request: Request) {
   }
 
   if (payload.action === "import") {
-    return importRows(admin, organisation.organisationId, auth.user, payload.importRows ?? []);
+    return importRows(admin, organisation.organisationId, auth.user, payload.importRows ?? [], payload.returnRows !== false);
   }
 
   const record = payload.record;
@@ -254,7 +255,8 @@ async function importRows(
   admin: ReturnType<typeof createAdminClient>,
   organisationId: string,
   user: User,
-  rows: Array<TaskLineRow & { import_action?: string; serial_no?: string }>
+  rows: Array<TaskLineRow & { import_action?: string; serial_no?: string }>,
+  returnRows: boolean
 ) {
   const existing = await loadTaskLineRecords(admin, organisationId);
 
@@ -319,6 +321,13 @@ async function importRows(
   }
 
   await writeAuditLog(admin, organisationId, user.id, "taskline.import", null, { added, deleted, updated });
+
+  if (!returnRows) {
+    return NextResponse.json({
+      summary: { added, deleted, updated }
+    });
+  }
+
   const refreshed = await loadTaskLineRecords(admin, organisationId);
 
   if (refreshed.error) {

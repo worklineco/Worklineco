@@ -25,6 +25,7 @@ type TaskLineView = "audit" | "register";
 
 const importActionColumn = "Import Action";
 const importActionOptions = ["Add", "Update", "Delete"];
+const taskLineImportBatchSize = 100;
 const taskLineColumnLayoutStorageKey = "workline:taskline-column-layout:v1";
 const actionColumnWidth = 132;
 const taskLineColumns: TaskLineColumn[] = [
@@ -345,28 +346,22 @@ export function TaskLineRegister() {
         return;
       }
 
-      const response = await fetch("/api/taskline", {
-        body: JSON.stringify({ action: "import", importRows }),
-        headers: { "Content-Type": "application/json" },
-        method: "POST"
-      });
-      const result = (await response.json().catch(() => ({}))) as {
-        error?: string;
-        rows?: TaskLineRow[];
-        summary?: { added: number; deleted: number; updated: number };
-      };
+      const summary = { added: 0, deleted: 0, updated: 0 };
 
-      if (!response.ok) {
-        setMessage(result.error ?? `Could not import TaskLine rows. Server returned ${response.status}.`);
-        return;
+      for (let index = 0; index < importRows.length; index += taskLineImportBatchSize) {
+        const batch = importRows.slice(index, index + taskLineImportBatchSize);
+        const result = await postTaskLineImportBatch(batch);
+        summary.added += result.summary?.added ?? 0;
+        summary.updated += result.summary?.updated ?? 0;
+        summary.deleted += result.summary?.deleted ?? 0;
+        setMessage(`Importing ${file.name}: ${Math.min(index + taskLineImportBatchSize, importRows.length)} of ${importRows.length} rows processed...`);
       }
 
-      setRows(result.rows ?? []);
       await loadTaskLine();
-      setMessage(`Imported ${file.name}: ${result.summary?.added ?? 0} added, ${result.summary?.updated ?? 0} updated, ${result.summary?.deleted ?? 0} deleted.`);
+      setMessage(`Imported ${file.name}: ${summary.added} added, ${summary.updated} updated, ${summary.deleted} deleted.`);
     } catch (error) {
       console.error("TaskLine import error:", error);
-      setMessage("Could not import TaskLine rows. Please check the file and try again.");
+      setMessage(error instanceof Error ? error.message : "Could not import TaskLine rows. Please check the file and try again.");
     }
   }
 
@@ -882,6 +877,24 @@ function rowFromImport(rawRow: Record<string, unknown>) {
     },
     { __id: `import-${crypto.randomUUID()}` }
   );
+}
+
+async function postTaskLineImportBatch(importRows: TaskLineRow[]) {
+  const response = await fetch("/api/taskline", {
+    body: JSON.stringify({ action: "import", importRows, returnRows: false }),
+    headers: { "Content-Type": "application/json" },
+    method: "POST"
+  });
+  const result = (await response.json().catch(() => ({}))) as {
+    error?: string;
+    summary?: { added: number; deleted: number; updated: number };
+  };
+
+  if (!response.ok) {
+    throw new Error(result.error ?? `Could not import TaskLine rows. Server returned ${response.status}.`);
+  }
+
+  return result;
 }
 
 function hasTaskLineValue(row: TaskLineRow) {
