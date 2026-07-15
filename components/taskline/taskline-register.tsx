@@ -26,8 +26,6 @@ type TaskLineView = "audit" | "register";
 const importActionColumn = "Import Action";
 const importActionOptions = ["Add", "Update", "Delete"];
 const taskLineColumnLayoutStorageKey = "workline:taskline-column-layout:v1";
-const taskLineRowsStorageKey = "workline:taskline-rows:v1";
-const taskLineAuditStorageKey = "workline:taskline-audit:v1";
 const actionColumnWidth = 132;
 const taskLineColumns: TaskLineColumn[] = [
   { key: "team", label: "Team", width: 120 },
@@ -85,13 +83,14 @@ export function TaskLineRegister() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
   const [columnOrder, setColumnOrder] = useState(() => getSavedTaskLineColumnLayout().order);
-  const [auditLogs, setAuditLogs] = useState<TaskLineAuditLog[]>(() => getSavedTaskLineAuditLogs());
+  const [auditLogs, setAuditLogs] = useState<TaskLineAuditLog[]>([]);
   const [formDraft, setFormDraft] = useState<TaskLineRow | null>(null);
   const [hiddenColumnKeys, setHiddenColumnKeys] = useState<Set<string>>(() => new Set(getSavedTaskLineColumnLayout().hiddenColumnKeys));
   const [isColumnOptionsOpen, setIsColumnOptionsOpen] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const [message, setMessage] = useState("");
   const [editingRowId, setEditingRowId] = useState<string | null>(null);
-  const [rows, setRows] = useState<TaskLineRow[]>(() => getSavedTaskLineRows());
+  const [rows, setRows] = useState<TaskLineRow[]>([]);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [viewMode, setViewMode] = useState<TaskLineView>("register");
@@ -122,12 +121,35 @@ export function TaskLineRegister() {
   const hasActiveColumnFilters = Object.values(columnFilters).some((value) => value.trim());
 
   useEffect(() => {
-    saveTaskLineRows(rows);
-  }, [rows]);
+    void loadTaskLine();
+  }, []);
 
-  useEffect(() => {
-    saveTaskLineAuditLogs(auditLogs);
-  }, [auditLogs]);
+  async function loadTaskLine() {
+    setIsLoading(true);
+
+    try {
+      const response = await fetch("/api/taskline", { cache: "no-store" });
+      const result = (await response.json()) as {
+        auditLogs?: Array<Record<string, unknown>>;
+        error?: string;
+        rows?: TaskLineRow[];
+      };
+
+      if (!response.ok) {
+        setMessage(result.error ?? "Could not load TaskLine.");
+        return;
+      }
+
+      setRows(result.rows ?? []);
+      setAuditLogs((result.auditLogs ?? []).map(formatServerAuditLog));
+      setMessage("");
+    } catch (error) {
+      console.error("TaskLine load error:", error);
+      setMessage("Could not load TaskLine.");
+    } finally {
+      setIsLoading(false);
+    }
+  }
 
   function addRow() {
     setEditingRowId(null);
@@ -139,25 +161,50 @@ export function TaskLineRegister() {
     setFormDraft({ ...row });
   }
 
-  function saveFormDraft() {
+  async function saveFormDraft() {
     if (!formDraft) {
       return;
     }
 
+    const existingRow = editingRowId ? rows.find((row) => row.__id === editingRowId) : null;
+    setMessage(editingRowId ? "Saving TaskLine row..." : "Creating TaskLine row...");
+
+    try {
+      const response = await fetch("/api/taskline", {
+        body: JSON.stringify({ action: "save", record: formDraft }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST"
+      });
+      const result = (await response.json()) as { error?: string; record?: TaskLineRow };
+
+      if (!response.ok || !result.record) {
+        setMessage(result.error ?? "Could not save TaskLine row.");
+        return;
+      }
+
+      if (editingRowId) {
+        setRows((current) => current.map((row) => (row.__id === editingRowId ? result.record! : row)));
+        setMessage("TaskLine row updated.");
+      } else {
+        setRows((current) => [result.record!, ...current]);
+        setMessage("TaskLine row added.");
+      }
+
+      await loadTaskLine();
+    } catch (error) {
+      console.error("TaskLine save error:", error);
+      setMessage("Could not save TaskLine row.");
+      return;
+    }
+
     if (editingRowId) {
-      const existingRow = rows.find((row) => row.__id === editingRowId);
-      setRows((current) => current.map((row) => (row.__id === editingRowId ? { ...formDraft, __id: row.__id } : row)));
       addAuditLog({
         action: "taskline.edit_row",
-        newValue: getChangedFields(existingRow, formDraft).join(", ") || "Row saved",
-        rowLabel: getRowLabel(existingRow, rows)
+        newValue: getChangedFields(existingRow ?? undefined, formDraft).join(", ") || "Row saved",
+        rowLabel: getRowLabel(existingRow ?? undefined, rows)
       });
-      setMessage("TaskLine row updated.");
     } else {
-      const nextRow = { ...formDraft, __id: formDraft.__id || `draft-${crypto.randomUUID()}` };
-      setRows((current) => [nextRow, ...current]);
-      addAuditLog({ action: "taskline.add_row", newValue: getRowLabel(nextRow, [nextRow]) || "New row added" });
-      setMessage("TaskLine row added.");
+      addAuditLog({ action: "taskline.add_row", newValue: getRowLabel(formDraft, [formDraft]) || "New row added" });
     }
 
     setEditingRowId(null);
@@ -178,17 +225,47 @@ export function TaskLineRegister() {
       });
     }
 
+    const nextRow = row ? { ...row, [key]: value } : null;
     setRows((current) => current.map((row) => (row.__id === rowId ? { ...row, [key]: value } : row)));
+    if (nextRow) void saveInlineRow(nextRow);
   }
 
-  function deleteRow(row: TaskLineRow) {
+  async function saveInlineRow(row: TaskLineRow) {
+    try {
+      await fetch("/api/taskline", {
+        body: JSON.stringify({ action: "save", record: row }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST"
+      });
+    } catch (error) {
+      console.error("TaskLine inline save error:", error);
+    }
+  }
+
+  async function deleteRow(row: TaskLineRow) {
     if (!window.confirm(`Delete ${getRowLabel(row, rows) || "this TaskLine row"}?`)) {
       return;
     }
 
-    setRows((current) => current.filter((item) => item.__id !== row.__id));
-    addAuditLog({ action: "taskline.delete_row", oldValue: JSON.stringify(toDisplayRow(row)), rowLabel: getRowLabel(row, rows) });
-    setMessage("TaskLine row deleted.");
+    setMessage("Deleting TaskLine row...");
+
+    try {
+      const response = await fetch(`/api/taskline?id=${encodeURIComponent(row.__id)}`, { method: "DELETE" });
+      const result = (await response.json().catch(() => ({}))) as { error?: string };
+
+      if (!response.ok) {
+        setMessage(result.error ?? "Could not delete TaskLine row.");
+        return;
+      }
+
+      setRows((current) => current.filter((item) => item.__id !== row.__id));
+      addAuditLog({ action: "taskline.delete_row", oldValue: JSON.stringify(toDisplayRow(row)), rowLabel: getRowLabel(row, rows) });
+      await loadTaskLine();
+      setMessage("TaskLine row deleted.");
+    } catch (error) {
+      console.error("TaskLine delete error:", error);
+      setMessage("Could not delete TaskLine row.");
+    }
   }
 
   function viewRowHistory(row: TaskLineRow) {
@@ -246,47 +323,31 @@ export function TaskLineRegister() {
       return;
     }
 
-    let added = 0;
-    let updated = 0;
-    let deleted = 0;
-
-    setRows((currentRows) => {
-      let nextRows = [...currentRows];
-
-      importedRows.forEach((rawRow) => {
-        const action = text(rawRow[importActionColumn] || "Add").toLowerCase();
-        const incoming = rowFromImport(rawRow);
-        const serialIndex = Number.parseInt(text(rawRow["S. No."] || rawRow["S.No."] || rawRow["Serial No."]), 10) - 1;
-
-        if (action === "delete") {
-          if (Number.isInteger(serialIndex) && serialIndex >= 0 && serialIndex < nextRows.length) {
-            nextRows = nextRows.filter((_, index) => index !== serialIndex);
-            deleted += 1;
-          }
-          return;
-        }
-
-        if (action === "update") {
-          if (Number.isInteger(serialIndex) && serialIndex >= 0 && serialIndex < nextRows.length) {
-            nextRows = nextRows.map((row, index) => (index === serialIndex ? { ...row, ...incoming, __id: row.__id } : row));
-            updated += 1;
-          }
-          return;
-        }
-
-        if (hasTaskLineValue(incoming)) {
-          nextRows = [...nextRows, incoming];
-          added += 1;
-        }
-      });
-
-      return nextRows;
+    setMessage(`Importing ${file.name}...`);
+    const importRows = importedRows.map((rawRow) => ({
+      ...rowFromImport(rawRow),
+      import_action: text(rawRow[importActionColumn] || "Add"),
+      serial_no: text(rawRow["S. No."] || rawRow["S.No."] || rawRow["Serial No."])
+    }));
+    const response = await fetch("/api/taskline", {
+      body: JSON.stringify({ action: "import", importRows }),
+      headers: { "Content-Type": "application/json" },
+      method: "POST"
     });
-    addAuditLog({
-      action: "taskline.import",
-      newValue: `${file.name}: ${added} added, ${updated} updated, ${deleted} deleted`
-    });
-    setMessage(`Imported ${file.name}: ${added} added, ${updated} updated, ${deleted} deleted.`);
+    const result = (await response.json()) as {
+      error?: string;
+      rows?: TaskLineRow[];
+      summary?: { added: number; deleted: number; updated: number };
+    };
+
+    if (!response.ok) {
+      setMessage(result.error ?? "Could not import TaskLine rows.");
+      return;
+    }
+
+    setRows(result.rows ?? []);
+    await loadTaskLine();
+    setMessage(`Imported ${file.name}: ${result.summary?.added ?? 0} added, ${result.summary?.updated ?? 0} updated, ${result.summary?.deleted ?? 0} deleted.`);
   }
 
   function addAuditLog(log: Omit<TaskLineAuditLog, "createdAt" | "id">) {
@@ -402,7 +463,7 @@ export function TaskLineRegister() {
       {viewMode === "register" ? (
       <div className="mt-4">
         <p className="mb-2 text-sm font-bold text-slate-600">
-          Showing 1-{filteredRows.length} of {filteredRows.length} matching task rows
+          {isLoading ? "Loading TaskLine rows..." : `Showing 1-${filteredRows.length} of ${filteredRows.length} matching task rows`}
         </p>
         <div className="max-h-[calc(100vh-260px)] overflow-auto rounded-md border border-slate-200 bg-white">
           <table className="table-fixed border-collapse text-left text-sm" style={{ minWidth: tableWidth, width: tableWidth }}>
@@ -436,7 +497,9 @@ export function TaskLineRegister() {
               </tr>
             </thead>
             <tbody>
-              {filteredRows.map((row, rowIndex) => (
+              {isLoading ? (
+                <tr><td className="px-4 py-8 font-bold text-slate-500" colSpan={visibleColumns.length + 1}>Loading TaskLine rows...</td></tr>
+              ) : filteredRows.length ? filteredRows.map((row, rowIndex) => (
                 <tr className="border-b border-slate-100 last:border-b-0" key={row.__id}>
                   <td className="border-r border-slate-100 px-2 py-2">
                     <div className="flex items-center gap-1">
@@ -461,7 +524,9 @@ export function TaskLineRegister() {
                     />
                   ))}
                 </tr>
-              ))}
+              )) : (
+                <tr><td className="px-4 py-8 font-bold text-slate-500" colSpan={visibleColumns.length + 1}>No TaskLine rows match the current filters.</td></tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -841,6 +906,59 @@ function formatAuditTime(value: string) {
   }).format(new Date(value));
 }
 
+function formatServerAuditLog(log: Record<string, unknown>): TaskLineAuditLog {
+  const oldValue = readAuditValue(log.old_value);
+  const newValue = readAuditValue(log.new_value);
+
+  return {
+    action: text(log.action),
+    createdAt: text(log.created_at),
+    field: getAuditFieldSummary(oldValue, newValue),
+    id: text(log.id) || crypto.randomUUID(),
+    newValue: summarizeAuditValue(newValue),
+    oldValue: summarizeAuditValue(oldValue),
+    rowLabel: getAuditRowLabel(oldValue || newValue)
+  };
+}
+
+function readAuditValue(value: unknown) {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const record = value as { data?: TaskLineRow } & TaskLineRow;
+  return record.data ?? record;
+}
+
+function getAuditFieldSummary(oldValue: TaskLineRow | null, newValue: TaskLineRow | null) {
+  if (!oldValue || !newValue) {
+    return "";
+  }
+
+  return taskLineColumns
+    .filter((column) => text(oldValue[column.key]) !== text(newValue[column.key]))
+    .map((column) => column.label)
+    .slice(0, 6)
+    .join(", ");
+}
+
+function summarizeAuditValue(value: TaskLineRow | null) {
+  if (!value) {
+    return "";
+  }
+
+  const summary = [value.task, value.entity, value.status_open_close].map(text).filter(Boolean).join(" | ");
+  return summary || JSON.stringify(toDisplayRow(value));
+}
+
+function getAuditRowLabel(value: TaskLineRow | null) {
+  if (!value) {
+    return "";
+  }
+
+  return [text(value.name), text(value.task), text(value.entity)].filter(Boolean).join(" - ");
+}
+
 function blankExportRow() {
   return taskLineColumns.reduce<Record<string, string>>(
     (row, column) => {
@@ -896,53 +1014,6 @@ function getSavedTaskLineColumnLayout() {
       : { hiddenColumnKeys: [], order: defaultTaskLineColumnOrder };
   } catch {
     return { hiddenColumnKeys: [], order: defaultTaskLineColumnOrder };
-  }
-}
-
-function saveTaskLineRows(rows: TaskLineRow[]) {
-  if (typeof window === "undefined") {
-    return;
-  }
-
-  window.localStorage.setItem(taskLineRowsStorageKey, JSON.stringify(rows));
-}
-
-function getSavedTaskLineRows() {
-  if (typeof window === "undefined") {
-    return defaultRows;
-  }
-
-  try {
-    const savedRows = window.localStorage.getItem(taskLineRowsStorageKey);
-    if (!savedRows) {
-      return defaultRows;
-    }
-
-    const parsed = JSON.parse(savedRows) as TaskLineRow[];
-    return parsed.length ? parsed.map((row, index) => ({ ...createEmptyRow(`saved-${index + 1}`), ...row, __id: row.__id || `saved-${index + 1}` })) : defaultRows;
-  } catch {
-    return defaultRows;
-  }
-}
-
-function saveTaskLineAuditLogs(logs: TaskLineAuditLog[]) {
-  if (typeof window === "undefined") {
-    return;
-  }
-
-  window.localStorage.setItem(taskLineAuditStorageKey, JSON.stringify(logs.slice(0, 500)));
-}
-
-function getSavedTaskLineAuditLogs() {
-  if (typeof window === "undefined") {
-    return [];
-  }
-
-  try {
-    const savedLogs = window.localStorage.getItem(taskLineAuditStorageKey);
-    return savedLogs ? (JSON.parse(savedLogs) as TaskLineAuditLog[]) : [];
-  } catch {
-    return [];
   }
 }
 
