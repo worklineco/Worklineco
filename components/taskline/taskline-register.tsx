@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowDown, ArrowUp, Download, Plus, Search, Settings2, Upload } from "lucide-react";
+import { ArrowDown, ArrowUp, Download, History, Plus, Search, Settings2, Upload } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx-js-style";
 
@@ -12,6 +12,16 @@ type TaskLineColumn = {
 };
 type TaskLineRow = Record<string, string>;
 type TaskLineColumnLayout = { hiddenColumnKeys: string[]; order: string[] };
+type TaskLineAuditLog = {
+  action: string;
+  createdAt: string;
+  field?: string;
+  id: string;
+  newValue?: string;
+  oldValue?: string;
+  rowLabel?: string;
+};
+type TaskLineView = "audit" | "register";
 
 const importActionColumn = "Import Action";
 const importActionOptions = ["Add", "Update", "Delete"];
@@ -72,12 +82,14 @@ export function TaskLineRegister() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
   const [columnOrder, setColumnOrder] = useState(() => getSavedTaskLineColumnLayout().order);
+  const [auditLogs, setAuditLogs] = useState<TaskLineAuditLog[]>([]);
   const [hiddenColumnKeys, setHiddenColumnKeys] = useState<Set<string>>(() => new Set(getSavedTaskLineColumnLayout().hiddenColumnKeys));
   const [isColumnOptionsOpen, setIsColumnOptionsOpen] = useState(false);
   const [message, setMessage] = useState("");
   const [rows, setRows] = useState<TaskLineRow[]>(defaultRows);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  const [viewMode, setViewMode] = useState<TaskLineView>("register");
 
   const orderedColumns = useMemo(
     () => columnOrder.map((key) => taskLineColumnByKey.get(key)).filter((column): column is TaskLineColumn => Boolean(column)),
@@ -106,10 +118,24 @@ export function TaskLineRegister() {
 
   function addRow() {
     setRows((current) => [createEmptyRow(`draft-${crypto.randomUUID()}`), ...current]);
+    addAuditLog({ action: "taskline.add_row", newValue: "Blank row added" });
     setMessage("Added a blank TaskLine row.");
   }
 
   function updateRow(rowId: string, key: string, value: string) {
+    const row = rows.find((item) => item.__id === rowId);
+    const oldValue = row?.[key] ?? "";
+
+    if (oldValue !== value) {
+      addAuditLog({
+        action: "taskline.update_cell",
+        field: taskLineColumnByKey.get(key)?.label ?? key,
+        newValue: value,
+        oldValue,
+        rowLabel: getRowLabel(row, rows)
+      });
+    }
+
     setRows((current) => current.map((row) => (row.__id === rowId ? { ...row, [key]: value } : row)));
   }
 
@@ -127,6 +153,7 @@ export function TaskLineRegister() {
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "TaskLine Import");
     XLSX.writeFile(workbook, "workline-taskline-import-template.xlsx");
+    addAuditLog({ action: "taskline.download_template", newValue: "Downloaded import template" });
   }
 
   function exportView() {
@@ -147,6 +174,7 @@ export function TaskLineRegister() {
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "TaskLine");
     XLSX.writeFile(workbook, "workline-taskline-current-view.xlsx");
+    addAuditLog({ action: "taskline.export_view", newValue: `${exportRows.length} rows exported` });
     setMessage(`Exported ${exportRows.length} TaskLine rows.`);
   }
 
@@ -197,7 +225,22 @@ export function TaskLineRegister() {
 
       return nextRows;
     });
+    addAuditLog({
+      action: "taskline.import",
+      newValue: `${file.name}: ${added} added, ${updated} updated, ${deleted} deleted`
+    });
     setMessage(`Imported ${file.name}: ${added} added, ${updated} updated, ${deleted} deleted.`);
+  }
+
+  function addAuditLog(log: Omit<TaskLineAuditLog, "createdAt" | "id">) {
+    setAuditLogs((current) => [
+      {
+        ...log,
+        createdAt: new Date().toISOString(),
+        id: crypto.randomUUID()
+      },
+      ...current
+    ]);
   }
 
   return (
@@ -250,6 +293,10 @@ export function TaskLineRegister() {
                   setHiddenColumnKeys(new Set(normalizedLayout.hiddenColumnKeys));
                   setIsColumnOptionsOpen(false);
                   saveTaskLineColumnLayout(normalizedLayout);
+                  addAuditLog({
+                    action: "taskline.column_layout",
+                    newValue: `${taskLineColumns.length - normalizedLayout.hiddenColumnKeys.length} visible columns`
+                  });
                 }}
                 onClose={() => setIsColumnOptionsOpen(false)}
                 orderedColumns={orderedColumns}
@@ -286,10 +333,16 @@ export function TaskLineRegister() {
         </div>
       </div>
 
+      <div className="mt-4 flex flex-wrap gap-2 border-b border-slate-200 pb-3">
+        <ViewButton active={viewMode === "register"} label="Register" onClick={() => setViewMode("register")} />
+        <ViewButton active={viewMode === "audit"} label={`Audit Trail (${auditLogs.length})`} onClick={() => setViewMode("audit")} />
+      </div>
+
       {message ? (
         <p className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-bold text-emerald-900">{message}</p>
       ) : null}
 
+      {viewMode === "register" ? (
       <div className="mt-4">
         <p className="mb-2 text-sm font-bold text-slate-600">
           Showing 1-{filteredRows.length} of {filteredRows.length} matching task rows
@@ -341,6 +394,11 @@ export function TaskLineRegister() {
           </table>
         </div>
       </div>
+      ) : null}
+
+      {viewMode === "audit" ? (
+        <TaskLineAuditTable logs={auditLogs} />
+      ) : null}
     </section>
   );
 }
@@ -492,6 +550,61 @@ function TaskLineColumnOptionsPanel({
   );
 }
 
+function TaskLineAuditTable({ logs }: { logs: TaskLineAuditLog[] }) {
+  return (
+    <section className="mt-4 overflow-hidden rounded-md border border-slate-200 bg-white">
+      <div className="flex items-center gap-2 border-b border-slate-200 px-4 py-3">
+        <History className="size-4 text-rose-700" />
+        <h3 className="text-sm font-black uppercase tracking-[0.14em] text-slate-700">Edit History</h3>
+      </div>
+      <div className="max-h-[calc(100vh-250px)] overflow-auto">
+        <table className="w-full min-w-[980px] border-collapse text-left text-sm">
+          <thead className="sticky top-0 z-10 bg-slate-950 text-xs font-black uppercase text-white">
+            <tr>
+              <th className="px-3 py-3">Time</th>
+              <th className="px-3 py-3">Action</th>
+              <th className="px-3 py-3">Row</th>
+              <th className="px-3 py-3">Field</th>
+              <th className="px-3 py-3">Old Value</th>
+              <th className="px-3 py-3">New Value</th>
+            </tr>
+          </thead>
+          <tbody>
+            {logs.length ? logs.map((log) => (
+              <tr className="border-b border-slate-100 last:border-b-0" key={log.id}>
+                <td className="px-3 py-3 text-xs font-bold text-slate-500">{formatAuditTime(log.createdAt)}</td>
+                <td className="px-3 py-3 font-black text-slate-900">{formatAuditAction(log.action)}</td>
+                <td className="px-3 py-3 font-semibold text-slate-700">{log.rowLabel || "-"}</td>
+                <td className="px-3 py-3 font-semibold text-slate-700">{log.field || "-"}</td>
+                <td className="max-w-[260px] truncate px-3 py-3 font-semibold text-slate-500" title={log.oldValue || ""}>{log.oldValue || "-"}</td>
+                <td className="max-w-[320px] truncate px-3 py-3 font-semibold text-slate-900" title={log.newValue || ""}>{log.newValue || "-"}</td>
+              </tr>
+            )) : (
+              <tr>
+                <td className="px-4 py-8 text-center font-bold text-slate-500" colSpan={6}>No TaskLine edit history yet.</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function ViewButton({ active, label, onClick }: { active: boolean; label: string; onClick: () => void }) {
+  return (
+    <button
+      className={`inline-flex h-10 items-center justify-center rounded-md px-4 text-xs font-black uppercase transition ${
+        active ? "bg-slate-950 text-white" : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+      }`}
+      onClick={onClick}
+      type="button"
+    >
+      {label}
+    </button>
+  );
+}
+
 function Summary({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-md border border-slate-200 bg-white px-3 py-2">
@@ -535,6 +648,27 @@ function rowFromImport(rawRow: Record<string, unknown>) {
 
 function hasTaskLineValue(row: TaskLineRow) {
   return taskLineColumns.some((column) => column.key !== "serial_no" && text(row[column.key]).trim());
+}
+
+function getRowLabel(row: TaskLineRow | undefined, rows: TaskLineRow[]) {
+  if (!row) {
+    return "";
+  }
+
+  const serialNumber = rows.findIndex((item) => item.__id === row.__id) + 1;
+  const name = text(row.name || row.task || row.entity);
+  return [serialNumber ? `#${serialNumber}` : "", name].filter(Boolean).join(" - ");
+}
+
+function formatAuditAction(action: string) {
+  return action.replace("taskline.", "").replace(/_/g, " ");
+}
+
+function formatAuditTime(value: string) {
+  return new Intl.DateTimeFormat("en-IN", {
+    dateStyle: "medium",
+    timeStyle: "short"
+  }).format(new Date(value));
 }
 
 function blankExportRow() {
