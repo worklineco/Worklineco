@@ -608,7 +608,8 @@ function TaskLineCell({
       <input
         className="h-8 w-full rounded-md border border-transparent bg-transparent px-1.5 text-xs font-semibold text-slate-700 outline-none hover:border-slate-200 hover:bg-slate-50 focus:border-rose-300 focus:bg-white focus:ring-2 focus:ring-rose-100"
         onChange={(event) => onChange(event.target.value)}
-        type={column.type === "date" ? "date" : column.type === "number" || column.type === "money" ? "number" : "text"}
+        placeholder={column.type === "date" ? "dd-mm-yyyy" : undefined}
+        type={column.type === "number" || column.type === "money" ? "number" : "text"}
         value={row[column.key] ?? ""}
       />
     </td>
@@ -660,7 +661,8 @@ function TaskLineForm({
                   <input
                     className={formControlClass}
                     onChange={(event) => onChange(column.key, event.target.value)}
-                    type={column.type === "date" ? "date" : column.type === "number" || column.type === "money" ? "number" : "text"}
+                    placeholder={column.type === "date" ? "dd-mm-yyyy" : undefined}
+                    type={column.type === "number" || column.type === "money" ? "number" : "text"}
                     value={draft[column.key] ?? ""}
                   />
                 )}
@@ -872,11 +874,76 @@ function createEmptyRow(id: string): TaskLineRow {
 function rowFromImport(rawRow: Record<string, unknown>) {
   return taskLineColumns.reduce<TaskLineRow>(
     (row, column) => {
-      row[column.key] = text(rawRow[column.label]);
+      const value = rawRow[column.label];
+      row[column.key] = column.type === "date" ? normalizeTaskLineDateInput(value) : text(value);
       return row;
     },
     { __id: `import-${crypto.randomUUID()}` }
   );
+}
+
+function normalizeTaskLineDateInput(value: unknown) {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return toDisplayDate(value);
+  }
+
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return excelSerialDateToDisplay(value);
+  }
+
+  const rawValue = text(value);
+
+  if (!rawValue) {
+    return "";
+  }
+
+  const excelSerial = Number(rawValue);
+
+  if (/^\d{4,6}(\.0+)?$/.test(rawValue) && Number.isFinite(excelSerial)) {
+    return excelSerialDateToDisplay(excelSerial);
+  }
+
+  const dayMonthYear = rawValue.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{2}|\d{4})$/);
+
+  if (dayMonthYear) {
+    const day = Number(dayMonthYear[1]);
+    const month = Number(dayMonthYear[2]);
+    const year = Number(dayMonthYear[3].length === 2 ? `20${dayMonthYear[3]}` : dayMonthYear[3]);
+    return makeDisplayDate(year, month, day);
+  }
+
+  const yearMonthDay = rawValue.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
+
+  if (yearMonthDay) {
+    return makeDisplayDate(Number(yearMonthDay[1]), Number(yearMonthDay[2]), Number(yearMonthDay[3]));
+  }
+
+  const parsed = new Date(rawValue);
+  return Number.isNaN(parsed.getTime()) ? rawValue : toDisplayDate(parsed);
+}
+
+function excelSerialDateToDisplay(value: number) {
+  const date = new Date(Date.UTC(1899, 11, 30));
+  date.setUTCDate(date.getUTCDate() + Math.floor(value));
+  return toDisplayDate(date);
+}
+
+function makeDisplayDate(year: number, month: number, day: number) {
+  const date = new Date(Date.UTC(year, month - 1, day));
+
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) {
+    return "";
+  }
+
+  return toDisplayDate(date);
+}
+
+function toDisplayDate(value: Date) {
+  return `${pad2(value.getUTCDate())}-${pad2(value.getUTCMonth() + 1)}-${value.getUTCFullYear()}`;
+}
+
+function pad2(value: number) {
+  return String(value).padStart(2, "0");
 }
 
 async function postTaskLineImportBatch(importRows: TaskLineRow[]) {

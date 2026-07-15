@@ -33,6 +33,7 @@ type AuditLog = {
 const defaultOrganisationCode = "DCO1433";
 const fetchBatchSize = 1000;
 const moduleKey = "taskline";
+const taskLineDateColumns = new Set(["due_date", "ref_date", "entry_date", "completion_date"]);
 const taskLineColumns = [
   "team",
   "name",
@@ -429,7 +430,7 @@ function formatRecord(record: TaskRecord): TaskLineRow {
 
 function cleanRecord(record: TaskLineRow) {
   return taskLineColumns.reduce<TaskLineRow>((result, key) => {
-    result[key] = text(record[key]);
+    result[key] = taskLineDateColumns.has(key) ? normalizeDisplayDate(record[key]) : text(record[key]);
     return result;
   }, {});
 }
@@ -452,14 +453,73 @@ function readId(value: unknown) {
 }
 
 function toDateTime(value: unknown) {
-  const raw = text(value);
+  const raw = normalizeDisplayDate(value);
 
   if (!raw) {
     return null;
   }
 
-  const date = new Date(raw);
-  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+  const parsed = parseDisplayDate(raw);
+  return parsed ? parsed.toISOString() : null;
+}
+
+function normalizeDisplayDate(value: unknown) {
+  const raw = text(value);
+
+  if (!raw) {
+    return "";
+  }
+
+  const dayMonthYear = raw.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{2}|\d{4})$/);
+
+  if (dayMonthYear) {
+    const day = Number(dayMonthYear[1]);
+    const month = Number(dayMonthYear[2]);
+    const year = Number(dayMonthYear[3].length === 2 ? `20${dayMonthYear[3]}` : dayMonthYear[3]);
+    return formatDisplayDate(year, month, day);
+  }
+
+  const yearMonthDay = raw.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
+
+  if (yearMonthDay) {
+    return formatDisplayDate(Number(yearMonthDay[1]), Number(yearMonthDay[2]), Number(yearMonthDay[3]));
+  }
+
+  const parsed = new Date(raw);
+
+  if (Number.isNaN(parsed.getTime()) || parsed.getUTCFullYear() < 1900 || parsed.getUTCFullYear() > 2200) {
+    return "";
+  }
+
+  return formatDisplayDate(parsed.getUTCFullYear(), parsed.getUTCMonth() + 1, parsed.getUTCDate());
+}
+
+function parseDisplayDate(value: string) {
+  const match = value.match(/^(\d{2})-(\d{2})-(\d{4})$/);
+
+  if (!match) {
+    return null;
+  }
+
+  const day = Number(match[1]);
+  const month = Number(match[2]);
+  const year = Number(match[3]);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day ? date : null;
+}
+
+function formatDisplayDate(year: number, month: number, day: number) {
+  const date = new Date(Date.UTC(year, month - 1, day));
+
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) {
+    return "";
+  }
+
+  return `${pad2(day)}-${pad2(month)}-${year}`;
+}
+
+function pad2(value: number) {
+  return String(value).padStart(2, "0");
 }
 
 function createAdminClient() {
