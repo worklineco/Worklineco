@@ -211,6 +211,10 @@ export async function GET(request: Request) {
   }
 
   const access = getAccessScope(auth.user);
+  if (!canAccessBillingModule(access)) {
+    return NextResponse.json({ error: "Billing is not available for Article Assistant." }, { status: 403 });
+  }
+
   const searchParams = new URL(request.url).searchParams;
 
   if (searchParams.get("scope") === "activity") {
@@ -272,6 +276,9 @@ export async function POST(request: Request) {
   }
 
   const access = getAccessScope(auth.user);
+  if (!canAccessBillingModule(access)) {
+    return NextResponse.json({ error: "Billing is not available for Article Assistant." }, { status: 403 });
+  }
 
   if (action === "restore") {
     if (!payload.trashId) {
@@ -588,6 +595,10 @@ export async function DELETE(request: Request) {
   }
 
   const access = getAccessScope(auth.user);
+  if (!canAccessBillingModule(access)) {
+    return NextResponse.json({ error: "Billing is not available for Article Assistant." }, { status: 403 });
+  }
+
   const existing = await admin
     .from(tableName)
     .select("*")
@@ -1065,6 +1076,10 @@ function getAccessScope(user: User): AccessScope {
     role,
     team
   };
+}
+
+function canAccessBillingModule(access: AccessScope) {
+  return access.role !== "article assistant";
 }
 
 function createAdminClient() {

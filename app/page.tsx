@@ -97,18 +97,29 @@ const supportingAreas = [
 export default function Home() {
   const [isTeamsVisible, setIsTeamsVisible] = useState(false);
   const [profileName, setProfileName] = useState("");
+  const [profileRole, setProfileRole] = useState("");
   const teamsPanelRef = useRef<HTMLDivElement>(null);
   const dashboardLabel = useMemo(() => {
     const firstName = profileName.trim().split(/\s+/)[0];
 
     return firstName ? `${firstName}'s Dashboard` : "Partner Dashboard";
   }, [profileName]);
+  const isArticleAssistant = profileRole.trim().toLowerCase() === "article assistant";
+  const visibleNavigation = useMemo(
+    () => navigation.filter((item) => !(isArticleAssistant && item.href === "/billing")),
+    [isArticleAssistant]
+  );
+  const visibleProductFocus = useMemo(
+    () => productFocus.filter((item) => !(isArticleAssistant && item.href === "/billing")),
+    [isArticleAssistant]
+  );
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {
       const user = data.user;
       const metadata = user?.user_metadata ?? {};
       setProfileName(String(metadata.full_name ?? metadata.name ?? user?.email ?? ""));
+      setProfileRole(String(metadata.role ?? ""));
     });
   }, []);
 
@@ -148,7 +159,7 @@ export default function Home() {
           </div>
 
           <nav className="mt-5 space-y-1.5">
-            {navigation.map((item) => (
+            {visibleNavigation.map((item) => (
               <NavItem item={item.label === "Partner Dashboard" ? { ...item, label: dashboardLabel } : item} key={item.label} />
             ))}
             <NavButton
@@ -164,7 +175,7 @@ export default function Home() {
 
         <section className="min-w-0">
           <nav className="workline-frame mb-5 flex gap-2 overflow-x-auto rounded-[22px] p-3 lg:hidden">
-            {navigation.map((item) => (
+            {visibleNavigation.map((item) => (
               <MobileNavItem item={item.label === "Partner Dashboard" ? { ...item, label: dashboardLabel } : item} key={item.label} />
             ))}
           </nav>
@@ -197,7 +208,7 @@ export default function Home() {
           </header>
 
           <section className="mt-5 grid gap-5 xl:grid-cols-2">
-            {productFocus.map((item) => (
+            {visibleProductFocus.map((item) => (
               <ProductCard item={item} key={item.title} />
             ))}
           </section>

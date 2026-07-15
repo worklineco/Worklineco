@@ -282,6 +282,7 @@ export function BillingRegister() {
   const [hiddenColumnKeys, setHiddenColumnKeys] = useState<Set<string>>(() => new Set());
   const [editDraft, setEditDraft] = useState<BillingRecord | null>(null);
   const [inlineEditor, setInlineEditor] = useState<InlineEditor | null>(null);
+  const [isAccessDenied, setIsAccessDenied] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isColumnOptionsOpen, setIsColumnOptionsOpen] = useState(false);
   const [isActivityLoading, setIsActivityLoading] = useState(false);
@@ -463,10 +464,17 @@ export function BillingRegister() {
       };
 
       if (!response.ok) {
+        if (response.status === 403) {
+          setIsAccessDenied(true);
+          setRecords([]);
+          setAuditLogs([]);
+          setTrashRecords([]);
+        }
         setMessage(result.error ?? "Could not load billing register.");
         return;
       }
 
+      setIsAccessDenied(false);
       setAccess(result.access ?? access);
       setMasters({ ...defaultMasters, ...(result.masters ?? {}) });
       setMatters(result.matters ?? []);
@@ -873,6 +881,14 @@ export function BillingRegister() {
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Billing Import");
     XLSX.writeFile(workbook, "workline-billing-import-template.xlsx");
+  }
+
+  if (isAccessDenied) {
+    return (
+      <section className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm font-bold text-amber-900 shadow-[0_18px_60px_rgba(15,23,42,0.10)]">
+        {message || "Billing is not available for your role."}
+      </section>
+    );
   }
 
   return (
