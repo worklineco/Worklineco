@@ -823,10 +823,10 @@ export function BillingRegister() {
 
   function exportWorkbook(scope: "full" | "view") {
     const exportRecords = scope === "full" ? records : filteredRecords;
-    const rows = exportRecords.map((record) => ({
+    const rows = exportRecords.map((record, index) => ({
       [importActionColumn]: "Update",
       "Billing ID": record.id ?? "",
-      "S.No.": record.serial_no ?? "",
+      "S.No.": index + 1,
       Team: record.owner_team,
       Source: record.source_module,
       "Voucher Type": record.voucher_type,
@@ -1091,7 +1091,7 @@ export function BillingRegister() {
               {isLoading ? (
                 <tr><td className="px-4 py-8 font-bold text-slate-500" colSpan={visibleBillingColumns.length}>Loading billing rows...</td></tr>
               ) : filteredRecords.length ? (
-                pagedRecords.map((record) => (
+                pagedRecords.map((record, rowIndex) => (
                   <tr className="border-b border-slate-100 last:border-b-0" key={record.id}>
                     {visibleBillingColumns.map((column) => (
                       <BillingCell
@@ -1115,6 +1115,7 @@ export function BillingRegister() {
                         onSave={saveInlineEditor}
                         record={record}
                         savingCell={savingCell}
+                        serialNumber={pageStart + rowIndex}
                       />
                     ))}
                   </tr>
@@ -1228,7 +1229,8 @@ function BillingCell({
   onDirectSave,
   onSave,
   record,
-  savingCell
+  savingCell,
+  serialNumber
 }: {
   access: AccessScope;
   column: BillingColumn;
@@ -1244,6 +1246,7 @@ function BillingCell({
   onSave: (valueOverride?: string) => void;
   record: BillingRecord;
   savingCell: InlineEditor | null;
+  serialNumber: number;
 }) {
   const isActions = column.field === "actions";
   const isGstatLink = column.field === "gstat_link";
@@ -1257,7 +1260,7 @@ function BillingCell({
   const isEditing = Boolean(inlineEditor && inlineEditor.recordId === record.id && inlineEditor.field === field);
   const isSaving = Boolean(savingCell && savingCell.recordId === record.id && savingCell.field === field);
   const editorValue = isEditing ? inlineEditor?.value ?? "" : "";
-  const displayValue = getDisplayValue(record, column, matters);
+  const displayValue = column.field === "serial_no" ? String(serialNumber) : getDisplayValue(record, column, matters);
 
   if (isActions) {
     return (
