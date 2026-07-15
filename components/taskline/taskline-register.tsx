@@ -26,6 +26,7 @@ type TaskLineView = "audit" | "register";
 const importActionColumn = "Import Action";
 const importActionOptions = ["Add", "Update", "Delete"];
 const taskLineImportBatchSize = 100;
+const taskLinePageSize = 100;
 const taskLineColumnLayoutStorageKey = "workline:taskline-column-layout:v1";
 const actionColumnWidth = 132;
 const taskLineColumns: TaskLineColumn[] = [
@@ -94,6 +95,7 @@ export function TaskLineRegister() {
   const [rows, setRows] = useState<TaskLineRow[]>([]);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  const [tablePage, setTablePage] = useState(1);
   const [viewMode, setViewMode] = useState<TaskLineView>("register");
 
   const orderedColumns = useMemo(
@@ -120,10 +122,25 @@ export function TaskLineRegister() {
     });
   }, [columnFilters, rows, search, statusFilter, visibleColumns]);
   const hasActiveColumnFilters = Object.values(columnFilters).some((value) => value.trim());
+  const pageCount = Math.max(1, Math.ceil(filteredRows.length / taskLinePageSize));
+  const pagedRows = useMemo(() => {
+    const startIndex = (tablePage - 1) * taskLinePageSize;
+    return filteredRows.slice(startIndex, startIndex + taskLinePageSize);
+  }, [filteredRows, tablePage]);
+  const pageStart = filteredRows.length ? (tablePage - 1) * taskLinePageSize + 1 : 0;
+  const pageEnd = Math.min(tablePage * taskLinePageSize, filteredRows.length);
 
   useEffect(() => {
     void loadTaskLine();
   }, []);
+
+  useEffect(() => {
+    setTablePage(1);
+  }, [columnFilters, search, statusFilter]);
+
+  useEffect(() => {
+    setTablePage((currentPage) => Math.min(currentPage, pageCount));
+  }, [pageCount]);
 
   async function loadTaskLine() {
     setIsLoading(true);
@@ -384,7 +401,8 @@ export function TaskLineRegister() {
           <h2 className="mt-1 text-2xl font-black text-slate-950">Task Register</h2>
           <p className="mt-1 text-sm font-bold text-slate-500">{filteredRows.length} visible of {rows.length} task rows</p>
         </div>
-        <div className="grid gap-2 text-sm font-black text-slate-700 sm:grid-cols-3 xl:min-w-[520px]">
+        <div className="grid gap-2 text-sm font-black text-slate-700 sm:grid-cols-4 xl:min-w-[680px]">
+          <Summary label="Total Entries" value={String(rows.length)} />
           <Summary label="Open" value={String(rows.filter((row) => row.status_open_close !== "Close").length)} />
           <Summary label="Closed" value={String(rows.filter((row) => row.status_open_close === "Close").length)} />
           <Summary label="Columns" value={`${visibleColumns.length} / ${taskLineColumns.length}`} />
@@ -477,12 +495,36 @@ export function TaskLineRegister() {
 
       {viewMode === "register" ? (
       <div className="mt-4">
-        <p className="mb-2 text-sm font-bold text-slate-600">
-          {isLoading ? "Loading TaskLine rows..." : `Showing 1-${filteredRows.length} of ${filteredRows.length} matching task rows`}
-        </p>
+        <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-sm font-bold text-slate-600">
+            {isLoading ? "Loading TaskLine rows..." : `Showing ${pageStart}-${pageEnd} of ${filteredRows.length} matching task rows · ${rows.length} total entries`}
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              className={buttonClass("light")}
+              disabled={tablePage <= 1 || isLoading}
+              onClick={() => setTablePage((currentPage) => Math.max(1, currentPage - 1))}
+              type="button"
+            >
+              Previous
+            </button>
+            <span className="inline-flex h-11 items-center rounded-md border border-slate-200 bg-white px-4 text-sm font-black text-slate-700">
+              Page {tablePage} of {pageCount}
+            </span>
+            <button
+              className={buttonClass("light")}
+              disabled={tablePage >= pageCount || isLoading}
+              onClick={() => setTablePage((currentPage) => Math.min(pageCount, currentPage + 1))}
+              type="button"
+            >
+              Next
+            </button>
+          </div>
+        </div>
         <div className="max-h-[calc(100vh-260px)] overflow-auto rounded-md border border-slate-200 bg-white">
           <table className="table-fixed border-collapse text-left text-sm" style={{ minWidth: tableWidth, width: tableWidth }}>
             <colgroup>
+              <col style={{ width: actionColumnWidth }} />
               {visibleColumns.map((column) => (
                 <col key={column.key} style={{ width: column.width }} />
               ))}
@@ -514,7 +556,7 @@ export function TaskLineRegister() {
             <tbody>
               {isLoading ? (
                 <tr><td className="px-4 py-8 font-bold text-slate-500" colSpan={visibleColumns.length + 1}>Loading TaskLine rows...</td></tr>
-              ) : filteredRows.length ? filteredRows.map((row, rowIndex) => (
+              ) : pagedRows.length ? pagedRows.map((row, rowIndex) => (
                 <tr className="border-b border-slate-100 last:border-b-0" key={row.__id}>
                   <td className="border-r border-slate-100 px-2 py-2">
                     <div className="flex items-center gap-1">
@@ -535,7 +577,7 @@ export function TaskLineRegister() {
                       key={`${row.__id}-${column.key}`}
                       onChange={(value) => updateRow(row.__id, column.key, value)}
                       row={row}
-                      serialNumber={rowIndex + 1}
+                      serialNumber={(tablePage - 1) * taskLinePageSize + rowIndex + 1}
                     />
                   ))}
                 </tr>
