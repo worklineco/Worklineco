@@ -295,7 +295,7 @@ export function BillingRegister() {
   const [tablePage, setTablePage] = useState(1);
   const [trashRecords, setTrashRecords] = useState<TrashRecord[]>([]);
   const [viewMode, setViewMode] = useState<BillingView>("register");
-  const [filters, setFilters] = useState({ search: "", status: "", team: "", source: "" });
+  const [filters, setFilters] = useState({ search: "", status: "", receiptStatus: "", team: "", source: "" });
   const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
   const [masters, setMasters] = useState(defaultMasters);
 
@@ -358,6 +358,7 @@ export function BillingRegister() {
         matchesSearch &&
         matchesColumnFilters &&
         (!filters.status || record.billing_status === filters.status) &&
+        (!filters.receiptStatus || record.receiving_status === filters.receiptStatus) &&
         (!filters.team || record.owner_team === filters.team) &&
         (!filters.source || record.source_module === filters.source)
       );
@@ -411,7 +412,7 @@ export function BillingRegister() {
 
   useEffect(() => {
     setTablePage(1);
-  }, [columnFilters, filters.search, filters.source, filters.status, filters.team]);
+  }, [columnFilters, filters.receiptStatus, filters.search, filters.source, filters.status, filters.team]);
 
   useEffect(() => {
     setTablePage((currentPage) => Math.min(currentPage, pageCount));
@@ -901,7 +902,10 @@ export function BillingRegister() {
 
       {viewMode === "register" ? (
         <BillingSummaryPanel
-          onFilterStatus={(status) => setFilters((current) => ({ ...current, status }))}
+          activeBillingStatus={filters.status}
+          activeReceiptStatus={filters.receiptStatus}
+          onFilterReceiptStatus={(receiptStatus) => setFilters((current) => ({ ...current, receiptStatus: current.receiptStatus === receiptStatus ? "" : receiptStatus }))}
+          onFilterStatus={(status) => setFilters((current) => ({ ...current, status: current.status === status ? "" : status }))}
           summary={billingSummary}
         />
       ) : null}
@@ -1511,9 +1515,15 @@ function FormInput({
 const formControlClass = "mt-1 h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm font-bold text-slate-900 outline-none focus:border-teal-300 focus:ring-2 focus:ring-teal-100";
 
 function BillingSummaryPanel({
+  activeBillingStatus,
+  activeReceiptStatus,
+  onFilterReceiptStatus,
   onFilterStatus,
   summary
 }: {
+  activeBillingStatus: string;
+  activeReceiptStatus: string;
+  onFilterReceiptStatus: (status: string) => void;
   onFilterStatus: (status: string) => void;
   summary: ReturnType<typeof getBillingSummary>;
 }) {
@@ -1527,8 +1537,8 @@ function BillingSummaryPanel({
           <p className="mt-3 text-sm font-black text-slate-950">{formatMoney(summary.total)}</p>
           <p className="text-xs font-bold text-slate-500">total billing value</p>
         </div>
-        <SummaryGroup items={summary.billingStatus} onSelect={onFilterStatus} title="Billing Status" />
-        <SummaryGroup items={summary.receivingStatus} title="Receipt Status" />
+        <SummaryGroup activeLabel={activeBillingStatus} items={summary.billingStatus} onSelect={onFilterStatus} title="Billing Status" />
+        <SummaryGroup activeLabel={activeReceiptStatus} items={summary.receivingStatus} onSelect={onFilterReceiptStatus} title="Receipt Status" />
         <SummaryGroup items={summary.sources} title="Source" />
       </div>
     </section>
@@ -1536,10 +1546,12 @@ function BillingSummaryPanel({
 }
 
 function SummaryGroup({
+  activeLabel = "",
   items,
   onSelect,
   title
 }: {
+  activeLabel?: string;
   items: Array<{ amount: number; count: number; label: string }>;
   onSelect?: (label: string) => void;
   title: string;
@@ -1548,9 +1560,15 @@ function SummaryGroup({
     <div className="rounded-md border border-slate-200 bg-white p-3">
       <p className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">{title}</p>
       <div className="mt-2 grid gap-1.5">
-        {items.length ? items.slice(0, 8).map((item) => (
+        {items.length ? items.slice(0, 8).map((item) => {
+          const isActive = Boolean(onSelect && activeLabel === item.label);
+
+          return (
           <button
-            className={`grid grid-cols-[minmax(0,1fr)_auto] gap-2 rounded-md px-2 py-1.5 text-left ${onSelect ? "hover:bg-slate-50" : "cursor-default"}`}
+            aria-pressed={onSelect ? isActive : undefined}
+            className={`grid grid-cols-[minmax(0,1fr)_auto] gap-2 rounded-md px-2 py-1.5 text-left ${
+              isActive ? "bg-slate-100" : onSelect ? "hover:bg-slate-50" : "cursor-default"
+            }`}
             disabled={!onSelect}
             key={item.label}
             onClick={() => onSelect?.(item.label)}
@@ -1559,7 +1577,8 @@ function SummaryGroup({
             <span className="min-w-0 truncate text-xs font-black text-slate-700">{item.label || "Not set"}</span>
             <span className="text-xs font-bold text-slate-500">{item.count} / {formatMoney(item.amount)}</span>
           </button>
-        )) : (
+        );
+        }) : (
           <p className="py-3 text-xs font-bold text-slate-500">No rows.</p>
         )}
       </div>
