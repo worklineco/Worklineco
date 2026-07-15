@@ -1051,7 +1051,7 @@ export function BillingRegister() {
             </button>
           </div>
         </div>
-        <div className={`overflow-auto rounded-md border border-slate-200 bg-white ${isFullscreen ? "min-h-0 flex-1" : ""}`}>
+        <div className={`overflow-auto rounded-md border border-slate-200 bg-white ${isFullscreen ? "min-h-0 flex-1" : "max-h-[calc(100vh-190px)]"}`}>
           <table className="table-fixed border-collapse text-left text-sm" style={{ minWidth: visibleTableWidth, width: visibleTableWidth }}>
             <colgroup>
               {visibleBillingColumns.map((column) => (
