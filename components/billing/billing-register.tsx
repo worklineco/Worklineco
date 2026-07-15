@@ -876,7 +876,7 @@ export function BillingRegister() {
   }
 
   return (
-    <section className={`border border-slate-200 bg-white p-4 shadow-[0_18px_60px_rgba(15,23,42,0.10)] ${isFullscreen ? "fixed inset-3 z-50 overflow-auto rounded-lg" : "rounded-lg"}`}>
+    <section className={`border border-slate-200 bg-white p-4 shadow-[0_18px_60px_rgba(15,23,42,0.10)] ${isFullscreen ? "fixed inset-3 z-50 flex flex-col overflow-hidden rounded-lg" : "rounded-lg"}`}>
       <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
         <div>
           <p className="text-xs font-black uppercase tracking-[0.16em] text-teal-700">Firm-wide billing</p>
@@ -1008,7 +1008,7 @@ export function BillingRegister() {
       ) : null}
 
       {viewMode === "register" ? (
-      <div className="mt-4">
+      <div className={`mt-4 ${isFullscreen ? "flex min-h-0 flex-1 flex-col" : ""}`}>
         <div className="mb-2 flex flex-col gap-2 text-sm font-bold text-slate-600 sm:flex-row sm:items-center sm:justify-between">
           <p>
             Showing {pageStart}-{pageEnd} of {filteredRecords.length} matching billing rows
@@ -1035,7 +1035,7 @@ export function BillingRegister() {
             </button>
           </div>
         </div>
-        <div className="overflow-auto rounded-md border border-slate-200 bg-white">
+        <div className={`overflow-auto rounded-md border border-slate-200 bg-white ${isFullscreen ? "min-h-0 flex-1" : ""}`}>
           <table className="table-fixed border-collapse text-left text-sm" style={{ minWidth: visibleTableWidth, width: visibleTableWidth }}>
             <colgroup>
               {visibleBillingColumns.map((column) => (
