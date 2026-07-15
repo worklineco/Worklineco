@@ -313,41 +313,61 @@ export function TaskLineRegister() {
   }
 
   async function importWorkbook(file: File) {
-    const data = await file.arrayBuffer();
-    const workbook = XLSX.read(data);
-    const sheet = workbook.Sheets[workbook.SheetNames[0]];
-    const importedRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "" });
-
-    if (!importedRows.length) {
-      setMessage(`No TaskLine rows found in ${file.name}.`);
-      return;
-    }
-
     setMessage(`Importing ${file.name}...`);
-    const importRows = importedRows.map((rawRow) => ({
-      ...rowFromImport(rawRow),
-      import_action: text(rawRow[importActionColumn] || "Add"),
-      serial_no: text(rawRow["S. No."] || rawRow["S.No."] || rawRow["Serial No."])
-    }));
-    const response = await fetch("/api/taskline", {
-      body: JSON.stringify({ action: "import", importRows }),
-      headers: { "Content-Type": "application/json" },
-      method: "POST"
-    });
-    const result = (await response.json()) as {
-      error?: string;
-      rows?: TaskLineRow[];
-      summary?: { added: number; deleted: number; updated: number };
-    };
 
-    if (!response.ok) {
-      setMessage(result.error ?? "Could not import TaskLine rows.");
-      return;
+    try {
+      const data = await file.arrayBuffer();
+      const workbook = XLSX.read(data);
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+
+      if (!sheet) {
+        setMessage(`No worksheet found in ${file.name}.`);
+        return;
+      }
+
+      const importedRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "" });
+
+      if (!importedRows.length) {
+        setMessage(`No TaskLine rows found in ${file.name}.`);
+        return;
+      }
+
+      const importRows = importedRows
+        .map((rawRow) => ({
+          ...rowFromImport(rawRow),
+          import_action: text(rawRow[importActionColumn] || "Add"),
+          serial_no: text(rawRow["S. No."] || rawRow["S.No."] || rawRow["Serial No."])
+        }))
+        .filter(hasTaskLineValue);
+
+      if (!importRows.length) {
+        setMessage(`No filled TaskLine rows found in ${file.name}. Please enter data below the headers before importing.`);
+        return;
+      }
+
+      const response = await fetch("/api/taskline", {
+        body: JSON.stringify({ action: "import", importRows }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST"
+      });
+      const result = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        rows?: TaskLineRow[];
+        summary?: { added: number; deleted: number; updated: number };
+      };
+
+      if (!response.ok) {
+        setMessage(result.error ?? "Could not import TaskLine rows.");
+        return;
+      }
+
+      setRows(result.rows ?? []);
+      await loadTaskLine();
+      setMessage(`Imported ${file.name}: ${result.summary?.added ?? 0} added, ${result.summary?.updated ?? 0} updated, ${result.summary?.deleted ?? 0} deleted.`);
+    } catch (error) {
+      console.error("TaskLine import error:", error);
+      setMessage("Could not import TaskLine rows. Please check the file and try again.");
     }
-
-    setRows(result.rows ?? []);
-    await loadTaskLine();
-    setMessage(`Imported ${file.name}: ${result.summary?.added ?? 0} added, ${result.summary?.updated ?? 0} updated, ${result.summary?.deleted ?? 0} deleted.`);
   }
 
   function addAuditLog(log: Omit<TaskLineAuditLog, "createdAt" | "id">) {

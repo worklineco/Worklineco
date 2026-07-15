@@ -331,7 +331,6 @@ async function loadTaskLineRecords(admin: ReturnType<typeof createAdminClient>, 
       .from("tasks")
       .select("id,organisation_id,title,description,due_at,custom_values,created_by,created_at,updated_at")
       .eq("organisation_id", organisationId)
-      .eq("custom_values->>workline_module", moduleKey)
       .order("created_at", { ascending: true })
       .range(from, to);
 
