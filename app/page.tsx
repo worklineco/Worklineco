@@ -139,7 +139,7 @@ export default function Home() {
   return (
     <main className="min-h-screen overflow-hidden bg-[#f4f6fa] text-slate-950">
       <div className="pointer-events-none fixed inset-0 -z-10">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_12%_0%,rgba(20,184,166,0.05),transparent_45%)]" />
+        <div className="absolute inset-0 " />
       </div>
 
       <div className="mx-auto w-full max-w-none px-3 py-5 sm:px-5 lg:px-8">
@@ -159,7 +159,7 @@ export default function Home() {
                 </p>
               </div>
 
-              <div className="rounded-3xl border border-white/15 bg-slate-950 p-5 text-white shadow-[0_18px_50px_rgba(15,23,42,0.20)]">
+              <div className="rounded-3xl border border-white/15 bg-navy-700 p-5 text-white shadow-[0_18px_50px_rgba(15,23,42,0.20)]">
                 <p className="text-xs font-bold uppercase tracking-[0.16em] text-navy-200">
                   Current workspace
                 </p>

@@ -46,7 +46,7 @@ export function MonthCalendar() {
       </div>
 
       <div className="mt-5 overflow-hidden rounded-2xl border border-slate-950/10 bg-white">
-        <div className="grid grid-cols-7 border-b border-slate-200 bg-slate-950 text-white">
+        <div className="grid grid-cols-7 border-b border-slate-200 bg-navy-700 text-white">
           {weekDays.map((day) => (
             <div className="px-2 py-2 text-center text-[11px] font-black uppercase" key={day}>
               {day}
@@ -70,7 +70,7 @@ export function MonthCalendar() {
               >
                 <span
                   className={`inline-flex size-7 items-center justify-center rounded-full text-xs font-black ${
-                    isToday ? "bg-slate-950 text-white" : "text-slate-700"
+                    isToday ? "bg-navy-700 text-white" : "text-slate-700"
                   }`}
                 >
                   {cell.date.getDate()}

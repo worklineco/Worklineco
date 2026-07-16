@@ -1188,7 +1188,7 @@ export function BillingRegister() {
       ) : null}
 
       {selectedRecordId ? (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/45 px-4 py-6">
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-navy-700/45 px-4 py-6">
           <section className="max-h-[86vh] w-full max-w-3xl overflow-hidden rounded-lg border border-slate-200 bg-white shadow-[0_24px_90px_rgba(15,23,42,0.30)]">
             <header className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
               <div>
@@ -1424,7 +1424,7 @@ function BillingAddForm({
   const isEdit = mode === "edit";
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/45 px-4 py-6">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-navy-700/45 px-4 py-6">
       <section className="max-h-[90vh] w-full max-w-5xl overflow-hidden rounded-lg border border-slate-200 bg-white shadow-[0_24px_90px_rgba(15,23,42,0.30)]">
         <header className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
           <div>
@@ -1670,7 +1670,7 @@ function ViewButton({ active, label, onClick }: { active: boolean; label: string
   return (
     <button
       className={`inline-flex h-10 items-center justify-center rounded-md px-4 text-xs font-black uppercase transition ${
-        active ? "bg-slate-950 text-white" : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+        active ? "bg-navy-700 text-white" : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
       }`}
       onClick={onClick}
       type="button"
@@ -2114,7 +2114,7 @@ function buttonClass(kind: "dark" | "light" | "primary") {
   }
 
   if (kind === "dark") {
-    return "inline-flex h-11 items-center justify-center gap-2 rounded-md bg-slate-950 px-3 text-sm font-black text-white transition hover:bg-slate-800";
+    return "inline-flex h-11 items-center justify-center gap-2 rounded-md bg-navy-700 px-3 text-sm font-black text-white transition hover:bg-navy-800";
   }
 
   return "inline-flex h-11 items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-sm font-black text-slate-800 transition hover:bg-slate-50";
@@ -2542,38 +2542,4 @@ function normalizeDateInput(value: unknown) {
 }
 
 function excelSerialDateToIso(value: number) {
-  const date = new Date(Date.UTC(1899, 11, 30));
-  date.setUTCDate(date.getUTCDate() + Math.floor(value));
-  return toIsoDate(date);
-}
-
-function makeIsoDate(year: number, month: number, day: number) {
-  const date = new Date(Date.UTC(year, month - 1, day));
-
-  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) {
-    return "";
-  }
-
-  return toIsoDate(date);
-}
-
-function toIsoDate(value: Date) {
-  return value.toISOString().slice(0, 10);
-}
-
-function pad2(value: number) {
-  return String(value).padStart(2, "0");
-}
-
-function formatMoney(value: number | string) {
-  return new Intl.NumberFormat("en-IN", {
-    currency: "INR",
-    maximumFractionDigits: 0,
-    style: "currency"
-  }).format(toNumber(value));
-}
-
-function toNumber(value: unknown) {
-  const parsed = Number(String(value ?? "").replace(/,/g, ""));
-  return Number.isFinite(parsed) ? parsed : 0;
-}
+  const date = new Date(D

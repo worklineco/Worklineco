@@ -1274,8 +1274,8 @@ export default function PdfIndexingPage() {
   return (
     <main className="min-h-screen overflow-hidden bg-[#f4f6fa] px-2 py-3 text-slate-950 sm:px-3 lg:px-4">
       <div className="pointer-events-none fixed inset-0 -z-10">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_16%_12%,rgba(99,102,241,0.16),transparent_28%),radial-gradient(circle_at_82%_16%,rgba(20,184,166,0.14),transparent_26%),radial-gradient(circle_at_48%_92%,rgba(245,158,11,0.14),transparent_32%)]" />
-        <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(15,23,42,0.04)_1px,transparent_1px),linear-gradient(180deg,rgba(15,23,42,0.04)_1px,transparent_1px)] bg-[size:48px_48px]" />
+        <div className="absolute inset-0 " />
+        <div className="absolute inset-0  bg-[size:48px_48px]" />
       </div>
 
       <section className="mx-auto w-full max-w-none">
@@ -1290,7 +1290,7 @@ export default function PdfIndexingPage() {
                 Workspace
               </Link>
               <div className="mt-5 flex flex-wrap items-center gap-3">
-                <span className="flex size-14 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-300 via-sky-300 to-navy-300 text-slate-950">
+                <span className="flex size-14 items-center justify-center rounded-2xl bg-navy-700 text-white">
                   <FileSearch className="size-7" />
                 </span>
                 <div>
@@ -1341,7 +1341,7 @@ export default function PdfIndexingPage() {
                 {...({ directory: "", webkitdirectory: "" } as Record<string, string>)}
               />
               <button
-                className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 text-xs font-black uppercase text-white shadow-sm transition hover:bg-slate-800"
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-navy-700 px-4 text-xs font-black uppercase text-white shadow-sm transition hover:bg-navy-800"
                 onClick={() => folderInputRef.current?.click()}
                 type="button"
               >
@@ -1382,7 +1382,7 @@ export default function PdfIndexingPage() {
           <div className="mt-4 overflow-hidden rounded-2xl border border-slate-950/10 bg-white">
             <div className="max-h-[calc(100vh-285px)] overflow-auto">
               <table className="w-full min-w-[1220px] border-separate border-spacing-0 text-left text-sm">
-                <thead className="sticky top-0 z-10 bg-slate-950 text-white">
+                <thead className="sticky top-0 z-10 bg-navy-700 text-white">
                   <tr>
                     <th className="w-12 border-b border-r border-white/15 px-3 py-3">
                       <input
@@ -1516,7 +1516,7 @@ export default function PdfIndexingPage() {
         </section>
       </section>
       {pdfPreview ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-navy-700/70 p-4">
           <div className="flex h-[90vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
             <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
               <p className="truncate text-sm font-black text-slate-950">{pdfPreview.name}</p>
@@ -1540,7 +1540,7 @@ export default function PdfIndexingPage() {
         </div>
       ) : null}
       {isDscModalOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-navy-700/70 p-4">
           <div className="w-full max-w-lg overflow-hidden rounded-2xl bg-white shadow-2xl">
             <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
               <div>
@@ -1564,7 +1564,7 @@ export default function PdfIndexingPage() {
                 <p className="mt-1 text-sm font-bold text-slate-950">{dscMessage || "Not checked yet."}</p>
                 {dscHelperStatus === "offline" ? (
                   <a
-                    className="mt-3 inline-flex h-9 items-center justify-center rounded-lg bg-slate-950 px-3 text-xs font-black uppercase text-white shadow-sm transition hover:bg-slate-800"
+                    className="mt-3 inline-flex h-9 items-center justify-center rounded-lg bg-navy-700 px-3 text-xs font-black uppercase text-white shadow-sm transition hover:bg-navy-800"
                     download
                     href={DSC_HELPER_DOWNLOAD_URL}
                   >
@@ -1627,7 +1627,7 @@ export default function PdfIndexingPage() {
                     <button
                       className={`h-10 rounded-lg border px-2 text-xs font-black uppercase transition ${
                         dscVisiblePlacement === placement.value
-                          ? "border-slate-950 bg-slate-950 text-white"
+                          ? "border-slate-950 bg-navy-700 text-white"
                           : "border-slate-950/10 bg-white text-slate-700 hover:bg-slate-100"
                       }`}
                       key={placement.value}
@@ -1662,7 +1662,7 @@ export default function PdfIndexingPage() {
                   Check
                 </button>
                 <button
-                  className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 text-xs font-black uppercase text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-45"
+                  className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-navy-700 px-4 text-xs font-black uppercase text-white shadow-sm transition hover:bg-navy-800 disabled:cursor-not-allowed disabled:opacity-45"
                   disabled={dscHelperStatus !== "ready" || selectedRows.length === 0}
                   onClick={signSelectedPdfsWithDsc}
                   type="button"

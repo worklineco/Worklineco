@@ -274,8 +274,8 @@ export function MeetingRoomBooking() {
   }
 
   return (
-    <main className="min-h-screen bg-[#fbf7ef] px-4 py-5 text-slate-950 sm:px-6 lg:px-8">
-      <div className="pointer-events-none fixed inset-0 -z-10 bg-[radial-gradient(circle_at_18%_14%,rgba(14,165,233,0.14),transparent_30%),radial-gradient(circle_at_82%_16%,rgba(20,184,166,0.16),transparent_30%),radial-gradient(circle_at_50%_88%,rgba(245,158,11,0.14),transparent_34%)]" />
+    <main className="min-h-screen bg-[#f4f6fa] px-4 py-5 text-slate-950 sm:px-6 lg:px-8">
+      <div className="pointer-events-none fixed inset-0 -z-10 " />
 
       <section className="mx-auto max-w-[1500px]">
         <header className="rounded-[28px] border border-white/80 bg-white/90 p-5 shadow-[0_24px_80px_rgba(15,23,42,0.12)]">
@@ -303,7 +303,7 @@ export function MeetingRoomBooking() {
                 Refresh
               </button>
               <Link
-                className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl bg-slate-950 px-4 text-sm font-black text-white"
+                className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl bg-navy-700 px-4 text-sm font-black text-white"
                 href="/"
               >
                 <ArrowLeft className="size-4" />
@@ -447,14 +447,14 @@ export function MeetingRoomBooking() {
 
             <div className="mt-4 flex flex-wrap gap-2 border-b border-slate-200 pb-3">
               <button
-                className={`h-10 rounded-md px-3 text-sm font-black ${viewMode === "board" ? "bg-slate-950 text-white" : "border border-slate-200 bg-white text-slate-700"}`}
+                className={`h-10 rounded-md px-3 text-sm font-black ${viewMode === "board" ? "bg-navy-700 text-white" : "border border-slate-200 bg-white text-slate-700"}`}
                 onClick={() => setViewMode("board")}
                 type="button"
               >
                 Board
               </button>
               <button
-                className={`h-10 rounded-md px-3 text-sm font-black ${viewMode === "log" ? "bg-slate-950 text-white" : "border border-slate-200 bg-white text-slate-700"}`}
+                className={`h-10 rounded-md px-3 text-sm font-black ${viewMode === "log" ? "bg-navy-700 text-white" : "border border-slate-200 bg-white text-slate-700"}`}
                 onClick={() => setViewMode("log")}
                 type="button"
               >
@@ -467,7 +467,7 @@ export function MeetingRoomBooking() {
             <div className="mt-4 flex flex-wrap gap-2">
               {floors.map((floor) => (
                 <button
-                  className={`h-10 rounded-md px-3 text-sm font-black ${activeFloor === floor ? "bg-slate-950 text-white" : "border border-slate-200 bg-white text-slate-700"}`}
+                  className={`h-10 rounded-md px-3 text-sm font-black ${activeFloor === floor ? "bg-navy-700 text-white" : "border border-slate-200 bg-white text-slate-700"}`}
                   key={floor}
                   onClick={() => setActiveFloor(floor)}
                   type="button"
@@ -659,25 +659,4 @@ function formatDateTime(value: string) {
     return "-";
   }
 
-  return `${String(date.getDate()).padStart(2, "0")}-${String(date.getMonth() + 1).padStart(2, "0")}-${date.getFullYear()}, ${date.toLocaleTimeString("en-IN", {
-    hour: "numeric",
-    hour12: true,
-    minute: "2-digit"
-  })}`;
-}
-
-function formatTime(value: string) {
-  const [hourText, minute] = value.split(":");
-  const date = new Date();
-  date.setHours(Number(hourText), Number(minute));
-  return date.toLocaleTimeString("en-IN", {
-    hour: "numeric",
-    hour12: true,
-    minute: "2-digit"
-  });
-}
-
-function minutesFromTime(value: string) {
-  const [hour, minute] = value.split(":").map(Number);
-  return hour * 60 + minute;
-}
+  return `${String(date.getDate()).padStart(2, "0")}-${Stri

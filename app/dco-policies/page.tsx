@@ -4,8 +4,8 @@ import { DcoPoliciesDashboard } from "@/components/dco-policies/dco-policies-das
 
 export default function DcoPoliciesPage() {
   return (
-    <main className="min-h-screen bg-[#fbf7ef] px-4 py-5 text-slate-950 sm:px-6 lg:px-8">
-      <div className="pointer-events-none fixed inset-0 -z-10 bg-[radial-gradient(circle_at_20%_15%,rgba(59,130,246,0.13),transparent_30%),radial-gradient(circle_at_80%_20%,rgba(16,185,129,0.12),transparent_28%),radial-gradient(circle_at_50%_86%,rgba(124,58,237,0.12),transparent_34%)]" />
+    <main className="min-h-screen bg-[#f4f6fa] px-4 py-5 text-slate-950 sm:px-6 lg:px-8">
+      <div className="pointer-events-none fixed inset-0 -z-10 " />
 
       <section className="mx-auto max-w-[1540px]">
         <header className="rounded-[28px] border border-white/80 bg-white/90 p-5 shadow-[0_24px_80px_rgba(15,23,42,0.12)]">
@@ -22,7 +22,7 @@ export default function DcoPoliciesPage() {
             </div>
 
             <Link
-              className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl bg-slate-950 px-4 text-sm font-black text-white"
+              className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl bg-navy-700 px-4 text-sm font-black text-white"
               href="/"
             >
               <ArrowLeft className="size-4" />

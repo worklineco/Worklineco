@@ -209,7 +209,7 @@ export function LoginForm() {
 
   return (
     <section className="workline-frame rounded-[28px] p-5 sm:p-6">
-      <div className="rounded-3xl border border-white/15 bg-[linear-gradient(135deg,#0f172a_0%,#0f766e_52%,#c026d3_100%)] p-5 text-white shadow-[0_18px_50px_rgba(15,23,42,0.20)]">
+      <div className="rounded-3xl border border-white/15  p-5 text-white shadow-[0_18px_50px_rgba(15,23,42,0.20)]">
         <div className="flex items-center justify-between gap-4">
           <div>
             <p className="text-xs font-black uppercase tracking-[0.16em] text-navy-100">
@@ -399,7 +399,7 @@ export function LoginForm() {
         ) : null}
 
         <button
-          className="flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-slate-950 text-sm font-black text-white shadow-[0_18px_45px_rgba(15,23,42,0.28)] transition hover:-translate-y-0.5 hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-500"
+          className="flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-navy-700 text-sm font-black text-white shadow-[0_18px_45px_rgba(15,23,42,0.28)] transition hover:-translate-y-0.5 hover:bg-navy-800 disabled:cursor-not-allowed disabled:bg-slate-500"
           disabled={isLoading || (mode === "signup" && Boolean(orgId) && !isValidOrg)}
           type="submit"
         >

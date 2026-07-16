@@ -67,7 +67,7 @@ export function ProfilePanel() {
             {profile.role ? <ProfileLine label="Role" value={profile.role} /> : null}
           </div>
           <button
-            className="mt-3 inline-flex h-9 w-full items-center justify-center gap-2 rounded-xl bg-slate-950 px-3 text-xs font-black uppercase text-white transition hover:bg-slate-800 disabled:bg-slate-500"
+            className="mt-3 inline-flex h-9 w-full items-center justify-center gap-2 rounded-xl bg-navy-700 px-3 text-xs font-black uppercase text-white transition hover:bg-navy-800 disabled:bg-slate-500"
             disabled={isSigningOut}
             onClick={signOut}
             type="button"
@@ -84,8 +84,4 @@ export function ProfilePanel() {
 function ProfileLine({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <p className="text-[10px] font-black uppercase text-slate-400">{label}</p>
-      <p className="mt-0.5 break-words text-slate-800">{value}</p>
-    </div>
-  );
-}
+      <p className="text-[10p

@@ -687,7 +687,7 @@ function TaskLineForm({
   onSubmit: () => void;
 }) {
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/45 px-4 py-6">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-navy-700/45 px-4 py-6">
       <section className="max-h-[90vh] w-full max-w-6xl overflow-hidden rounded-lg border border-slate-200 bg-white shadow-[0_24px_90px_rgba(15,23,42,0.30)]">
         <header className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
           <div>
@@ -887,7 +887,7 @@ function ViewButton({ active, label, onClick }: { active: boolean; label: string
   return (
     <button
       className={`inline-flex h-10 items-center justify-center rounded-md px-4 text-xs font-black uppercase transition ${
-        active ? "bg-slate-950 text-white" : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+        active ? "bg-navy-700 text-white" : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
       }`}
       onClick={onClick}
       type="button"
@@ -912,7 +912,7 @@ function buttonClass(tone: "dark" | "light" | "primary") {
     return `${base} bg-navy-700 text-white hover:bg-navy-800`;
   }
   if (tone === "dark") {
-    return `${base} bg-slate-950 text-white hover:bg-slate-800`;
+    return `${base} bg-navy-700 text-white hover:bg-navy-800`;
   }
 
   return `${base} border border-slate-200 bg-white text-slate-800 hover:bg-slate-50`;
@@ -1199,24 +1199,4 @@ function saveTaskLineColumnLayout(layout: TaskLineColumnLayout) {
     return;
   }
 
-  window.localStorage.setItem(taskLineColumnLayoutStorageKey, JSON.stringify(normalizeTaskLineColumnLayout(layout)));
-}
-
-function getSavedTaskLineColumnLayout() {
-  if (typeof window === "undefined") {
-    return { hiddenColumnKeys: [], order: defaultTaskLineColumnOrder };
-  }
-
-  try {
-    const savedLayout = window.localStorage.getItem(taskLineColumnLayoutStorageKey);
-    return savedLayout
-      ? normalizeTaskLineColumnLayout(JSON.parse(savedLayout) as Partial<TaskLineColumnLayout>)
-      : { hiddenColumnKeys: [], order: defaultTaskLineColumnOrder };
-  } catch {
-    return { hiddenColumnKeys: [], order: defaultTaskLineColumnOrder };
-  }
-}
-
-function text(value: unknown) {
-  return String(value ?? "").trim();
-}
+  window.loc

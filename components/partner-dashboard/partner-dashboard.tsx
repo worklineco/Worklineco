@@ -670,7 +670,7 @@ export function PartnerDashboard() {
           </div>
           <div className="mt-4 grid gap-3 lg:grid-cols-[240px_minmax(0,1fr)]">
             <div>
-              <button className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-slate-950 px-3 text-sm font-black text-white" onClick={createNote} type="button">
+              <button className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-navy-700 px-3 text-sm font-black text-white" onClick={createNote} type="button">
                 <Plus className="size-4" />
                 New note
               </button>
@@ -756,7 +756,7 @@ export function PartnerDashboard() {
               </div>
             </div>
             <div className="flex justify-end">
-              <button className="flex h-10 items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 text-sm font-black text-white" onClick={createThread} type="button">
+              <button className="flex h-10 items-center justify-center gap-2 rounded-xl bg-navy-700 px-4 text-sm font-black text-white" onClick={createThread} type="button">
                 <Plus className="size-4" />
                 Create thread
               </button>
@@ -807,7 +807,7 @@ export function PartnerDashboard() {
               <option>Client promise</option>
               <option>Team promise</option>
             </select>
-            <button className="flex size-10 items-center justify-center rounded-xl bg-slate-950 text-white" onClick={addFollowUp} type="button">
+            <button className="flex size-10 items-center justify-center rounded-xl bg-navy-700 text-white" onClick={addFollowUp} type="button">
               <Plus className="size-4" />
             </button>
           </div>
@@ -835,7 +835,7 @@ export function PartnerDashboard() {
           <div className="mt-4 grid gap-2 md:grid-cols-[120px_1fr_auto]">
             <input className="h-10 rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-semibold outline-none focus:border-violet-500" onChange={(event) => setMeetingDraft((current) => ({ ...current, time: event.target.value }))} type="time" value={meetingDraft.time} />
             <input className="h-10 rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-semibold outline-none focus:border-violet-500" onChange={(event) => setMeetingDraft((current) => ({ ...current, title: event.target.value }))} placeholder="Meeting title" value={meetingDraft.title} />
-            <button className="flex size-10 items-center justify-center rounded-xl bg-slate-950 text-white" onClick={addMeeting} type="button">
+            <button className="flex size-10 items-center justify-center rounded-xl bg-navy-700 text-white" onClick={addMeeting} type="button">
               <Plus className="size-4" />
             </button>
           </div>

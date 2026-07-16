@@ -55,7 +55,7 @@ export function GstatAuditTrail() {
   return (
     <main className="min-h-screen bg-[#f4f6fa] px-4 py-4 text-slate-950 sm:px-6 lg:px-8">
       <div className="pointer-events-none fixed inset-0 -z-10">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_16%_12%,rgba(20,184,166,0.18),transparent_28%),radial-gradient(circle_at_82%_16%,rgba(217,70,239,0.16),transparent_26%),radial-gradient(circle_at_48%_92%,rgba(245,158,11,0.16),transparent_32%)]" />
+        <div className="absolute inset-0 " />
       </div>
 
       <section className="mx-auto max-w-[1500px]">
@@ -70,7 +70,7 @@ export function GstatAuditTrail() {
                 GSTAT
               </Link>
               <div className="mt-5 flex items-center gap-3">
-                <span className="flex size-12 items-center justify-center rounded-2xl bg-slate-950 text-white">
+                <span className="flex size-12 items-center justify-center rounded-2xl bg-navy-700 text-white">
                   <ShieldCheck className="size-6" />
                 </span>
                 <div>
@@ -80,7 +80,7 @@ export function GstatAuditTrail() {
               </div>
             </div>
             <button
-              className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 text-xs font-black uppercase text-white shadow-sm transition hover:bg-slate-800"
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-navy-700 px-4 text-xs font-black uppercase text-white shadow-sm transition hover:bg-navy-800"
               onClick={loadLogs}
               type="button"
             >
@@ -157,20 +157,4 @@ export function GstatAuditTrail() {
 
 function formatValue(value: AuditValue) {
   if (value === null || value === undefined || value === "") {
-    return "-";
-  }
-
-  if (typeof value === "object") {
-    return JSON.stringify(value);
-  }
-
-  return String(value);
-}
-
-function valueTeam(value: AuditValue) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return "";
-  }
-
-  return String(value["Person handling"] ?? "");
-}
+    

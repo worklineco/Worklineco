@@ -290,7 +290,7 @@ export function SpreadsheetRegister({
             {isSaving ? "Saving..." : "Import Excel"}
           </button>
           <button
-            className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl bg-slate-950 px-4 text-sm font-semibold text-white transition hover:bg-slate-800"
+            className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl bg-navy-700 px-4 text-sm font-semibold text-white transition hover:bg-navy-800"
             onClick={exportExcel}
             type="button"
           >
@@ -485,16 +485,3 @@ function normalizeHeader(value: string) {
 }
 
 function addImportActionDropdown(worksheet: XLSX.WorkSheet, rowCount: number) {
-  const worksheetWithValidation = worksheet as XLSX.WorkSheet & {
-    "!dataValidation"?: Array<Record<string, unknown>>;
-  };
-
-  worksheetWithValidation["!dataValidation"] = [
-    {
-      allowBlank: false,
-      formula1: `"${importActionOptions.join(",")}"`,
-      sqref: `A2:A${Math.max(rowCount, 2)}`,
-      type: "list"
-    }
-  ];
-}

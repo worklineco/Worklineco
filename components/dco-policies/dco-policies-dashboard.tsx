@@ -66,7 +66,7 @@ export function DcoPoliciesDashboard() {
 
       <article className="rounded-[28px] border border-dashed border-slate-300 bg-white/70 p-5 lg:col-span-3">
         <div className="flex items-center gap-3">
-          <div className="flex size-11 items-center justify-center rounded-2xl bg-slate-950 text-white">
+          <div className="flex size-11 items-center justify-center rounded-2xl bg-navy-700 text-white">
             <BookOpenCheck className="size-5" />
           </div>
           <div>

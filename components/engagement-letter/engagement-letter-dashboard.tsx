@@ -597,7 +597,7 @@ export function EngagementLetterDashboard() {
           {formatTabs.map((tab) => (
             <button
               className={`h-10 rounded-2xl px-4 text-sm font-black transition ${
-                activeTab === tab.key ? "bg-slate-950 text-white" : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                activeTab === tab.key ? "bg-navy-700 text-white" : "bg-slate-100 text-slate-700 hover:bg-slate-200"
               }`}
               key={tab.key}
               onClick={() => setActiveTab(tab.key)}
@@ -643,7 +643,7 @@ export function EngagementLetterDashboard() {
                 </div>
 
                 <button
-                  className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 text-sm font-black text-white transition hover:bg-slate-800"
+                  className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-navy-700 px-4 text-sm font-black text-white transition hover:bg-navy-800"
                   onClick={() => openCreateWindow(format)}
                   type="button"
                 >
@@ -657,7 +657,7 @@ export function EngagementLetterDashboard() {
 
         <aside className="rounded-[28px] border border-white/80 bg-white/90 p-5 shadow-[0_24px_80px_rgba(15,23,42,0.10)]">
           <div className="flex items-center gap-3">
-            <div className="flex size-11 items-center justify-center rounded-2xl bg-slate-950 text-white">
+            <div className="flex size-11 items-center justify-center rounded-2xl bg-navy-700 text-white">
               <Eye className="size-5" />
             </div>
             <div>
@@ -681,7 +681,7 @@ export function EngagementLetterDashboard() {
                   Download Word Draft
                 </button>
                 <button
-                  className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 text-sm font-black text-white"
+                  className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-navy-700 px-4 text-sm font-black text-white"
                   onClick={() => window.print()}
                   type="button"
                 >
@@ -771,7 +771,7 @@ export function EngagementLetterDashboard() {
       ) : null}
 
       {activeFormat ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55 p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-navy-700/55 p-4">
           <section className="max-h-[92vh] w-full max-w-3xl overflow-auto rounded-[28px] bg-white p-5 shadow-[0_30px_100px_rgba(15,23,42,0.35)]">
             <div className="flex items-start justify-between gap-4">
               <div>

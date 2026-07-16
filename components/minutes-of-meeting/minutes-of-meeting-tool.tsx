@@ -132,7 +132,7 @@ export function MinutesOfMeetingTool() {
 
         <div className="mt-5 flex flex-wrap gap-2">
           <button
-            className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl bg-slate-950 px-4 text-sm font-black text-white disabled:bg-slate-400"
+            className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl bg-navy-700 px-4 text-sm font-black text-white disabled:bg-slate-400"
             disabled={!recognitionSupported || isRecording}
             onClick={startRecording}
             type="button"
@@ -168,7 +168,7 @@ export function MinutesOfMeetingTool() {
       <div className="rounded-[28px] border border-white/80 bg-white/90 p-5 shadow-[0_24px_80px_rgba(15,23,42,0.10)]">
         <div className="flex flex-col gap-3 border-b border-slate-200 pb-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-3">
-            <div className="flex size-11 items-center justify-center rounded-2xl bg-slate-950 text-white">
+            <div className="flex size-11 items-center justify-center rounded-2xl bg-navy-700 text-white">
               <FileText className="size-5" />
             </div>
             <div>

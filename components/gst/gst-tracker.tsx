@@ -246,8 +246,8 @@ export function GstTracker() {
   }).length;
 
   return (
-    <main className="min-h-screen bg-[#fbf7ef] px-4 py-5 text-slate-950 sm:px-6 lg:px-8">
-      <div className="pointer-events-none fixed inset-0 -z-10 bg-[radial-gradient(circle_at_20%_15%,rgba(14,165,233,0.16),transparent_30%),radial-gradient(circle_at_80%_20%,rgba(217,70,239,0.14),transparent_28%),radial-gradient(circle_at_50%_86%,rgba(245,158,11,0.16),transparent_34%)]" />
+    <main className="min-h-screen bg-[#f4f6fa] px-4 py-5 text-slate-950 sm:px-6 lg:px-8">
+      <div className="pointer-events-none fixed inset-0 -z-10 " />
 
       <section className="mx-auto max-w-[1540px]">
         <header className="rounded-[28px] border border-white/80 bg-white/90 p-5 shadow-[0_24px_80px_rgba(15,23,42,0.12)]">
@@ -305,7 +305,7 @@ export function GstTracker() {
                     <p className="text-xs font-black uppercase tracking-[0.16em] text-navy-700">GSTIN source list</p>
                     <h2 className="mt-2 text-2xl font-black">Clients</h2>
                   </div>
-                  <button className="flex size-10 items-center justify-center rounded-2xl bg-slate-950 text-white" onClick={() => void loadWorkspace()} type="button">
+                  <button className="flex size-10 items-center justify-center rounded-2xl bg-navy-700 text-white" onClick={() => void loadWorkspace()} type="button">
                     <RefreshCw className="size-4" />
                   </button>
                 </div>
@@ -340,7 +340,7 @@ export function GstTracker() {
                   <input className="input uppercase" maxLength={15} minLength={15} onChange={(e) => setGstin(e.target.value)} placeholder="GSTIN from Excel A2" required value={gstin} />
                   <input className="input" onChange={(e) => setTradeName(e.target.value)} placeholder="Trade name optional" value={tradeName} />
                   <input className="input" onChange={(e) => setStateName(e.target.value)} placeholder="State optional" value={stateName} />
-                  <button className="flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-slate-950 text-sm font-black text-white" disabled={isSavingClient} type="submit">
+                  <button className="flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-navy-700 text-sm font-black text-white" disabled={isSavingClient} type="submit">
                     {isSavingClient ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}
                     Add GST client
                   </button>
@@ -381,7 +381,7 @@ export function GstTracker() {
                   <input className="input lg:col-span-2" onChange={(e) => setDueDate(e.target.value)} type="date" value={dueDate} />
                   <input className="input lg:col-span-2" onChange={(e) => setSection(e.target.value)} placeholder="Section" value={section} />
                   <input className="input lg:col-span-3" onChange={(e) => setReplyFilingStatus(e.target.value)} placeholder="Reply Filing" value={replyFilingStatus} />
-                  <button className="flex h-12 items-center justify-center gap-2 rounded-2xl bg-slate-950 px-4 text-sm font-black text-white disabled:opacity-60 lg:col-span-1" disabled={!selectedRegistrationId || isSavingCase} type="submit">
+                  <button className="flex h-12 items-center justify-center gap-2 rounded-2xl bg-navy-700 px-4 text-sm font-black text-white disabled:opacity-60 lg:col-span-1" disabled={!selectedRegistrationId || isSavingCase} type="submit">
                     {isSavingCase ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}
                     Add
                   </button>
@@ -451,22 +451,4 @@ function InfoCard({
   title: string;
 }) {
   return (
-    <article className="rounded-[24px] border border-white/80 bg-white/90 p-5 shadow-[0_18px_55px_rgba(15,23,42,0.08)]">
-      <Icon className="size-5 text-navy-700" />
-      <h3 className="mt-3 text-sm font-black text-slate-950">{title}</h3>
-      <p className="mt-2 text-xs font-semibold leading-5 text-slate-600">{text}</p>
-    </article>
-  );
-}
-
-function formatLoadError(message: string) {
-  if (message.toLowerCase().includes("gst_litigation_cases")) {
-    return "GST litigation database table is not installed yet. Run database/004_gst_litigation_monitor.sql in Supabase SQL Editor.";
-  }
-
-  if (message.toLowerCase().includes("gst_registrations")) {
-    return "GST registration table is not installed yet. Run database/003_gst_tracker.sql first, then database/004_gst_litigation_monitor.sql.";
-  }
-
-  return message;
-}
+    <article className="rounded-[24px] border border-white/80 

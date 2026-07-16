@@ -55,7 +55,7 @@ export function TeamsPanel() {
           <h2 className="mt-3 text-2xl font-black text-slate-950">Team Members</h2>
         </div>
         <button
-          className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 text-xs font-black uppercase text-white transition hover:bg-slate-800 disabled:bg-slate-500"
+          className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-navy-700 px-4 text-xs font-black uppercase text-white transition hover:bg-navy-800 disabled:bg-slate-500"
           disabled={isLoading}
           onClick={loadMembers}
           type="button"

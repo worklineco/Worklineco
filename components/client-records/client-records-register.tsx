@@ -339,7 +339,7 @@ export function ClientRecordsRegister() {
             <History className="size-4" />
             Audit
           </button>
-          <button className={`${buttonClass} bg-slate-950 text-white ring-slate-950`} onClick={loadRows} type="button">
+          <button className={`${buttonClass} bg-navy-700 text-white ring-slate-950`} onClick={loadRows} type="button">
             <RefreshCw className="size-4" />
             Refresh
           </button>
@@ -522,7 +522,7 @@ export function ClientRecordsRegister() {
       ) : null}
 
       {editor ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-navy-700/45 p-4">
           <form className="max-h-[90vh] w-full max-w-5xl overflow-auto rounded-[28px] bg-white p-5 shadow-2xl" onSubmit={saveEditor}>
             <div className="flex items-center justify-between gap-3 border-b border-slate-200 pb-4">
               <h3 className="text-xl font-black text-slate-950">{editor.rowId ? "Edit Client Record" : "Add Client Record"}</h3>
@@ -547,7 +547,7 @@ export function ClientRecordsRegister() {
                 </label>
               ))}
             </div>
-            <button className="mt-5 inline-flex h-12 items-center justify-center rounded-2xl bg-slate-950 px-5 text-sm font-black text-white" type="submit">
+            <button className="mt-5 inline-flex h-12 items-center justify-center rounded-2xl bg-navy-700 px-5 text-sm font-black text-white" type="submit">
               Save Client Record
             </button>
           </form>
@@ -597,32 +597,4 @@ function normalizeImportAction(value: unknown) {
   return "Add";
 }
 
-function normalizeHeader(value: string) {
-  return value.replace(/[^0-9a-z]/gi, "").toLowerCase();
-}
-
-function addImportActionDropdown(worksheet: XLSX.WorkSheet, rowCount: number) {
-  const worksheetWithValidation = worksheet as XLSX.WorkSheet & {
-    "!dataValidation"?: Array<Record<string, unknown>>;
-  };
-
-  worksheetWithValidation["!dataValidation"] = [
-    {
-      allowBlank: false,
-      sqref: `A2:A${Math.max(rowCount, 2)}`,
-      type: "list",
-      formula1: `"${importActionOptions.join(",")}"`
-    }
-  ];
-}
-
-function formatDate(value: unknown) {
-  if (!value) return "-";
-  return new Date(String(value)).toLocaleString();
-}
-
-function formatAuditValue(value: unknown) {
-  if (!value) return "-";
-  if (typeof value === "object") return JSON.stringify(value);
-  return String(value);
-}
+function normalizeHeader(value: st

@@ -1392,8 +1392,8 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
   return (
     <main className={`min-h-screen overflow-hidden bg-[#f4f6fa] text-slate-950 ${isMaximized ? "px-2 py-2" : "px-2 py-3 sm:px-3 lg:px-4"}`}>
       <div className="pointer-events-none fixed inset-0 -z-10">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_16%_12%,rgba(20,184,166,0.18),transparent_28%),radial-gradient(circle_at_82%_16%,rgba(217,70,239,0.16),transparent_26%),radial-gradient(circle_at_48%_92%,rgba(245,158,11,0.16),transparent_32%)]" />
-        <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(15,23,42,0.04)_1px,transparent_1px),linear-gradient(180deg,rgba(15,23,42,0.04)_1px,transparent_1px)] bg-[size:48px_48px]" />
+        <div className="absolute inset-0 " />
+        <div className="absolute inset-0  bg-[size:48px_48px]" />
       </div>
 
       <section className="mx-auto w-full max-w-none">
@@ -1409,7 +1409,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                 Workspace
               </Link>
               <div className="mt-5 flex flex-wrap items-center gap-3">
-                <span className="flex size-14 items-center justify-center rounded-2xl bg-gradient-to-br from-navy-300 via-sky-300 to-fuchsia-300 text-slate-950">
+                <span className="flex size-14 items-center justify-center rounded-2xl bg-navy-700 text-white">
                   <Scale className="size-7" />
                 </span>
                 <div>
@@ -1582,7 +1582,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
               ) : null}
               <div className="flex overflow-hidden rounded-xl shadow-sm">
                 <button
-                  className="inline-flex h-10 items-center justify-center gap-2 bg-slate-950 px-3 text-xs font-black uppercase text-white transition hover:bg-slate-800"
+                  className="inline-flex h-10 items-center justify-center gap-2 bg-navy-700 px-3 text-xs font-black uppercase text-white transition hover:bg-navy-800"
                   onClick={() => exportExcel("all")}
                   title="Export every GSTAT row"
                   type="button"
@@ -1591,7 +1591,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                   Full Table
                 </button>
                 <button
-                  className="inline-flex h-10 items-center justify-center gap-2 border-l border-white/15 bg-slate-800 px-3 text-xs font-black uppercase text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-45"
+                  className="inline-flex h-10 items-center justify-center gap-2 border-l border-white/15 bg-navy-800 px-3 text-xs font-black uppercase text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-45"
                   disabled={!filteredRows.length}
                   onClick={() => exportExcel("current")}
                   title="Export the currently filtered and sorted GSTAT rows"
@@ -2052,7 +2052,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
         </section>
       </section>
       {editor ? (
-        <div className="fixed inset-0 z-50 flex justify-end bg-slate-950/30">
+        <div className="fixed inset-0 z-50 flex justify-end bg-navy-700/30">
           <button
             aria-label="Close editor"
             className="absolute inset-0 cursor-default"
@@ -2075,7 +2075,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                     Cancel
                   </button>
                   <button
-                    className="inline-flex h-10 items-center justify-center rounded-xl bg-slate-950 px-4 text-xs font-black uppercase text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="inline-flex h-10 items-center justify-center rounded-xl bg-navy-700 px-4 text-xs font-black uppercase text-white shadow-sm transition hover:bg-navy-800 disabled:cursor-not-allowed disabled:opacity-50"
                     disabled={isSavingEditor}
                     onClick={saveEditor}
                     type="button"
@@ -2177,7 +2177,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
         </div>
       ) : null}
       {billingDraft ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-navy-700/40 p-4">
           <button
             aria-label="Close billing form"
             className="absolute inset-0 cursor-default"
@@ -3119,7 +3119,7 @@ function ExcelColumnHeader({
               Cancel
             </button>
             <button
-              className="inline-flex h-9 items-center justify-center rounded-md bg-slate-950 px-4 text-sm font-semibold text-white transition hover:bg-slate-800"
+              className="inline-flex h-9 items-center justify-center rounded-md bg-navy-700 px-4 text-sm font-semibold text-white transition hover:bg-navy-800"
               onClick={() => onApplyFilter(column)}
               type="button"
             >
@@ -3374,7 +3374,7 @@ function ColumnOptionsPanel({
           Cancel
         </button>
         <button
-          className="inline-flex h-9 items-center rounded-lg bg-slate-950 px-4 text-xs font-black uppercase text-white transition hover:bg-slate-800"
+          className="inline-flex h-9 items-center rounded-lg bg-navy-700 px-4 text-xs font-black uppercase text-white transition hover:bg-navy-800"
           onClick={saveDraftLayout}
           type="button"
         >
@@ -3455,7 +3455,7 @@ function Metric({
   return (
     <div className="rounded-2xl border border-slate-950/10 bg-white p-4 shadow-sm ring-1 ring-white/70">
       <div className="flex items-center gap-3">
-        <span className="flex size-10 items-center justify-center rounded-xl bg-slate-950 text-white">
+        <span className="flex size-10 items-center justify-center rounded-xl bg-navy-700 text-white">
           <Icon className="size-4" />
         </span>
         <div>
@@ -3516,20 +3516,4 @@ function normalizeImportAction(value: unknown) {
 }
 
 function normalizeHeader(value: string) {
-  return value.replace(/[^0-9a-z]/gi, "").toLowerCase();
-}
-
-function addImportActionDropdown(worksheet: XLSX.WorkSheet, rowCount: number) {
-  const worksheetWithValidation = worksheet as XLSX.WorkSheet & {
-    "!dataValidation"?: Array<Record<string, unknown>>;
-  };
-
-  worksheetWithValidation["!dataValidation"] = [
-    {
-      allowBlank: false,
-      formula1: `"${importActionOptions.join(",")}"`,
-      sqref: `A3:A${Math.max(rowCount + 2, 3)}`,
-      type: "list"
-    }
-  ];
-}
+  return valu

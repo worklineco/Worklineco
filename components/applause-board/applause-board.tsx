@@ -174,7 +174,7 @@ export function ApplauseBoard() {
           {audienceOptions.map((option) => (
             <button
               className={`h-11 rounded-2xl px-4 text-left text-sm font-black transition ${
-                audience === option.key ? "bg-slate-950 text-white" : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                audience === option.key ? "bg-navy-700 text-white" : "bg-slate-100 text-slate-700 hover:bg-slate-200"
               }`}
               key={option.key}
               onClick={() => {
@@ -232,7 +232,7 @@ export function ApplauseBoard() {
                   </option>
                 ))}
             </select>
-            <button className="flex h-10 items-center justify-center rounded-xl bg-slate-950 px-3 text-sm font-black text-white" onClick={addTaggedPerson} type="button">
+            <button className="flex h-10 items-center justify-center rounded-xl bg-navy-700 px-3 text-sm font-black text-white" onClick={addTaggedPerson} type="button">
               <Plus className="size-4" />
             </button>
           </div>
@@ -246,7 +246,7 @@ export function ApplauseBoard() {
           value={message}
         />
         <button
-          className="mt-3 inline-flex h-11 w-full items-center justify-center gap-2 rounded-2xl bg-slate-950 px-4 text-sm font-black text-white"
+          className="mt-3 inline-flex h-11 w-full items-center justify-center gap-2 rounded-2xl bg-navy-700 px-4 text-sm font-black text-white"
           onClick={sendApplause}
           type="button"
         >
@@ -324,21 +324,4 @@ function audienceLabel(post: ApplausePost) {
     return "To Everyone";
   }
 
-  if (post.audience === "person") {
-    return `To ${post.recipient_names || "selected person"}`;
-  }
-
-  return `To ${post.recipient_names || "close group"}`;
-}
-
-function formatDate(value?: string) {
-  if (!value) {
-    return "";
-  }
-
-  return new Intl.DateTimeFormat("en-IN", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric"
-  }).format(new Date(value));
-}
+  if (post.audience === "pers
