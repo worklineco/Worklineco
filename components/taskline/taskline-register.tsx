@@ -1,7 +1,8 @@
 "use client";
 
-import { ArrowDown, ArrowUp, Download, History, Pencil, Plus, Search, Settings2, Trash2, Upload, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Download, Filter, History, Pencil, Plus, Search, Settings2, Trash2, Upload, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import * as XLSX from "xlsx-js-style";
 import { getCached, setCached } from "@/lib/data-cache";
 
@@ -85,6 +86,12 @@ const defaultRows = Array.from({ length: 8 }, (_, index) => createEmptyRow(`init
 export function TaskLineRegister() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
+  const [sortState, setSortState] = useState<{ dir: "asc" | "desc"; key: string } | null>(null);
+  const [valueFilters, setValueFilters] = useState<Record<string, string[]>>({});
+  const [openFilterKey, setOpenFilterKey] = useState<string | null>(null);
+  const [filterDraft, setFilterDraft] = useState<string[]>([]);
+  const [filterSearch, setFilterSearch] = useState("");
+  const [filterMenuPos, setFilterMenuPos] = useState<{ left: number; maxHeight: number; top: number } | null>(null);
   const [columnOrder, setColumnOrder] = useState(() => getSavedTaskLineColumnLayout().order);
   const [auditLogs, setAuditLogs] = useState<TaskLineAuditLog[]>([]);
   const [formDraft, setFormDraft] = useState<TaskLineRow | null>(null);
@@ -111,17 +118,31 @@ export function TaskLineRegister() {
   const filteredRows = useMemo(() => {
     const query = search.trim().toLowerCase();
 
-    return rows.filter((row) => {
+    const result = rows.filter((row) => {
       const matchesSearch = !query || taskLineColumns.some((column) => text(row[column.key]).toLowerCase().includes(query));
       const matchesStatus = !statusFilter || row.status_open_close === statusFilter;
       const matchesColumnFilters = visibleColumns.every((column) => {
         const filter = text(columnFilters[column.key]).trim().toLowerCase();
         return !filter || text(row[column.key]).toLowerCase().includes(filter);
       });
+      const matchesValueFilters = visibleColumns.every((column) => {
+        const selected = valueFilters[column.key];
+        return !selected || selected.includes(text(row[column.key]));
+      });
 
-      return matchesSearch && matchesStatus && matchesColumnFilters;
+      return matchesSearch && matchesStatus && matchesColumnFilters && matchesValueFilters;
     });
-  }, [columnFilters, rows, search, statusFilter, visibleColumns]);
+
+    if (sortState) {
+      const factor = sortState.dir === "asc" ? 1 : -1;
+      return [...result].sort(
+        (first, second) =>
+          factor * text(first[sortState.key]).localeCompare(text(second[sortState.key]), undefined, { numeric: true })
+      );
+    }
+
+    return result;
+  }, [columnFilters, rows, search, sortState, statusFilter, valueFilters, visibleColumns]);
   const hasActiveColumnFilters = Object.values(columnFilters).some((value) => value.trim());
   const pageCount = Math.max(1, Math.ceil(filteredRows.length / taskLinePageSize));
   const pagedRows = useMemo(() => {
@@ -144,6 +165,97 @@ export function TaskLineRegister() {
   useEffect(() => {
     setTablePage((currentPage) => Math.min(currentPage, pageCount));
   }, [pageCount]);
+
+  function uniqueValuesForColumn(key: string) {
+    const values = new Set<string>();
+    for (const row of rows) {
+      values.add(text(row[key]));
+    }
+    return Array.from(values).sort((first, second) => first.localeCompare(second, undefined, { numeric: true }));
+  }
+
+  const openColumnOptions = useMemo(
+    () => (openFilterKey ? uniqueValuesForColumn(openFilterKey) : []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [openFilterKey, rows]
+  );
+  const visibleFilterOptions = useMemo(() => {
+    const query = filterSearch.trim().toLowerCase();
+    return query ? openColumnOptions.filter((value) => value.toLowerCase().includes(query)) : openColumnOptions;
+  }, [openColumnOptions, filterSearch]);
+
+  function openColumnFilter(key: string, anchor: HTMLElement) {
+    const options = uniqueValuesForColumn(key);
+    setOpenFilterKey(key);
+    setFilterSearch("");
+    setFilterDraft(valueFilters[key] ? [...valueFilters[key]] : options);
+    const rect = anchor.getBoundingClientRect();
+    const width = 288;
+    const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
+    const top = rect.bottom + 4;
+    const maxHeight = Math.max(160, window.innerHeight - top - 90);
+    setFilterMenuPos({ left, maxHeight, top });
+  }
+
+  function closeColumnFilter() {
+    setOpenFilterKey(null);
+    setFilterMenuPos(null);
+  }
+
+  function applyColumnFilter(key: string) {
+    const options = uniqueValuesForColumn(key);
+    setValueFilters((current) => {
+      const next = { ...current };
+      if (filterDraft.length >= options.length) {
+        delete next[key];
+      } else {
+        next[key] = [...filterDraft];
+      }
+      return next;
+    });
+    closeColumnFilter();
+  }
+
+  function clearColumnFilter(key: string) {
+    setValueFilters((current) => {
+      const next = { ...current };
+      delete next[key];
+      return next;
+    });
+    closeColumnFilter();
+  }
+
+  function toggleDraftValue(value: string) {
+    setFilterDraft((current) =>
+      current.includes(value) ? current.filter((item) => item !== value) : [...current, value]
+    );
+  }
+
+  function toggleVisibleDraftValues() {
+    const allSelected = visibleFilterOptions.every((value) => filterDraft.includes(value));
+    setFilterDraft((current) => {
+      if (allSelected) {
+        return current.filter((value) => !visibleFilterOptions.includes(value));
+      }
+      const merged = new Set(current);
+      for (const value of visibleFilterOptions) {
+        merged.add(value);
+      }
+      return Array.from(merged);
+    });
+  }
+
+  function toggleSort(key: string) {
+    setSortState((current) => {
+      if (!current || current.key !== key) {
+        return { dir: "asc", key };
+      }
+      if (current.dir === "asc") {
+        return { dir: "desc", key };
+      }
+      return null;
+    });
+  }
 
   async function loadTaskLine() {
     const cached = !dataHydratedRef.current
@@ -547,9 +659,66 @@ export function TaskLineRegister() {
             <thead className="sticky top-0 z-10 bg-slate-100 text-[11px] font-semibold uppercase tracking-wide text-slate-600 [&_th]:border-b [&_th]:border-slate-200">
             <tr>
               <th className="border-r border-white/10 px-3 py-3" style={{ width: actionColumnWidth }}>Actions</th>
-              {visibleColumns.map((column) => (
-                <th className="border-r border-white/10 px-3 py-3 last:border-r-0" key={column.key}>{column.label}</th>
-              ))}
+              {visibleColumns.map((column) => {
+                const isAsc = sortState?.key === column.key && sortState.dir === "asc";
+                const isDesc = sortState?.key === column.key && sortState.dir === "desc";
+                const hasValueFilter = Boolean(valueFilters[column.key]);
+                return (
+                  <th className="border-r border-white/10 px-3 py-3 last:border-r-0" key={column.key}>
+                    <div className="flex items-center gap-1">
+                      <button
+                        className="flex min-w-0 flex-1 items-center justify-between gap-1 text-left"
+                        onClick={() => toggleSort(column.key)}
+                        title={`Sort by ${column.label}`}
+                        type="button"
+                      >
+                        <span className="min-w-0 whitespace-normal break-words leading-tight">{column.label}</span>
+                        <span className="flex shrink-0 flex-col leading-none">
+                          <ArrowUp className={`size-3 ${isAsc ? "text-navy-700" : "text-slate-300"}`} />
+                          <ArrowDown className={`-mt-1 size-3 ${isDesc ? "text-navy-700" : "text-slate-300"}`} />
+                        </span>
+                      </button>
+                      <button
+                        aria-label={`Filter ${column.label}`}
+                        className={`inline-flex size-5 shrink-0 items-center justify-center rounded border transition ${
+                          hasValueFilter
+                            ? "border-navy-600 bg-navy-600 text-white"
+                            : "border-slate-300 bg-white text-slate-500 hover:bg-slate-100"
+                        }`}
+                        onClick={(event) => openColumnFilter(column.key, event.currentTarget)}
+                        title={`Filter ${column.label}`}
+                        type="button"
+                      >
+                        <Filter className="size-3" />
+                      </button>
+                    </div>
+                    {openFilterKey === column.key && filterMenuPos ? (
+                      <TaskLineFilterMenu
+                        columnLabel={column.label}
+                        draft={filterDraft}
+                        hasFilter={hasValueFilter}
+                        menuPos={filterMenuPos}
+                        onApply={() => applyColumnFilter(column.key)}
+                        onCancel={closeColumnFilter}
+                        onClear={() => clearColumnFilter(column.key)}
+                        onSearchChange={setFilterSearch}
+                        onSortAsc={() => {
+                          setSortState({ dir: "asc", key: column.key });
+                          closeColumnFilter();
+                        }}
+                        onSortDesc={() => {
+                          setSortState({ dir: "desc", key: column.key });
+                          closeColumnFilter();
+                        }}
+                        onToggleAll={toggleVisibleDraftValues}
+                        onToggleValue={toggleDraftValue}
+                        search={filterSearch}
+                        visibleOptions={visibleFilterOptions}
+                      />
+                    ) : null}
+                  </th>
+                );
+              })}
             </tr>
             <tr className="bg-slate-50">
               <th className="border-r border-slate-200 px-2 py-2" />
@@ -1219,4 +1388,120 @@ function getSavedTaskLineColumnLayout() {
 
 function text(value: unknown) {
   return String(value ?? "").trim();
+}
+
+function TaskLineFilterMenu({
+  columnLabel,
+  draft,
+  hasFilter,
+  menuPos,
+  onApply,
+  onCancel,
+  onClear,
+  onSearchChange,
+  onSortAsc,
+  onSortDesc,
+  onToggleAll,
+  onToggleValue,
+  search,
+  visibleOptions
+}: {
+  columnLabel: string;
+  draft: string[];
+  hasFilter: boolean;
+  menuPos: { left: number; maxHeight: number; top: number };
+  onApply: () => void;
+  onCancel: () => void;
+  onClear: () => void;
+  onSearchChange: (value: string) => void;
+  onSortAsc: () => void;
+  onSortDesc: () => void;
+  onToggleAll: () => void;
+  onToggleValue: (value: string) => void;
+  search: string;
+  visibleOptions: string[];
+}) {
+  if (typeof document === "undefined") {
+    return null;
+  }
+
+  const allVisibleSelected = visibleOptions.length > 0 && visibleOptions.every((value) => draft.includes(value));
+  const someVisibleSelected = visibleOptions.some((value) => draft.includes(value)) && !allVisibleSelected;
+
+  return createPortal(
+    <div
+      className="fixed z-[1000] w-72 overflow-hidden rounded-lg border border-slate-300 bg-white p-2 text-left text-slate-900 shadow-2xl"
+      style={{ left: menuPos.left, top: menuPos.top }}
+    >
+      <div className="space-y-1 border-b border-slate-200 pb-2">
+        <button className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm font-semibold transition hover:bg-slate-100" onClick={onSortAsc} type="button">
+          <span className="flex w-8 items-center justify-center text-xs font-black text-navy-700">A-Z</span>
+          Sort A to Z
+        </button>
+        <button className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm font-semibold transition hover:bg-slate-100" onClick={onSortDesc} type="button">
+          <span className="flex w-8 items-center justify-center text-xs font-black text-navy-700">Z-A</span>
+          Sort Z to A
+        </button>
+      </div>
+
+      <button
+        className="mt-2 flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm font-semibold text-slate-500 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-300 disabled:hover:bg-white"
+        disabled={!hasFilter}
+        onClick={onClear}
+        type="button"
+      >
+        <X className="size-4" />
+        Clear Filter From &quot;{columnLabel}&quot;
+      </button>
+
+      <div className="mt-2 flex justify-end gap-2">
+        <button className="inline-flex h-9 items-center justify-center rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50" onClick={onCancel} type="button">
+          Cancel
+        </button>
+        <button className="inline-flex h-9 items-center justify-center rounded-md bg-navy-700 px-4 text-sm font-semibold text-white transition hover:bg-navy-800" onClick={onApply} type="button">
+          OK
+        </button>
+      </div>
+
+      <div className="mt-2 flex items-center gap-2 rounded-md border border-slate-300 px-2 py-1.5">
+        <Search className="size-4 text-slate-400" />
+        <input
+          className="min-w-0 flex-1 bg-transparent text-sm font-semibold outline-none placeholder:text-slate-400"
+          onChange={(event) => onSearchChange(event.target.value)}
+          placeholder="Search"
+          value={search}
+        />
+      </div>
+
+      <div className="mt-2 overflow-y-auto overscroll-contain border border-slate-200 bg-slate-50 p-2" style={{ maxHeight: menuPos.maxHeight }}>
+        <label className="flex cursor-pointer items-center gap-2 text-sm font-semibold text-slate-950">
+          <input
+            checked={allVisibleSelected}
+            className="size-4 accent-navy-700"
+            onChange={onToggleAll}
+            ref={(input) => {
+              if (input) {
+                input.indeterminate = someVisibleSelected;
+              }
+            }}
+            type="checkbox"
+          />
+          (Select All)
+        </label>
+        <div className="mt-1 space-y-1">
+          {visibleOptions.length ? (
+            visibleOptions.map((value) => (
+              <label className="flex cursor-pointer items-center gap-2 text-sm font-semibold text-slate-950" key={value || "(blank)"}>
+                <input checked={draft.includes(value)} className="size-4 accent-navy-700" onChange={() => onToggleValue(value)} type="checkbox" />
+                <span className="min-w-0 truncate" title={value || "(Blank)"}>{value || "(Blank)"}</span>
+              </label>
+            ))
+          ) : (
+            <p className="py-6 text-center text-sm font-semibold text-slate-500">No values found</p>
+          )}
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
 }
