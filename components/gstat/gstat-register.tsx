@@ -1,7 +1,7 @@
 "use client";
 
 import { downloadGstatPoa } from "@/lib/gstat/poa-document";
-import { supabase } from "@/lib/supabase/client";
+import { getCurrentUser } from "@/lib/supabase/session";
 import { ArrowDown, ArrowLeft, ArrowUp, ChevronDown, ChevronUp, Download, Expand, ExternalLink, FileSpreadsheet, FileText, Filter, History, Pencil, Plus, ReceiptText, Scale, Search, Settings2, ShieldCheck, Trash2, Upload, X } from "lucide-react";
 import Link from "next/link";
 import { ChangeEvent, memo, useDeferredValue, useEffect, useMemo, useRef, useState, useTransition } from "react";
@@ -723,8 +723,8 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
   }, [columnOrder, hasLoadedColumnLayout, hiddenColumnKeys]);
 
   async function loadUserAccess() {
-    const { data } = await supabase.auth.getUser();
-    const metadata = data.user?.user_metadata ?? {};
+    const user = await getCurrentUser();
+    const metadata = user?.user_metadata ?? {};
     const role = String(metadata.role ?? "").trim().toLowerCase();
 
     setUserAccess({

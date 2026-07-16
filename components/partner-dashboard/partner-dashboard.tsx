@@ -1,6 +1,6 @@
 "use client";
 
-import { supabase } from "@/lib/supabase/client";
+import { getCurrentUser } from "@/lib/supabase/session";
 import {
   CalendarClock,
   CheckCircle2,
@@ -205,8 +205,7 @@ export function PartnerDashboard() {
       setActiveThreadId(parsed.threads[0]?.id ?? "");
     }
 
-    supabase.auth.getUser().then(({ data }) => {
-      const user = data.user;
+    getCurrentUser().then((user) => {
       const metadata = user?.user_metadata ?? {};
       const name = String(metadata.full_name ?? metadata.name ?? user?.email ?? "Partner").trim();
       setProfileName(name || "Partner");

@@ -1,6 +1,7 @@
 "use client";
 
 import { supabase } from "@/lib/supabase/client";
+import { getCurrentUser } from "@/lib/supabase/session";
 import { ArrowRight, Building2, CheckCircle2, Loader2, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
@@ -21,8 +22,8 @@ export function OnboardingForm() {
   const [isCheckingSession, setIsCheckingSession] = useState(true);
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-      setEmail(data.user?.email ?? "");
+    getCurrentUser().then((user) => {
+      setEmail(user?.email ?? "");
       setIsCheckingSession(false);
     });
   }, []);

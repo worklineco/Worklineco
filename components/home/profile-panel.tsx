@@ -1,6 +1,7 @@
 "use client";
 
 import { supabase } from "@/lib/supabase/client";
+import { clearWorkspaceCache, getCurrentUser } from "@/lib/supabase/session";
 import { ChevronDown, LogOut, UserRound } from "lucide-react";
 import { useEffect, useState } from "react";
 
@@ -22,8 +23,7 @@ export function ProfilePanel() {
   const [isSigningOut, setIsSigningOut] = useState(false);
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-      const user = data.user;
+    getCurrentUser().then((user) => {
       const metadata = user?.user_metadata ?? {};
 
       setProfile({
@@ -37,6 +37,7 @@ export function ProfilePanel() {
 
   async function signOut() {
     setIsSigningOut(true);
+    clearWorkspaceCache();
     await supabase.auth.signOut();
     window.location.href = "/login";
   }

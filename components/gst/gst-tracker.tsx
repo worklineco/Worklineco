@@ -1,6 +1,7 @@
 "use client";
 
 import { supabase } from "@/lib/supabase/client";
+import { getOrganisationId } from "@/lib/supabase/session";
 import {
   AlertCircle,
   Building2,
@@ -78,39 +79,27 @@ export function GstTracker() {
     setIsLoading(true);
     setMessage("");
 
-    const { data: userData } = await supabase.auth.getUser();
+    const orgId = await getOrganisationId();
 
-    if (!userData.user) {
-      setMessage("Please sign in again to access GST Litigation Monitor.");
-      setIsLoading(false);
-      return;
-    }
-
-    const { data: profile, error: profileError } = await supabase
-      .from("users")
-      .select("organisation_id")
-      .eq("id", userData.user.id)
-      .single();
-
-    if (profileError || !profile?.organisation_id) {
+    if (!orgId) {
       setMessage("Create your organisation workspace before using GST Litigation Monitor.");
       setIsLoading(false);
       return;
     }
 
-    setOrganisationId(profile.organisation_id);
+    setOrganisationId(orgId);
 
     const [{ data: gstRows, error: gstError }, { data: caseRows, error: caseError }] =
       await Promise.all([
         supabase
           .from("gst_registrations")
           .select("*")
-          .eq("organisation_id", profile.organisation_id)
+          .eq("organisation_id", orgId)
           .order("client_name", { ascending: true }),
         supabase
           .from("gst_litigation_cases")
           .select("*")
-          .eq("organisation_id", profile.organisation_id)
+          .eq("organisation_id", orgId)
           .order("date_of_issue", { ascending: false, nullsFirst: false })
       ]);
 

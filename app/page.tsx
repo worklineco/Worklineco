@@ -26,7 +26,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { MonthCalendar } from "@/components/home/month-calendar";
 import { ProfilePanel } from "@/components/home/profile-panel";
 import { TeamsPanel } from "@/components/home/teams-panel";
-import { supabase } from "@/lib/supabase/client";
+import { getCurrentUser } from "@/lib/supabase/session";
 
 const navigation = [
   { href: "/", icon: LayoutDashboard, label: "Overview", tone: "bg-teal-100 text-teal-800" },
@@ -115,8 +115,7 @@ export default function Home() {
   );
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-      const user = data.user;
+    getCurrentUser().then((user) => {
       const metadata = user?.user_metadata ?? {};
       setProfileName(String(metadata.full_name ?? metadata.name ?? user?.email ?? ""));
       setProfileRole(String(metadata.role ?? ""));
