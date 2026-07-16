@@ -38,7 +38,7 @@ const partnerOptions = [
   "Mrs. Shuchi Sethi"
 ];
 const inputClass =
-  "mt-2 h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm font-semibold outline-none transition focus:border-teal-400 focus:ring-4 focus:ring-teal-100";
+  "mt-2 h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm font-semibold outline-none transition focus:border-navy-400 focus:ring-4 focus:ring-navy-100";
 
 export function LoginForm() {
   const [mode, setMode] = useState<"signin" | "signup">("signin");
@@ -212,7 +212,7 @@ export function LoginForm() {
       <div className="rounded-3xl border border-white/15 bg-[linear-gradient(135deg,#0f172a_0%,#0f766e_52%,#c026d3_100%)] p-5 text-white shadow-[0_18px_50px_rgba(15,23,42,0.20)]">
         <div className="flex items-center justify-between gap-4">
           <div>
-            <p className="text-xs font-black uppercase tracking-[0.16em] text-teal-100">
+            <p className="text-xs font-black uppercase tracking-[0.16em] text-navy-100">
               WorkLine secure access
             </p>
             <h2 className="mt-2 text-2xl font-black">
@@ -348,7 +348,7 @@ export function LoginForm() {
 
         <label className="block">
           <span className="text-xs font-black uppercase text-slate-500">Password</span>
-          <div className="mt-2 flex h-12 items-center rounded-2xl border border-slate-200 bg-white pr-2 transition focus-within:border-teal-400 focus-within:ring-4 focus-within:ring-teal-100">
+          <div className="mt-2 flex h-12 items-center rounded-2xl border border-slate-200 bg-white pr-2 transition focus-within:border-navy-400 focus-within:ring-4 focus-within:ring-navy-100">
             <input
               className="h-full min-w-0 flex-1 rounded-2xl border-0 bg-transparent px-4 text-sm font-semibold outline-none"
               disabled={signupStep === "emailOtp"}

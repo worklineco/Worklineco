@@ -921,7 +921,7 @@ export function BillingRegister() {
     <section className={`w-full border border-slate-200 bg-white p-4 shadow-[0_18px_60px_rgba(15,23,42,0.10)] ${isFullscreen ? "fixed inset-3 z-50 flex flex-col overflow-hidden rounded-lg" : "rounded-lg"}`}>
       <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
         <div>
-          <p className="text-xs font-black uppercase tracking-[0.16em] text-teal-700">Firm-wide billing</p>
+          <p className="text-xs font-black uppercase tracking-[0.16em] text-navy-700">Firm-wide billing</p>
           <h2 className="mt-1 text-2xl font-black text-slate-950">Billing Register</h2>
           <p className="mt-1 text-sm font-bold text-slate-500">
             {isLoading ? "Loading" : `${filteredRecords.length} visible of ${records.length} rows`} - total {formatMoney(totals.billed)}
@@ -1098,7 +1098,7 @@ export function BillingRegister() {
                     {column.field === "actions" ? null : (
                       <input
                         aria-label={`Filter ${column.label}`}
-                        className="h-8 w-full rounded-md border border-slate-200 bg-white px-2 text-xs font-semibold normal-case text-slate-950 outline-none focus:border-teal-400"
+                        className="h-8 w-full rounded-md border border-slate-200 bg-white px-2 text-xs font-semibold normal-case text-slate-950 outline-none focus:border-navy-400"
                         onChange={(event) =>
                           setColumnFilters((current) => ({
                             ...current,
@@ -1192,7 +1192,7 @@ export function BillingRegister() {
           <section className="max-h-[86vh] w-full max-w-3xl overflow-hidden rounded-lg border border-slate-200 bg-white shadow-[0_24px_90px_rgba(15,23,42,0.30)]">
             <header className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
               <div>
-                <p className="text-xs font-black uppercase tracking-[0.14em] text-teal-700">Row history</p>
+                <p className="text-xs font-black uppercase tracking-[0.14em] text-navy-700">Row history</p>
                 <h3 className="mt-1 text-xl font-black text-slate-950">
                   {selectedRecord?.client || selectedRecord?.invoice_no || selectedRecord?.memo_no || "Billing row"}
                 </h3>
@@ -1301,7 +1301,7 @@ function BillingCell({
             <Pencil className="size-4" />
           </button>
           <button
-            className="inline-flex size-8 items-center justify-center rounded-md border border-teal-200 text-teal-700 hover:bg-teal-50"
+            className="inline-flex size-8 items-center justify-center rounded-md border border-navy-200 text-navy-700 hover:bg-navy-50"
             onClick={onHistory}
             title="View row history"
             type="button"
@@ -1350,7 +1350,7 @@ function BillingCell({
       {isEditing && column.type === "select" ? (
         <select
           autoFocus
-          className="h-8 w-full rounded-md border border-teal-300 bg-white px-2 text-xs font-bold outline-none ring-2 ring-teal-100"
+          className="h-8 w-full rounded-md border border-navy-300 bg-white px-2 text-xs font-bold outline-none ring-2 ring-navy-100"
           onBlur={() => onSave()}
           onChange={(event) => {
             onEditorChange(event.target.value);
@@ -1365,7 +1365,7 @@ function BillingCell({
       ) : isEditing ? (
         <input
           autoFocus
-          className="h-8 w-full rounded-md border border-teal-300 bg-white px-2 text-xs font-bold outline-none ring-2 ring-teal-100"
+          className="h-8 w-full rounded-md border border-navy-300 bg-white px-2 text-xs font-bold outline-none ring-2 ring-navy-100"
           onBlur={() => onSave()}
           onChange={(event) => onEditorChange(event.target.value)}
           onKeyDown={(event) => {
@@ -1386,7 +1386,7 @@ function BillingCell({
       ) : (
         <button
           className={`block h-8 w-full min-w-0 truncate rounded px-1.5 text-left ${
-            isReadOnly ? "cursor-default" : "cursor-text hover:bg-slate-50 hover:ring-1 hover:ring-teal-200"
+            isReadOnly ? "cursor-default" : "cursor-text hover:bg-slate-50 hover:ring-1 hover:ring-navy-200"
           }`}
           disabled={isReadOnly || isSaving}
           onClick={() => {
@@ -1428,7 +1428,7 @@ function BillingAddForm({
       <section className="max-h-[90vh] w-full max-w-5xl overflow-hidden rounded-lg border border-slate-200 bg-white shadow-[0_24px_90px_rgba(15,23,42,0.30)]">
         <header className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
           <div>
-            <p className="text-xs font-black uppercase tracking-[0.14em] text-teal-700">
+            <p className="text-xs font-black uppercase tracking-[0.14em] text-navy-700">
               {isEdit ? "Edit billing record" : "New billing record"}
             </p>
             <h3 className="mt-1 text-2xl font-black text-slate-950">
@@ -1557,7 +1557,7 @@ function FormInput({
   );
 }
 
-const formControlClass = "mt-1 h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm font-bold text-slate-900 outline-none focus:border-teal-300 focus:ring-2 focus:ring-teal-100";
+const formControlClass = "mt-1 h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm font-bold text-slate-900 outline-none focus:border-navy-300 focus:ring-2 focus:ring-navy-100";
 
 function BillingSummaryPanel({
   activeBillingStatus,
@@ -2110,7 +2110,7 @@ function selectOptions(field: BillingField, masters: Record<string, string[]>) {
 
 function buttonClass(kind: "dark" | "light" | "primary") {
   if (kind === "primary") {
-    return "inline-flex h-11 items-center justify-center gap-2 rounded-md bg-teal-700 px-3 text-sm font-black text-white transition hover:bg-teal-800";
+    return "inline-flex h-11 items-center justify-center gap-2 rounded-md bg-navy-700 px-3 text-sm font-black text-white transition hover:bg-navy-800";
   }
 
   if (kind === "dark") {

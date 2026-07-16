@@ -10,7 +10,7 @@ const accessHighlights = [
 export default function LoginPage() {
   return (
     <main
-      className="min-h-screen overflow-hidden bg-[#f7f3ea] px-4 py-6 text-slate-950 sm:px-6 lg:px-8"
+      className="min-h-screen overflow-hidden bg-[#f4f6fa] px-4 py-6 text-slate-950 sm:px-6 lg:px-8"
       data-ui="border-refresh"
     >
       <div className="pointer-events-none fixed inset-0 -z-10">
@@ -20,7 +20,7 @@ export default function LoginPage() {
 
       <div className="mx-auto grid min-h-[calc(100vh-3rem)] max-w-6xl items-center gap-8 rounded-[34px] border border-slate-950/10 bg-white/20 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.75)] ring-1 ring-white/65 backdrop-blur-sm lg:grid-cols-[1fr_455px] lg:p-5">
         <section className="py-6">
-          <div className="inline-flex items-center gap-2 rounded-full border border-white/80 bg-white/80 px-3 py-1.5 text-xs font-black uppercase text-teal-800 shadow-sm backdrop-blur">
+          <div className="inline-flex items-center gap-2 rounded-full border border-white/80 bg-white/80 px-3 py-1.5 text-xs font-black uppercase text-navy-800 shadow-sm backdrop-blur">
             <Sparkles className="size-3.5 text-fuchsia-600" />
             WorkLine Co
           </div>
@@ -53,12 +53,12 @@ export default function LoginPage() {
           </div>
 
           <div className="mt-8 grid max-w-2xl gap-3 rounded-[28px] border border-slate-950 bg-slate-950 p-4 text-white shadow-[0_28px_80px_rgba(15,23,42,0.24)] ring-1 ring-white/20 sm:grid-cols-[auto_1fr] sm:p-5">
-            <div className="flex size-14 items-center justify-center rounded-2xl bg-gradient-to-br from-teal-300 via-sky-300 to-fuchsia-300 text-slate-950">
+            <div className="flex size-14 items-center justify-center rounded-2xl bg-gradient-to-br from-navy-300 via-sky-300 to-fuchsia-300 text-slate-950">
               <Building2 className="size-6" />
             </div>
             <div>
               <div className="flex flex-wrap items-center gap-2">
-                <span className="rounded-full bg-white/12 px-2.5 py-1 text-[11px] font-black uppercase text-teal-100">
+                <span className="rounded-full bg-white/12 px-2.5 py-1 text-[11px] font-black uppercase text-navy-100">
                   DCO workspace
                 </span>
                 <span className="inline-flex items-center gap-1 rounded-full bg-emerald-300 px-2.5 py-1 text-[11px] font-black uppercase text-emerald-950">

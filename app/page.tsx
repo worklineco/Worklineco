@@ -29,7 +29,7 @@ import { TeamsPanel } from "@/components/home/teams-panel";
 import { getCurrentUser } from "@/lib/supabase/session";
 
 const navigation = [
-  { href: "/", icon: LayoutDashboard, label: "Overview", tone: "bg-teal-100 text-teal-800" },
+  { href: "/", icon: LayoutDashboard, label: "Overview", tone: "bg-navy-100 text-navy-800" },
   { href: "/partner-dashboard", icon: BriefcaseBusiness, label: "Partner Dashboard", tone: "bg-violet-100 text-violet-800" },
   { href: "/gst", icon: ClipboardCheck, label: "GST Tracker", tone: "bg-amber-100 text-amber-800" },
   { href: "/gstat", icon: Scale, label: "GSTAT", tone: "bg-fuchsia-100 text-fuchsia-800" },
@@ -63,7 +63,7 @@ const productFocus = [
     label: "Now live",
     target: "_blank",
     title: "GSTAT",
-    tone: "from-teal-300 via-sky-300 to-fuchsia-300"
+    tone: "from-navy-300 via-sky-300 to-fuchsia-300"
   },
   {
     action: "Open billing",
@@ -73,7 +73,7 @@ const productFocus = [
     label: "Firm-wide",
     target: "_blank",
     title: "Billing",
-    tone: "from-lime-200 via-emerald-200 to-teal-300"
+    tone: "from-lime-200 via-emerald-200 to-navy-300"
   },
   {
     action: "Book a room",
@@ -137,7 +137,7 @@ export default function Home() {
   }
 
   return (
-    <main className="min-h-screen overflow-hidden bg-[#f7f4ee] text-slate-950">
+    <main className="min-h-screen overflow-hidden bg-[#f4f6fa] text-slate-950">
       <div className="pointer-events-none fixed inset-0 -z-10">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_12%_0%,rgba(20,184,166,0.05),transparent_45%)]" />
       </div>
@@ -146,7 +146,7 @@ export default function Home() {
         <aside className="workline-frame hidden rounded-[22px] p-4 lg:block">
           <div className="rounded-2xl border border-white/15 bg-slate-950 p-4 text-white">
             <div className="flex items-center gap-3">
-              <div className="flex size-12 items-center justify-center rounded-xl bg-teal-600 text-sm font-bold text-white">
+              <div className="flex size-12 items-center justify-center rounded-xl bg-navy-600 text-sm font-bold text-white">
                 WL
               </div>
               <div>
@@ -193,7 +193,7 @@ export default function Home() {
               </div>
 
               <div className="rounded-3xl border border-white/15 bg-slate-950 p-5 text-white shadow-[0_18px_50px_rgba(15,23,42,0.20)]">
-                <p className="text-xs font-bold uppercase tracking-[0.16em] text-teal-200">
+                <p className="text-xs font-bold uppercase tracking-[0.16em] text-navy-200">
                   Current workspace
                 </p>
                 <h2 className="mt-3 text-3xl font-bold">Firm Operations</h2>
@@ -221,7 +221,7 @@ export default function Home() {
           <section className="workline-frame mt-5 rounded-[26px] p-5 md:p-6">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
               <div>
-                <p className="text-xs font-bold uppercase tracking-[0.16em] text-teal-700">
+                <p className="text-xs font-bold uppercase tracking-[0.16em] text-navy-700">
                   Product areas
                 </p>
                 <h2 className="mt-2 text-2xl font-bold text-slate-950">Supporting Workspace</h2>
@@ -299,7 +299,7 @@ function NavButton({
       onClick={onClick}
       type="button"
     >
-      <span className="flex size-9 items-center justify-center rounded-xl bg-slate-100 text-slate-500 transition group-hover:bg-teal-50 group-hover:text-teal-700">
+      <span className="flex size-9 items-center justify-center rounded-xl bg-slate-100 text-slate-500 transition group-hover:bg-navy-50 group-hover:text-navy-700">
         <Icon className="size-4" />
       </span>
       <span>{label}</span>
@@ -326,7 +326,7 @@ function NavItem({
       className="group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-white hover:text-slate-950 hover:shadow-sm"
       href={item.href}
     >
-      <span className="flex size-9 items-center justify-center rounded-xl bg-slate-100 text-slate-500 transition group-hover:bg-teal-50 group-hover:text-teal-700">
+      <span className="flex size-9 items-center justify-center rounded-xl bg-slate-100 text-slate-500 transition group-hover:bg-navy-50 group-hover:text-navy-700">
         <Icon className="size-4" />
       </span>
       <span className="flex min-w-0 flex-1 items-center gap-2">
@@ -364,7 +364,7 @@ function ProductCard({
       id={item.title === "GSTAT" ? "gstat" : undefined}
     >
       <div className="flex items-start justify-between gap-4">
-        <div className="flex size-14 items-center justify-center rounded-2xl bg-teal-50 text-teal-700 ring-1 ring-teal-100">
+        <div className="flex size-14 items-center justify-center rounded-2xl bg-navy-50 text-navy-700 ring-1 ring-navy-100">
           <Icon className="size-7" />
         </div>
         <span className={`rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-wide ${

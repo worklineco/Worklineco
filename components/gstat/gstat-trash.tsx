@@ -70,7 +70,7 @@ export function GstatTrash() {
   }
 
   return (
-    <main className="min-h-screen bg-[#f7f3ea] px-4 py-4 text-slate-950 sm:px-6 lg:px-8">
+    <main className="min-h-screen bg-[#f4f6fa] px-4 py-4 text-slate-950 sm:px-6 lg:px-8">
       <div className="pointer-events-none fixed inset-0 -z-10">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_16%_12%,rgba(20,184,166,0.18),transparent_28%),radial-gradient(circle_at_82%_16%,rgba(217,70,239,0.16),transparent_26%),radial-gradient(circle_at_48%_92%,rgba(245,158,11,0.16),transparent_32%)]" />
       </div>
@@ -91,7 +91,7 @@ export function GstatTrash() {
                   <ShieldCheck className="size-6" />
                 </span>
                 <div>
-                  <p className="text-xs font-black uppercase tracking-[0.14em] text-teal-700">30-day recovery</p>
+                  <p className="text-xs font-black uppercase tracking-[0.14em] text-navy-700">30-day recovery</p>
                   <h1 className="mt-1 text-3xl font-black text-slate-950">GSTAT Trash</h1>
                 </div>
               </div>

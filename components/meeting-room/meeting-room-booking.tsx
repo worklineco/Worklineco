@@ -317,7 +317,7 @@ export function MeetingRoomBooking() {
           <form className="workline-panel grid gap-4 rounded-[24px] p-5 xl:sticky xl:top-5" onSubmit={saveBooking}>
             <div className="flex items-center justify-between gap-4">
               <div>
-                <p className="text-xs font-black uppercase tracking-[0.14em] text-teal-700">
+                <p className="text-xs font-black uppercase tracking-[0.14em] text-navy-700">
                   {editingId ? "Edit booking" : "New booking"}
                 </p>
                 <h2 className="mt-1 text-xl font-black text-slate-950">
@@ -405,7 +405,7 @@ export function MeetingRoomBooking() {
             ) : null}
 
             <div className="grid gap-2 sm:grid-cols-2">
-              <button className="inline-flex h-12 items-center justify-center rounded-md bg-teal-700 px-4 text-sm font-black text-white" disabled={isSaving} type="submit">
+              <button className="inline-flex h-12 items-center justify-center rounded-md bg-navy-700 px-4 text-sm font-black text-white" disabled={isSaving} type="submit">
                 {isSaving ? "Saving..." : editingId ? "Save Changes" : "Add Booking"}
               </button>
               <button className="inline-flex h-12 items-center justify-center rounded-md border border-slate-200 bg-white px-4 text-sm font-black text-slate-800" onClick={() => resetForm()} type="button">
@@ -417,7 +417,7 @@ export function MeetingRoomBooking() {
           <section className="workline-panel rounded-[24px] p-5">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
               <div>
-                <p className="text-xs font-black uppercase tracking-[0.14em] text-teal-700">
+                <p className="text-xs font-black uppercase tracking-[0.14em] text-navy-700">
                   {viewMode === "board" ? "Booking Board" : "Booking Log"}
                 </p>
                 <h2 className="mt-1 text-2xl font-black text-slate-950">
@@ -504,14 +504,14 @@ export function MeetingRoomBooking() {
                             <div className="flex items-start justify-between gap-3">
                               <div>
                                 <p className="inline-flex items-center gap-1.5 text-sm font-black text-slate-950">
-                                  <Clock3 className="size-4 text-teal-700" />
+                                  <Clock3 className="size-4 text-navy-700" />
                                   {formatTime(booking.from_time)} - {formatTime(booking.to_time)}
                                 </p>
                                 <p className="mt-1 text-sm font-bold text-slate-700">{booking.team_name}</p>
                                 <p className="mt-1 text-xs font-semibold leading-5 text-slate-500">{booking.purpose}</p>
                               </div>
                               <div className="flex shrink-0 gap-1">
-                                <button className="inline-flex size-9 items-center justify-center rounded-md border border-teal-200 bg-white text-teal-700" onClick={() => startEdit(booking)} title="Edit booking" type="button">
+                                <button className="inline-flex size-9 items-center justify-center rounded-md border border-navy-200 bg-white text-navy-700" onClick={() => startEdit(booking)} title="Edit booking" type="button">
                                   <Edit3 className="size-4" />
                                 </button>
                                 <button className="inline-flex size-9 items-center justify-center rounded-md border border-rose-200 bg-white text-rose-700" onClick={() => void deleteBooking(booking)} title="Delete booking" type="button">

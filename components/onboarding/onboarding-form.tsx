@@ -55,7 +55,7 @@ export function OnboardingForm() {
     return (
       <Shell>
         <div className="rounded-[30px] border border-white/80 bg-white/90 p-8 shadow-[0_24px_80px_rgba(15,23,42,0.14)]">
-          <Loader2 className="size-6 animate-spin text-teal-700" />
+          <Loader2 className="size-6 animate-spin text-navy-700" />
           <p className="mt-4 text-sm font-bold text-slate-600">Checking your WorkLine session...</p>
         </div>
       </Shell>
@@ -66,7 +66,7 @@ export function OnboardingForm() {
     return (
       <Shell>
         <div className="rounded-[30px] border border-white/80 bg-white/90 p-8 shadow-[0_24px_80px_rgba(15,23,42,0.14)]">
-          <ShieldCheck className="size-8 text-teal-700" />
+          <ShieldCheck className="size-8 text-navy-700" />
           <h1 className="mt-5 text-3xl font-black text-slate-950">Sign in required</h1>
           <p className="mt-3 text-sm font-semibold leading-6 text-slate-600">
             Please sign in before creating your organisation workspace.
@@ -86,10 +86,10 @@ export function OnboardingForm() {
     <Shell>
       <section className="grid w-full max-w-6xl gap-6 lg:grid-cols-[0.82fr_1.18fr]">
         <aside className="rounded-[30px] border border-white/80 bg-white/90 p-6 shadow-[0_24px_80px_rgba(15,23,42,0.14)]">
-          <div className="flex size-14 items-center justify-center rounded-2xl bg-gradient-to-br from-teal-300 via-sky-400 to-fuchsia-400 text-sm font-black text-slate-950">
+          <div className="flex size-14 items-center justify-center rounded-2xl bg-gradient-to-br from-navy-300 via-sky-400 to-fuchsia-400 text-sm font-black text-slate-950">
             WL
           </div>
-          <p className="mt-6 text-xs font-black uppercase tracking-[0.16em] text-teal-700">
+          <p className="mt-6 text-xs font-black uppercase tracking-[0.16em] text-navy-700">
             Organisation setup
           </p>
           <h1 className="mt-3 text-4xl font-black leading-tight text-slate-950">

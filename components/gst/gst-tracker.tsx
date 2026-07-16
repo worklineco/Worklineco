@@ -293,7 +293,7 @@ export function GstTracker() {
 
         {isLoading ? (
           <div className="mt-5 rounded-[28px] border border-white/80 bg-white/90 p-8 shadow-[0_24px_80px_rgba(15,23,42,0.12)]">
-            <Loader2 className="size-6 animate-spin text-teal-700" />
+            <Loader2 className="size-6 animate-spin text-navy-700" />
             <p className="mt-4 text-sm font-bold text-slate-600">Loading GST litigation workspace...</p>
           </div>
         ) : (
@@ -302,7 +302,7 @@ export function GstTracker() {
               <section className="rounded-[28px] border border-white/80 bg-white/90 p-5 shadow-[0_24px_80px_rgba(15,23,42,0.10)]">
                 <div className="flex items-center justify-between gap-3">
                   <div>
-                    <p className="text-xs font-black uppercase tracking-[0.16em] text-teal-700">GSTIN source list</p>
+                    <p className="text-xs font-black uppercase tracking-[0.16em] text-navy-700">GSTIN source list</p>
                     <h2 className="mt-2 text-2xl font-black">Clients</h2>
                   </div>
                   <button className="flex size-10 items-center justify-center rounded-2xl bg-slate-950 text-white" onClick={() => void loadWorkspace()} type="button">
@@ -319,7 +319,7 @@ export function GstTracker() {
                   {filteredRegistrations.map((registration) => (
                     <button
                       className={`w-full rounded-2xl border px-4 py-3 text-left transition ${
-                        registration.id === selectedRegistrationId ? "border-teal-300 bg-teal-50" : "border-slate-200 bg-slate-50 hover:bg-white"
+                        registration.id === selectedRegistrationId ? "border-navy-300 bg-navy-50" : "border-slate-200 bg-slate-50 hover:bg-white"
                       }`}
                       key={registration.id}
                       onClick={() => setSelectedRegistrationId(registration.id)}
@@ -358,7 +358,7 @@ export function GstTracker() {
                   </div>
                   <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center">
                     <button
-                      className="flex h-12 items-center justify-center gap-2 rounded-2xl bg-teal-700 px-5 text-sm font-black text-white shadow-sm transition hover:bg-teal-800 disabled:cursor-not-allowed disabled:opacity-60"
+                      className="flex h-12 items-center justify-center gap-2 rounded-2xl bg-navy-700 px-5 text-sm font-black text-white shadow-sm transition hover:bg-navy-800 disabled:cursor-not-allowed disabled:opacity-60"
                       disabled={!selectedRegistrationId}
                       onClick={openGstPortal}
                       type="button"
@@ -452,7 +452,7 @@ function InfoCard({
 }) {
   return (
     <article className="rounded-[24px] border border-white/80 bg-white/90 p-5 shadow-[0_18px_55px_rgba(15,23,42,0.08)]">
-      <Icon className="size-5 text-teal-700" />
+      <Icon className="size-5 text-navy-700" />
       <h3 className="mt-3 text-sm font-black text-slate-950">{title}</h3>
       <p className="mt-2 text-xs font-semibold leading-5 text-slate-600">{text}</p>
     </article>

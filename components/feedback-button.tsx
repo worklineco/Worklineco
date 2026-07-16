@@ -62,7 +62,7 @@ export function FeedbackButton() {
       {/* Floating Button */}
       <button
         onClick={() => setIsOpen(true)}
-        className="fixed bottom-6 right-6 z-40 flex items-center justify-center rounded-full bg-gradient-to-br from-teal-500 to-cyan-600 p-4 shadow-lg transition hover:scale-110 hover:shadow-xl"
+        className="fixed bottom-6 right-6 z-40 flex items-center justify-center rounded-full bg-gradient-to-br from-navy-500 to-cyan-600 p-4 shadow-lg transition hover:scale-110 hover:shadow-xl"
         aria-label="Help and feedback"
       >
         <MessageCircle className="size-6 text-white" />
@@ -100,7 +100,7 @@ export function FeedbackButton() {
                 onChange={(e) => setMessage(e.target.value)}
                 placeholder="Describe your question, feedback, or issue..."
                 rows={4}
-                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500/20"
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-navy-500 focus:outline-none focus:ring-2 focus:ring-navy-500/20"
                 required
               />
             </div>
@@ -148,7 +148,7 @@ export function FeedbackButton() {
             <button
               type="submit"
               disabled={isSubmitting}
-              className="w-full rounded-lg bg-gradient-to-r from-teal-500 to-cyan-600 py-2.5 text-xs font-black uppercase text-white transition disabled:opacity-50 hover:shadow-lg"
+              className="w-full rounded-lg bg-gradient-to-r from-navy-500 to-cyan-600 py-2.5 text-xs font-black uppercase text-white transition disabled:opacity-50 hover:shadow-lg"
             >
               {isSubmitting ? (
                 <span className="flex items-center justify-center gap-2">

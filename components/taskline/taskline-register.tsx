@@ -558,7 +558,7 @@ export function TaskLineRegister() {
                     {column.key === "serial_no" ? null : (
                       <input
                         aria-label={`Filter ${column.label}`}
-                        className="h-8 w-full rounded-md border border-slate-200 bg-white px-2 text-xs font-semibold normal-case text-slate-950 outline-none focus:border-teal-400"
+                        className="h-8 w-full rounded-md border border-slate-200 bg-white px-2 text-xs font-semibold normal-case text-slate-950 outline-none focus:border-navy-400"
                         onChange={(event) => setColumnFilters((current) => ({ ...current, [column.key]: event.target.value }))}
                         placeholder="Filter"
                         value={columnFilters[column.key] ?? ""}
@@ -578,7 +578,7 @@ export function TaskLineRegister() {
                       <button className="inline-flex size-8 items-center justify-center rounded-md border border-sky-200 text-sky-700 hover:bg-sky-50" onClick={() => openEditForm(row)} title="Edit row" type="button">
                         <Pencil className="size-4" />
                       </button>
-                      <button className="inline-flex size-8 items-center justify-center rounded-md border border-teal-200 text-teal-700 hover:bg-teal-50" onClick={() => viewRowHistory(row)} title="View history" type="button">
+                      <button className="inline-flex size-8 items-center justify-center rounded-md border border-navy-200 text-navy-700 hover:bg-navy-50" onClick={() => viewRowHistory(row)} title="View history" type="button">
                         <History className="size-4" />
                       </button>
                       <button className="inline-flex size-8 items-center justify-center rounded-md border border-rose-200 text-rose-700 hover:bg-rose-50" onClick={() => deleteRow(row)} title="Delete row" type="button">
@@ -909,7 +909,7 @@ function Summary({ label, value }: { label: string; value: string }) {
 function buttonClass(tone: "dark" | "light" | "primary") {
   const base = "inline-flex h-11 items-center justify-center gap-2 rounded-md px-4 text-sm font-black transition disabled:cursor-not-allowed disabled:opacity-50";
   if (tone === "primary") {
-    return `${base} bg-teal-700 text-white hover:bg-teal-800`;
+    return `${base} bg-navy-700 text-white hover:bg-navy-800`;
   }
   if (tone === "dark") {
     return `${base} bg-slate-950 text-white hover:bg-slate-800`;

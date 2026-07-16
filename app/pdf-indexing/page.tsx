@@ -1272,7 +1272,7 @@ export default function PdfIndexingPage() {
   }
 
   return (
-    <main className="min-h-screen overflow-hidden bg-[#f7f3ea] px-2 py-3 text-slate-950 sm:px-3 lg:px-4">
+    <main className="min-h-screen overflow-hidden bg-[#f4f6fa] px-2 py-3 text-slate-950 sm:px-3 lg:px-4">
       <div className="pointer-events-none fixed inset-0 -z-10">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_16%_12%,rgba(99,102,241,0.16),transparent_28%),radial-gradient(circle_at_82%_16%,rgba(20,184,166,0.14),transparent_26%),radial-gradient(circle_at_48%_92%,rgba(245,158,11,0.14),transparent_32%)]" />
         <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(15,23,42,0.04)_1px,transparent_1px),linear-gradient(180deg,rgba(15,23,42,0.04)_1px,transparent_1px)] bg-[size:48px_48px]" />
@@ -1290,7 +1290,7 @@ export default function PdfIndexingPage() {
                 Workspace
               </Link>
               <div className="mt-5 flex flex-wrap items-center gap-3">
-                <span className="flex size-14 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-300 via-sky-300 to-teal-300 text-slate-950">
+                <span className="flex size-14 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-300 via-sky-300 to-navy-300 text-slate-950">
                   <FileSearch className="size-7" />
                 </span>
                 <div>
@@ -1310,7 +1310,7 @@ export default function PdfIndexingPage() {
               <label className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-950/10 bg-white px-3 text-xs font-black uppercase text-slate-800 shadow-sm">
                 <input
                   checked={smartSplitShouldLimitSize}
-                  className="size-4 rounded border-slate-300 accent-teal-500"
+                  className="size-4 rounded border-slate-300 accent-navy-500"
                   disabled={isProcessing}
                   onChange={(event) => setSmartSplitShouldLimitSize(event.target.checked)}
                   type="checkbox"
@@ -1388,7 +1388,7 @@ export default function PdfIndexingPage() {
                       <input
                         aria-label="Select all files"
                         checked={areAllRowsSelected}
-                        className="size-4 rounded border-slate-300 accent-teal-500"
+                        className="size-4 rounded border-slate-300 accent-navy-500"
                         onChange={toggleAllRows}
                         ref={(input) => {
                           if (input) {
@@ -1416,7 +1416,7 @@ export default function PdfIndexingPage() {
                           <input
                             aria-label={`Select ${row.name}`}
                             checked={selectedRowIds.has(row.id)}
-                            className="size-4 rounded border-slate-300 accent-teal-600"
+                            className="size-4 rounded border-slate-300 accent-navy-600"
                             onChange={() => toggleRowSelection(row.id)}
                             type="checkbox"
                           />
@@ -1478,7 +1478,7 @@ export default function PdfIndexingPage() {
                         <td className="border-b border-r border-slate-200 px-3 py-2">
                           <select
                             aria-label={`Select document type for ${row.name}`}
-                            className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-xs font-bold text-slate-800 outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
+                            className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-xs font-bold text-slate-800 outline-none transition focus:border-navy-500 focus:ring-2 focus:ring-navy-100"
                             onChange={(event) => updateDocumentType(row.id, event.target.value)}
                             value={row.documentType}
                           >
@@ -1493,7 +1493,7 @@ export default function PdfIndexingPage() {
                         <td className="border-b border-slate-200 px-3 py-2">
                           <input
                             aria-label={`Annexure number or text for ${row.name}`}
-                            className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-xs font-bold text-slate-800 outline-none transition placeholder:text-slate-400 disabled:bg-slate-100 disabled:text-transparent disabled:placeholder:text-transparent focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
+                            className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-xs font-bold text-slate-800 outline-none transition placeholder:text-slate-400 disabled:bg-slate-100 disabled:text-transparent disabled:placeholder:text-transparent focus:border-navy-500 focus:ring-2 focus:ring-navy-100"
                             disabled={row.documentType !== "Annexure"}
                             onChange={(event) => updateAnnexureLabel(row.id, event.target.value)}
                             placeholder="No. / text"

@@ -1390,7 +1390,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
   }
 
   return (
-    <main className={`min-h-screen overflow-hidden bg-[#f7f3ea] text-slate-950 ${isMaximized ? "px-2 py-2" : "px-2 py-3 sm:px-3 lg:px-4"}`}>
+    <main className={`min-h-screen overflow-hidden bg-[#f4f6fa] text-slate-950 ${isMaximized ? "px-2 py-2" : "px-2 py-3 sm:px-3 lg:px-4"}`}>
       <div className="pointer-events-none fixed inset-0 -z-10">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_16%_12%,rgba(20,184,166,0.18),transparent_28%),radial-gradient(circle_at_82%_16%,rgba(217,70,239,0.16),transparent_26%),radial-gradient(circle_at_48%_92%,rgba(245,158,11,0.16),transparent_32%)]" />
         <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(15,23,42,0.04)_1px,transparent_1px),linear-gradient(180deg,rgba(15,23,42,0.04)_1px,transparent_1px)] bg-[size:48px_48px]" />
@@ -1409,11 +1409,11 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                 Workspace
               </Link>
               <div className="mt-5 flex flex-wrap items-center gap-3">
-                <span className="flex size-14 items-center justify-center rounded-2xl bg-gradient-to-br from-teal-300 via-sky-300 to-fuchsia-300 text-slate-950">
+                <span className="flex size-14 items-center justify-center rounded-2xl bg-gradient-to-br from-navy-300 via-sky-300 to-fuchsia-300 text-slate-950">
                   <Scale className="size-7" />
                 </span>
                 <div>
-                  <p className="text-xs font-black uppercase tracking-[0.16em] text-teal-700">
+                  <p className="text-xs font-black uppercase tracking-[0.16em] text-navy-700">
                     Tribunal appeals register
                   </p>
                   <h1 className="mt-1 text-4xl font-black leading-tight text-slate-950">GSTAT</h1>
@@ -1458,7 +1458,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
               {isLoading ? <p className="mt-1 text-sm font-bold text-slate-500">Loading saved GSTAT data...</p> : null}
               {hasActiveFilters && (
                 <p className="mt-1 text-sm font-semibold text-slate-600">
-                  Showing <span className="font-black text-teal-700">{filteredRows.length}</span> rows 
+                  Showing <span className="font-black text-navy-700">{filteredRows.length}</span> rows 
                   ({filteredUniqueAppeals} unique appeals) of <span className="font-black text-slate-700">{rows.length}</span> total
                 </p>
               )}
@@ -1552,7 +1552,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                 Generate POA
               </button>
               <a
-                className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-teal-200 bg-teal-50 px-3 text-xs font-black uppercase text-teal-800 shadow-sm transition hover:-translate-y-0.5 hover:bg-teal-100 hover:shadow-md"
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-navy-200 bg-navy-50 px-3 text-xs font-black uppercase text-navy-800 shadow-sm transition hover:-translate-y-0.5 hover:bg-navy-100 hover:shadow-md"
                 href={poaGptUrl}
                 rel="noreferrer"
                 target="_blank"
@@ -1563,7 +1563,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
               <label className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-950/10 bg-white px-3 text-xs font-black uppercase text-slate-800 shadow-sm">
                 <input
                   checked={showNtbdRows}
-                  className="size-4 rounded border-slate-300 accent-teal-600"
+                  className="size-4 rounded border-slate-300 accent-navy-600"
                   onChange={(event) => setShowNtbdRows(event.target.checked)}
                   type="checkbox"
                 />
@@ -1638,7 +1638,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
           <section className="mb-3 overflow-hidden rounded-2xl border border-slate-950/10 bg-white shadow-sm">
             <div className="flex flex-col gap-3 px-3 py-2.5 lg:flex-row lg:items-center lg:justify-between">
               <div className="flex min-w-0 flex-wrap items-center gap-2">
-                <span className="rounded-lg bg-teal-50 px-2.5 py-1 text-xs font-black uppercase tracking-[0.12em] text-teal-700">
+                <span className="rounded-lg bg-navy-50 px-2.5 py-1 text-xs font-black uppercase tracking-[0.12em] text-navy-700">
                   Status Summary
                 </span>
                 <span className="text-sm font-black text-slate-950">
@@ -1649,7 +1649,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                   {statusSummaryGroupCount} status group{statusSummaryGroupCount === 1 ? "" : "s"}
                 </span>
                 {selectedStatusFilter ? (
-                  <span className="rounded-full bg-teal-100 px-2.5 py-1 text-xs font-black text-teal-800">
+                  <span className="rounded-full bg-navy-100 px-2.5 py-1 text-xs font-black text-navy-800">
                     {selectedStatusFilter === blankColumnFilterValue ? "Not set" : selectedStatusFilter}
                   </span>
                 ) : null}
@@ -1660,7 +1660,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                     <button
                       className={`inline-flex h-8 max-w-[190px] items-center gap-1.5 rounded-lg border px-2 text-xs font-black transition hover:bg-white hover:shadow-sm ${
                         selectedStatusFilter === item.key
-                          ? "border-teal-300 bg-teal-50 text-teal-800"
+                          ? "border-navy-300 bg-navy-50 text-navy-800"
                           : "border-slate-200 bg-slate-50 text-slate-700"
                       }`}
                       key={`preview-${item.key}`}
@@ -1710,7 +1710,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                             <button
                               className={`grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-xl border px-3 py-2 text-left transition hover:bg-white hover:shadow-sm ${
                                 isActive
-                                  ? "border-teal-300 bg-teal-50 ring-2 ring-teal-100"
+                                  ? "border-navy-300 bg-navy-50 ring-2 ring-navy-100"
                                   : "border-slate-200 bg-white"
                               }`}
                               key={item.key}
@@ -1774,7 +1774,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                           <input
                             aria-label="Select visible rows"
                             checked={areAllVisibleRowsSelected}
-                            className="size-4 rounded border-slate-300 accent-teal-600"
+                            className="size-4 rounded border-slate-300 accent-navy-600"
                             onChange={toggleVisibleRowSelection}
                             ref={(input) => {
                               if (input) {
@@ -1785,7 +1785,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                             type="checkbox"
                           />
                           <button
-                            className="inline-flex h-7 items-center justify-center gap-1 rounded-md border border-teal-200 bg-teal-50 px-1.5 text-[10px] font-black uppercase text-teal-800 transition hover:bg-teal-100"
+                            className="inline-flex h-7 items-center justify-center gap-1 rounded-md border border-navy-200 bg-navy-50 px-1.5 text-[10px] font-black uppercase text-navy-800 transition hover:bg-navy-100"
                             onClick={openNewEditor}
                             type="button"
                           >
@@ -1897,7 +1897,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                             <input
                               aria-label={`Select row ${row.data.Sno || visibleIndex + 1}`}
                               checked={isSelected}
-                              className="size-4 shrink-0 rounded border-slate-300 accent-teal-600"
+                              className="size-4 shrink-0 rounded border-slate-300 accent-navy-600"
                               onChange={() => toggleRowSelection(row, originalIndex)}
                               type="checkbox"
                             />
@@ -1988,7 +1988,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                               ) : isInlineEditing ? (
                                 <input
                                   autoFocus
-                                  className="h-7 w-full rounded-md border border-teal-300 bg-white px-1.5 text-[11px] font-bold text-slate-950 outline-none ring-2 ring-teal-100"
+                                  className="h-7 w-full rounded-md border border-navy-300 bg-white px-1.5 text-[11px] font-bold text-slate-950 outline-none ring-2 ring-navy-100"
                                   onBlur={() => saveInlineEditor()}
                                   onChange={(event) =>
                                     setInlineEditor((currentEditor) =>
@@ -2011,7 +2011,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                               ) : (
                                 <button
                                   className={`block h-7 w-full min-w-0 truncate rounded px-1.5 text-left ${
-                                    isInlineEditable ? "cursor-text hover:bg-white/80 hover:ring-1 hover:ring-teal-200" : ""
+                                    isInlineEditable ? "cursor-text hover:bg-white/80 hover:ring-1 hover:ring-navy-200" : ""
                                   } ${
                                     isBillingInlineColumn && isBlankCell(displayValue)
                                       ? "text-slate-400 ring-1 ring-dashed ring-slate-200"
@@ -2063,7 +2063,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
             <div className="shrink-0 border-b border-slate-200 bg-white/95 px-4 py-3 backdrop-blur">
               <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                 <div>
-                  <p className="text-xs font-black uppercase tracking-[0.14em] text-teal-700">GSTAT row editor</p>
+                  <p className="text-xs font-black uppercase tracking-[0.14em] text-navy-700">GSTAT row editor</p>
                   <h3 className="mt-1 text-xl font-black text-slate-950">Appeal {editor.draft.Sno || editor.rowIndex + 1}</h3>
                 </div>
                 <div className="flex shrink-0 items-center justify-end gap-2">
@@ -2108,7 +2108,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                           <span className="text-[10px] font-black uppercase text-slate-500">{field}</span>
                           {field === "Person handling" ? (
                             <select
-                              className="mt-0.5 h-8 w-full rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-900 outline-none transition disabled:bg-slate-100 disabled:text-slate-600 focus:border-teal-300 focus:ring-2 focus:ring-teal-100"
+                              className="mt-0.5 h-8 w-full rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-900 outline-none transition disabled:bg-slate-100 disabled:text-slate-600 focus:border-navy-300 focus:ring-2 focus:ring-navy-100"
                               disabled={isPersonHandlingLocked(userAccess)}
                               onChange={(event) => updateDraft(field, event.target.value)}
                               value={editor.draft[field] ?? ""}
@@ -2127,7 +2127,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                             />
                           ) : field === "NTBD Reason" ? (
                             <input
-                              className="mt-0.5 h-8 w-full rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-900 outline-none transition disabled:bg-slate-100 disabled:text-slate-500 focus:border-teal-300 focus:ring-2 focus:ring-teal-100"
+                              className="mt-0.5 h-8 w-full rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-900 outline-none transition disabled:bg-slate-100 disabled:text-slate-500 focus:border-navy-300 focus:ring-2 focus:ring-navy-100"
                               disabled={!isNtbdStatus(editor.draft.Status)}
                               onChange={(event) => updateDraft(field, event.target.value)}
                               placeholder={isNtbdStatus(editor.draft.Status) ? "Reason for NTBD" : "Available when Status is NTBD"}
@@ -2135,7 +2135,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                             />
                           ) : (
                             <input
-                              className="mt-0.5 h-8 w-full rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-900 outline-none transition focus:border-teal-300 focus:ring-2 focus:ring-teal-100"
+                              className="mt-0.5 h-8 w-full rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-900 outline-none transition focus:border-navy-300 focus:ring-2 focus:ring-navy-100"
                               onChange={(event) => updateDraft(field, event.target.value)}
                               type={dateFields.has(field) ? "date" : "text"}
                               value={editor.draft[field] ?? ""}
@@ -2158,7 +2158,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                                     {field.split(" - ").pop()}
                                   </span>
                                   <input
-                                    className="mt-0.5 h-8 w-full rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-900 outline-none transition focus:border-teal-300 focus:ring-2 focus:ring-teal-100"
+                                    className="mt-0.5 h-8 w-full rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-900 outline-none transition focus:border-navy-300 focus:ring-2 focus:ring-navy-100"
                                     onChange={(event) => updateDraft(field, event.target.value)}
                                     value={editor.draft[field] ?? ""}
                                   />
@@ -2209,7 +2209,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
               <label>
                 <span className="text-[10px] font-black uppercase text-slate-500">Voucher Type</span>
                 <select
-                  className="mt-1 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-900 outline-none focus:border-teal-300 focus:ring-2 focus:ring-teal-100"
+                  className="mt-1 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-900 outline-none focus:border-navy-300 focus:ring-2 focus:ring-navy-100"
                   onChange={(event) => updateBillingDraft("voucher_type", event.target.value)}
                   value={billingDraft.voucher_type}
                 >
@@ -2226,7 +2226,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
               <label className="lg:col-span-2">
                 <span className="text-[10px] font-black uppercase text-slate-500">Client</span>
                 <input
-                  className="mt-1 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-900 outline-none focus:border-teal-300 focus:ring-2 focus:ring-teal-100"
+                  className="mt-1 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-900 outline-none focus:border-navy-300 focus:ring-2 focus:ring-navy-100"
                   onChange={(event) => updateBillingDraft("client", event.target.value)}
                   value={billingDraft.client}
                 />
@@ -2234,7 +2234,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
               <label className="lg:col-span-2">
                 <span className="text-[10px] font-black uppercase text-slate-500">Matter description</span>
                 <input
-                  className="mt-1 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-900 outline-none focus:border-teal-300 focus:ring-2 focus:ring-teal-100"
+                  className="mt-1 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-900 outline-none focus:border-navy-300 focus:ring-2 focus:ring-navy-100"
                   onChange={(event) => updateBillingDraft("matter_description", event.target.value)}
                   value={billingDraft.matter_description}
                 />
@@ -2264,7 +2264,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
               <label>
                 <span className="text-[10px] font-black uppercase text-slate-500">Include OPE in Fee</span>
                 <select
-                  className="mt-1 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-900 outline-none focus:border-teal-300 focus:ring-2 focus:ring-teal-100"
+                  className="mt-1 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-900 outline-none focus:border-navy-300 focus:ring-2 focus:ring-navy-100"
                   onChange={(event) => updateBillingDraft("include_ope_in_fees", event.target.value)}
                   value={billingDraft.include_ope_in_fees}
                 >
@@ -2848,7 +2848,7 @@ function StatusSelectEditor({ onChange, value }: { onChange: (value: string) => 
   return (
     <div className="space-y-1">
       <select
-        className="mt-0.5 h-8 w-full rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-900 outline-none transition focus:border-teal-300 focus:ring-2 focus:ring-teal-100"
+        className="mt-0.5 h-8 w-full rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-900 outline-none transition focus:border-navy-300 focus:ring-2 focus:ring-navy-100"
         onChange={(event) => {
           const nextValue = event.target.value;
 
@@ -2874,7 +2874,7 @@ function StatusSelectEditor({ onChange, value }: { onChange: (value: string) => 
       {isCustom ? (
         <input
           ref={customInputRef}
-          className="h-8 w-full rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-900 outline-none transition focus:border-teal-300 focus:ring-2 focus:ring-teal-100"
+          className="h-8 w-full rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-900 outline-none transition focus:border-navy-300 focus:ring-2 focus:ring-navy-100"
           onChange={(event) => onChange(event.target.value)}
           placeholder="Type custom status"
           type="text"
@@ -2910,7 +2910,7 @@ function StatusInlineEditor({
     <div className="space-y-1">
       <select
         autoFocus
-        className="h-7 w-full rounded-md border border-teal-300 bg-white px-1.5 text-[11px] font-bold text-slate-950 outline-none ring-2 ring-teal-100"
+        className="h-7 w-full rounded-md border border-navy-300 bg-white px-1.5 text-[11px] font-bold text-slate-950 outline-none ring-2 ring-navy-100"
         onChange={(event) => {
           const nextValue = event.target.value;
 
@@ -2946,7 +2946,7 @@ function StatusInlineEditor({
       {isCustom ? (
         <input
           ref={customInputRef}
-          className="h-7 w-full rounded-md border border-teal-300 bg-white px-1.5 text-[11px] font-bold text-slate-950 outline-none ring-2 ring-teal-100"
+          className="h-7 w-full rounded-md border border-navy-300 bg-white px-1.5 text-[11px] font-bold text-slate-950 outline-none ring-2 ring-navy-100"
           onBlur={(event) => onSave(event.currentTarget.value)}
           onChange={(event) => onChange(event.target.value)}
           onKeyDown={(event) => {
@@ -3224,7 +3224,7 @@ function BillingDraftInput({
     <label>
       <span className="text-[10px] font-black uppercase text-slate-500">{label}</span>
       <input
-        className="mt-1 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-900 outline-none focus:border-teal-300 focus:ring-2 focus:ring-teal-100"
+        className="mt-1 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-900 outline-none focus:border-navy-300 focus:ring-2 focus:ring-navy-100"
         min={type === "number" ? "0" : undefined}
         onChange={(event) => onChange(event.target.value)}
         type={type}

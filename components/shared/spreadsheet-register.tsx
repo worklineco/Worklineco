@@ -362,7 +362,7 @@ export function SpreadsheetRegister({
               </tr>
             ) : filteredRows.length ? (
               filteredRows.map((row, rowIndex) => (
-                <tr className="border-b border-slate-100 transition-colors last:border-b-0 even:bg-slate-50/40 hover:bg-teal-50/40" key={`${title}-${rowIndex}`}>
+                <tr className="border-b border-slate-100 transition-colors last:border-b-0 even:bg-slate-50/40 hover:bg-navy-50/40" key={`${title}-${rowIndex}`}>
                   {columns.map((column) => (
                     <td className="px-4 py-2.5 font-medium text-slate-700" key={column}>
                       {row[column] || "-"}
