@@ -193,7 +193,7 @@ export function TaskLineRegister() {
     const width = 288;
     const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
     const top = rect.bottom + 4;
-    const maxHeight = Math.max(160, window.innerHeight - top - 90);
+    const maxHeight = Math.max(120, window.innerHeight - top - 300);
     setFilterMenuPos({ left, maxHeight, top });
   }
 
@@ -829,10 +829,12 @@ function TaskLineCell({
     );
   }
 
+  const dueColor = column.key === "due_date" ? dueDateColorClass(row[column.key] ?? "") : "";
+
   return (
-    <td className="border-r border-slate-100 px-2 py-2 last:border-r-0">
+    <td className={`border-r border-slate-100 px-2 py-2 last:border-r-0 ${dueColor}`}>
       <input
-        className="h-8 w-full rounded-md border border-transparent bg-transparent px-1.5 text-xs font-semibold text-slate-700 outline-none hover:border-slate-200 hover:bg-slate-50 focus:border-rose-300 focus:bg-white focus:ring-2 focus:ring-rose-100"
+        className="h-8 w-full rounded-md border border-transparent bg-transparent px-1.5 text-xs font-semibold text-slate-700 outline-none hover:border-slate-200 hover:bg-white focus:border-rose-300 focus:bg-white focus:ring-2 focus:ring-rose-100"
         onChange={(event) => onChange(event.target.value)}
         placeholder={column.type === "date" ? "dd-mm-yyyy" : undefined}
         type={column.type === "number" || column.type === "money" ? "number" : "text"}
@@ -1504,4 +1506,58 @@ function TaskLineFilterMenu({
     </div>,
     document.body
   );
+}
+
+// Due-date conditional colours (matches the TaskLine legend).
+// bg-red-200 bg-yellow-300 bg-green-400 bg-blue-300 bg-amber-500 bg-orange-300
+function dueDateColorClass(value: string): string {
+  const due = parseTaskLineDueDate(value);
+  if (!due) {
+    return "";
+  }
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const diffDays = Math.round((due.getTime() - today.getTime()) / 86400000);
+
+  if (diffDays < 0) {
+    return "bg-red-200";
+  }
+  if (diffDays === 0) {
+    return "bg-yellow-300";
+  }
+  if (diffDays <= 7) {
+    return "bg-green-400";
+  }
+  if (diffDays <= 15) {
+    return "bg-blue-300";
+  }
+  if (diffDays <= 30) {
+    return "bg-amber-500";
+  }
+  if (diffDays <= 90) {
+    return "bg-orange-300";
+  }
+  return "";
+}
+
+function parseTaskLineDueDate(value: string): Date | null {
+  const raw = String(value ?? "").trim();
+  if (!raw) {
+    return null;
+  }
+
+  const iso = raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (iso) {
+    const date = new Date(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]));
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  const dmy = raw.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
+  if (dmy) {
+    const date = new Date(Number(dmy[3]), Number(dmy[2]) - 1, Number(dmy[1]));
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  return null;
 }
