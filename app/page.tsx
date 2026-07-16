@@ -142,41 +142,8 @@ export default function Home() {
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_12%_0%,rgba(20,184,166,0.05),transparent_45%)]" />
       </div>
 
-      <div className="mx-auto grid w-full max-w-none gap-5 px-2 py-3 sm:px-3 lg:grid-cols-[300px_minmax(0,1fr)] lg:px-4">
-        <aside className="workline-frame hidden rounded-[22px] p-4 lg:block">
-          <div className="rounded-2xl border border-white/15 bg-slate-950 p-4 text-white">
-            <div className="flex items-center gap-3">
-              <div className="flex size-12 items-center justify-center rounded-xl bg-navy-600 text-sm font-bold text-white">
-                WL
-              </div>
-              <div>
-                <p className="text-sm font-bold">WorkLine Co</p>
-                <p className="text-xs font-semibold text-slate-300">Professional workspace</p>
-              </div>
-            </div>
-          </div>
-
-          <nav className="mt-5 space-y-1.5">
-            {visibleNavigation.map((item) => (
-              <NavItem item={item.label === "Partner Dashboard" ? { ...item, label: dashboardLabel } : item} key={item.label} />
-            ))}
-            <NavButton
-              icon={UsersRound}
-              isActive={isTeamsVisible}
-              label="Teams"
-              onClick={toggleTeams}
-            />
-            <ProfilePanel />
-          </nav>
-        </aside>
-
+      <div className="mx-auto w-full max-w-none px-3 py-5 sm:px-5 lg:px-8">
         <section className="min-w-0">
-          <nav className="workline-frame mb-5 flex gap-2 overflow-x-auto rounded-[22px] p-3 lg:hidden">
-            {visibleNavigation.map((item) => (
-              <MobileNavItem item={item.label === "Partner Dashboard" ? { ...item, label: dashboardLabel } : item} key={item.label} />
-            ))}
-          </nav>
-
           <header className="workline-frame rounded-[26px] p-5 md:p-7">
             <div className="grid gap-6 xl:grid-cols-[1fr_360px] xl:items-center">
               <div>

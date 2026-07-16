@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { AppShell } from "@/components/layout/app-shell";
 import { FeedbackButton } from "@/components/feedback-button";
 
 export const metadata: Metadata = {
@@ -15,7 +16,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body>
-        {children}
+        <AppShell>{children}</AppShell>
         <FeedbackButton />
       </body>
     </html>
