@@ -2,6 +2,7 @@
 
 import { supabase } from "@/lib/supabase/client";
 import { clearWorkspaceCache, getCurrentUser } from "@/lib/supabase/session";
+import { clearDataCache } from "@/lib/data-cache";
 import { ChevronDown, LogOut, UserRound } from "lucide-react";
 import { useEffect, useState } from "react";
 
@@ -38,6 +39,7 @@ export function ProfilePanel() {
   async function signOut() {
     setIsSigningOut(true);
     clearWorkspaceCache();
+    clearDataCache();
     await supabase.auth.signOut();
     window.location.href = "/login";
   }

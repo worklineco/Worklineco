@@ -3,6 +3,7 @@
 import { ArrowDown, ArrowUp, Download, History, Pencil, Plus, Search, Settings2, Trash2, Upload, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx-js-style";
+import { getCached, setCached } from "@/lib/data-cache";
 
 type TaskLineColumn = {
   key: string;
@@ -130,6 +131,8 @@ export function TaskLineRegister() {
   const pageStart = filteredRows.length ? (tablePage - 1) * taskLinePageSize + 1 : 0;
   const pageEnd = Math.min(tablePage * taskLinePageSize, filteredRows.length);
 
+  const dataHydratedRef = useRef(false);
+
   useEffect(() => {
     void loadTaskLine();
   }, []);
@@ -143,7 +146,18 @@ export function TaskLineRegister() {
   }, [pageCount]);
 
   async function loadTaskLine() {
-    setIsLoading(true);
+    const cached = !dataHydratedRef.current
+      ? getCached<{ auditLogs?: Array<Record<string, unknown>>; rows?: TaskLineRow[] }>("taskline")
+      : undefined;
+    dataHydratedRef.current = true;
+
+    if (cached) {
+      setRows(cached.rows ?? []);
+      setAuditLogs((cached.auditLogs ?? []).map(formatServerAuditLog));
+      setIsLoading(false);
+    } else {
+      setIsLoading(true);
+    }
 
     try {
       const response = await fetch("/api/taskline", { cache: "no-store" });
@@ -158,6 +172,7 @@ export function TaskLineRegister() {
         return;
       }
 
+      setCached("taskline", { auditLogs: result.auditLogs, rows: result.rows });
       setRows(result.rows ?? []);
       setAuditLogs((result.auditLogs ?? []).map(formatServerAuditLog));
       setMessage("");

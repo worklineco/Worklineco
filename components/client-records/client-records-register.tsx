@@ -16,6 +16,7 @@ import {
   X
 } from "lucide-react";
 import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { getCached, setCached } from "@/lib/data-cache";
 import * as XLSX from "xlsx-js-style";
 
 type RegisterRow = Record<string, string | number>;
@@ -67,6 +68,8 @@ export function ClientRecordsRegister() {
   const [isAuditOpen, setIsAuditOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const dataHydratedRef = useRef(false);
+
   useEffect(() => {
     void loadRows();
   }, []);
@@ -101,7 +104,20 @@ export function ClientRecordsRegister() {
   const areAllVisibleSelected = filteredRows.length > 0 && selectedVisibleCount === filteredRows.length;
 
   async function loadRows() {
-    setIsLoading(true);
+    const cached = !dataHydratedRef.current
+      ? getCached<{ auditLogs?: AuditLog[]; rows?: RegisterRow[]; trashRows?: RegisterRow[] }>("client-records")
+      : undefined;
+    dataHydratedRef.current = true;
+
+    if (cached) {
+      setRows(cached.rows ?? []);
+      setTrashRows(cached.trashRows ?? []);
+      setAuditLogs(cached.auditLogs ?? []);
+      setIsLoading(false);
+    } else {
+      setIsLoading(true);
+    }
+
     const response = await fetch("/api/client-records/managed", { cache: "no-store" });
     const result = (await response.json()) as {
       auditLogs?: AuditLog[];
@@ -116,6 +132,7 @@ export function ClientRecordsRegister() {
       return;
     }
 
+    setCached("client-records", { auditLogs: result.auditLogs, rows: result.rows, trashRows: result.trashRows });
     setRows(result.rows ?? []);
     setTrashRows(result.trashRows ?? []);
     setAuditLogs(result.auditLogs ?? []);

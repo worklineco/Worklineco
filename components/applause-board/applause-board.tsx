@@ -1,7 +1,8 @@
 "use client";
 
 import { Megaphone, Plus, Send, Sparkles, UsersRound, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { getCached, setCached } from "@/lib/data-cache";
 
 type Audience = "everyone" | "group" | "person";
 type TeamMember = {
@@ -39,6 +40,8 @@ export function ApplauseBoard() {
   const [taggedIds, setTaggedIds] = useState<string[]>([]);
   const [message, setMessage] = useState("");
 
+  const dataHydratedRef = useRef(false);
+
   useEffect(() => {
     fetch("/api/teams")
       .then((response) => (response.ok ? response.json() : null))
@@ -59,11 +62,22 @@ export function ApplauseBoard() {
   const taggedMembers = useMemo(() => members.filter((member) => taggedIds.includes(member.id)), [members, taggedIds]);
 
   async function loadPosts() {
+    if (!dataHydratedRef.current) {
+      const cached = getCached<ApplausePost[]>("applause");
+
+      if (cached) {
+        setPosts(cached);
+      }
+    }
+
+    dataHydratedRef.current = true;
+
     try {
       const response = await fetch("/api/applause-board");
       const result = (await response.json()) as { posts?: ApplausePost[] };
 
       if (response.ok && result.posts) {
+        setCached("applause", result.posts);
         setPosts(result.posts);
       }
     } catch {

@@ -2,6 +2,7 @@
 
 import { supabase } from "@/lib/supabase/client";
 import { getOrganisationId } from "@/lib/supabase/session";
+import { getCached, setCached } from "@/lib/data-cache";
 import {
   AlertCircle,
   Building2,
@@ -14,7 +15,7 @@ import {
   Search,
   ShieldCheck
 } from "lucide-react";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 type GstRegistration = {
   id: string;
@@ -71,6 +72,8 @@ export function GstTracker() {
   const [section, setSection] = useState("");
   const [replyFilingStatus, setReplyFilingStatus] = useState("");
 
+  const dataHydratedRef = useRef(false);
+
   useEffect(() => {
     void loadWorkspace();
   }, []);
@@ -88,6 +91,21 @@ export function GstTracker() {
     }
 
     setOrganisationId(orgId);
+
+    const cacheKey = `gst:${orgId}`;
+
+    if (!dataHydratedRef.current) {
+      const cached = getCached<{ cases: GstLitigationCase[]; registrations: GstRegistration[] }>(cacheKey);
+
+      if (cached) {
+        setRegistrations(cached.registrations);
+        setCases(cached.cases);
+        setSelectedRegistrationId((current) => current || cached.registrations[0]?.id || "");
+        setIsLoading(false);
+      }
+    }
+
+    dataHydratedRef.current = true;
 
     const [{ data: gstRows, error: gstError }, { data: caseRows, error: caseError }] =
       await Promise.all([
@@ -109,9 +127,12 @@ export function GstTracker() {
       return;
     }
 
-    setRegistrations((gstRows ?? []) as GstRegistration[]);
-    setCases((caseRows ?? []) as GstLitigationCase[]);
-    setSelectedRegistrationId((current) => current || gstRows?.[0]?.id || "");
+    const registrations = (gstRows ?? []) as GstRegistration[];
+    const cases = (caseRows ?? []) as GstLitigationCase[];
+    setCached(cacheKey, { cases, registrations });
+    setRegistrations(registrations);
+    setCases(cases);
+    setSelectedRegistrationId((current) => current || registrations[0]?.id || "");
     setIsLoading(false);
   }
 

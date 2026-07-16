@@ -3,6 +3,7 @@
 import { Download, Plus, Search, Upload } from "lucide-react";
 import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx-js-style";
+import { getCached, setCached } from "@/lib/data-cache";
 
 type RegisterRow = Record<string, string | number>;
 const importActionColumn = "Import Action";
@@ -82,7 +83,15 @@ export function SpreadsheetRegister({
     const endpoint = apiPath;
 
     async function loadRows() {
-      setIsLoading(true);
+      const cached = getCached<RegisterRow[]>(endpoint);
+
+      if (cached) {
+        setRows(cached);
+        setIsLoading(false);
+      } else {
+        setIsLoading(true);
+      }
+
       setMessage("");
 
       try {
@@ -91,11 +100,15 @@ export function SpreadsheetRegister({
 
         if (!response.ok) {
           setMessage(result.error ?? "Could not load saved rows.");
-          setRows([]);
+          if (!cached) {
+            setRows([]);
+          }
           return;
         }
 
-        setRows(result.rows ?? []);
+        const nextRows = result.rows ?? [];
+        setCached(endpoint, nextRows);
+        setRows(nextRows);
       } catch (error) {
         console.error(`${title} load error:`, error);
         setMessage("Could not load saved rows.");

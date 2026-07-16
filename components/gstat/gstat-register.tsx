@@ -2,6 +2,7 @@
 
 import { downloadGstatPoa } from "@/lib/gstat/poa-document";
 import { getCurrentUser } from "@/lib/supabase/session";
+import { getCached, setCached } from "@/lib/data-cache";
 import { ArrowDown, ArrowLeft, ArrowUp, ChevronDown, ChevronUp, Download, Expand, ExternalLink, FileSpreadsheet, FileText, Filter, History, Pencil, Plus, ReceiptText, Scale, Search, Settings2, ShieldCheck, Trash2, Upload, X } from "lucide-react";
 import Link from "next/link";
 import { ChangeEvent, memo, useDeferredValue, useEffect, useMemo, useRef, useState, useTransition } from "react";
@@ -334,6 +335,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
   const fileInputRef = useRef<HTMLInputElement>(null);
   const inlineSaveCancelledRef = useRef(false);
   const inlineSaveInFlightRef = useRef(false);
+  const dataHydratedRef = useRef(false);
   const uniqueAppeals = useMemo(
     () => new Set(rows.map((row) => String(row.data["OIA No"] ?? "").trim()).filter(Boolean)).size,
     [rows]
@@ -734,7 +736,17 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
   }
 
   async function loadRows() {
-    setIsLoading(true);
+    const cached = !dataHydratedRef.current ? getCached<AppealRow[]>("gstat") : undefined;
+    dataHydratedRef.current = true;
+
+    if (cached) {
+      setRows(cached);
+      setSelectedRowKeys(new Set());
+      setIsLoading(false);
+    } else {
+      setIsLoading(true);
+    }
+
     const response = await fetch("/api/gstat");
     const result = (await response.json()) as { error?: string; rows?: AppealRow[] };
 
@@ -744,7 +756,9 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
       return;
     }
 
-    setRows(result.rows?.length ? normalizeRows(result.rows) : initialRows);
+    const nextRows = result.rows?.length ? normalizeRows(result.rows) : initialRows;
+    setCached("gstat", nextRows);
+    setRows(nextRows);
     setSelectedRowKeys(new Set());
     setIsLoading(false);
   }

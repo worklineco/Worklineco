@@ -3,7 +3,8 @@
 import { ArrowLeft, CalendarDays, Clock3, Edit3, RefreshCw, Trash2 } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { getCached, setCached } from "@/lib/data-cache";
 
 type Booking = {
   booking_date: string;
@@ -101,13 +102,26 @@ export function MeetingRoomBooking() {
     };
   }, [boardDate, bookings]);
 
+  const dataHydratedRef = useRef(false);
+
   useEffect(() => {
     void loadBookings();
     void loadTeams();
   }, []);
 
   async function loadBookings() {
-    setIsLoading(true);
+    const cached = !dataHydratedRef.current
+      ? getCached<{ bookings?: Booking[]; logs?: BookingLog[] }>("meeting-room")
+      : undefined;
+    dataHydratedRef.current = true;
+
+    if (cached) {
+      setBookings(cached.bookings ?? []);
+      setLogs(cached.logs ?? []);
+      setIsLoading(false);
+    } else {
+      setIsLoading(true);
+    }
 
     try {
       const response = await fetch("/api/meeting-room", { cache: "no-store" });
@@ -118,6 +132,7 @@ export function MeetingRoomBooking() {
         return;
       }
 
+      setCached("meeting-room", { bookings: result.bookings, logs: result.logs });
       setBookings(result.bookings ?? []);
       setLogs(result.logs ?? []);
       setMessage("");

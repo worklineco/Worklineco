@@ -2,6 +2,7 @@
 
 import { ArrowDown, ArrowUp, Download, History, Link2, Maximize2, Pencil, Plus, RotateCcw, Search, Settings2, ShieldCheck, Trash2, Upload, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { getCached, setCached } from "@/lib/data-cache";
 import * as XLSX from "xlsx-js-style";
 
 type BillingRecord = {
@@ -273,6 +274,7 @@ const accountsOnlyFields = new Set<BillingField>([
 
 export function BillingRegister() {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const dataHydratedRef = useRef(false);
   const [access, setAccess] = useState<AccessScope>({ canEditAccountsFields: false, canManageMasters: false, canViewAll: false, role: "", team: "" });
   const [addDraft, setAddDraft] = useState<BillingRecord | null>(null);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
@@ -450,6 +452,24 @@ export function BillingRegister() {
   }
 
   async function loadBilling() {
+    const cached = !dataHydratedRef.current
+      ? getCached<{ access?: AccessScope; masters?: Record<string, string[]>; matters?: GstatMatter[]; records?: BillingRecord[] }>("billing")
+      : undefined;
+    dataHydratedRef.current = true;
+
+    if (cached) {
+      setIsAccessDenied(false);
+      if (cached.access) {
+        setAccess(cached.access);
+      }
+      setMasters({ ...defaultMasters, ...(cached.masters ?? {}) });
+      setMatters(cached.matters ?? []);
+      setRecords((cached.records ?? []).map(normalizeRecord));
+      setIsLoading(false);
+      void loadFullBilling();
+      return;
+    }
+
     setIsLoading(true);
     setMessage("");
 
@@ -510,6 +530,12 @@ export function BillingRegister() {
       setMasters({ ...defaultMasters, ...(result.masters ?? {}) });
       setMatters(result.matters ?? []);
       setRecords((result.records ?? []).map(normalizeRecord));
+      setCached("billing", {
+        access: result.access ?? access,
+        masters: result.masters,
+        matters: result.matters,
+        records: result.records
+      });
     } catch (error) {
       console.error("Full billing load error:", error);
     } finally {

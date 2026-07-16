@@ -3,6 +3,7 @@
 import { ArrowLeft, RefreshCw, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { getCached, setCached } from "@/lib/data-cache";
 
 type AuditValue = Record<string, string | number> | string | number | null;
 type AuditLog = {
@@ -27,7 +28,15 @@ export function GstatAuditTrail() {
   }, []);
 
   async function loadLogs() {
-    setIsLoading(true);
+    const cached = getCached<AuditLog[]>("gstat-audit");
+
+    if (cached) {
+      setLogs(cached);
+      setIsLoading(false);
+    } else {
+      setIsLoading(true);
+    }
+
     const response = await fetch("/api/gstat/audit");
     const result = (await response.json()) as { error?: string; logs?: AuditLog[] };
 
@@ -37,6 +46,7 @@ export function GstatAuditTrail() {
       return;
     }
 
+    setCached("gstat-audit", result.logs ?? []);
     setLogs(result.logs ?? []);
     setMessage("");
     setIsLoading(false);
