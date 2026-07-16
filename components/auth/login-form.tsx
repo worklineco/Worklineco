@@ -46,6 +46,7 @@ export function LoginForm() {
   const [orgId, setOrgId] = useState("");
   const [role, setRole] = useState("");
   const [team, setTeam] = useState("");
+  const [joiningDate, setJoiningDate] = useState("");
   const [email, setEmail] = useState("");
   const [emailOtp, setEmailOtp] = useState("");
   const [teamOtp, setTeamOtp] = useState("");
@@ -113,6 +114,7 @@ export function LoginForm() {
 
     const userData = {
       full_name: name,
+      joining_date: joiningDate,
       organisation_id: organisationId,
       role,
       team
@@ -263,6 +265,18 @@ export function LoginForm() {
                 placeholder="Your full name"
                 required
                 value={name}
+              />
+            </label>
+
+            <label className="block">
+              <span className="text-xs font-black uppercase text-slate-500">Joining Date</span>
+              <input
+                className={inputClass}
+                disabled={signupStep === "emailOtp"}
+                onChange={(event) => setJoiningDate(event.target.value)}
+                required
+                type="date"
+                value={joiningDate}
               />
             </label>
 

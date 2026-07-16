@@ -144,31 +144,13 @@ export default function Home() {
 
       <div className="mx-auto w-full max-w-none px-3 py-5 sm:px-5 lg:px-8">
         <section className="min-w-0">
-          <header className="workline-frame rounded-[26px] p-5 md:p-7">
-            <div className="grid gap-6 xl:grid-cols-[1fr_360px] xl:items-center">
-              <div>
-                <div className="inline-flex items-center gap-2 rounded-full bg-emerald-100 px-3 py-1.5 text-xs font-bold uppercase text-emerald-800">
-                  <ShieldCheck className="size-3.5" />
-                  WorkLine Co workspace
-                </div>
-                <h1 className="mt-4 max-w-3xl text-4xl font-bold leading-tight text-slate-950 sm:text-5xl">
-                  A firm-wide operating workspace for matters, billing, clients, and office scheduling.
-                </h1>
-                <p className="mt-4 max-w-2xl text-base font-semibold leading-7 text-slate-600">
-                  Run professional-service work from one place: client records, GST/GSTAT, billing, tasks, documents, and meeting room bookings.
-                </p>
-              </div>
-
-              <div className="rounded-3xl border border-white/15 bg-navy-700 p-5 text-white shadow-[0_18px_50px_rgba(15,23,42,0.20)]">
-                <p className="text-xs font-bold uppercase tracking-[0.16em] text-navy-200">
-                  Current workspace
-                </p>
-                <h2 className="mt-3 text-3xl font-bold">Firm Operations</h2>
-                <p className="mt-3 text-sm font-semibold leading-6 text-slate-300">
-                  WorkLine now brings compliance, litigation, billing, client master data, and office coordination into one product surface.
-                </p>
-              </div>
-            </div>
+          <header className="mb-1">
+            <h1 className="text-2xl font-bold text-slate-950">
+              {profileName ? `Welcome back, ${profileName.split(" ")[0]}` : "Dashboard"}
+            </h1>
+            <p className="mt-1 text-sm font-medium text-slate-500">
+              Jump into your workspace — compliance, billing, clients, and office scheduling in one place.
+            </p>
           </header>
 
           <section className="mt-5 grid gap-5 xl:grid-cols-2">

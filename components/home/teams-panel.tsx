@@ -7,6 +7,7 @@ type TeamMember = {
   designation: string;
   email: string;
   id: string;
+  joining_date: string;
   name: string;
   team: string;
 };
@@ -67,11 +68,12 @@ export function TeamsPanel() {
 
       <div className="mt-5 overflow-hidden rounded-2xl border border-slate-950/10 bg-white shadow-sm ring-1 ring-white/70">
         <div className="overflow-x-auto">
-          <div className="grid min-w-[780px] grid-cols-[1.1fr_0.65fr_1.4fr_1fr] gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3 text-xs font-black uppercase text-slate-500">
+          <div className="grid min-w-[940px] grid-cols-[1.1fr_0.6fr_1.4fr_1fr_0.9fr] gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3 text-xs font-black uppercase text-slate-500">
             <span>Name</span>
             <span>Team No</span>
             <span>Email ID</span>
             <span>Designation</span>
+            <span>Joining Date</span>
           </div>
 
           {isLoading ? (
@@ -88,7 +90,7 @@ export function TeamsPanel() {
 
           {!isLoading && !message && members.map((member) => (
             <div
-              className="grid min-w-[780px] grid-cols-[1.1fr_0.65fr_1.4fr_1fr] gap-3 border-b border-slate-100 px-4 py-3 text-sm last:border-b-0"
+              className="grid min-w-[940px] grid-cols-[1.1fr_0.6fr_1.4fr_1fr_0.9fr] gap-3 border-b border-slate-100 px-4 py-3 text-sm last:border-b-0"
               key={member.id}
             >
               <div className="min-w-0">
@@ -100,10 +102,25 @@ export function TeamsPanel() {
                 <span className="truncate">{member.email}</span>
               </div>
               <p className="truncate font-bold text-slate-700">{member.designation}</p>
+              <p className="truncate font-bold text-slate-600">{formatJoiningDate(member.joining_date)}</p>
             </div>
           ))}
         </div>
       </div>
     </section>
   );
+}
+
+function formatJoiningDate(value: string) {
+  if (!value) {
+    return "-";
+  }
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return date.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
 }

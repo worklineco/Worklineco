@@ -8,6 +8,7 @@ type TeamMember = {
   designation: string;
   email: string;
   id: string;
+  joining_date: string;
   name: string;
   team: string;
 };
@@ -61,6 +62,7 @@ export async function GET() {
             designation: designation || "-",
             email: user.email ?? "-",
             id: user.id,
+            joining_date: String(metadata.joining_date ?? "").trim(),
             name: name || "WorkLine User",
             team: String(metadata.team ?? "").trim()
           };

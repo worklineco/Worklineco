@@ -14,14 +14,18 @@ import {
   ListChecks,
   LogOut,
   Megaphone,
+  PanelLeftClose,
+  PanelLeftOpen,
   ReceiptText,
   Scale,
   Trash2,
+  UsersRound,
   Wrench
 } from "lucide-react";
 import { supabase } from "@/lib/supabase/client";
 import { clearWorkspaceCache, getCurrentUser } from "@/lib/supabase/session";
 import { clearDataCache } from "@/lib/data-cache";
+import { JoiningDatePrompt } from "@/components/layout/joining-date-prompt";
 
 type NavItem = {
   href: string;
@@ -41,19 +45,26 @@ const navItems: NavItem[] = [
   { href: "/dco-policies", icon: BookOpenCheck, label: "DCo Policies" },
   { href: "/applause-board", icon: Megaphone, label: "Applause Board" },
   { href: "/client-records", icon: Building2, label: "Client Records" },
+  { href: "/teams", icon: UsersRound, label: "Team Members" },
   { href: "/gstat/trash", icon: Trash2, label: "Trash" }
 ];
 
 // Routes that should render without the app chrome (sidebar).
 const bareRoutePrefixes = ["/login", "/onboarding", "/auth"];
+const collapseStorageKey = "wl_sidebar_collapsed";
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname() ?? "";
   const [profileName, setProfileName] = useState("");
   const [profileRole, setProfileRole] = useState("");
   const [isSigningOut, setIsSigningOut] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
 
   useEffect(() => {
+    if (window.localStorage.getItem(collapseStorageKey) === "1") {
+      setCollapsed(true);
+    }
+
     void getCurrentUser().then((user) => {
       const metadata = user?.user_metadata ?? {};
       setProfileName(String(metadata.full_name ?? metadata.name ?? user?.email ?? ""));
@@ -72,6 +83,14 @@ export function AppShell({ children }: { children: ReactNode }) {
   const isArticleAssistant = profileRole.trim().toLowerCase() === "article assistant";
   const visibleNav = navItems.filter((item) => !(isArticleAssistant && item.href === "/billing"));
 
+  function toggleCollapsed() {
+    setCollapsed((current) => {
+      const next = !current;
+      window.localStorage.setItem(collapseStorageKey, next ? "1" : "0");
+      return next;
+    });
+  }
+
   async function signOut() {
     setIsSigningOut(true);
     clearWorkspaceCache();
@@ -89,12 +108,27 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="flex min-h-screen">
-      <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col bg-navy-700 text-white lg:flex">
-        <div className="flex items-center gap-3 px-5 py-5">
-          <div className="flex size-9 items-center justify-center rounded-lg bg-navy-500 text-sm font-semibold">
+      <aside
+        className={`sticky top-0 hidden h-screen shrink-0 flex-col bg-navy-700 text-white lg:flex ${
+          collapsed ? "w-16" : "w-60"
+        }`}
+      >
+        <div className={`flex px-3 py-4 ${collapsed ? "flex-col items-center gap-3" : "items-center gap-3"}`}>
+          <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-navy-500 text-sm font-semibold">
             WL
           </div>
-          <div className="text-[15px] font-semibold tracking-wide">WorkLine Co</div>
+          {!collapsed ? (
+            <div className="flex-1 truncate text-[15px] font-semibold tracking-wide">WorkLine Co</div>
+          ) : null}
+          <button
+            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            className="rounded-md p-1.5 text-navy-100 transition hover:bg-white/10 hover:text-white"
+            onClick={toggleCollapsed}
+            title={collapsed ? "Expand" : "Collapse"}
+            type="button"
+          >
+            {collapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}
+          </button>
         </div>
 
         <nav className="flex-1 space-y-1 overflow-y-auto px-3 pb-4">
@@ -104,39 +138,46 @@ export function AppShell({ children }: { children: ReactNode }) {
 
             return (
               <Link
-                className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition ${
+                className={`flex items-center rounded-lg px-3 py-2.5 text-sm transition ${
+                  collapsed ? "justify-center" : "gap-3"
+                } ${
                   active
                     ? "bg-white font-semibold text-navy-700"
                     : "text-navy-100 hover:bg-white/10 hover:text-white"
                 }`}
                 href={item.href}
                 key={item.href}
+                title={collapsed ? item.label : undefined}
               >
                 <Icon className="size-[18px] shrink-0" />
-                <span className="truncate">{item.label}</span>
+                {!collapsed ? <span className="truncate">{item.label}</span> : null}
               </Link>
             );
           })}
         </nav>
 
-        <div className="border-t border-white/10 px-4 py-4">
-          <div className="mb-2 min-w-0">
-            <p className="truncate text-sm font-semibold">{profileName || "Account"}</p>
-            {profileRole ? <p className="truncate text-xs text-navy-200">{profileRole}</p> : null}
-          </div>
+        <div className="border-t border-white/10 px-3 py-4">
+          {!collapsed ? (
+            <div className="mb-2 min-w-0 px-1">
+              <p className="truncate text-sm font-semibold">{profileName || "Account"}</p>
+              {profileRole ? <p className="truncate text-xs text-navy-200">{profileRole}</p> : null}
+            </div>
+          ) : null}
           <button
             className="flex w-full items-center justify-center gap-2 rounded-lg bg-white/10 px-3 py-2 text-sm font-medium text-white transition hover:bg-white/20 disabled:opacity-60"
             disabled={isSigningOut}
             onClick={signOut}
+            title="Log out"
             type="button"
           >
             <LogOut className="size-4" />
-            {isSigningOut ? "Signing out..." : "Log out"}
+            {!collapsed ? (isSigningOut ? "Signing out..." : "Log out") : null}
           </button>
         </div>
       </aside>
 
       <div className="min-w-0 flex-1">{children}</div>
+      <JoiningDatePrompt />
     </div>
   );
 }
