@@ -547,7 +547,7 @@ function BookingLogTable({ logs }: { logs: BookingLog[] }) {
   return (
     <div className="mt-5 overflow-auto rounded-lg border border-slate-200">
       <table className="min-w-[980px] w-full border-collapse text-left text-sm">
-        <thead className="bg-slate-950 text-xs font-black uppercase text-white">
+        <thead className="bg-slate-100 text-[11px] font-semibold uppercase tracking-wide text-slate-600 [&_th]:border-b [&_th]:border-slate-200">
           <tr>
             {["Time", "Action", "Updated By", "Room", "Date", "Time Slot", "Team", "Purpose"].map((heading) => (
               <th className="border-r border-white/10 px-3 py-3 last:border-r-0" key={heading}>{heading}</th>

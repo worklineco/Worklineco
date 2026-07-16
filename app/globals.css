@@ -19,12 +19,12 @@ html {
 body {
   margin: 0;
   min-height: 100vh;
-  background:
-    linear-gradient(90deg, rgba(222, 216, 205, 0.42) 1px, transparent 1px),
-    linear-gradient(180deg, rgba(222, 216, 205, 0.42) 1px, transparent 1px),
-    #f7f4ee;
-  background-size: 42px 42px;
-  font-family: Arial, Helvetica, sans-serif;
+  background: #f7f4ee;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }
 
 button,
@@ -41,14 +41,39 @@ a {
 
 @layer components {
   .workline-frame {
-    @apply border border-slate-950/10 bg-white/90 shadow-[0_24px_80px_rgba(15,23,42,0.12)] ring-1 ring-white/70 backdrop-blur;
+    @apply border border-slate-200 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04),0_10px_30px_rgba(15,23,42,0.06)];
   }
 
   .workline-panel {
-    @apply border border-slate-950/10 bg-white/90 shadow-[0_18px_55px_rgba(15,23,42,0.10)] ring-1 ring-white/70 backdrop-blur;
+    @apply border border-slate-200 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04),0_8px_24px_rgba(15,23,42,0.05)];
   }
 
   .input {
-    @apply min-h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-950 outline-none transition focus:border-teal-400 focus:ring-4 focus:ring-teal-100;
+    @apply min-h-12 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-950 outline-none transition focus:border-teal-500 focus:ring-4 focus:ring-teal-100;
+  }
+
+  /* Shared, professional table styling — used across register pages. */
+  .wl-table {
+    @apply w-full border-collapse text-left text-sm;
+  }
+
+  .wl-thead {
+    @apply sticky top-0 z-10 bg-slate-50 text-[11px] font-semibold uppercase tracking-wide text-slate-500;
+  }
+
+  .wl-thead th {
+    @apply border-b border-slate-200 px-4 py-3 font-semibold;
+  }
+
+  .wl-tbody tr {
+    @apply border-b border-slate-100 transition-colors last:border-b-0 hover:bg-slate-50/70;
+  }
+
+  .wl-tbody tr:nth-child(even) {
+    @apply bg-slate-50/40;
+  }
+
+  .wl-tbody td {
+    @apply px-4 py-2.5 font-medium text-slate-700;
   }
 }

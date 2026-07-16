@@ -249,11 +249,11 @@ export function SpreadsheetRegister({
   }
 
   return (
-    <section className="rounded-[28px] border border-white/80 bg-white/90 p-5 shadow-[0_24px_80px_rgba(15,23,42,0.10)]">
+    <section className="workline-frame rounded-2xl p-5">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <p className={`text-xs font-black uppercase tracking-[0.16em] ${tone}`}>Register</p>
-          <h2 className="mt-2 text-2xl font-black text-slate-950">{title}</h2>
+          <p className={`text-xs font-semibold uppercase tracking-[0.16em] ${tone}`}>Register</p>
+          <h2 className="mt-2 text-2xl font-semibold text-slate-950">{title}</h2>
           <p className="mt-2 text-sm font-bold text-slate-500">
             {columns.length} columns - {isLoading ? "loading" : rows.length} rows
           </p>
@@ -268,7 +268,7 @@ export function SpreadsheetRegister({
             type="file"
           />
           <button
-            className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl bg-white px-4 text-sm font-black text-slate-800 ring-1 ring-slate-200 transition hover:bg-slate-50"
+            className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl bg-white px-4 text-sm font-semibold text-slate-800 ring-1 ring-slate-200 transition hover:bg-slate-50"
             disabled={isLoading || isSaving}
             onClick={() => fileInputRef.current?.click()}
             type="button"
@@ -277,7 +277,7 @@ export function SpreadsheetRegister({
             {isSaving ? "Saving..." : "Import Excel"}
           </button>
           <button
-            className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl bg-slate-950 px-4 text-sm font-black text-white transition hover:bg-slate-800"
+            className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl bg-slate-950 px-4 text-sm font-semibold text-white transition hover:bg-slate-800"
             onClick={exportExcel}
             type="button"
           >
@@ -316,7 +316,7 @@ export function SpreadsheetRegister({
           <input className="input" onChange={(event) => setPocName(event.target.value)} placeholder="POC Name" value={pocName} />
           <input className="input" onChange={(event) => setPocContact(event.target.value)} placeholder="POC Contact no." value={pocContact} />
           <input className="input" onChange={(event) => setPocEmail(event.target.value)} placeholder="Email ID" value={pocEmail} />
-          <button className="inline-flex h-12 items-center justify-center gap-2 rounded-2xl bg-lime-700 px-4 text-sm font-black text-white transition hover:bg-lime-800" type="submit">
+          <button className="inline-flex h-12 items-center justify-center gap-2 rounded-2xl bg-lime-700 px-4 text-sm font-semibold text-white transition hover:bg-lime-800" type="submit">
             <Plus className="size-4" />
             Add POC
           </button>
@@ -329,12 +329,12 @@ export function SpreadsheetRegister({
         </p>
       ) : null}
 
-      <div className="mt-5 overflow-auto rounded-2xl border border-slate-200 bg-white">
+      <div className="mt-5 max-h-[70vh] overflow-auto rounded-2xl border border-slate-200 bg-white">
         <table className="w-full border-collapse text-left text-sm" style={{ minWidth }}>
-          <thead className="bg-slate-50 text-xs font-black uppercase text-slate-500">
+          <thead className="sticky top-0 z-10 bg-slate-100 text-[11px] font-semibold uppercase tracking-wide text-slate-600">
             <tr>
               {columns.map((column) => (
-                <th className="border-b border-r border-slate-200 px-4 py-3 last:border-r-0" key={column}>
+                <th className="border-b border-slate-200 px-4 py-3 font-semibold" key={column}>
                   {column}
                 </th>
               ))}
@@ -343,15 +343,15 @@ export function SpreadsheetRegister({
           <tbody>
             {isLoading ? (
               <tr>
-                <td className="px-4 py-8 text-sm font-bold text-slate-500" colSpan={columns.length}>
+                <td className="px-4 py-8 text-sm font-medium text-slate-500" colSpan={columns.length}>
                   Loading saved rows...
                 </td>
               </tr>
             ) : filteredRows.length ? (
               filteredRows.map((row, rowIndex) => (
-                <tr className="border-b border-slate-100 last:border-b-0" key={`${title}-${rowIndex}`}>
+                <tr className="border-b border-slate-100 transition-colors last:border-b-0 even:bg-slate-50/40 hover:bg-teal-50/40" key={`${title}-${rowIndex}`}>
                   {columns.map((column) => (
-                    <td className="border-r border-slate-100 px-4 py-3 font-semibold text-slate-700 last:border-r-0" key={column}>
+                    <td className="px-4 py-2.5 font-medium text-slate-700" key={column}>
                       {row[column] || "-"}
                     </td>
                   ))}

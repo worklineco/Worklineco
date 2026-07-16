@@ -365,7 +365,7 @@ export function ClientRecordsRegister() {
 
       <div className="mt-5 overflow-auto rounded-2xl border border-slate-200 bg-white">
         <table className="w-full min-w-[1780px] border-collapse text-left text-sm">
-          <thead className="sticky top-0 z-10 bg-slate-50 text-xs font-black uppercase text-slate-500">
+          <thead className="sticky top-0 z-10 bg-slate-100 text-[11px] font-semibold uppercase tracking-wide text-slate-600 [&_th]:border-b [&_th]:border-slate-200">
             <tr>
               <th className="border-b border-r border-slate-200 px-4 py-3">
                 <input checked={areAllVisibleSelected} onChange={toggleVisibleSelection} type="checkbox" />
@@ -437,7 +437,7 @@ export function ClientRecordsRegister() {
           <h3 className="text-lg font-black text-slate-950">Trash</h3>
           <div className="mt-3 overflow-auto">
             <table className="w-full min-w-[980px] border-collapse text-left text-xs">
-              <thead className="bg-slate-950 text-white">
+              <thead className="bg-slate-100 text-slate-600 [&_th]:border-b [&_th]:border-slate-200">
                 <tr>
                   {["Deleted", "Expires", "Group", "Particulars", "POC", "Restore"].map((heading) => (
                     <th className="border-r border-white/15 px-3 py-3" key={heading}>{heading}</th>
@@ -476,7 +476,7 @@ export function ClientRecordsRegister() {
           <h3 className="text-lg font-black text-slate-950">Audit Log</h3>
           <div className="mt-3 overflow-auto">
             <table className="w-full min-w-[900px] border-collapse text-left text-xs">
-              <thead className="bg-slate-950 text-white">
+              <thead className="bg-slate-100 text-slate-600 [&_th]:border-b [&_th]:border-slate-200">
                 <tr>
                   {["Time", "Action", "Old Value", "New Value", "User"].map((heading) => (
                     <th className="border-r border-white/15 px-3 py-3" key={heading}>{heading}</th>

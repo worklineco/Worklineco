@@ -86,7 +86,7 @@ export function GstatAuditTrail() {
           <div className="overflow-hidden rounded-2xl border border-slate-950/10 bg-white">
             <div className="max-h-[calc(100vh-245px)] overflow-auto">
               <table className="min-w-[1200px] border-separate border-spacing-0 text-left text-xs">
-                <thead className="sticky top-0 z-10 bg-slate-950 text-white">
+                <thead className="sticky top-0 z-10 bg-slate-100 text-slate-600 [&_th]:border-b [&_th]:border-slate-200">
                   <tr>
                     {["Time", "Action", "Row", "Team", "Changed Column", "Old Value", "New Value", "User"].map((heading) => (
                       <th className="border-b border-r border-white/15 px-3 py-3 font-black" key={heading}>

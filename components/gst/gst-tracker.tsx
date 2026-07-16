@@ -368,7 +368,7 @@ export function GstTracker() {
 
                 <div className="mt-5 overflow-auto rounded-2xl border border-slate-200">
                   <table className="w-full min-w-[1280px] border-collapse bg-white text-left text-sm">
-                    <thead className="bg-slate-50 text-xs font-black uppercase text-slate-500">
+                    <thead className="sticky top-0 z-10 bg-slate-100 text-[11px] font-semibold uppercase tracking-wide text-slate-600 [&_th]:border-b [&_th]:border-slate-200">
                       <tr>
                         {["S.No.", "Type of Notice", "Description", "Ref ID", "Date of Issue", "Case ID", "Status", "Tax Period", "Due Date", "Section", "Reply Filing"].map((column) => (
                           <th className="px-4 py-3" key={column}>{column}</th>

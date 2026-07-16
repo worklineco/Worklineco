@@ -529,21 +529,21 @@ export function TaskLineRegister() {
                 <col key={column.key} style={{ width: column.width }} />
               ))}
             </colgroup>
-            <thead className="sticky top-0 z-10 bg-slate-950 text-xs font-black uppercase text-white">
+            <thead className="sticky top-0 z-10 bg-slate-100 text-[11px] font-semibold uppercase tracking-wide text-slate-600 [&_th]:border-b [&_th]:border-slate-200">
             <tr>
               <th className="border-r border-white/10 px-3 py-3" style={{ width: actionColumnWidth }}>Actions</th>
               {visibleColumns.map((column) => (
                 <th className="border-r border-white/10 px-3 py-3 last:border-r-0" key={column.key}>{column.label}</th>
               ))}
             </tr>
-            <tr className="bg-slate-900">
-              <th className="border-r border-white/10 px-2 py-2" />
+            <tr className="bg-slate-50">
+              <th className="border-r border-slate-200 px-2 py-2" />
               {visibleColumns.map((column) => (
-                  <th className="border-r border-white/10 px-2 py-2 last:border-r-0" key={`filter-${column.key}`}>
+                  <th className="border-r border-slate-200 px-2 py-2 last:border-r-0" key={`filter-${column.key}`}>
                     {column.key === "serial_no" ? null : (
                       <input
                         aria-label={`Filter ${column.label}`}
-                        className="h-8 w-full rounded-md border border-white/10 bg-white px-2 text-xs font-bold normal-case text-slate-950 outline-none"
+                        className="h-8 w-full rounded-md border border-slate-200 bg-white px-2 text-xs font-semibold normal-case text-slate-950 outline-none focus:border-teal-400"
                         onChange={(event) => setColumnFilters((current) => ({ ...current, [column.key]: event.target.value }))}
                         placeholder="Filter"
                         value={columnFilters[column.key] ?? ""}
@@ -836,7 +836,7 @@ function TaskLineAuditTable({ logs }: { logs: TaskLineAuditLog[] }) {
       </div>
       <div className="max-h-[calc(100vh-250px)] overflow-auto">
         <table className="w-full min-w-[980px] border-collapse text-left text-sm">
-          <thead className="sticky top-0 z-10 bg-slate-950 text-xs font-black uppercase text-white">
+          <thead className="sticky top-0 z-10 bg-slate-100 text-[11px] font-semibold uppercase tracking-wide text-slate-600 [&_th]:border-b [&_th]:border-slate-200">
             <tr>
               <th className="px-3 py-3">Time</th>
               <th className="px-3 py-3">Action</th>

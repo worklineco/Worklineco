@@ -1748,10 +1748,10 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                     <col key={`width-${column.key}`} style={{ width: getColumnWidth(column) }} />
                   ))}
                 </colgroup>
-                <thead className="sticky top-0 z-30 bg-slate-950 text-white">
+                <thead className="sticky top-0 z-30 bg-slate-100 text-slate-600 [&_th]:border-b [&_th]:border-slate-200">
                   <tr>
                     <th
-                      className="sticky left-0 z-50 border-b border-r border-white/15 bg-slate-950 px-2 py-2 align-bottom font-black"
+                      className="sticky left-0 z-50 border-b border-r border-slate-200 bg-slate-100 px-2 py-2 align-bottom font-semibold"
                       rowSpan={2}
                     >
                       <div className="space-y-2">
@@ -1800,8 +1800,8 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
 
                       return (
                         <th
-                          className={`relative border-b border-r border-white/15 px-2 py-2 align-bottom font-black ${
-                            isSnoColumn ? "sticky z-40 bg-slate-950" : ""
+                          className={`relative border-b border-r border-slate-200 px-2 py-2 align-bottom font-semibold ${
+                            isSnoColumn ? "sticky z-40 bg-slate-100" : ""
                           }`}
                           key={column.key}
                           style={isSnoColumn ? { left: actionColumnWidth } : undefined}
@@ -1836,7 +1836,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
 
                       return (
                         <th
-                          className={`border-b border-r border-white/15 bg-slate-900 px-1.5 py-1.5 ${
+                          className={`border-b border-r border-slate-200 bg-slate-50 px-1.5 py-1.5 ${
                             isSnoColumn ? "sticky z-40" : ""
                           }`}
                           key={`filter-${column.key}`}

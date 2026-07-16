@@ -1058,7 +1058,7 @@ export function BillingRegister() {
                 <col key={column.field} style={{ width: column.width }} />
               ))}
             </colgroup>
-            <thead className="sticky top-0 z-10 bg-slate-950 text-xs font-black uppercase text-white">
+            <thead className="sticky top-0 z-10 bg-slate-100 text-[11px] font-semibold uppercase tracking-wide text-slate-600 [&_th]:border-b [&_th]:border-slate-200">
               <tr>
                 {visibleBillingColumns.map((column) => (
                   <th className="border-r border-white/10 px-3 py-3 last:border-r-0" key={column.field}>
@@ -1066,13 +1066,13 @@ export function BillingRegister() {
                   </th>
                 ))}
               </tr>
-              <tr className="bg-slate-900">
+              <tr className="bg-slate-50">
                 {visibleBillingColumns.map((column) => (
-                  <th className="border-r border-white/10 px-2 py-2 last:border-r-0" key={`filter-${column.field}`}>
+                  <th className="border-r border-slate-200 px-2 py-2 last:border-r-0" key={`filter-${column.field}`}>
                     {column.field === "actions" ? null : (
                       <input
                         aria-label={`Filter ${column.label}`}
-                        className="h-8 w-full rounded-md border border-white/10 bg-white px-2 text-xs font-bold normal-case text-slate-950 outline-none"
+                        className="h-8 w-full rounded-md border border-slate-200 bg-white px-2 text-xs font-semibold normal-case text-slate-950 outline-none focus:border-teal-400"
                         onChange={(event) =>
                           setColumnFilters((current) => ({
                             ...current,
@@ -1816,7 +1816,7 @@ function BillingAuditTable({ isLoading, logs }: { isLoading: boolean; logs: Audi
   return (
     <div className="mt-4 overflow-auto rounded-md border border-slate-200 bg-white">
       <table className="min-w-[1180px] border-separate border-spacing-0 text-left text-xs">
-        <thead className="sticky top-0 z-10 bg-slate-950 text-white">
+        <thead className="sticky top-0 z-10 bg-slate-100 text-slate-600 [&_th]:border-b [&_th]:border-slate-200">
           <tr>
             {["Time", "Action", "Updated By", "Team", "Client", "Changed Data"].map((heading) => (
               <th className="border-b border-r border-white/15 px-3 py-3 font-black" key={heading}>{heading}</th>
@@ -1881,7 +1881,7 @@ function BillingTrashTable({
   return (
     <div className="mt-4 overflow-auto rounded-md border border-slate-200 bg-white">
       <table className="min-w-[1120px] border-separate border-spacing-0 text-left text-xs">
-        <thead className="sticky top-0 z-10 bg-slate-950 text-white">
+        <thead className="sticky top-0 z-10 bg-slate-100 text-slate-600 [&_th]:border-b [&_th]:border-slate-200">
           <tr>
             {["Deleted", "Expires", "Action", "Team", "Client", "GSTIN", "Amount", "Restore"].map((heading) => (
               <th className="border-b border-r border-white/15 px-3 py-3 font-black" key={heading}>{heading}</th>
