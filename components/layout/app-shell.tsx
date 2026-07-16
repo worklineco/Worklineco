@@ -49,7 +49,6 @@ const navItems: NavItem[] = [
   { href: "/gstat/trash", icon: Trash2, label: "Trash" }
 ];
 
-// Routes that should render without the app chrome (sidebar).
 const bareRoutePrefixes = ["/login", "/onboarding", "/auth"];
 const collapseStorageKey = "wl_sidebar_collapsed";
 

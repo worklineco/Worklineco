@@ -1199,4 +1199,24 @@ function saveTaskLineColumnLayout(layout: TaskLineColumnLayout) {
     return;
   }
 
-  window.loc
+  window.localStorage.setItem(taskLineColumnLayoutStorageKey, JSON.stringify(normalizeTaskLineColumnLayout(layout)));
+}
+
+function getSavedTaskLineColumnLayout() {
+  if (typeof window === "undefined") {
+    return { hiddenColumnKeys: [], order: defaultTaskLineColumnOrder };
+  }
+
+  try {
+    const savedLayout = window.localStorage.getItem(taskLineColumnLayoutStorageKey);
+    return savedLayout
+      ? normalizeTaskLineColumnLayout(JSON.parse(savedLayout) as Partial<TaskLineColumnLayout>)
+      : { hiddenColumnKeys: [], order: defaultTaskLineColumnOrder };
+  } catch {
+    return { hiddenColumnKeys: [], order: defaultTaskLineColumnOrder };
+  }
+}
+
+function text(value: unknown) {
+  return String(value ?? "").trim();
+}

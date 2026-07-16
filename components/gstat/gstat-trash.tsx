@@ -180,4 +180,8 @@ export function GstatTrash() {
               </table>
             </div>
           </div>
-        </s
+        </section>
+      </section>
+    </main>
+  );
+}

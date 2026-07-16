@@ -84,4 +84,8 @@ export function ProfilePanel() {
 function ProfileLine({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <p className="text-[10p
+      <p className="text-[10px] font-black uppercase text-slate-400">{label}</p>
+      <p className="mt-0.5 break-words text-slate-800">{value}</p>
+    </div>
+  );
+}

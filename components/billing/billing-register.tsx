@@ -2542,4 +2542,38 @@ function normalizeDateInput(value: unknown) {
 }
 
 function excelSerialDateToIso(value: number) {
-  const date = new Date(D
+  const date = new Date(Date.UTC(1899, 11, 30));
+  date.setUTCDate(date.getUTCDate() + Math.floor(value));
+  return toIsoDate(date);
+}
+
+function makeIsoDate(year: number, month: number, day: number) {
+  const date = new Date(Date.UTC(year, month - 1, day));
+
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) {
+    return "";
+  }
+
+  return toIsoDate(date);
+}
+
+function toIsoDate(value: Date) {
+  return value.toISOString().slice(0, 10);
+}
+
+function pad2(value: number) {
+  return String(value).padStart(2, "0");
+}
+
+function formatMoney(value: number | string) {
+  return new Intl.NumberFormat("en-IN", {
+    currency: "INR",
+    maximumFractionDigits: 0,
+    style: "currency"
+  }).format(toNumber(value));
+}
+
+function toNumber(value: unknown) {
+  const parsed = Number(String(value ?? "").replace(/,/g, ""));
+  return Number.isFinite(parsed) ? parsed : 0;
+}

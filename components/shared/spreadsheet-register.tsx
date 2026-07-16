@@ -485,3 +485,16 @@ function normalizeHeader(value: string) {
 }
 
 function addImportActionDropdown(worksheet: XLSX.WorkSheet, rowCount: number) {
+  const worksheetWithValidation = worksheet as XLSX.WorkSheet & {
+    "!dataValidation"?: Array<Record<string, unknown>>;
+  };
+
+  worksheetWithValidation["!dataValidation"] = [
+    {
+      allowBlank: false,
+      formula1: `"${importActionOptions.join(",")}"`,
+      sqref: `A2:A${Math.max(rowCount, 2)}`,
+      type: "list"
+    }
+  ];
+}

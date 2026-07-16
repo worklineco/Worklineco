@@ -249,4 +249,8 @@ function formatOnboardingError(message: string) {
   }
 
   if (message.toLowerCase().includes("not authenticated")) {
-    return "Your session expired. Please s
+    return "Your session expired. Please sign in again.";
+  }
+
+  return message;
+}

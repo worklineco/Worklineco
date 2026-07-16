@@ -157,4 +157,20 @@ export function GstatAuditTrail() {
 
 function formatValue(value: AuditValue) {
   if (value === null || value === undefined || value === "") {
-    
+    return "-";
+  }
+
+  if (typeof value === "object") {
+    return JSON.stringify(value);
+  }
+
+  return String(value);
+}
+
+function valueTeam(value: AuditValue) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return "";
+  }
+
+  return String(value["Person handling"] ?? "");
+}

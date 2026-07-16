@@ -451,4 +451,22 @@ function InfoCard({
   title: string;
 }) {
   return (
-    <article className="rounded-[24px] border border-white/80 
+    <article className="rounded-[24px] border border-white/80 bg-white/90 p-5 shadow-[0_18px_55px_rgba(15,23,42,0.08)]">
+      <Icon className="size-5 text-teal-700" />
+      <h3 className="mt-3 text-sm font-black text-slate-950">{title}</h3>
+      <p className="mt-2 text-xs font-semibold leading-5 text-slate-600">{text}</p>
+    </article>
+  );
+}
+
+function formatLoadError(message: string) {
+  if (message.toLowerCase().includes("gst_litigation_cases")) {
+    return "GST litigation database table is not installed yet. Run database/004_gst_litigation_monitor.sql in Supabase SQL Editor.";
+  }
+
+  if (message.toLowerCase().includes("gst_registrations")) {
+    return "GST registration table is not installed yet. Run database/003_gst_tracker.sql first, then database/004_gst_litigation_monitor.sql.";
+  }
+
+  return message;
+}

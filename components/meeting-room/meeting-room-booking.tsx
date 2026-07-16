@@ -659,4 +659,25 @@ function formatDateTime(value: string) {
     return "-";
   }
 
-  return `${String(date.getDate()).padStart(2, "0")}-${Stri
+  return `${String(date.getDate()).padStart(2, "0")}-${String(date.getMonth() + 1).padStart(2, "0")}-${date.getFullYear()}, ${date.toLocaleTimeString("en-IN", {
+    hour: "numeric",
+    hour12: true,
+    minute: "2-digit"
+  })}`;
+}
+
+function formatTime(value: string) {
+  const [hourText, minute] = value.split(":");
+  const date = new Date();
+  date.setHours(Number(hourText), Number(minute));
+  return date.toLocaleTimeString("en-IN", {
+    hour: "numeric",
+    hour12: true,
+    minute: "2-digit"
+  });
+}
+
+function minutesFromTime(value: string) {
+  const [hour, minute] = value.split(":").map(Number);
+  return hour * 60 + minute;
+}

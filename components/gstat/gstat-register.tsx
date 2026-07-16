@@ -3516,4 +3516,20 @@ function normalizeImportAction(value: unknown) {
 }
 
 function normalizeHeader(value: string) {
-  return valu
+  return value.replace(/[^0-9a-z]/gi, "").toLowerCase();
+}
+
+function addImportActionDropdown(worksheet: XLSX.WorkSheet, rowCount: number) {
+  const worksheetWithValidation = worksheet as XLSX.WorkSheet & {
+    "!dataValidation"?: Array<Record<string, unknown>>;
+  };
+
+  worksheetWithValidation["!dataValidation"] = [
+    {
+      allowBlank: false,
+      formula1: `"${importActionOptions.join(",")}"`,
+      sqref: `A3:A${Math.max(rowCount + 2, 3)}`,
+      type: "list"
+    }
+  ];
+}
