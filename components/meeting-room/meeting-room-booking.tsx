@@ -55,6 +55,14 @@ const fallbackTeams = [
   "Mrs. Shuchi Sethi"
 ];
 const floors = ["All", "3rd Floor", "2nd Floor", "1st Floor"];
+const purposeOptions = [
+  "Team Meetings",
+  "Client Meetings",
+  "Virtual Hearings",
+  "Inter Team Discussions",
+  "Medical Reason"
+];
+const otherPurposeValue = "Other reason";
 const emptyDraft: Booking = {
   booking_date: todayValue(),
   floor: "",
@@ -71,12 +79,19 @@ export function MeetingRoomBooking() {
   const [boardDate, setBoardDate] = useState(todayValue());
   const [draft, setDraft] = useState<Booking>(emptyDraft);
   const [editingId, setEditingId] = useState("");
+  const [isCustomPurpose, setIsCustomPurpose] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [logs, setLogs] = useState<BookingLog[]>([]);
   const [message, setMessage] = useState("");
   const [teams, setTeams] = useState<string[]>(fallbackTeams);
   const [viewMode, setViewMode] = useState<ViewMode>("board");
+  const knownPurpose = purposeOptions.includes(draft.purpose);
+  const purposeChoice = knownPurpose
+    ? draft.purpose
+    : isCustomPurpose || draft.purpose
+      ? otherPurposeValue
+      : "";
   const visibleRooms = rooms.filter((room) => activeFloor === "All" || room.floor === activeFloor);
   const stats = useMemo(() => {
     const dayBookings = bookings.filter((booking) => booking.booking_date === boardDate);
@@ -143,6 +158,20 @@ export function MeetingRoomBooking() {
 
       return { ...current, [field]: value };
     });
+  }
+
+  function updatePurposeChoice(value: string) {
+    if (value === otherPurposeValue) {
+      setIsCustomPurpose(true);
+      setDraft((current) => ({
+        ...current,
+        purpose: purposeOptions.includes(current.purpose) ? "" : current.purpose
+      }));
+      return;
+    }
+
+    setIsCustomPurpose(false);
+    updateDraft("purpose", value);
   }
 
   async function saveBooking(event: FormEvent<HTMLFormElement>) {
@@ -218,12 +247,14 @@ export function MeetingRoomBooking() {
   function startEdit(booking: Booking) {
     setEditingId(booking.id ?? "");
     setBoardDate(booking.booking_date);
+    setIsCustomPurpose(Boolean(booking.purpose && !purposeOptions.includes(booking.purpose)));
     setDraft(booking);
     setMessage("Editing selected booking.");
   }
 
   function resetForm(date = boardDate) {
     setEditingId("");
+    setIsCustomPurpose(false);
     setDraft({ ...emptyDraft, booking_date: date });
   }
 
@@ -324,13 +355,29 @@ export function MeetingRoomBooking() {
             </FormField>
 
             <FormField label="Purpose">
-              <textarea
-                className="input min-h-28 rounded-md py-3"
-                onChange={(event) => updateDraft("purpose", event.target.value)}
-                placeholder="Weekly planning discussion"
-                value={draft.purpose}
-              />
+              <select
+                className="input rounded-md"
+                onChange={(event) => updatePurposeChoice(event.target.value)}
+                value={purposeChoice}
+              >
+                <option value="">Select purpose</option>
+                {purposeOptions.map((purpose) => (
+                  <option key={purpose} value={purpose}>{purpose}</option>
+                ))}
+                <option value={otherPurposeValue}>Other reason - Please specify</option>
+              </select>
             </FormField>
+
+            {purposeChoice === otherPurposeValue ? (
+              <FormField label="Specify Reason">
+                <textarea
+                  className="input min-h-24 rounded-md py-3"
+                  onChange={(event) => updateDraft("purpose", event.target.value)}
+                  placeholder="Please specify the booking reason"
+                  value={draft.purpose}
+                />
+              </FormField>
+            ) : null}
 
             {message ? (
               <p className={`rounded-md border px-3 py-2 text-sm font-bold ${
