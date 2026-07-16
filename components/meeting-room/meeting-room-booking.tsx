@@ -379,7 +379,7 @@ export function MeetingRoomBooking() {
                 {purposeOptions.map((purpose) => (
                   <option key={purpose} value={purpose}>{purpose}</option>
                 ))}
-                <option value={otherPurposeValue}>Other reason - Please specify</option>
+                <option value={otherPurposeValue}>Other reason (Not in regular course)- Please specify</option>
               </select>
             </FormField>
 
