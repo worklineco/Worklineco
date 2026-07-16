@@ -602,3 +602,28 @@ function formatAuditValue(value: unknown) {
   if (typeof value === "object") return JSON.stringify(value);
   return String(value);
 }
+
+function normalizeHeader(value: string) {
+  return value.replace(/[^0-9a-z]/gi, "").toLowerCase();
+}
+
+function addImportActionDropdown(worksheet: XLSX.WorkSheet, rowCount: number) {
+  const worksheetWithValidation = worksheet as XLSX.WorkSheet & {
+    "!dataValidation"?: Array<Record<string, unknown>>;
+  };
+
+  worksheetWithValidation["!dataValidation"] = [
+    {
+      allowBlank: false,
+      sqref: `A2:A${Math.max(rowCount, 2)}`,
+      type: "list",
+      formula1: `"${importActionOptions.join(",")}"`
+    }
+  ];
+}
+
+function formatDate(value: unknown) {
+  if (!value) return "-";
+  return new Date(String(value)).toLocaleString();
+}
+
