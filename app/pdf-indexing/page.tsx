@@ -10,12 +10,14 @@ import JSZip from "jszip";
 type PdfFileRow = {
   annexureLabel: string;
   documentType: string;
+  fileKind: SupportedFileKind;
   id: string;
   name: string;
   pages: number | null;
   path: string;
   size: number;
 };
+type SupportedFileKind = "pdf" | "image";
 
 const DOCUMENT_TYPES = ["POA", "Affidavit", "ASMT-10", "SCN", "SCN Reply", "OIO", "OIA", "Appeal", "Annexure"];
 const PDF_PAGE_NUMBER_FONT_SIZE = 12;
@@ -27,6 +29,12 @@ const DSC_HELPER_DOWNLOAD_URL = "/WorkLineDSCHelperSetup.vbs";
 const EMSIGNER_DOWNLOAD_URL = "https://tutorial.gst.gov.in/installers/dscemSigner/GSTSigner-v2.8.msi";
 const TRUE_COPY_STAMP_URL = "/true-copy-stamp.png";
 const PAPERBOOK_TRUE_COPY_DOCUMENT_TYPES = new Set(["SCN", "OIO", "OIA"]);
+const MERGE_FILE_ACCEPT = "application/pdf,.pdf,image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp";
+const IMAGE_FILE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".webp"]);
+const IMAGE_FILE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+const PDF_FILE_TYPES = new Set(["application/pdf"]);
+const A4_PORTRAIT_SIZE: [number, number] = [595.28, 841.89];
+const IMAGE_PAGE_MARGIN = 36;
 
 type PageRange = {
   label: string;
@@ -105,6 +113,7 @@ export default function PdfIndexingPage() {
   const [dscHelperStatus, setDscHelperStatus] = useState<DscHelperStatus>("idle");
   const [dscMessage, setDscMessage] = useState("");
   const [dscVisiblePlacement, setDscVisiblePlacement] = useState<DscVisiblePlacement>("all_pages");
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
   const pdfFileMapRef = useRef<Map<string, File>>(new Map());
   const selectedFilesRef = useRef<File[]>([]);
@@ -349,20 +358,28 @@ export default function PdfIndexingPage() {
 
   async function selectFolder(event: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.target.files ?? []);
-    const pdfFiles = files.filter((file) => file.name.toLowerCase().endsWith(".pdf"));
+    const documentFiles = files.filter(isSupportedMergeFile);
 
-    selectedFilesRef.current = pdfFiles;
-    await loadPdfFiles(pdfFiles);
+    selectedFilesRef.current = documentFiles;
+    await loadDocumentFiles(documentFiles, "folder");
+    event.target.value = "";
+  }
+
+  async function selectFiles(event: ChangeEvent<HTMLInputElement>) {
+    const documentFiles = Array.from(event.target.files ?? []).filter(isSupportedMergeFile);
+
+    selectedFilesRef.current = documentFiles;
+    await loadDocumentFiles(documentFiles, "files");
     event.target.value = "";
   }
 
   async function refreshSelectedFolder() {
-    await loadPdfFiles(selectedFilesRef.current);
+    await loadDocumentFiles(selectedFilesRef.current, folderName === "Selected files" ? "files" : "folder");
   }
 
-  async function loadPdfFiles(pdfFiles: File[]) {
+  async function loadDocumentFiles(documentFiles: File[], source: "files" | "folder") {
     setIsReading(true);
-    setMessage(pdfFiles.length ? `Reading ${pdfFiles.length} PDF file${pdfFiles.length === 1 ? "" : "s"}...` : "");
+    setMessage(documentFiles.length ? `Reading ${documentFiles.length} file${documentFiles.length === 1 ? "" : "s"}...` : "");
     setPdfRows([]);
     setSelectedRowIds(new Set());
 
@@ -370,16 +387,22 @@ export default function PdfIndexingPage() {
       const rows: PdfFileRow[] = [];
       const fileMap = new Map<string, File>();
 
-      for (const file of pdfFiles) {
+      for (const file of documentFiles) {
         const id = `${file.webkitRelativePath || file.name}-${file.size}-${file.lastModified}`;
+        const fileKind = getSupportedFileKind(file);
+
+        if (!fileKind) {
+          continue;
+        }
 
         fileMap.set(id, file);
         rows.push({
           annexureLabel: "",
           documentType: "",
+          fileKind,
           id,
           name: file.name,
-          pages: await getPdfPageCount(file),
+          pages: fileKind === "pdf" ? await getPdfPageCount(file) : 1,
           path: file.webkitRelativePath || file.name,
           size: file.size
         });
@@ -392,16 +415,18 @@ export default function PdfIndexingPage() {
         })
       );
 
-      setFolderName(getSelectedFolderName(rows));
+      setFolderName(source === "files" ? "Selected files" : getSelectedFolderName(rows));
       pdfFileMapRef.current = fileMap;
       setPdfRows(rows);
       setMessage(
         rows.length
-          ? `Loaded ${rows.length} PDF file${rows.length === 1 ? "" : "s"}.`
-          : "No PDF files found in the selected folder."
+          ? `Loaded ${rows.length} file${rows.length === 1 ? "" : "s"} for PDF tools and merge.`
+          : source === "files"
+            ? "No supported files selected. Choose PDF, JPG, JPEG, PNG, or WebP files."
+            : "No supported files found in the selected folder."
       );
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Could not read the selected folder.");
+      setMessage(error instanceof Error ? error.message : "Could not read the selected files.");
     } finally {
       setIsReading(false);
     }
@@ -475,7 +500,7 @@ export default function PdfIndexingPage() {
     const file = pdfFileMapRef.current.get(row.id);
 
     if (!file) {
-      setMessage("Could not find the selected PDF file for preview.");
+      setMessage("Could not find the selected file for preview.");
       return;
     }
 
@@ -505,12 +530,12 @@ export default function PdfIndexingPage() {
     const rows = getActionRows(true);
 
     if (rows.length < 2) {
-      setMessage("Select at least two PDF files to merge.");
+      setMessage("Select at least two files to merge.");
       return;
     }
 
     setIsProcessing(true);
-    setMessage(`Merging ${rows.length} PDF files...`);
+    setMessage(`Merging ${rows.length} files into one PDF...`);
 
     try {
       const mergedPdf = await PDFDocument.create();
@@ -522,15 +547,14 @@ export default function PdfIndexingPage() {
           continue;
         }
 
-        const sourcePdf = await loadPdfWithVisibleSignatures(file);
-        await appendPortraitPages(mergedPdf, sourcePdf);
+        await appendFileToMergedPdf(mergedPdf, file);
       }
 
       const bytes = await mergedPdf.save();
       downloadBlob(createPdfBlob(bytes), "workline-merged.pdf");
-      setMessage(`Merged ${rows.length} PDF files.`);
+      setMessage(`Merged ${rows.length} files into one PDF.`);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Could not merge selected PDFs.");
+      setMessage(error instanceof Error ? error.message : "Could not merge selected files.");
     } finally {
       setIsProcessing(false);
     }
@@ -1300,7 +1324,15 @@ export default function PdfIndexingPage() {
               <ToolButton disabled={isProcessing || pdfRows.length === 0} icon={ListOrdered} label="Create Index" onClick={createPdfIndex} />
               <ToolButton disabled={isProcessing} icon={FileSearch} label="GSTAT Docket" onClick={openGstatDocket} />
               <input
-                accept="application/pdf,.pdf"
+                accept={MERGE_FILE_ACCEPT}
+                className="hidden"
+                multiple
+                onChange={selectFiles}
+                ref={fileInputRef}
+                type="file"
+              />
+              <input
+                accept={MERGE_FILE_ACCEPT}
                 className="hidden"
                 multiple
                 onChange={selectFolder}
@@ -1316,6 +1348,14 @@ export default function PdfIndexingPage() {
                 <FolderOpen className="size-4" />
                 Select Folder
               </button>
+              <button
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-950/10 bg-white px-4 text-xs font-black uppercase text-slate-800 shadow-sm transition hover:bg-slate-100"
+                onClick={() => fileInputRef.current?.click()}
+                type="button"
+              >
+                <FileImage className="size-4" />
+                Select Files
+              </button>
             </div>
           </div>
         </header>
@@ -1323,9 +1363,9 @@ export default function PdfIndexingPage() {
         <section className="workline-frame mt-4 rounded-[20px] p-3 md:p-4">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <h2 className="text-xl font-black text-slate-950">PDF Files</h2>
+              <h2 className="text-xl font-black text-slate-950">PDF & Image Files</h2>
               <p className="mt-1 text-sm font-semibold text-slate-600">
-                {folderName ? folderName : "Select a folder to load PDF files."}
+                {folderName ? folderName : "Select a folder or files to load PDFs and images."}
               </p>
               {message ? <p className="mt-1 text-sm font-bold text-indigo-700">{message}</p> : null}
             </div>
@@ -1346,7 +1386,7 @@ export default function PdfIndexingPage() {
                   <tr>
                     <th className="w-12 border-b border-r border-white/15 px-3 py-3">
                       <input
-                        aria-label="Select all PDF files"
+                        aria-label="Select all files"
                         checked={areAllRowsSelected}
                         className="size-4 rounded border-slate-300 accent-teal-500"
                         onChange={toggleAllRows}
@@ -1361,7 +1401,7 @@ export default function PdfIndexingPage() {
                     <th className="w-24 border-b border-r border-white/15 px-3 py-3 text-xs font-black uppercase">Move</th>
                     <th className="w-16 border-b border-r border-white/15 px-3 py-3 text-xs font-black uppercase">Sno</th>
                     <th className="w-20 border-b border-r border-white/15 px-3 py-3 text-xs font-black uppercase">Preview</th>
-                    <th className="border-b border-r border-white/15 px-3 py-3 text-xs font-black uppercase">PDF Name</th>
+                    <th className="border-b border-r border-white/15 px-3 py-3 text-xs font-black uppercase">File Name</th>
                     <th className="w-36 border-b border-r border-white/15 px-3 py-3 text-xs font-black uppercase">Size</th>
                     <th className="w-32 border-b border-r border-white/15 px-3 py-3 text-xs font-black uppercase">Page</th>
                     <th className="w-44 border-b border-r border-white/15 px-3 py-3 text-xs font-black uppercase">Document</th>
@@ -1414,7 +1454,7 @@ export default function PdfIndexingPage() {
                               aria-label={`Preview ${row.name}`}
                               className="flex size-8 items-center justify-center rounded-lg border border-slate-950/10 bg-white text-slate-700 transition hover:bg-slate-100"
                               onClick={() => previewPdfRow(row)}
-                              title="Preview PDF"
+                              title={row.fileKind === "pdf" ? "Preview PDF" : "Preview image"}
                               type="button"
                             >
                               <Eye className="size-4" />
@@ -1422,7 +1462,12 @@ export default function PdfIndexingPage() {
                           </div>
                         </td>
                         <td className="border-b border-r border-slate-200 px-3 py-2 font-bold text-slate-950">
-                          {row.name}
+                          <div className="flex flex-col gap-1">
+                            <span>{row.name}</span>
+                            {row.fileKind === "image" ? (
+                              <span className="w-fit rounded-full bg-sky-50 px-2 py-0.5 text-[10px] font-black uppercase text-sky-700">Image converts on merge</span>
+                            ) : null}
+                          </div>
                         </td>
                         <td className="border-b border-r border-slate-200 px-3 py-2 font-semibold text-slate-700">
                           {formatFileSize(row.size)}
@@ -1460,7 +1505,7 @@ export default function PdfIndexingPage() {
                   ) : (
                     <tr>
                       <td className="px-3 py-12 text-center text-sm font-bold text-slate-500" colSpan={9}>
-                        {isReading ? "Reading PDFs..." : "No PDF folder selected yet."}
+                        {isReading ? "Reading files..." : "No PDF or image files selected yet."}
                       </td>
                     </tr>
                   )}
@@ -1501,7 +1546,7 @@ export default function PdfIndexingPage() {
               <div>
                 <p className="text-sm font-black uppercase text-slate-950">DSC filing</p>
                 <p className="mt-0.5 text-xs font-bold text-slate-500">
-                  {selectedRows.length} selected PDF{selectedRows.length === 1 ? "" : "s"}
+                  {selectedRows.length} selected file{selectedRows.length === 1 ? "" : "s"}
                 </p>
               </div>
               <button
@@ -1917,6 +1962,31 @@ function readPdfNumber(value: unknown) {
   return null;
 }
 
+function isSupportedMergeFile(file: File) {
+  return getSupportedFileKind(file) !== null;
+}
+
+function getSupportedFileKind(file: File): SupportedFileKind | null {
+  const extension = getFileExtension(file.name);
+  const type = file.type.toLowerCase();
+
+  if (extension === ".pdf" || PDF_FILE_TYPES.has(type)) {
+    return "pdf";
+  }
+
+  if (IMAGE_FILE_EXTENSIONS.has(extension) || IMAGE_FILE_TYPES.has(type)) {
+    return "image";
+  }
+
+  return null;
+}
+
+function getFileExtension(filename: string) {
+  const dotIndex = filename.lastIndexOf(".");
+
+  return dotIndex >= 0 ? filename.slice(dotIndex).toLowerCase() : "";
+}
+
 async function getPdfPageCount(file: File) {
   const buffer = await file.arrayBuffer();
   const loadedPdf = await PDFDocument.load(buffer.slice(0), { ignoreEncryption: true }).catch(() => null);
@@ -1981,6 +2051,100 @@ async function loadPdfWithVisibleSignatures(file: File) {
   flattenVisibleSignatureAppearances(pdf);
 
   return pdf;
+}
+
+async function appendFileToMergedPdf(targetPdf: PDFDocument, file: File) {
+  const fileKind = getSupportedFileKind(file);
+
+  if (fileKind === "pdf") {
+    const sourcePdf = await loadPdfWithVisibleSignatures(file);
+    await appendPortraitPages(targetPdf, sourcePdf);
+    return;
+  }
+
+  if (fileKind === "image") {
+    await appendImageAsPdfPage(targetPdf, file);
+    return;
+  }
+
+  throw new Error(`"${file.name}" is not supported for merge. Choose PDF, JPG, JPEG, PNG, or WebP files.`);
+}
+
+async function appendImageAsPdfPage(targetPdf: PDFDocument, file: File) {
+  const imageBytes = await imageFileToPngBytes(file);
+  const embeddedImage = await targetPdf.embedPng(imageBytes);
+  const [pageWidth, pageHeight] = A4_PORTRAIT_SIZE;
+  const page = targetPdf.addPage(A4_PORTRAIT_SIZE);
+  const maxWidth = pageWidth - IMAGE_PAGE_MARGIN * 2;
+  const maxHeight = pageHeight - IMAGE_PAGE_MARGIN * 2;
+  const scale = Math.min(maxWidth / embeddedImage.width, maxHeight / embeddedImage.height);
+  const width = embeddedImage.width * scale;
+  const height = embeddedImage.height * scale;
+
+  page.drawImage(embeddedImage, {
+    height,
+    width,
+    x: (pageWidth - width) / 2,
+    y: (pageHeight - height) / 2
+  });
+}
+
+async function imageFileToPngBytes(file: File) {
+  const image = await decodeImageFile(file);
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("2d");
+
+  if (!context) {
+    image.close?.();
+    throw new Error(`Could not prepare "${file.name}" for PDF merge.`);
+  }
+
+  canvas.width = image.width;
+  canvas.height = image.height;
+  context.drawImage(image.source, 0, 0);
+  image.close?.();
+
+  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
+
+  if (!blob) {
+    throw new Error(`Could not convert "${file.name}" to a PDF page.`);
+  }
+
+  return blob.arrayBuffer();
+}
+
+async function decodeImageFile(file: File): Promise<{ close?: () => void; height: number; source: CanvasImageSource; width: number }> {
+  if ("createImageBitmap" in window) {
+    const bitmap = await createImageBitmap(file);
+
+    return {
+      close: () => bitmap.close(),
+      height: bitmap.height,
+      source: bitmap,
+      width: bitmap.width
+    };
+  }
+
+  const url = URL.createObjectURL(file);
+
+  try {
+    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const element = new Image();
+      element.onload = () => resolve(element);
+      element.onerror = () => reject(new Error(`Could not read "${file.name}" as an image.`));
+      element.src = url;
+    });
+
+    return {
+      close: () => URL.revokeObjectURL(url),
+      height: image.naturalHeight || image.height,
+      source: image,
+      width: image.naturalWidth || image.width
+    };
+  } catch (error) {
+    URL.revokeObjectURL(url);
+    throw error;
+  }
 }
 
 function stripPdfExtension(filename: string) {
