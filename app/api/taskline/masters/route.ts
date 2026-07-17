@@ -5,10 +5,20 @@ import { NextResponse } from "next/server";
 
 type CookieToSet = { name: string; options: CookieOptions; value: string };
 type TaskMaster = { id: string; name: string };
+type MasterKind = { label: string; sqlFile: string; table: string };
 
 const defaultOrganisationCode = "DCO1433";
 
-export async function GET() {
+const masterKinds: Record<string, MasterKind> = {
+  status: { label: "Status master", sqlFile: "database/014_taskline_status_master.sql", table: "taskline_status_master" },
+  task: { label: "Task master", sqlFile: "database/013_taskline_task_master.sql", table: "taskline_task_master" }
+};
+
+function resolveKind(type: string | null | undefined): MasterKind {
+  return masterKinds[text(type)] ?? masterKinds.task;
+}
+
+export async function GET(request: Request) {
   const auth = await requireUser();
   if ("error" in auth) {
     return auth.error;
@@ -20,7 +30,8 @@ export async function GET() {
     return organisation.error;
   }
 
-  return listMasters(admin, organisation.organisationId);
+  const kind = resolveKind(new URL(request.url).searchParams.get("type"));
+  return listMasters(admin, organisation.organisationId, kind);
 }
 
 export async function POST(request: Request) {
@@ -29,7 +40,7 @@ export async function POST(request: Request) {
     return auth.error;
   }
 
-  const payload = (await request.json()) as { id?: string; name?: string; names?: string[] };
+  const payload = (await request.json()) as { id?: string; name?: string; names?: string[]; type?: string };
 
   const admin = createAdminClient();
   const organisation = await getOrganisationId(admin, auth.user);
@@ -37,49 +48,51 @@ export async function POST(request: Request) {
     return organisation.error;
   }
 
+  const kind = resolveKind(payload.type);
+
   if (Array.isArray(payload.names)) {
     const unique = Array.from(new Set(payload.names.map((value) => text(value)).filter(Boolean)));
     if (unique.length) {
       const inserted = await admin
-        .from("taskline_task_master")
+        .from(kind.table)
         .upsert(unique.map((name) => ({ name, organisation_id: organisation.organisationId })), {
           ignoreDuplicates: true,
           onConflict: "organisation_id,name"
         });
       if (inserted.error) {
-        return errorResponse(inserted.error);
+        return errorResponse(inserted.error, kind);
       }
     }
-    return listMasters(admin, organisation.organisationId);
+    return listMasters(admin, organisation.organisationId, kind);
   }
 
   const name = text(payload.name);
 
   if (!name) {
-    return NextResponse.json({ error: "Task name is required." }, { status: 400 });
+    return NextResponse.json({ error: `${kind.label} name is required.` }, { status: 400 });
   }
 
   const id = text(payload.id);
 
   if (id) {
     const updated = await admin
-      .from("taskline_task_master")
+      .from(kind.table)
       .update({ name, updated_at: new Date().toISOString() })
       .eq("id", id)
       .eq("organisation_id", organisation.organisationId);
     if (updated.error) {
-      return errorResponse(updated.error);
+      return errorResponse(updated.error, kind);
     }
   } else {
     const inserted = await admin
-      .from("taskline_task_master")
+      .from(kind.table)
       .insert({ name, organisation_id: organisation.organisationId });
     if (inserted.error && !inserted.error.message.toLowerCase().includes("duplicate")) {
-      return errorResponse(inserted.error);
+      return errorResponse(inserted.error, kind);
     }
   }
 
-  return listMasters(admin, organisation.organisationId);
+  return listMasters(admin, organisation.organisationId, kind);
 }
 
 export async function DELETE(request: Request) {
@@ -88,9 +101,10 @@ export async function DELETE(request: Request) {
     return auth.error;
   }
 
-  const id = new URL(request.url).searchParams.get("id");
+  const url = new URL(request.url);
+  const id = url.searchParams.get("id");
   if (!id) {
-    return NextResponse.json({ error: "Task id is required." }, { status: 400 });
+    return NextResponse.json({ error: "Master id is required." }, { status: 400 });
   }
 
   const admin = createAdminClient();
@@ -99,40 +113,41 @@ export async function DELETE(request: Request) {
     return organisation.error;
   }
 
+  const kind = resolveKind(url.searchParams.get("type"));
   const deleted = await admin
-    .from("taskline_task_master")
+    .from(kind.table)
     .delete()
     .eq("id", id)
     .eq("organisation_id", organisation.organisationId);
   if (deleted.error) {
-    return errorResponse(deleted.error);
+    return errorResponse(deleted.error, kind);
   }
 
-  return listMasters(admin, organisation.organisationId);
+  return listMasters(admin, organisation.organisationId, kind);
 }
 
-async function listMasters(admin: ReturnType<typeof createAdminClient>, organisationId: string) {
+async function listMasters(admin: ReturnType<typeof createAdminClient>, organisationId: string, kind: MasterKind) {
   const { data, error } = await admin
-    .from("taskline_task_master")
+    .from(kind.table)
     .select("id,name")
     .eq("organisation_id", organisationId)
     .order("name", { ascending: true });
 
   if (error) {
-    return errorResponse(error);
+    return errorResponse(error, kind);
   }
 
   return NextResponse.json({ masters: (data ?? []) as TaskMaster[] });
 }
 
-function errorResponse(error: { message: string }) {
+function errorResponse(error: { message: string }, kind: MasterKind) {
   const setupRequired =
     error.message.toLowerCase().includes("does not exist") ||
     error.message.toLowerCase().includes("could not find the table");
   return NextResponse.json(
     {
       error: setupRequired
-        ? "Task master table is not set up yet. Run database/013_taskline_task_master.sql in Supabase."
+        ? `${kind.label} table is not set up yet. Run ${kind.sqlFile} in Supabase.`
         : error.message,
       setupRequired
     },

@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowDown, ArrowUp, Download, Filter, History, ListChecks, Menu, Pencil, Pin, Plus, Search, Settings2, Trash2, Upload, X } from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronDown, CircleDot, Download, Filter, History, ListChecks, Menu, Pencil, Pin, Plus, Search, Settings2, Trash2, Upload, X } from "lucide-react";
 import type { ComponentType } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -32,10 +32,9 @@ const importActionColumn = "Import Action";
 const importActionOptions = ["Add", "Update", "Delete"];
 const taskLineImportBatchSize = 100;
 const taskLinePageSize = 200;
-const taskLineColumnLayoutStorageKey = "workline:taskline-column-layout:v1";
+const taskLineColumnLayoutStorageKey = "workline:taskline-column-layout:v2";
 const actionColumnWidth = 132;
 const actionColumnKey = "__actions";
-const alwaysHiddenColumnKeys = new Set(["team"]);
 const taskLineColumns: TaskLineColumn[] = [
   { key: "team", label: "Team", width: 120 },
   { key: "serial_no", label: "S. No.", width: 82 },
@@ -117,13 +116,14 @@ export function TaskLineRegister() {
   const [isToolbarMenuOpen, setIsToolbarMenuOpen] = useState(false);
   const [masterMessage, setMasterMessage] = useState("");
   const taskMasterNames = useMemo(() => taskMasters.map((master) => master.name), [taskMasters]);
+  const [statusMasters, setStatusMasters] = useState<{ id: string; name: string }[]>([]);
+  const [statusMasterMessage, setStatusMasterMessage] = useState("");
+  const [masterKind, setMasterKind] = useState<"status" | "task">("task");
+  const [isMasterSubmenuOpen, setIsMasterSubmenuOpen] = useState(false);
+  const statusMasterNames = useMemo(() => statusMasters.map((master) => master.name), [statusMasters]);
 
   const orderedColumns = useMemo(
-    () =>
-      columnOrder
-        .map((key) => taskLineColumnByKey.get(key))
-        .filter((column): column is TaskLineColumn => Boolean(column))
-        .filter((column) => !alwaysHiddenColumnKeys.has(column.key)),
+    () => columnOrder.map((key) => taskLineColumnByKey.get(key)).filter((column): column is TaskLineColumn => Boolean(column)),
     [columnOrder]
   );
   const visibleColumns = useMemo(
@@ -213,6 +213,7 @@ export function TaskLineRegister() {
   useEffect(() => {
     void loadTaskLine();
     void loadMasters();
+    void loadStatusMasters();
   }, []);
 
   useEffect(() => {
@@ -363,6 +364,65 @@ export function TaskLineRegister() {
     }
     setTaskMasters(result.masters ?? []);
     setMasterMessage("");
+  }
+
+  async function loadStatusMasters() {
+    try {
+      const response = await fetch("/api/taskline/masters?type=status", { cache: "no-store" });
+      const result = (await response.json()) as { error?: string; masters?: { id: string; name: string }[] };
+      if (!response.ok) {
+        setStatusMasterMessage(result.error ?? "Could not load status master list.");
+        return;
+      }
+      const list = result.masters ?? [];
+      if (!list.length) {
+        const seeded = await fetch("/api/taskline/masters", {
+          body: JSON.stringify({ names: statusOptions, type: "status" }),
+          headers: { "Content-Type": "application/json" },
+          method: "POST"
+        });
+        const seededResult = (await seeded.json()) as { error?: string; masters?: { id: string; name: string }[] };
+        if (seeded.ok) {
+          setStatusMasters(seededResult.masters ?? []);
+          setStatusMasterMessage("");
+          return;
+        }
+      }
+      setStatusMasters(list);
+      setStatusMasterMessage("");
+    } catch {
+      setStatusMasterMessage("Could not load status master list.");
+    }
+  }
+
+  async function saveStatusMaster(name: string, id?: string) {
+    const trimmed = name.trim();
+    if (!trimmed) {
+      return;
+    }
+    const response = await fetch("/api/taskline/masters", {
+      body: JSON.stringify({ id, name: trimmed, type: "status" }),
+      headers: { "Content-Type": "application/json" },
+      method: "POST"
+    });
+    const result = (await response.json()) as { error?: string; masters?: { id: string; name: string }[] };
+    if (!response.ok) {
+      setStatusMasterMessage(result.error ?? "Could not save status type.");
+      return;
+    }
+    setStatusMasters(result.masters ?? []);
+    setStatusMasterMessage("");
+  }
+
+  async function deleteStatusMaster(id: string) {
+    const response = await fetch(`/api/taskline/masters?type=status&id=${encodeURIComponent(id)}`, { method: "DELETE" });
+    const result = (await response.json()) as { error?: string; masters?: { id: string; name: string }[] };
+    if (!response.ok) {
+      setStatusMasterMessage(result.error ?? "Could not delete status type.");
+      return;
+    }
+    setStatusMasters(result.masters ?? []);
+    setStatusMasterMessage("");
   }
 
   async function loadTaskLine() {
@@ -673,10 +733,23 @@ export function TaskLineRegister() {
           </button>
           {isToolbarMenuOpen ? (
             <>
-              <div className="fixed inset-0 z-30" onClick={() => setIsToolbarMenuOpen(false)} />
+              <div className="fixed inset-0 z-30" onClick={() => { setIsToolbarMenuOpen(false); setIsMasterSubmenuOpen(false); }} />
               <div className="absolute right-0 top-12 z-40 w-52 overflow-hidden rounded-md border border-slate-200 bg-white py-1 shadow-2xl">
                 <ToolbarMenuItem icon={Plus} label="Add row" onClick={() => { setIsToolbarMenuOpen(false); addRow(); }} />
-                <ToolbarMenuItem icon={ListChecks} label="Task Master" onClick={() => { setIsToolbarMenuOpen(false); setIsMasterOpen(true); }} />
+                <button
+                  className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
+                  onClick={() => setIsMasterSubmenuOpen((current) => !current)}
+                  type="button"
+                >
+                  <span className="flex items-center gap-2"><ListChecks className="size-4 shrink-0 text-slate-500" />Master</span>
+                  <ChevronDown className={`size-4 shrink-0 text-slate-400 transition ${isMasterSubmenuOpen ? "rotate-180" : ""}`} />
+                </button>
+                {isMasterSubmenuOpen ? (
+                  <div className="border-y border-slate-100 bg-slate-50 pl-3">
+                    <ToolbarMenuItem icon={ListChecks} label="Task Master" onClick={() => { setIsToolbarMenuOpen(false); setIsMasterSubmenuOpen(false); setMasterKind("task"); setIsMasterOpen(true); }} />
+                    <ToolbarMenuItem icon={CircleDot} label="Status Master" onClick={() => { setIsToolbarMenuOpen(false); setIsMasterSubmenuOpen(false); setMasterKind("status"); setIsMasterOpen(true); }} />
+                  </div>
+                ) : null}
                 <ToolbarMenuItem icon={Settings2} label="Columns" onClick={() => { setIsToolbarMenuOpen(false); setIsColumnOptionsOpen(true); }} />
                 <ToolbarMenuItem icon={Download} label="Export view" onClick={() => { setIsToolbarMenuOpen(false); exportView(); }} />
                 <ToolbarMenuItem icon={Download} label="Download template" onClick={() => { setIsToolbarMenuOpen(false); downloadTemplate(); }} />
@@ -903,6 +976,7 @@ export function TaskLineRegister() {
                         onChange={(value) => updateRow(row.__id, column.key, value)}
                         row={row}
                         serialNumber={(tablePage - 1) * taskLinePageSize + rowIndex + 1}
+                        statusMasterNames={statusMasterNames}
                         taskMasterNames={taskMasterNames}
                       />
                     );
@@ -931,18 +1005,39 @@ export function TaskLineRegister() {
             setFormDraft(null);
           }}
           onSubmit={saveFormDraft}
+          statusMasterNames={statusMasterNames}
           taskMasterNames={taskMasterNames}
         />
       ) : null}
 
       {isMasterOpen ? (
-        <TaskLineMasterPanel
-          masters={taskMasters}
-          message={masterMessage}
-          onClose={() => setIsMasterOpen(false)}
-          onDelete={deleteTaskMaster}
-          onSave={saveTaskMaster}
-        />
+        masterKind === "status" ? (
+          <TaskLineMasterPanel
+            addPlaceholder="Add a new status type"
+            emptyText="No status types yet. Add one above."
+            heading="Status Master"
+            masters={statusMasters}
+            message={statusMasterMessage}
+            onClose={() => setIsMasterOpen(false)}
+            onDelete={deleteStatusMaster}
+            onSave={saveStatusMaster}
+            subheading="Status Open/Close can only be chosen from this list."
+            title="Manage status types"
+          />
+        ) : (
+          <TaskLineMasterPanel
+            addPlaceholder="Add a new task type"
+            emptyText="No task types yet. Add one above."
+            heading="Task Master"
+            masters={taskMasters}
+            message={masterMessage}
+            onClose={() => setIsMasterOpen(false)}
+            onDelete={deleteTaskMaster}
+            onSave={saveTaskMaster}
+            subheading="Tasks in TaskLine can only be chosen from this list."
+            title="Manage task types"
+          />
+        )
       ) : null}
     </section>
   );
@@ -955,6 +1050,7 @@ function TaskLineCell({
   onChange,
   row,
   serialNumber,
+  statusMasterNames,
   taskMasterNames
 }: {
   column: TaskLineColumn;
@@ -963,6 +1059,7 @@ function TaskLineCell({
   onChange: (value: string) => void;
   row: TaskLineRow;
   serialNumber: number;
+  statusMasterNames: string[];
   taskMasterNames: string[];
 }) {
   const frozenStyle = isFrozen ? { left: frozenLeft } : undefined;
@@ -997,17 +1094,21 @@ function TaskLineCell({
   }
 
   if (column.type === "select") {
+    const current = row[column.key] ?? "";
     return (
       <td className={`border-r border-slate-100 px-2 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
         <select
           className="h-7 w-full rounded-md border border-slate-200 bg-white px-2 text-xs font-bold outline-none focus:border-rose-300 focus:ring-2 focus:ring-rose-100"
           onChange={(event) => onChange(event.target.value)}
-          value={row[column.key] ?? ""}
+          value={current}
         >
           <option value="">Select</option>
-          {statusOptions.map((option) => (
-            <option key={option} value={option}>{option}</option>
+          {statusMasterNames.map((name) => (
+            <option key={name} value={name}>{name}</option>
           ))}
+          {current && !statusMasterNames.includes(current) ? (
+            <option value={current}>{current} (not in master)</option>
+          ) : null}
         </select>
       </td>
     );
@@ -1037,6 +1138,7 @@ function TaskLineForm({
   onChange,
   onClose,
   onSubmit,
+  statusMasterNames,
   taskMasterNames
 }: {
   draft: TaskLineRow;
@@ -1044,6 +1146,7 @@ function TaskLineForm({
   onChange: (key: string, value: string) => void;
   onClose: () => void;
   onSubmit: () => void;
+  statusMasterNames: string[];
   taskMasterNames: string[];
 }) {
   return (
@@ -1085,9 +1188,12 @@ function TaskLineForm({
                     value={draft[column.key] ?? ""}
                   >
                     <option value="">Select</option>
-                    {statusOptions.map((option) => (
-                      <option key={option} value={option}>{option}</option>
+                    {statusMasterNames.map((name) => (
+                      <option key={name} value={name}>{name}</option>
                     ))}
+                    {draft[column.key] && !statusMasterNames.includes(draft[column.key]) ? (
+                      <option value={draft[column.key]}>{draft[column.key]} (not in master)</option>
+                    ) : null}
                   </select>
                 ) : (
                   <input
@@ -1665,7 +1771,7 @@ function normalizeTaskLineColumnLayout(layout: Partial<TaskLineColumnLayout>): T
   const order = [...savedOrder, ...defaultTaskLineColumnOrder.filter((key) => !savedOrder.includes(key))];
   const hiddenColumnKeys = Array.isArray(layout.hiddenColumnKeys)
     ? layout.hiddenColumnKeys.filter((key) => toggleableKeys.has(key))
-    : [];
+    : ["team"];
   const frozenColumnKeys = Array.isArray(layout.frozenColumnKeys)
     ? layout.frozenColumnKeys.filter((key) => toggleableKeys.has(key))
     : [];
@@ -1936,17 +2042,27 @@ function parseTaskLineDueDate(value: string): Date | null {
 }
 
 function TaskLineMasterPanel({
+  addPlaceholder,
+  emptyText,
+  heading,
   masters,
   message,
   onClose,
   onDelete,
-  onSave
+  onSave,
+  subheading,
+  title
 }: {
+  addPlaceholder: string;
+  emptyText: string;
+  heading: string;
   masters: { id: string; name: string }[];
   message: string;
   onClose: () => void;
   onDelete: (id: string) => void;
   onSave: (name: string, id?: string) => void;
+  subheading: string;
+  title: string;
 }) {
   const [newName, setNewName] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -1957,9 +2073,9 @@ function TaskLineMasterPanel({
       <section className="flex max-h-[85vh] w-full max-w-lg flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-[0_24px_90px_rgba(15,23,42,0.30)]">
         <header className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
           <div>
-            <p className="text-xs font-black uppercase tracking-[0.14em] text-rose-700">Task Master</p>
-            <h3 className="mt-1 text-xl font-black text-slate-950">Manage task types</h3>
-            <p className="mt-1 text-xs font-bold text-slate-500">Tasks in TaskLine can only be chosen from this list.</p>
+            <p className="text-xs font-black uppercase tracking-[0.14em] text-rose-700">{heading}</p>
+            <h3 className="mt-1 text-xl font-black text-slate-950">{title}</h3>
+            <p className="mt-1 text-xs font-bold text-slate-500">{subheading}</p>
           </div>
           <button className="inline-flex size-9 items-center justify-center rounded-md border border-slate-200 text-slate-700 hover:bg-slate-50" onClick={onClose} title="Close" type="button">
             <X className="size-4" />
@@ -1976,7 +2092,7 @@ function TaskLineMasterPanel({
                 setNewName("");
               }
             }}
-            placeholder="Add a new task type"
+            placeholder={addPlaceholder}
             value={newName}
           />
           <button
@@ -2047,7 +2163,7 @@ function TaskLineMasterPanel({
               ))}
             </div>
           ) : (
-            <p className="py-8 text-center text-sm font-bold text-slate-500">No task types yet. Add one above.</p>
+            <p className="py-8 text-center text-sm font-bold text-slate-500">{emptyText}</p>
           )}
         </div>
 
