@@ -743,7 +743,7 @@ export function TaskLineRegister() {
             Next
           </button>
         </div>
-        <div className="max-h-[calc(100vh-185px)] overflow-auto rounded-md border border-slate-200 bg-white">
+        <div className="max-h-[calc(100vh-135px)] overflow-auto rounded-md border border-slate-200 bg-white">
           <table className="table-fixed border-separate border-spacing-0 text-left text-sm" style={{ minWidth: tableWidth, width: tableWidth }}>
             <colgroup>
               <col style={{ width: actionColumnWidth }} />
@@ -1240,7 +1240,7 @@ function TaskLineAuditTable({ logs, rows }: { logs: TaskLineAuditLog[]; rows: Ta
         <History className="size-4 text-rose-700" />
         <h3 className="text-sm font-black uppercase tracking-[0.14em] text-slate-700">Edit History</h3>
       </div>
-      <div className="max-h-[calc(100vh-175px)] overflow-auto">
+      <div className="max-h-[calc(100vh-130px)] overflow-auto">
         <table className="w-full min-w-[860px] border-collapse text-left text-sm">
           <thead className="sticky top-0 z-10 bg-slate-100 text-[11px] font-semibold uppercase tracking-wide text-slate-600 [&_th]:border-b [&_th]:border-slate-200">
             <tr>
