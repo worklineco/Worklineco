@@ -111,12 +111,12 @@ export function TeamsPanel() {
           {!isLoading && message ? <p className="px-4 py-5 text-sm font-bold text-red-600">{message}</p> : null}
           {!isLoading && !message && members.length === 0 ? <p className="px-4 py-5 text-sm font-bold text-slate-500">No team members found.</p> : null}
 
-          {!isLoading && !message && sortedMembers.map(({ member }, index) => (
+          {!isLoading && !message && sortedMembers.map(({ member, originalIndex }) => (
             <div
               className="grid min-w-[1160px] grid-cols-[0.45fr_1.1fr_0.6fr_1.4fr_1fr_0.9fr_0.9fr] gap-3 border-b border-slate-100 px-4 py-3 text-sm last:border-b-0"
               key={member.id}
             >
-              <p className="font-bold text-slate-600">{index + 1}</p>
+              <p className="font-bold text-slate-600">{originalIndex + 1}</p>
               <div className="min-w-0"><p className="truncate font-black text-slate-950">{member.name}</p></div>
               <p className="truncate font-bold text-slate-600">{member.team || "-"}</p>
               <div className="flex min-w-0 items-center gap-2 font-semibold text-slate-700">
