@@ -85,6 +85,24 @@ const taskLineColumns: TaskLineColumn[] = [
 const taskLineColumnByKey = new Map(taskLineColumns.map((column) => [column.key, column]));
 const defaultTaskLineColumnOrder = taskLineColumns.map((column) => column.key);
 const statusOptions = ["Open", "Close"];
+type TeamMemberLite = { designation: string; name: string; team: string };
+const partnerNameFallback = ["Yash Dhaddha", "Shuchi Sethi"];
+
+function teamMatchKey(value: string) {
+  const digits = String(value ?? "").match(/\d+/);
+  if (digits) {
+    return String(parseInt(digits[0], 10));
+  }
+  return String(value ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function isArticleDesignation(value: string) {
+  return String(value ?? "").toLowerCase().includes("article");
+}
+
+function isPartnerDesignation(value: string) {
+  return String(value ?? "").toLowerCase().includes("partner");
+}
 const defaultRows = Array.from({ length: 8 }, (_, index) => createEmptyRow(`initial-${index + 1}`));
 
 export function TaskLineRegister() {
@@ -123,6 +141,29 @@ export function TaskLineRegister() {
   const stageMasterNames = useMemo(() => stageMasters.map((master) => master.name), [stageMasters]);
   const [stageMastersFetched, setStageMastersFetched] = useState(false);
   const stageSeedDoneRef = useRef(false);
+  const [teamMembers, setTeamMembers] = useState<TeamMemberLite[]>([]);
+  const partnerMemberNames = useMemo(
+    () => teamMembers.filter((member) => isPartnerDesignation(member.designation)).map((member) => member.name.trim()).filter(Boolean),
+    [teamMembers]
+  );
+  function nameOptionsForTeam(team: string) {
+    const key = teamMatchKey(team);
+    const teamNonArticles = teamMembers
+      .filter((member) => teamMatchKey(member.team) === key && !isArticleDesignation(member.designation))
+      .map((member) => member.name.trim());
+    return Array.from(new Set([...teamNonArticles, ...partnerMemberNames, ...partnerNameFallback].map((name) => name.trim()).filter(Boolean)));
+  }
+  function resourceOptionsForTeam(team: string) {
+    const key = teamMatchKey(team);
+    return Array.from(
+      new Set(
+        teamMembers
+          .filter((member) => teamMatchKey(member.team) === key && isArticleDesignation(member.designation))
+          .map((member) => member.name.trim())
+          .filter(Boolean)
+      )
+    );
+  }
 
   const orderedColumns = useMemo(
     () => columnOrder.map((key) => taskLineColumnByKey.get(key)).filter((column): column is TaskLineColumn => Boolean(column)),
@@ -216,6 +257,7 @@ export function TaskLineRegister() {
     void loadTaskLine();
     void loadMasters();
     void loadStageMasters();
+    void loadTeamMembers();
   }, []);
 
   useEffect(() => {
@@ -441,6 +483,25 @@ export function TaskLineRegister() {
     }
     setStageMasters(result.masters ?? []);
     setStageMasterMessage("");
+  }
+
+  async function loadTeamMembers() {
+    try {
+      const response = await fetch("/api/teams", { cache: "no-store" });
+      const result = (await response.json()) as { members?: { designation?: string; name?: string; team?: string }[] };
+      if (!response.ok) {
+        return;
+      }
+      setTeamMembers(
+        (result.members ?? []).map((member) => ({
+          designation: text(member.designation),
+          name: text(member.name),
+          team: text(member.team)
+        }))
+      );
+    } catch {
+      // ignore; Name/Resource dropdowns fall back to any existing value
+    }
   }
 
   async function loadTaskLine() {
@@ -966,7 +1027,10 @@ export function TaskLineRegister() {
             <tbody>
               {isLoading ? (
                 <tr><td className="px-4 py-8 font-bold text-slate-500" colSpan={visibleColumns.length + (actionColumnHidden ? 0 : 1)}>Loading TaskLine rows...</td></tr>
-              ) : pagedRows.length ? pagedRows.map((row, rowIndex) => (
+              ) : pagedRows.length ? pagedRows.map((row, rowIndex) => {
+                const rowNameOptions = nameOptionsForTeam(text(row.team));
+                const rowResourceOptions = resourceOptionsForTeam(text(row.team));
+                return (
                 <tr className="border-b border-slate-100 last:border-b-0" key={row.__id}>
                   {actionColumnHidden ? null : (
                   <td className={`border-r border-slate-100 px-2 py-1 ${actionColumnFrozen ? "sticky left-0 z-[5] bg-white" : ""}`} style={actionColumnFrozen ? { left: 0 } : undefined}>
@@ -991,7 +1055,9 @@ export function TaskLineRegister() {
                         frozenLeft={frozen.left}
                         isFrozen={frozen.isFrozen}
                         key={`${row.__id}-${column.key}`}
+                        nameOptions={rowNameOptions}
                         onChange={(value) => updateRow(row.__id, column.key, value)}
+                        resourceOptions={rowResourceOptions}
                         row={row}
                         serialNumber={(tablePage - 1) * taskLinePageSize + rowIndex + 1}
                         stageMasterNames={stageMasterNames}
@@ -1000,7 +1066,8 @@ export function TaskLineRegister() {
                     );
                   })}
                 </tr>
-              )) : (
+                );
+              }) : (
                 <tr><td className="px-4 py-8 font-bold text-slate-500" colSpan={visibleColumns.length + (actionColumnHidden ? 0 : 1)}>No TaskLine rows match the current filters.</td></tr>
               )}
             </tbody>
@@ -1023,6 +1090,8 @@ export function TaskLineRegister() {
             setFormDraft(null);
           }}
           onSubmit={saveFormDraft}
+          nameOptionsForTeam={nameOptionsForTeam}
+          resourceOptionsForTeam={resourceOptionsForTeam}
           stageMasterNames={stageMasterNames}
           taskMasterNames={taskMasterNames}
         />
@@ -1065,7 +1134,9 @@ function TaskLineCell({
   column,
   frozenLeft,
   isFrozen,
+  nameOptions,
   onChange,
+  resourceOptions,
   row,
   serialNumber,
   stageMasterNames,
@@ -1074,7 +1145,9 @@ function TaskLineCell({
   column: TaskLineColumn;
   frozenLeft: number;
   isFrozen: boolean;
+  nameOptions: string[];
   onChange: (value: string) => void;
+  resourceOptions: string[];
   row: TaskLineRow;
   serialNumber: number;
   stageMasterNames: string[];
@@ -1087,6 +1160,39 @@ function TaskLineCell({
       <td className={`border-r border-slate-100 px-2 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
         <span className="block h-7 px-1.5 py-1 font-semibold text-slate-700">{serialNumber}</span>
       </td>
+    );
+  }
+
+  if (column.key === "name") {
+    const current = row[column.key] ?? "";
+    return (
+      <td className={`border-r border-slate-100 px-2 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
+        <select
+          className="h-7 w-full rounded-md border border-slate-200 bg-white px-2 text-xs font-bold outline-none focus:border-rose-300 focus:ring-2 focus:ring-rose-100"
+          onChange={(event) => onChange(event.target.value)}
+          value={current}
+        >
+          <option value="">Select</option>
+          {nameOptions.map((name) => (
+            <option key={name} value={name}>{name}</option>
+          ))}
+          {current && !nameOptions.includes(current) ? (
+            <option value={current}>{current}</option>
+          ) : null}
+        </select>
+      </td>
+    );
+  }
+
+  if (column.key === "resource") {
+    return (
+      <TaskLineMultiSelectCell
+        frozenStyle={frozenStyle}
+        isFrozen={isFrozen}
+        onChange={onChange}
+        options={resourceOptions}
+        value={row[column.key] ?? ""}
+      />
     );
   }
 
@@ -1167,20 +1273,111 @@ function TaskLineCell({
   );
 }
 
+function TaskLineMultiSelectCell({
+  frozenStyle,
+  isFrozen,
+  onChange,
+  options,
+  value
+}: {
+  frozenStyle: { left: number } | undefined;
+  isFrozen: boolean;
+  onChange: (value: string) => void;
+  options: string[];
+  value: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{ left: number; maxHeight: number; top: number } | null>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const selected = value ? value.split(",").map((entry) => entry.trim()).filter(Boolean) : [];
+
+  function openMenu() {
+    const rect = buttonRef.current?.getBoundingClientRect();
+    if (!rect) {
+      return;
+    }
+    const width = 224;
+    const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
+    const top = rect.bottom + 4;
+    const maxHeight = Math.max(180, window.innerHeight - top - 16);
+    setPos({ left, maxHeight, top });
+    setOpen(true);
+  }
+
+  function toggle(name: string) {
+    const set = new Set(selected);
+    if (set.has(name)) {
+      set.delete(name);
+    } else {
+      set.add(name);
+    }
+    const ordered = options.filter((option) => set.has(option));
+    selected.forEach((entry) => {
+      if (!options.includes(entry) && set.has(entry)) {
+        ordered.push(entry);
+      }
+    });
+    onChange(ordered.join(", "));
+  }
+
+  return (
+    <td className={`border-r border-slate-100 px-2 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
+      <button
+        className="flex h-7 w-full items-center justify-between gap-1 rounded-md border border-slate-200 bg-white px-2 text-xs font-bold text-slate-700 outline-none hover:border-slate-300"
+        onClick={openMenu}
+        ref={buttonRef}
+        type="button"
+      >
+        <span className="min-w-0 truncate">{selected.length ? selected.join(", ") : <span className="text-slate-400">Select</span>}</span>
+        <ChevronDown className="size-3.5 shrink-0 text-slate-400" />
+      </button>
+      {open && pos && typeof document !== "undefined"
+        ? createPortal(
+            <>
+              <div className="fixed inset-0 z-[999]" onClick={() => setOpen(false)} />
+              <div
+                className="fixed z-[1000] flex w-56 flex-col overflow-hidden rounded-lg border border-slate-300 bg-white p-1 text-left shadow-2xl"
+                style={{ left: pos.left, maxHeight: pos.maxHeight, top: pos.top }}
+              >
+                <div className="overflow-y-auto">
+                  {options.length ? (
+                    options.map((name) => (
+                      <label className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm font-semibold text-slate-900 hover:bg-slate-100" key={name}>
+                        <input checked={selected.includes(name)} className="size-4 accent-navy-700" onChange={() => toggle(name)} type="checkbox" />
+                        <span className="min-w-0 truncate">{name}</span>
+                      </label>
+                    ))
+                  ) : (
+                    <p className="px-2 py-3 text-center text-xs font-semibold text-slate-400">No article members for this team.</p>
+                  )}
+                </div>
+              </div>
+            </>,
+            document.body
+          )
+        : null}
+    </td>
+  );
+}
+
 function TaskLineForm({
   draft,
   isEdit,
+  nameOptionsForTeam,
   onChange,
   onClose,
   onSubmit,
+  resourceOptionsForTeam,
   stageMasterNames,
   taskMasterNames
 }: {
   draft: TaskLineRow;
   isEdit: boolean;
+  nameOptionsForTeam: (team: string) => string[];
   onChange: (key: string, value: string) => void;
   onClose: () => void;
   onSubmit: () => void;
+  resourceOptionsForTeam: (team: string) => string[];
   stageMasterNames: string[];
   taskMasterNames: string[];
 }) {
@@ -1202,7 +1399,51 @@ function TaskLineForm({
             {taskLineColumns.filter((column) => column.key !== "serial_no").map((column) => (
               <label className={["remarks", "issue", "document_link", "el_reference", "fee_comments"].includes(column.key) ? "xl:col-span-2" : ""} key={column.key}>
                 <span className="text-[10px] font-black uppercase text-slate-500">{column.label}</span>
-                {column.key === "task" ? (
+                {column.key === "name" ? (
+                  <select
+                    className={formControlClass}
+                    onChange={(event) => onChange(column.key, event.target.value)}
+                    value={draft[column.key] ?? ""}
+                  >
+                    <option value="">Select</option>
+                    {nameOptionsForTeam(draft.team ?? "").map((name) => (
+                      <option key={name} value={name}>{name}</option>
+                    ))}
+                    {draft[column.key] && !nameOptionsForTeam(draft.team ?? "").includes(draft[column.key]) ? (
+                      <option value={draft[column.key]}>{draft[column.key]}</option>
+                    ) : null}
+                  </select>
+                ) : column.key === "resource" ? (
+                  <div className="mt-1 flex max-h-32 flex-wrap gap-x-4 gap-y-1 overflow-y-auto rounded-md border border-slate-200 bg-white px-3 py-2">
+                    {resourceOptionsForTeam(draft.team ?? "").length ? (
+                      resourceOptionsForTeam(draft.team ?? "").map((name) => {
+                        const selected = (draft.resource ?? "").split(",").map((entry) => entry.trim()).filter(Boolean);
+                        return (
+                          <label className="flex items-center gap-2 text-sm font-semibold text-slate-800" key={name}>
+                            <input
+                              checked={selected.includes(name)}
+                              className="size-4 accent-navy-700"
+                              onChange={() => {
+                                const set = new Set(selected);
+                                if (set.has(name)) {
+                                  set.delete(name);
+                                } else {
+                                  set.add(name);
+                                }
+                                const options = resourceOptionsForTeam(draft.team ?? "");
+                                onChange("resource", options.filter((option) => set.has(option)).join(", "));
+                              }}
+                              type="checkbox"
+                            />
+                            {name}
+                          </label>
+                        );
+                      })
+                    ) : (
+                      <span className="text-xs font-semibold text-slate-400">No article members for this team.</span>
+                    )}
+                  </div>
+                ) : column.key === "task" ? (
                   <select
                     className={formControlClass}
                     onChange={(event) => onChange(column.key, event.target.value)}
