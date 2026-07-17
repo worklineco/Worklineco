@@ -197,8 +197,6 @@ export function TaskLineRegister() {
     const startIndex = (tablePage - 1) * taskLinePageSize;
     return filteredRows.slice(startIndex, startIndex + taskLinePageSize);
   }, [filteredRows, tablePage]);
-  const pageStart = filteredRows.length ? (tablePage - 1) * taskLinePageSize + 1 : 0;
-  const pageEnd = Math.min(tablePage * taskLinePageSize, filteredRows.length);
 
   const dataHydratedRef = useRef(false);
 
@@ -671,6 +669,7 @@ export function TaskLineRegister() {
                 <ToolbarMenuItem icon={Download} label="Export view" onClick={() => { setIsToolbarMenuOpen(false); exportView(); }} />
                 <ToolbarMenuItem icon={Download} label="Download template" onClick={() => { setIsToolbarMenuOpen(false); downloadTemplate(); }} />
                 <ToolbarMenuItem icon={Upload} label="Import" onClick={() => { setIsToolbarMenuOpen(false); fileInputRef.current?.click(); }} />
+                <ToolbarMenuItem icon={History} label={viewMode === "register" ? `Audit Trail (${auditLogs.length})` : "Back to Register"} onClick={() => { setIsToolbarMenuOpen(false); setViewMode(viewMode === "register" ? "audit" : "register"); }} />
                 {hasActiveColumnFilters ? (
                   <ToolbarMenuItem icon={X} label="Clear column filters" onClick={() => { setIsToolbarMenuOpen(false); setColumnFilters({}); }} />
                 ) : null}
@@ -712,42 +711,33 @@ export function TaskLineRegister() {
         type="file"
       />
 
-      <div className="mt-3 flex flex-wrap gap-2 border-b border-slate-200 pb-2">
-        <ViewButton active={viewMode === "register"} label="Register" onClick={() => setViewMode("register")} />
-        <ViewButton active={viewMode === "audit"} label={`Audit Trail (${auditLogs.length})`} onClick={() => setViewMode("audit")} />
-      </div>
-
       {message ? (
         <p className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-bold text-emerald-900">{message}</p>
       ) : null}
 
       {viewMode === "register" ? (
-      <div className="mt-4">
-        <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-sm font-bold text-slate-600">
-            {isLoading ? "Loading TaskLine rows..." : `Showing ${pageStart}-${pageEnd} of ${filteredRows.length} matching task rows · ${rows.length} total entries`}
-          </p>
-          <div className="flex items-center gap-2">
-            <button
-              className={buttonClass("light")}
-              disabled={tablePage <= 1 || isLoading}
-              onClick={() => setTablePage((currentPage) => Math.max(1, currentPage - 1))}
-              type="button"
-            >
-              Previous
-            </button>
-            <span className="inline-flex h-11 items-center rounded-md border border-slate-200 bg-white px-4 text-sm font-black text-slate-700">
-              Page {tablePage} of {pageCount}
-            </span>
-            <button
-              className={buttonClass("light")}
-              disabled={tablePage >= pageCount || isLoading}
-              onClick={() => setTablePage((currentPage) => Math.min(pageCount, currentPage + 1))}
-              type="button"
-            >
-              Next
-            </button>
-          </div>
+      <div className="mt-3">
+        <div className="mb-1.5 flex items-center justify-end gap-1.5">
+          {isLoading ? <span className="mr-auto text-xs font-bold text-slate-500">Loading TaskLine rows...</span> : null}
+          <button
+            className="inline-flex h-8 items-center rounded-md border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 transition hover:bg-slate-50 disabled:opacity-40"
+            disabled={tablePage <= 1 || isLoading}
+            onClick={() => setTablePage((currentPage) => Math.max(1, currentPage - 1))}
+            type="button"
+          >
+            Prev
+          </button>
+          <span className="inline-flex h-8 items-center rounded-md border border-slate-200 bg-white px-3 text-xs font-black text-slate-700">
+            Page {tablePage} of {pageCount}
+          </span>
+          <button
+            className="inline-flex h-8 items-center rounded-md border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 transition hover:bg-slate-50 disabled:opacity-40"
+            disabled={tablePage >= pageCount || isLoading}
+            onClick={() => setTablePage((currentPage) => Math.min(pageCount, currentPage + 1))}
+            type="button"
+          >
+            Next
+          </button>
         </div>
         <div className="max-h-[calc(100vh-260px)] overflow-auto rounded-md border border-slate-200 bg-white">
           <table className="table-fixed border-separate border-spacing-0 text-left text-sm" style={{ minWidth: tableWidth, width: tableWidth }}>
@@ -759,7 +749,7 @@ export function TaskLineRegister() {
             </colgroup>
             <thead className="sticky top-0 z-10 bg-slate-100 text-[11px] font-semibold uppercase tracking-wide text-slate-600 [&_th]:border-b [&_th]:border-slate-200">
             <tr>
-              <th className="border-r border-white/10 px-3 py-3" style={{ width: actionColumnWidth }}>Actions</th>
+              <th className="border-r border-white/10 px-3 py-2" style={{ width: actionColumnWidth }}>Actions</th>
               {visibleColumns.map((column) => {
                 const isAsc = sortState?.key === column.key && sortState.dir === "asc";
                 const isDesc = sortState?.key === column.key && sortState.dir === "desc";
@@ -767,7 +757,7 @@ export function TaskLineRegister() {
                 const frozen = frozenInfo(column.key);
                 return (
                   <th
-                    className={`border-r border-white/10 px-3 py-3 last:border-r-0 ${frozen.isFrozen ? "sticky z-20 bg-slate-100" : ""}`}
+                    className={`border-r border-white/10 px-3 py-2 last:border-r-0 ${frozen.isFrozen ? "sticky z-20 bg-slate-100" : ""}`}
                     key={column.key}
                     style={frozen.isFrozen ? { left: frozen.left } : undefined}
                   >
@@ -835,19 +825,19 @@ export function TaskLineRegister() {
               })}
             </tr>
             <tr className="bg-slate-50">
-              <th className="border-r border-slate-200 px-2 py-2" />
+              <th className="border-r border-slate-200 px-2 py-1" />
               {visibleColumns.map((column) => {
                 const frozen = frozenInfo(column.key);
                 return (
                   <th
-                    className={`border-r border-slate-200 px-2 py-2 last:border-r-0 ${frozen.isFrozen ? "sticky z-20 bg-slate-50" : ""}`}
+                    className={`border-r border-slate-200 px-2 py-1 last:border-r-0 ${frozen.isFrozen ? "sticky z-20 bg-slate-50" : ""}`}
                     key={`filter-${column.key}`}
                     style={frozen.isFrozen ? { left: frozen.left } : undefined}
                   >
                     {column.key === "serial_no" ? null : (
                       <input
                         aria-label={`Filter ${column.label}`}
-                        className="h-8 w-full rounded-md border border-slate-200 bg-white px-2 text-xs font-semibold normal-case text-slate-950 outline-none focus:border-navy-400"
+                        className="h-7 w-full rounded-md border border-slate-200 bg-white px-2 text-xs font-semibold normal-case text-slate-950 outline-none focus:border-navy-400"
                         onChange={(event) => setColumnFilters((current) => ({ ...current, [column.key]: event.target.value }))}
                         placeholder="Filter"
                         value={columnFilters[column.key] ?? ""}
@@ -863,15 +853,15 @@ export function TaskLineRegister() {
                 <tr><td className="px-4 py-8 font-bold text-slate-500" colSpan={visibleColumns.length + 1}>Loading TaskLine rows...</td></tr>
               ) : pagedRows.length ? pagedRows.map((row, rowIndex) => (
                 <tr className="border-b border-slate-100 last:border-b-0" key={row.__id}>
-                  <td className="border-r border-slate-100 px-2 py-2">
+                  <td className="border-r border-slate-100 px-2 py-1">
                     <div className="flex items-center gap-1">
-                      <button className="inline-flex size-8 items-center justify-center rounded-md border border-sky-200 text-sky-700 hover:bg-sky-50" onClick={() => openEditForm(row)} title="Edit row" type="button">
+                      <button className="inline-flex size-7 items-center justify-center rounded-md border border-sky-200 text-sky-700 hover:bg-sky-50" onClick={() => openEditForm(row)} title="Edit row" type="button">
                         <Pencil className="size-4" />
                       </button>
-                      <button className="inline-flex size-8 items-center justify-center rounded-md border border-navy-200 text-navy-700 hover:bg-navy-50" onClick={() => viewRowHistory(row)} title="View history" type="button">
+                      <button className="inline-flex size-7 items-center justify-center rounded-md border border-navy-200 text-navy-700 hover:bg-navy-50" onClick={() => viewRowHistory(row)} title="View history" type="button">
                         <History className="size-4" />
                       </button>
-                      <button className="inline-flex size-8 items-center justify-center rounded-md border border-rose-200 text-rose-700 hover:bg-rose-50" onClick={() => deleteRow(row)} title="Delete row" type="button">
+                      <button className="inline-flex size-7 items-center justify-center rounded-md border border-rose-200 text-rose-700 hover:bg-rose-50" onClick={() => deleteRow(row)} title="Delete row" type="button">
                         <Trash2 className="size-4" />
                       </button>
                     </div>
@@ -953,8 +943,8 @@ function TaskLineCell({
 
   if (column.key === "serial_no") {
     return (
-      <td className={`border-r border-slate-100 px-2 py-2 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
-        <span className="block h-8 px-1.5 py-1.5 font-semibold text-slate-700">{serialNumber}</span>
+      <td className={`border-r border-slate-100 px-2 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
+        <span className="block h-7 px-1.5 py-1 font-semibold text-slate-700">{serialNumber}</span>
       </td>
     );
   }
@@ -962,9 +952,9 @@ function TaskLineCell({
   if (column.key === "task") {
     const current = row[column.key] ?? "";
     return (
-      <td className={`border-r border-slate-100 px-2 py-2 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
+      <td className={`border-r border-slate-100 px-2 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
         <select
-          className="h-8 w-full rounded-md border border-slate-200 bg-white px-2 text-xs font-bold outline-none focus:border-rose-300 focus:ring-2 focus:ring-rose-100"
+          className="h-7 w-full rounded-md border border-slate-200 bg-white px-2 text-xs font-bold outline-none focus:border-rose-300 focus:ring-2 focus:ring-rose-100"
           onChange={(event) => onChange(event.target.value)}
           value={current}
         >
@@ -982,9 +972,9 @@ function TaskLineCell({
 
   if (column.type === "select") {
     return (
-      <td className={`border-r border-slate-100 px-2 py-2 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
+      <td className={`border-r border-slate-100 px-2 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
         <select
-          className="h-8 w-full rounded-md border border-slate-200 bg-white px-2 text-xs font-bold outline-none focus:border-rose-300 focus:ring-2 focus:ring-rose-100"
+          className="h-7 w-full rounded-md border border-slate-200 bg-white px-2 text-xs font-bold outline-none focus:border-rose-300 focus:ring-2 focus:ring-rose-100"
           onChange={(event) => onChange(event.target.value)}
           value={row[column.key] ?? ""}
         >
@@ -1000,11 +990,11 @@ function TaskLineCell({
 
   return (
     <td
-      className={`border-r border-slate-100 px-2 py-2 last:border-r-0 ${dueColor} ${isFrozen ? (dueColor ? "sticky z-[5]" : "sticky z-[5] bg-white") : ""}`}
+      className={`border-r border-slate-100 px-2 py-1 last:border-r-0 ${dueColor} ${isFrozen ? (dueColor ? "sticky z-[5]" : "sticky z-[5] bg-white") : ""}`}
       style={frozenStyle}
     >
       <input
-        className="h-8 w-full rounded-md border border-transparent bg-transparent px-1.5 text-xs font-semibold text-slate-700 outline-none hover:border-slate-200 hover:bg-white focus:border-rose-300 focus:bg-white focus:ring-2 focus:ring-rose-100"
+        className="h-7 w-full rounded-md border border-transparent bg-transparent px-1.5 text-xs font-semibold text-slate-700 outline-none hover:border-slate-200 hover:bg-white focus:border-rose-300 focus:bg-white focus:ring-2 focus:ring-rose-100"
         onChange={(event) => onChange(event.target.value)}
         placeholder={column.type === "date" ? "dd-mm-yyyy" : undefined}
         type={column.type === "number" || column.type === "money" ? "number" : "text"}
@@ -1266,20 +1256,6 @@ function TaskLineAuditTable({ logs }: { logs: TaskLineAuditLog[] }) {
         </table>
       </div>
     </section>
-  );
-}
-
-function ViewButton({ active, label, onClick }: { active: boolean; label: string; onClick: () => void }) {
-  return (
-    <button
-      className={`inline-flex h-10 items-center justify-center rounded-md px-4 text-xs font-black uppercase transition ${
-        active ? "bg-navy-700 text-white" : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-      }`}
-      onClick={onClick}
-      type="button"
-    >
-      {label}
-    </button>
   );
 }
 
