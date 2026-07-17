@@ -401,15 +401,51 @@ async function loadAuditLogs(admin: ReturnType<typeof createAdminClient>, organi
 
   const taskLineLogs = (logs.data ?? []) as AuditLog[];
 
-  if (access.canViewAll) {
-    return taskLineLogs;
+  const visibleLogs = access.canViewAll
+    ? taskLineLogs
+    : !access.team
+      ? []
+      : taskLineLogs.filter(
+          (log) => canAccessAuditValue(log.old_value, access) || canAccessAuditValue(log.new_value, access)
+        );
+
+  if (!visibleLogs.length) {
+    return visibleLogs;
   }
 
-  if (!access.team) {
-    return [];
+  const actorNames = await loadActorNames(admin);
+
+  return visibleLogs.map((log) => ({
+    ...log,
+    actor_name: (log.actor_user_id && actorNames.get(log.actor_user_id)) || ""
+  }));
+}
+
+async function loadActorNames(admin: ReturnType<typeof createAdminClient>) {
+  const names = new Map<string, string>();
+  let page = 1;
+
+  while (page <= 20) {
+    const { data, error } = await admin.auth.admin.listUsers({ page, perPage: 1000 });
+
+    if (error || !data) {
+      break;
+    }
+
+    for (const user of data.users) {
+      const metadata = user.user_metadata ?? {};
+      const name = String(metadata.full_name ?? metadata.name ?? "").trim() || user.email || "";
+      names.set(user.id, name);
+    }
+
+    if (data.users.length < 1000) {
+      break;
+    }
+
+    page += 1;
   }
 
-  return taskLineLogs.filter((log) => canAccessAuditValue(log.old_value, access) || canAccessAuditValue(log.new_value, access));
+  return names;
 }
 
 async function writeAuditLog(

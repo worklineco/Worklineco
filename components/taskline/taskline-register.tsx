@@ -17,7 +17,9 @@ type TaskLineRow = Record<string, string>;
 type TaskLineColumnLayout = { frozenColumnKeys: string[]; hiddenColumnKeys: string[]; order: string[] };
 type TaskLineAuditLog = {
   action: string;
+  actorName?: string;
   createdAt: string;
+  entityId?: string;
   field?: string;
   id: string;
   newValue?: string;
@@ -443,6 +445,7 @@ export function TaskLineRegister() {
     if (editingRowId) {
       addAuditLog({
         action: "taskline.edit_row",
+        entityId: existingRow?.__id,
         newValue: getChangedFields(existingRow ?? undefined, formDraft).join(", ") || "Row saved",
         rowLabel: getRowLabel(existingRow ?? undefined, rows)
       });
@@ -461,6 +464,7 @@ export function TaskLineRegister() {
     if (oldValue !== value) {
       addAuditLog({
         action: "taskline.update_cell",
+        entityId: row?.__id,
         field: taskLineColumnByKey.get(key)?.label ?? key,
         newValue: value,
         oldValue,
@@ -502,7 +506,7 @@ export function TaskLineRegister() {
       }
 
       setRows((current) => current.filter((item) => item.__id !== row.__id));
-      addAuditLog({ action: "taskline.delete_row", oldValue: JSON.stringify(toDisplayRow(row)), rowLabel: getRowLabel(row, rows) });
+      addAuditLog({ action: "taskline.delete_row", entityId: row.__id, oldValue: getAuditRowLabel(row), rowLabel: getRowLabel(row, rows) });
       await loadTaskLine();
       setMessage("TaskLine row deleted.");
     } catch (error) {
@@ -739,7 +743,7 @@ export function TaskLineRegister() {
             Next
           </button>
         </div>
-        <div className="max-h-[calc(100vh-260px)] overflow-auto rounded-md border border-slate-200 bg-white">
+        <div className="max-h-[calc(100vh-185px)] overflow-auto rounded-md border border-slate-200 bg-white">
           <table className="table-fixed border-separate border-spacing-0 text-left text-sm" style={{ minWidth: tableWidth, width: tableWidth }}>
             <colgroup>
               <col style={{ width: actionColumnWidth }} />
@@ -892,7 +896,7 @@ export function TaskLineRegister() {
       ) : null}
 
       {viewMode === "audit" ? (
-        <TaskLineAuditTable logs={auditLogs} />
+        <TaskLineAuditTable logs={auditLogs} rows={rows} />
       ) : null}
 
       {formDraft ? (
@@ -1218,38 +1222,51 @@ function TaskLineColumnOptionsPanel({
   );
 }
 
-function TaskLineAuditTable({ logs }: { logs: TaskLineAuditLog[] }) {
+function TaskLineAuditTable({ logs, rows }: { logs: TaskLineAuditLog[]; rows: TaskLineRow[] }) {
+  const serialByRowId = useMemo(() => {
+    const map = new Map<string, number>();
+    rows.forEach((row, index) => map.set(row.__id, index + 1));
+    return map;
+  }, [rows]);
+
+  function rowNumber(log: TaskLineAuditLog) {
+    const serial = log.entityId ? serialByRowId.get(log.entityId) : undefined;
+    return serial ? String(serial) : "-";
+  }
+
   return (
     <section className="mt-4 overflow-hidden rounded-md border border-slate-200 bg-white">
       <div className="flex items-center gap-2 border-b border-slate-200 px-4 py-3">
         <History className="size-4 text-rose-700" />
         <h3 className="text-sm font-black uppercase tracking-[0.14em] text-slate-700">Edit History</h3>
       </div>
-      <div className="max-h-[calc(100vh-250px)] overflow-auto">
-        <table className="w-full min-w-[980px] border-collapse text-left text-sm">
+      <div className="max-h-[calc(100vh-175px)] overflow-auto">
+        <table className="w-full min-w-[860px] border-collapse text-left text-sm">
           <thead className="sticky top-0 z-10 bg-slate-100 text-[11px] font-semibold uppercase tracking-wide text-slate-600 [&_th]:border-b [&_th]:border-slate-200">
             <tr>
-              <th className="px-3 py-3">Time</th>
-              <th className="px-3 py-3">Action</th>
-              <th className="px-3 py-3">Row</th>
-              <th className="px-3 py-3">Field</th>
-              <th className="px-3 py-3">Old Value</th>
-              <th className="px-3 py-3">New Value</th>
+              <th className="px-3 py-2">Time</th>
+              <th className="px-3 py-2">Action</th>
+              <th className="px-3 py-2">Changed By</th>
+              <th className="px-3 py-2">Row</th>
+              <th className="px-3 py-2">Field</th>
+              <th className="px-3 py-2">Old Value</th>
+              <th className="px-3 py-2">New Value</th>
             </tr>
           </thead>
           <tbody>
             {logs.length ? logs.map((log) => (
               <tr className="border-b border-slate-100 last:border-b-0" key={log.id}>
-                <td className="px-3 py-3 text-xs font-bold text-slate-500">{formatAuditTime(log.createdAt)}</td>
-                <td className="px-3 py-3 font-black text-slate-900">{formatAuditAction(log.action)}</td>
-                <td className="px-3 py-3 font-semibold text-slate-700">{log.rowLabel || "-"}</td>
-                <td className="px-3 py-3 font-semibold text-slate-700">{log.field || "-"}</td>
-                <td className="max-w-[320px] px-3 py-3 font-semibold text-slate-500" title={log.oldValue || ""}>{log.oldValue || "-"}</td>
-                <td className="max-w-[520px] whitespace-normal px-3 py-3 font-semibold leading-6 text-slate-900" title={log.newValue || ""}>{log.newValue || "-"}</td>
+                <td className="px-3 py-2 text-xs font-bold text-slate-500">{formatAuditTime(log.createdAt)}</td>
+                <td className="px-3 py-2 font-black text-slate-900">{formatAuditAction(log.action)}</td>
+                <td className="px-3 py-2 font-bold text-slate-700">{log.actorName || "-"}</td>
+                <td className="px-3 py-2 font-bold text-slate-700">{rowNumber(log)}</td>
+                <td className="px-3 py-2 font-semibold text-slate-700">{log.field || "-"}</td>
+                <td className="max-w-[280px] whitespace-normal px-3 py-2 font-semibold leading-5 text-slate-500" title={log.oldValue || ""}>{log.oldValue || "-"}</td>
+                <td className="max-w-[280px] whitespace-normal px-3 py-2 font-semibold leading-5 text-slate-900" title={log.newValue || ""}>{log.newValue || "-"}</td>
               </tr>
             )) : (
               <tr>
-                <td className="px-4 py-8 text-center font-bold text-slate-500" colSpan={6}>No TaskLine edit history yet.</td>
+                <td className="px-4 py-8 text-center font-bold text-slate-500" colSpan={7}>No TaskLine edit history yet.</td>
               </tr>
             )}
           </tbody>
@@ -1428,16 +1445,55 @@ function formatAuditTime(value: string) {
 function formatServerAuditLog(log: Record<string, unknown>): TaskLineAuditLog {
   const oldValue = readAuditValue(log.old_value);
   const newValue = readAuditValue(log.new_value);
+  const change = summarizeAuditChange(oldValue, newValue);
 
   return {
     action: text(log.action),
+    actorName: text(log.actor_name),
     createdAt: text(log.created_at),
-    field: getAuditFieldSummary(oldValue, newValue),
+    entityId: text(log.entity_id) || readAuditId(log.old_value) || readAuditId(log.new_value),
+    field: change.field,
     id: text(log.id) || crypto.randomUUID(),
-    newValue: summarizeAuditValue(newValue),
-    oldValue: summarizeAuditValue(oldValue),
+    newValue: change.newValue,
+    oldValue: change.oldValue,
     rowLabel: getAuditRowLabel(oldValue || newValue)
   };
+}
+
+function readAuditId(value: unknown) {
+  if (value && typeof value === "object" && "id" in value) {
+    return text((value as { id?: unknown }).id);
+  }
+  return "";
+}
+
+function summarizeAuditChange(oldValue: TaskLineRow | null, newValue: TaskLineRow | null) {
+  const summarySource = newValue ?? oldValue;
+  if (summarySource && ("added" in summarySource || "updated" in summarySource || "deleted" in summarySource)) {
+    return { field: "Import", newValue: summarizeAuditValue(newValue), oldValue: summarizeAuditValue(oldValue) };
+  }
+
+  if (oldValue && newValue) {
+    const changed = taskLineColumns.filter((column) => text(oldValue[column.key]) !== text(newValue[column.key]));
+    if (!changed.length) {
+      return { field: "-", newValue: "-", oldValue: "-" };
+    }
+    return {
+      field: changed.map((column) => column.label).join(", "),
+      newValue: changed.map((column) => text(newValue[column.key]) || "-").join("; "),
+      oldValue: changed.map((column) => text(oldValue[column.key]) || "-").join("; ")
+    };
+  }
+
+  if (newValue) {
+    return { field: "New row", newValue: getAuditRowLabel(newValue) || "New row", oldValue: "-" };
+  }
+
+  if (oldValue) {
+    return { field: "Deleted row", newValue: "-", oldValue: getAuditRowLabel(oldValue) || "Deleted row" };
+  }
+
+  return { field: "-", newValue: "-", oldValue: "-" };
 }
 
 function readAuditValue(value: unknown) {
@@ -1447,18 +1503,6 @@ function readAuditValue(value: unknown) {
 
   const record = value as { data?: TaskLineRow } & TaskLineRow;
   return record.data ?? record;
-}
-
-function getAuditFieldSummary(oldValue: TaskLineRow | null, newValue: TaskLineRow | null) {
-  if (!oldValue || !newValue) {
-    return "";
-  }
-
-  return taskLineColumns
-    .filter((column) => text(oldValue[column.key]) !== text(newValue[column.key]))
-    .map((column) => column.label)
-    .slice(0, 6)
-    .join(", ");
 }
 
 function summarizeAuditValue(value: TaskLineRow | null) {
