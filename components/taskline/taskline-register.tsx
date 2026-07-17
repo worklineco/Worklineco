@@ -1278,8 +1278,14 @@ function TaskLineMultiSelectCell({
 }) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<{ left: number; maxHeight: number; top: number } | null>(null);
+  const [localValue, setLocalValue] = useState(value);
   const buttonRef = useRef<HTMLButtonElement>(null);
-  const selected = value ? value.split(",").map((entry) => entry.trim()).filter(Boolean) : [];
+
+  useEffect(() => {
+    setLocalValue(value);
+  }, [value]);
+
+  const selected = localValue ? localValue.split(",").map((entry) => entry.trim()).filter(Boolean) : [];
 
   function openMenu() {
     const rect = buttonRef.current?.getBoundingClientRect();
@@ -1295,19 +1301,11 @@ function TaskLineMultiSelectCell({
   }
 
   function toggle(name: string) {
-    const set = new Set(selected);
-    if (set.has(name)) {
-      set.delete(name);
-    } else {
-      set.add(name);
-    }
-    const ordered = options.filter((option) => set.has(option));
-    selected.forEach((entry) => {
-      if (!options.includes(entry) && set.has(entry)) {
-        ordered.push(entry);
-      }
-    });
-    onChange(ordered.join(", "));
+    const next = selected.includes(name) ? selected.filter((entry) => entry !== name) : [...selected, name];
+    const ordered = [...options.filter((option) => next.includes(option)), ...next.filter((entry) => !options.includes(entry))];
+    const joined = ordered.join(", ");
+    setLocalValue(joined);
+    onChange(joined);
   }
 
   return (
