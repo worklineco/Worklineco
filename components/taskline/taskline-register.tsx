@@ -137,10 +137,34 @@ export function TaskLineRegister() {
 
     if (sortState) {
       const factor = sortState.dir === "asc" ? 1 : -1;
-      return [...result].sort(
-        (first, second) =>
-          factor * text(first[sortState.key]).localeCompare(text(second[sortState.key]), undefined, { numeric: true })
-      );
+      const sortType = taskLineColumnByKey.get(sortState.key)?.type;
+
+      return [...result].sort((first, second) => {
+        const rawA = text(first[sortState.key]);
+        const rawB = text(second[sortState.key]);
+
+        if (sortType === "date") {
+          const dateA = parseTaskLineDueDate(rawA);
+          const dateB = parseTaskLineDueDate(rawB);
+          if (!dateA && !dateB) return 0;
+          if (!dateA) return 1;
+          if (!dateB) return -1;
+          return factor * (dateA.getTime() - dateB.getTime());
+        }
+
+        if (sortType === "number" || sortType === "money") {
+          const numA = rawA === "" ? NaN : Number(rawA.replace(/[^0-9.-]/g, ""));
+          const numB = rawB === "" ? NaN : Number(rawB.replace(/[^0-9.-]/g, ""));
+          const validA = !Number.isNaN(numA);
+          const validB = !Number.isNaN(numB);
+          if (!validA && !validB) return 0;
+          if (!validA) return 1;
+          if (!validB) return -1;
+          return factor * (numA - numB);
+        }
+
+        return factor * rawA.localeCompare(rawB, undefined, { numeric: true });
+      });
     }
 
     return result;
@@ -162,7 +186,7 @@ export function TaskLineRegister() {
 
   useEffect(() => {
     setTablePage(1);
-  }, [columnFilters, search, statusFilter]);
+  }, [columnFilters, dueColorFilter, search, sortState, statusFilter, valueFilters]);
 
   useEffect(() => {
     setTablePage((currentPage) => Math.min(currentPage, pageCount));
