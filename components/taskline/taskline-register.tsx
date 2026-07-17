@@ -984,7 +984,7 @@ function TaskLineCell({
           onChange={(event) => onChange(event.target.value)}
           value={current}
         >
-          <option value="" disabled hidden>Select task</option>
+          <option value="">Select task</option>
           {taskMasterNames.map((name) => (
             <option key={name} value={name}>{name}</option>
           ))}
@@ -1004,7 +1004,7 @@ function TaskLineCell({
           onChange={(event) => onChange(event.target.value)}
           value={row[column.key] ?? ""}
         >
-          <option value="" disabled hidden>Select</option>
+          <option value="">Select</option>
           {statusOptions.map((option) => (
             <option key={option} value={option}>{option}</option>
           ))}
@@ -1084,7 +1084,7 @@ function TaskLineForm({
                     onChange={(event) => onChange(column.key, event.target.value)}
                     value={draft[column.key] ?? ""}
                   >
-                    <option value="" disabled hidden>Select</option>
+                    <option value="">Select</option>
                     {statusOptions.map((option) => (
                       <option key={option} value={option}>{option}</option>
                     ))}
