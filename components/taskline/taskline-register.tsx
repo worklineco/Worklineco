@@ -86,7 +86,6 @@ const taskLineColumnByKey = new Map(taskLineColumns.map((column) => [column.key,
 const defaultTaskLineColumnOrder = taskLineColumns.map((column) => column.key);
 const statusOptions = ["Open", "Close"];
 type TeamMemberLite = { designation: string; name: string; team: string };
-const partnerNameFallback = ["Yash Dhaddha", "Shuchi Sethi"];
 
 function teamMatchKey(value: string) {
   const digits = String(value ?? "").match(/\d+/);
@@ -151,7 +150,7 @@ export function TaskLineRegister() {
     const teamNonArticles = teamMembers
       .filter((member) => teamMatchKey(member.team) === key && !isArticleDesignation(member.designation))
       .map((member) => member.name.trim());
-    return Array.from(new Set([...teamNonArticles, ...partnerMemberNames, ...partnerNameFallback].map((name) => name.trim()).filter(Boolean)));
+    return Array.from(new Set([...teamNonArticles, ...partnerMemberNames].map((name) => name.trim()).filter(Boolean)));
   }
   function resourceOptionsForTeam(team: string) {
     const key = teamMatchKey(team);
@@ -1164,23 +1163,14 @@ function TaskLineCell({
   }
 
   if (column.key === "name") {
-    const current = row[column.key] ?? "";
     return (
-      <td className={`border-r border-slate-100 px-2 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
-        <select
-          className="h-7 w-full rounded-md border border-slate-200 bg-white px-2 text-xs font-bold outline-none focus:border-rose-300 focus:ring-2 focus:ring-rose-100"
-          onChange={(event) => onChange(event.target.value)}
-          value={current}
-        >
-          <option value="">Select</option>
-          {nameOptions.map((name) => (
-            <option key={name} value={name}>{name}</option>
-          ))}
-          {current && !nameOptions.includes(current) ? (
-            <option value={current}>{current}</option>
-          ) : null}
-        </select>
-      </td>
+      <TaskLineMultiSelectCell
+        frozenStyle={frozenStyle}
+        isFrozen={isFrozen}
+        onChange={onChange}
+        options={nameOptions}
+        value={row[column.key] ?? ""}
+      />
     );
   }
 
@@ -1400,19 +1390,35 @@ function TaskLineForm({
               <label className={["remarks", "issue", "document_link", "el_reference", "fee_comments"].includes(column.key) ? "xl:col-span-2" : ""} key={column.key}>
                 <span className="text-[10px] font-black uppercase text-slate-500">{column.label}</span>
                 {column.key === "name" ? (
-                  <select
-                    className={formControlClass}
-                    onChange={(event) => onChange(column.key, event.target.value)}
-                    value={draft[column.key] ?? ""}
-                  >
-                    <option value="">Select</option>
-                    {nameOptionsForTeam(draft.team ?? "").map((name) => (
-                      <option key={name} value={name}>{name}</option>
-                    ))}
-                    {draft[column.key] && !nameOptionsForTeam(draft.team ?? "").includes(draft[column.key]) ? (
-                      <option value={draft[column.key]}>{draft[column.key]}</option>
-                    ) : null}
-                  </select>
+                  <div className="mt-1 flex max-h-32 flex-wrap gap-x-4 gap-y-1 overflow-y-auto rounded-md border border-slate-200 bg-white px-3 py-2">
+                    {nameOptionsForTeam(draft.team ?? "").length ? (
+                      nameOptionsForTeam(draft.team ?? "").map((name) => {
+                        const selected = (draft.name ?? "").split(",").map((entry) => entry.trim()).filter(Boolean);
+                        return (
+                          <label className="flex items-center gap-2 text-sm font-semibold text-slate-800" key={name}>
+                            <input
+                              checked={selected.includes(name)}
+                              className="size-4 accent-navy-700"
+                              onChange={() => {
+                                const set = new Set(selected);
+                                if (set.has(name)) {
+                                  set.delete(name);
+                                } else {
+                                  set.add(name);
+                                }
+                                const options = nameOptionsForTeam(draft.team ?? "");
+                                onChange("name", options.filter((option) => set.has(option)).join(", "));
+                              }}
+                              type="checkbox"
+                            />
+                            {name}
+                          </label>
+                        );
+                      })
+                    ) : (
+                      <span className="text-xs font-semibold text-slate-400">No members for this team.</span>
+                    )}
+                  </div>
                 ) : column.key === "resource" ? (
                   <div className="mt-1 flex max-h-32 flex-wrap gap-x-4 gap-y-1 overflow-y-auto rounded-md border border-slate-200 bg-white px-3 py-2">
                     {resourceOptionsForTeam(draft.team ?? "").length ? (
