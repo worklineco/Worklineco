@@ -116,11 +116,13 @@ export function TaskLineRegister() {
   const [isToolbarMenuOpen, setIsToolbarMenuOpen] = useState(false);
   const [masterMessage, setMasterMessage] = useState("");
   const taskMasterNames = useMemo(() => taskMasters.map((master) => master.name), [taskMasters]);
-  const [statusMasters, setStatusMasters] = useState<{ id: string; name: string }[]>([]);
-  const [statusMasterMessage, setStatusMasterMessage] = useState("");
-  const [masterKind, setMasterKind] = useState<"status" | "task">("task");
+  const [stageMasters, setStageMasters] = useState<{ id: string; name: string }[]>([]);
+  const [stageMasterMessage, setStageMasterMessage] = useState("");
+  const [masterKind, setMasterKind] = useState<"stage" | "task">("task");
   const [isMasterSubmenuOpen, setIsMasterSubmenuOpen] = useState(false);
-  const statusMasterNames = useMemo(() => statusMasters.map((master) => master.name), [statusMasters]);
+  const stageMasterNames = useMemo(() => stageMasters.map((master) => master.name), [stageMasters]);
+  const [stageMastersFetched, setStageMastersFetched] = useState(false);
+  const stageSeedDoneRef = useRef(false);
 
   const orderedColumns = useMemo(
     () => columnOrder.map((key) => taskLineColumnByKey.get(key)).filter((column): column is TaskLineColumn => Boolean(column)),
@@ -213,8 +215,23 @@ export function TaskLineRegister() {
   useEffect(() => {
     void loadTaskLine();
     void loadMasters();
-    void loadStatusMasters();
+    void loadStageMasters();
   }, []);
+
+  useEffect(() => {
+    if (stageSeedDoneRef.current || !stageMastersFetched || !rows.length) {
+      return;
+    }
+    stageSeedDoneRef.current = true;
+    if (stageMasters.length) {
+      return;
+    }
+    const unique = Array.from(new Set(rows.map((row) => text(row.stage).trim()).filter(Boolean)));
+    if (unique.length) {
+      void seedStageMasters(unique);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows, stageMasters, stageMastersFetched]);
 
   useEffect(() => {
     setTablePage(1);
@@ -366,63 +383,64 @@ export function TaskLineRegister() {
     setMasterMessage("");
   }
 
-  async function loadStatusMasters() {
+  async function loadStageMasters() {
     try {
-      const response = await fetch("/api/taskline/masters?type=status", { cache: "no-store" });
+      const response = await fetch("/api/taskline/masters?type=stage", { cache: "no-store" });
       const result = (await response.json()) as { error?: string; masters?: { id: string; name: string }[] };
       if (!response.ok) {
-        setStatusMasterMessage(result.error ?? "Could not load status master list.");
+        setStageMasterMessage(result.error ?? "Could not load stage master list.");
         return;
       }
-      const list = result.masters ?? [];
-      if (!list.length) {
-        const seeded = await fetch("/api/taskline/masters", {
-          body: JSON.stringify({ names: statusOptions, type: "status" }),
-          headers: { "Content-Type": "application/json" },
-          method: "POST"
-        });
-        const seededResult = (await seeded.json()) as { error?: string; masters?: { id: string; name: string }[] };
-        if (seeded.ok) {
-          setStatusMasters(seededResult.masters ?? []);
-          setStatusMasterMessage("");
-          return;
-        }
-      }
-      setStatusMasters(list);
-      setStatusMasterMessage("");
+      setStageMasters(result.masters ?? []);
+      setStageMasterMessage("");
     } catch {
-      setStatusMasterMessage("Could not load status master list.");
+      setStageMasterMessage("Could not load stage master list.");
+    } finally {
+      setStageMastersFetched(true);
     }
   }
 
-  async function saveStatusMaster(name: string, id?: string) {
+  async function seedStageMasters(names: string[]) {
+    const response = await fetch("/api/taskline/masters", {
+      body: JSON.stringify({ names, type: "stage" }),
+      headers: { "Content-Type": "application/json" },
+      method: "POST"
+    });
+    const result = (await response.json()) as { error?: string; masters?: { id: string; name: string }[] };
+    if (response.ok) {
+      setStageMasters(result.masters ?? []);
+      setStageMasterMessage("");
+    }
+  }
+
+  async function saveStageMaster(name: string, id?: string) {
     const trimmed = name.trim();
     if (!trimmed) {
       return;
     }
     const response = await fetch("/api/taskline/masters", {
-      body: JSON.stringify({ id, name: trimmed, type: "status" }),
+      body: JSON.stringify({ id, name: trimmed, type: "stage" }),
       headers: { "Content-Type": "application/json" },
       method: "POST"
     });
     const result = (await response.json()) as { error?: string; masters?: { id: string; name: string }[] };
     if (!response.ok) {
-      setStatusMasterMessage(result.error ?? "Could not save status type.");
+      setStageMasterMessage(result.error ?? "Could not save stage type.");
       return;
     }
-    setStatusMasters(result.masters ?? []);
-    setStatusMasterMessage("");
+    setStageMasters(result.masters ?? []);
+    setStageMasterMessage("");
   }
 
-  async function deleteStatusMaster(id: string) {
-    const response = await fetch(`/api/taskline/masters?type=status&id=${encodeURIComponent(id)}`, { method: "DELETE" });
+  async function deleteStageMaster(id: string) {
+    const response = await fetch(`/api/taskline/masters?type=stage&id=${encodeURIComponent(id)}`, { method: "DELETE" });
     const result = (await response.json()) as { error?: string; masters?: { id: string; name: string }[] };
     if (!response.ok) {
-      setStatusMasterMessage(result.error ?? "Could not delete status type.");
+      setStageMasterMessage(result.error ?? "Could not delete stage type.");
       return;
     }
-    setStatusMasters(result.masters ?? []);
-    setStatusMasterMessage("");
+    setStageMasters(result.masters ?? []);
+    setStageMasterMessage("");
   }
 
   async function loadTaskLine() {
@@ -747,7 +765,7 @@ export function TaskLineRegister() {
                 {isMasterSubmenuOpen ? (
                   <div className="border-y border-slate-100 bg-slate-50 pl-3">
                     <ToolbarMenuItem icon={ListChecks} label="Task Master" onClick={() => { setIsToolbarMenuOpen(false); setIsMasterSubmenuOpen(false); setMasterKind("task"); setIsMasterOpen(true); }} />
-                    <ToolbarMenuItem icon={CircleDot} label="Status Master" onClick={() => { setIsToolbarMenuOpen(false); setIsMasterSubmenuOpen(false); setMasterKind("status"); setIsMasterOpen(true); }} />
+                    <ToolbarMenuItem icon={CircleDot} label="Stage Master" onClick={() => { setIsToolbarMenuOpen(false); setIsMasterSubmenuOpen(false); setMasterKind("stage"); setIsMasterOpen(true); }} />
                   </div>
                 ) : null}
                 <ToolbarMenuItem icon={Settings2} label="Columns" onClick={() => { setIsToolbarMenuOpen(false); setIsColumnOptionsOpen(true); }} />
@@ -976,7 +994,7 @@ export function TaskLineRegister() {
                         onChange={(value) => updateRow(row.__id, column.key, value)}
                         row={row}
                         serialNumber={(tablePage - 1) * taskLinePageSize + rowIndex + 1}
-                        statusMasterNames={statusMasterNames}
+                        stageMasterNames={stageMasterNames}
                         taskMasterNames={taskMasterNames}
                       />
                     );
@@ -1005,24 +1023,24 @@ export function TaskLineRegister() {
             setFormDraft(null);
           }}
           onSubmit={saveFormDraft}
-          statusMasterNames={statusMasterNames}
+          stageMasterNames={stageMasterNames}
           taskMasterNames={taskMasterNames}
         />
       ) : null}
 
       {isMasterOpen ? (
-        masterKind === "status" ? (
+        masterKind === "stage" ? (
           <TaskLineMasterPanel
-            addPlaceholder="Add a new status type"
-            emptyText="No status types yet. Add one above."
-            heading="Status Master"
-            masters={statusMasters}
-            message={statusMasterMessage}
+            addPlaceholder="Add a new stage type"
+            emptyText="No stage types yet. Add one above."
+            heading="Stage Master"
+            masters={stageMasters}
+            message={stageMasterMessage}
             onClose={() => setIsMasterOpen(false)}
-            onDelete={deleteStatusMaster}
-            onSave={saveStatusMaster}
-            subheading="Status Open/Close can only be chosen from this list."
-            title="Manage status types"
+            onDelete={deleteStageMaster}
+            onSave={saveStageMaster}
+            subheading="Stage in TaskLine can only be chosen from this list."
+            title="Manage stage types"
           />
         ) : (
           <TaskLineMasterPanel
@@ -1050,7 +1068,7 @@ function TaskLineCell({
   onChange,
   row,
   serialNumber,
-  statusMasterNames,
+  stageMasterNames,
   taskMasterNames
 }: {
   column: TaskLineColumn;
@@ -1059,7 +1077,7 @@ function TaskLineCell({
   onChange: (value: string) => void;
   row: TaskLineRow;
   serialNumber: number;
-  statusMasterNames: string[];
+  stageMasterNames: string[];
   taskMasterNames: string[];
 }) {
   const frozenStyle = isFrozen ? { left: frozenLeft } : undefined;
@@ -1093,7 +1111,7 @@ function TaskLineCell({
     );
   }
 
-  if (column.type === "select") {
+  if (column.key === "stage") {
     const current = row[column.key] ?? "";
     return (
       <td className={`border-r border-slate-100 px-2 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
@@ -1102,13 +1120,30 @@ function TaskLineCell({
           onChange={(event) => onChange(event.target.value)}
           value={current}
         >
-          <option value="">Select</option>
-          {statusMasterNames.map((name) => (
+          <option value="">Select stage</option>
+          {stageMasterNames.map((name) => (
             <option key={name} value={name}>{name}</option>
           ))}
-          {current && !statusMasterNames.includes(current) ? (
+          {current && !stageMasterNames.includes(current) ? (
             <option value={current}>{current} (not in master)</option>
           ) : null}
+        </select>
+      </td>
+    );
+  }
+
+  if (column.type === "select") {
+    return (
+      <td className={`border-r border-slate-100 px-2 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
+        <select
+          className="h-7 w-full rounded-md border border-slate-200 bg-white px-2 text-xs font-bold outline-none focus:border-rose-300 focus:ring-2 focus:ring-rose-100"
+          onChange={(event) => onChange(event.target.value)}
+          value={row[column.key] ?? ""}
+        >
+          <option value="">Select</option>
+          {statusOptions.map((option) => (
+            <option key={option} value={option}>{option}</option>
+          ))}
         </select>
       </td>
     );
@@ -1138,7 +1173,7 @@ function TaskLineForm({
   onChange,
   onClose,
   onSubmit,
-  statusMasterNames,
+  stageMasterNames,
   taskMasterNames
 }: {
   draft: TaskLineRow;
@@ -1146,7 +1181,7 @@ function TaskLineForm({
   onChange: (key: string, value: string) => void;
   onClose: () => void;
   onSubmit: () => void;
-  statusMasterNames: string[];
+  stageMasterNames: string[];
   taskMasterNames: string[];
 }) {
   return (
@@ -1181,6 +1216,20 @@ function TaskLineForm({
                       <option value={draft[column.key]}>{draft[column.key]} (not in master)</option>
                     ) : null}
                   </select>
+                ) : column.key === "stage" ? (
+                  <select
+                    className={formControlClass}
+                    onChange={(event) => onChange(column.key, event.target.value)}
+                    value={draft[column.key] ?? ""}
+                  >
+                    <option value="">Select stage</option>
+                    {stageMasterNames.map((name) => (
+                      <option key={name} value={name}>{name}</option>
+                    ))}
+                    {draft[column.key] && !stageMasterNames.includes(draft[column.key]) ? (
+                      <option value={draft[column.key]}>{draft[column.key]} (not in master)</option>
+                    ) : null}
+                  </select>
                 ) : column.type === "select" ? (
                   <select
                     className={formControlClass}
@@ -1188,12 +1237,9 @@ function TaskLineForm({
                     value={draft[column.key] ?? ""}
                   >
                     <option value="">Select</option>
-                    {statusMasterNames.map((name) => (
-                      <option key={name} value={name}>{name}</option>
+                    {statusOptions.map((option) => (
+                      <option key={option} value={option}>{option}</option>
                     ))}
-                    {draft[column.key] && !statusMasterNames.includes(draft[column.key]) ? (
-                      <option value={draft[column.key]}>{draft[column.key]} (not in master)</option>
-                    ) : null}
                   </select>
                 ) : (
                   <input

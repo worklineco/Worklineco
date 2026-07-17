@@ -10,7 +10,7 @@ type MasterKind = { label: string; sqlFile: string; table: string };
 const defaultOrganisationCode = "DCO1433";
 
 const masterKinds: Record<string, MasterKind> = {
-  status: { label: "Status master", sqlFile: "database/014_taskline_status_master.sql", table: "taskline_status_master" },
+  stage: { label: "Stage master", sqlFile: "database/014_taskline_stage_master.sql", table: "taskline_stage_master" },
   task: { label: "Task master", sqlFile: "database/013_taskline_task_master.sql", table: "taskline_task_master" }
 };
 
