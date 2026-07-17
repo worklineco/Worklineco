@@ -92,6 +92,7 @@ export function TaskLineRegister() {
   const [filterDraft, setFilterDraft] = useState<string[]>([]);
   const [filterSearch, setFilterSearch] = useState("");
   const [filterMenuPos, setFilterMenuPos] = useState<{ left: number; maxHeight: number; top: number } | null>(null);
+  const [dueColorFilter, setDueColorFilter] = useState<string[]>([]);
   const [columnOrder, setColumnOrder] = useState(() => getSavedTaskLineColumnLayout().order);
   const [auditLogs, setAuditLogs] = useState<TaskLineAuditLog[]>([]);
   const [formDraft, setFormDraft] = useState<TaskLineRow | null>(null);
@@ -129,8 +130,9 @@ export function TaskLineRegister() {
         const selected = valueFilters[column.key];
         return !selected || selected.includes(text(row[column.key]));
       });
+      const matchesDueColor = !dueColorFilter.length || dueColorFilter.includes(dueDateCategory(text(row.due_date)));
 
-      return matchesSearch && matchesStatus && matchesColumnFilters && matchesValueFilters;
+      return matchesSearch && matchesStatus && matchesColumnFilters && matchesValueFilters && matchesDueColor;
     });
 
     if (sortState) {
@@ -142,7 +144,7 @@ export function TaskLineRegister() {
     }
 
     return result;
-  }, [columnFilters, rows, search, sortState, statusFilter, valueFilters, visibleColumns]);
+  }, [columnFilters, dueColorFilter, rows, search, sortState, statusFilter, valueFilters, visibleColumns]);
   const hasActiveColumnFilters = Object.values(columnFilters).some((value) => value.trim());
   const pageCount = Math.max(1, Math.ceil(filteredRows.length / taskLinePageSize));
   const pagedRows = useMemo(() => {
@@ -193,7 +195,7 @@ export function TaskLineRegister() {
     const width = 288;
     const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
     const top = rect.bottom + 4;
-    const maxHeight = Math.max(120, window.innerHeight - top - 300);
+    const maxHeight = Math.max(240, window.innerHeight - top - 16);
     setFilterMenuPos({ left, maxHeight, top });
   }
 
@@ -243,6 +245,12 @@ export function TaskLineRegister() {
       }
       return Array.from(merged);
     });
+  }
+
+  function toggleDueColor(key: string) {
+    setDueColorFilter((current) =>
+      current.includes(key) ? current.filter((item) => item !== key) : [...current, key]
+    );
   }
 
   function toggleSort(key: string) {
@@ -662,7 +670,7 @@ export function TaskLineRegister() {
               {visibleColumns.map((column) => {
                 const isAsc = sortState?.key === column.key && sortState.dir === "asc";
                 const isDesc = sortState?.key === column.key && sortState.dir === "desc";
-                const hasValueFilter = Boolean(valueFilters[column.key]);
+                const hasValueFilter = Boolean(valueFilters[column.key]) || (column.key === "due_date" && dueColorFilter.length > 0);
                 return (
                   <th className="border-r border-white/10 px-3 py-3 last:border-r-0" key={column.key}>
                     <div className="flex items-center gap-1">
@@ -694,13 +702,21 @@ export function TaskLineRegister() {
                     </div>
                     {openFilterKey === column.key && filterMenuPos ? (
                       <TaskLineFilterMenu
+                        colorOptions={column.key === "due_date" ? dueColorCategories : undefined}
+                        colorSelected={dueColorFilter}
                         columnLabel={column.label}
                         draft={filterDraft}
                         hasFilter={hasValueFilter}
+                        onToggleColor={toggleDueColor}
                         menuPos={filterMenuPos}
                         onApply={() => applyColumnFilter(column.key)}
                         onCancel={closeColumnFilter}
-                        onClear={() => clearColumnFilter(column.key)}
+                        onClear={() => {
+                          clearColumnFilter(column.key);
+                          if (column.key === "due_date") {
+                            setDueColorFilter([]);
+                          }
+                        }}
                         onSearchChange={setFilterSearch}
                         onSortAsc={() => {
                           setSortState({ dir: "asc", key: column.key });
@@ -1393,6 +1409,8 @@ function text(value: unknown) {
 }
 
 function TaskLineFilterMenu({
+  colorOptions,
+  colorSelected,
   columnLabel,
   draft,
   hasFilter,
@@ -1404,10 +1422,13 @@ function TaskLineFilterMenu({
   onSortAsc,
   onSortDesc,
   onToggleAll,
+  onToggleColor,
   onToggleValue,
   search,
   visibleOptions
 }: {
+  colorOptions?: { key: string; label: string; swatch: string }[];
+  colorSelected: string[];
   columnLabel: string;
   draft: string[];
   hasFilter: boolean;
@@ -1419,6 +1440,7 @@ function TaskLineFilterMenu({
   onSortAsc: () => void;
   onSortDesc: () => void;
   onToggleAll: () => void;
+  onToggleColor: (key: string) => void;
   onToggleValue: (value: string) => void;
   search: string;
   visibleOptions: string[];
@@ -1432,10 +1454,10 @@ function TaskLineFilterMenu({
 
   return createPortal(
     <div
-      className="fixed z-[1000] w-72 overflow-hidden rounded-lg border border-slate-300 bg-white p-2 text-left text-slate-900 shadow-2xl"
-      style={{ left: menuPos.left, top: menuPos.top }}
+      className="fixed z-[1000] flex w-72 flex-col overflow-hidden rounded-lg border border-slate-300 bg-white p-2 text-left text-slate-900 shadow-2xl"
+      style={{ left: menuPos.left, maxHeight: menuPos.maxHeight, top: menuPos.top }}
     >
-      <div className="space-y-1 border-b border-slate-200 pb-2">
+      <div className="shrink-0 space-y-1 border-b border-slate-200 pb-2">
         <button className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm font-semibold transition hover:bg-slate-100" onClick={onSortAsc} type="button">
           <span className="flex w-8 items-center justify-center text-xs font-black text-navy-700">A-Z</span>
           Sort A to Z
@@ -1446,8 +1468,26 @@ function TaskLineFilterMenu({
         </button>
       </div>
 
+      {colorOptions ? (
+        <div className="mt-2 shrink-0 border-b border-slate-200 pb-2">
+          <p className="px-1 pb-1 text-[11px] font-bold uppercase tracking-wide text-slate-500">Filter by colour</p>
+          {colorOptions.map((option) => (
+            <label className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm font-semibold text-slate-950 hover:bg-slate-100" key={option.key}>
+              <input
+                checked={colorSelected.includes(option.key)}
+                className="size-4 accent-navy-700"
+                onChange={() => onToggleColor(option.key)}
+                type="checkbox"
+              />
+              <span className={`inline-block size-4 shrink-0 rounded ${option.swatch}`} />
+              <span className="min-w-0 truncate">{option.label}</span>
+            </label>
+          ))}
+        </div>
+      ) : null}
+
       <button
-        className="mt-2 flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm font-semibold text-slate-500 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-300 disabled:hover:bg-white"
+        className="mt-2 flex w-full shrink-0 items-center gap-2 rounded-md px-2 py-2 text-sm font-semibold text-slate-500 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-300 disabled:hover:bg-white"
         disabled={!hasFilter}
         onClick={onClear}
         type="button"
@@ -1456,7 +1496,7 @@ function TaskLineFilterMenu({
         Clear Filter From &quot;{columnLabel}&quot;
       </button>
 
-      <div className="mt-2 flex justify-end gap-2">
+      <div className="mt-2 flex shrink-0 justify-end gap-2">
         <button className="inline-flex h-9 items-center justify-center rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50" onClick={onCancel} type="button">
           Cancel
         </button>
@@ -1465,7 +1505,7 @@ function TaskLineFilterMenu({
         </button>
       </div>
 
-      <div className="mt-2 flex items-center gap-2 rounded-md border border-slate-300 px-2 py-1.5">
+      <div className="mt-2 flex shrink-0 items-center gap-2 rounded-md border border-slate-300 px-2 py-1.5">
         <Search className="size-4 text-slate-400" />
         <input
           className="min-w-0 flex-1 bg-transparent text-sm font-semibold outline-none placeholder:text-slate-400"
@@ -1475,7 +1515,7 @@ function TaskLineFilterMenu({
         />
       </div>
 
-      <div className="mt-2 overflow-y-auto overscroll-contain border border-slate-200 bg-slate-50 p-2" style={{ maxHeight: menuPos.maxHeight }}>
+      <div className="mt-2 min-h-0 flex-1 overflow-y-auto overscroll-contain border border-slate-200 bg-slate-50 p-2">
         <label className="flex cursor-pointer items-center gap-2 text-sm font-semibold text-slate-950">
           <input
             checked={allVisibleSelected}
@@ -1510,6 +1550,47 @@ function TaskLineFilterMenu({
 
 // Due-date conditional colours (matches the TaskLine legend).
 // bg-red-200 bg-yellow-300 bg-green-400 bg-blue-300 bg-amber-500 bg-orange-300
+const dueColorCategories = [
+  { key: "overdue", label: "Overdue", swatch: "bg-red-200" },
+  { key: "today", label: "Due Today", swatch: "bg-yellow-300" },
+  { key: "d7", label: "Due Within 7 Days", swatch: "bg-green-400" },
+  { key: "d15", label: "Due Within 15 Days", swatch: "bg-blue-300" },
+  { key: "d30", label: "Due Within 30 Days", swatch: "bg-amber-500" },
+  { key: "d90", label: "Due Within 30-90 Days", swatch: "bg-orange-300" },
+  { key: "none", label: "No colour (blank / 90+ days)", swatch: "border border-slate-300 bg-white" }
+];
+
+function dueDateCategory(value: string): string {
+  const due = parseTaskLineDueDate(value);
+  if (!due) {
+    return "none";
+  }
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const diffDays = Math.round((due.getTime() - today.getTime()) / 86400000);
+
+  if (diffDays < 0) {
+    return "overdue";
+  }
+  if (diffDays === 0) {
+    return "today";
+  }
+  if (diffDays <= 7) {
+    return "d7";
+  }
+  if (diffDays <= 15) {
+    return "d15";
+  }
+  if (diffDays <= 30) {
+    return "d30";
+  }
+  if (diffDays <= 90) {
+    return "d90";
+  }
+  return "none";
+}
+
 function dueDateColorClass(value: string): string {
   const due = parseTaskLineDueDate(value);
   if (!due) {
