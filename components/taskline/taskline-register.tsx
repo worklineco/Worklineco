@@ -2,7 +2,7 @@
 
 import { ArrowDown, ArrowUp, ChevronDown, CircleDot, Download, Filter, History, ListChecks, Menu, Pencil, Pin, Plus, Search, Settings2, Trash2, Upload, X } from "lucide-react";
 import type { ComponentType } from "react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import * as XLSX from "xlsx-js-style";
 import { getCached, setCached } from "@/lib/data-cache";
@@ -86,6 +86,7 @@ const taskLineColumnByKey = new Map(taskLineColumns.map((column) => [column.key,
 const defaultTaskLineColumnOrder = taskLineColumns.map((column) => column.key);
 const statusOptions = ["Open", "Close"];
 type TeamMemberLite = { designation: string; name: string; team: string };
+const emptyOptions: string[] = [];
 
 function teamMatchKey(value: string) {
   const digits = String(value ?? "").match(/\d+/);
@@ -141,28 +142,52 @@ export function TaskLineRegister() {
   const [stageMastersFetched, setStageMastersFetched] = useState(false);
   const stageSeedDoneRef = useRef(false);
   const [teamMembers, setTeamMembers] = useState<TeamMemberLite[]>([]);
-  const partnerMemberNames = useMemo(
-    () => teamMembers.filter((member) => isPartnerDesignation(member.designation)).map((member) => member.name.trim()).filter(Boolean),
-    [teamMembers]
+  const rowsRef = useRef<TaskLineRow[]>([]);
+  const teamNameOptions = useMemo(() => {
+    const partners = teamMembers
+      .filter((member) => isPartnerDesignation(member.designation))
+      .map((member) => member.name.trim())
+      .filter(Boolean);
+    const byTeam = new Map<string, string[]>();
+    for (const member of teamMembers) {
+      if (isArticleDesignation(member.designation)) {
+        continue;
+      }
+      const key = teamMatchKey(member.team);
+      const list = byTeam.get(key) ?? [];
+      list.push(member.name.trim());
+      byTeam.set(key, list);
+    }
+    const map = new Map<string, string[]>();
+    for (const [key, names] of byTeam) {
+      map.set(key, Array.from(new Set([...names, ...partners].filter(Boolean))));
+    }
+    return { map, partnersOnly: Array.from(new Set(partners)) };
+  }, [teamMembers]);
+  const teamResourceOptions = useMemo(() => {
+    const map = new Map<string, string[]>();
+    for (const member of teamMembers) {
+      if (!isArticleDesignation(member.designation)) {
+        continue;
+      }
+      const key = teamMatchKey(member.team);
+      const list = map.get(key) ?? [];
+      list.push(member.name.trim());
+      map.set(key, list);
+    }
+    for (const [key, names] of map) {
+      map.set(key, Array.from(new Set(names.filter(Boolean))));
+    }
+    return map;
+  }, [teamMembers]);
+  const nameOptionsForTeam = useCallback(
+    (team: string) => teamNameOptions.map.get(teamMatchKey(team)) ?? teamNameOptions.partnersOnly,
+    [teamNameOptions]
   );
-  function nameOptionsForTeam(team: string) {
-    const key = teamMatchKey(team);
-    const teamNonArticles = teamMembers
-      .filter((member) => teamMatchKey(member.team) === key && !isArticleDesignation(member.designation))
-      .map((member) => member.name.trim());
-    return Array.from(new Set([...teamNonArticles, ...partnerMemberNames].map((name) => name.trim()).filter(Boolean)));
-  }
-  function resourceOptionsForTeam(team: string) {
-    const key = teamMatchKey(team);
-    return Array.from(
-      new Set(
-        teamMembers
-          .filter((member) => teamMatchKey(member.team) === key && isArticleDesignation(member.designation))
-          .map((member) => member.name.trim())
-          .filter(Boolean)
-      )
-    );
-  }
+  const resourceOptionsForTeam = useCallback(
+    (team: string) => teamResourceOptions.get(teamMatchKey(team)) ?? emptyOptions,
+    [teamResourceOptions]
+  );
 
   const orderedColumns = useMemo(
     () => columnOrder.map((key) => taskLineColumnByKey.get(key)).filter((column): column is TaskLineColumn => Boolean(column)),
@@ -258,6 +283,10 @@ export function TaskLineRegister() {
     void loadStageMasters();
     void loadTeamMembers();
   }, []);
+
+  useEffect(() => {
+    rowsRef.current = rows;
+  }, [rows]);
 
   useEffect(() => {
     if (stageSeedDoneRef.current || !stageMastersFetched || !rows.length) {
@@ -603,25 +632,29 @@ export function TaskLineRegister() {
     setFormDraft(null);
   }
 
-  function updateRow(rowId: string, key: string, value: string) {
-    const row = rows.find((item) => item.__id === rowId);
-    const oldValue = row?.[key] ?? "";
+  const updateRow = useCallback((rowId: string, key: string, value: string) => {
+    const currentRows = rowsRef.current;
+    const existing = currentRows.find((item) => item.__id === rowId);
+    const oldValue = existing?.[key] ?? "";
 
-    if (oldValue !== value) {
+    if (existing && oldValue !== value) {
       addAuditLog({
         action: "taskline.update_cell",
-        entityId: row?.__id,
+        entityId: rowId,
         field: taskLineColumnByKey.get(key)?.label ?? key,
         newValue: value,
         oldValue,
-        rowLabel: getRowLabel(row, rows)
+        rowLabel: getRowLabel(existing, currentRows)
       });
     }
 
-    const nextRow = row ? { ...row, [key]: value } : null;
-    setRows((current) => current.map((row) => (row.__id === rowId ? { ...row, [key]: value } : row)));
-    if (nextRow) void saveInlineRow(nextRow);
-  }
+    const nextRow = existing ? { ...existing, [key]: value } : null;
+    setRows((current) => current.map((item) => (item.__id === rowId ? { ...item, [key]: value } : item)));
+    if (nextRow) {
+      void saveInlineRow(nextRow);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function saveInlineRow(row: TaskLineRow) {
     try {
@@ -1055,7 +1088,7 @@ export function TaskLineRegister() {
                         isFrozen={frozen.isFrozen}
                         key={`${row.__id}-${column.key}`}
                         nameOptions={rowNameOptions}
-                        onChange={(value) => updateRow(row.__id, column.key, value)}
+                        onCellChange={updateRow}
                         resourceOptions={rowResourceOptions}
                         row={row}
                         serialNumber={(tablePage - 1) * taskLinePageSize + rowIndex + 1}
@@ -1129,12 +1162,12 @@ export function TaskLineRegister() {
   );
 }
 
-function TaskLineCell({
+const TaskLineCell = memo(function TaskLineCell({
   column,
   frozenLeft,
   isFrozen,
   nameOptions,
-  onChange,
+  onCellChange,
   resourceOptions,
   row,
   serialNumber,
@@ -1145,7 +1178,7 @@ function TaskLineCell({
   frozenLeft: number;
   isFrozen: boolean;
   nameOptions: string[];
-  onChange: (value: string) => void;
+  onCellChange: (rowId: string, key: string, value: string) => void;
   resourceOptions: string[];
   row: TaskLineRow;
   serialNumber: number;
@@ -1153,6 +1186,7 @@ function TaskLineCell({
   taskMasterNames: string[];
 }) {
   const frozenStyle = isFrozen ? { left: frozenLeft } : undefined;
+  const onChange = (value: string) => onCellChange(row.__id, column.key, value);
 
   if (column.key === "serial_no") {
     return (
@@ -1261,7 +1295,7 @@ function TaskLineCell({
       />
     </td>
   );
-}
+});
 
 function TaskLineMultiSelectCell({
   frozenStyle,
