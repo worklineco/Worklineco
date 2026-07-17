@@ -1,6 +1,7 @@
 "use client";
 
-import { ArrowDown, ArrowUp, Download, Filter, History, ListChecks, Pencil, Pin, Plus, Search, Settings2, Trash2, Upload, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Download, Filter, History, ListChecks, Menu, Pencil, Pin, Plus, Search, Settings2, Trash2, Upload, X } from "lucide-react";
+import type { ComponentType } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import * as XLSX from "xlsx-js-style";
@@ -109,6 +110,7 @@ export function TaskLineRegister() {
   const [viewMode, setViewMode] = useState<TaskLineView>("register");
   const [taskMasters, setTaskMasters] = useState<{ id: string; name: string }[]>([]);
   const [isMasterOpen, setIsMasterOpen] = useState(false);
+  const [isToolbarMenuOpen, setIsToolbarMenuOpen] = useState(false);
   const [masterMessage, setMasterMessage] = useState("");
   const taskMasterNames = useMemo(() => taskMasters.map((master) => master.name), [taskMasters]);
 
@@ -619,23 +621,16 @@ export function TaskLineRegister() {
   }
 
   return (
-    <section className="w-full rounded-lg border border-slate-200 bg-white p-4 shadow-[0_18px_60px_rgba(15,23,42,0.10)]">
-      <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
-        <div>
-          <p className="text-xs font-black uppercase tracking-[0.16em] text-rose-700">TaskLine register</p>
-          <h2 className="mt-1 text-2xl font-black text-slate-950">Task Register</h2>
-          <p className="mt-1 text-sm font-bold text-slate-500">{filteredRows.length} visible of {rows.length} task rows</p>
+    <section className="w-full rounded-lg border border-slate-200 bg-white p-3 shadow-[0_18px_60px_rgba(15,23,42,0.10)]">
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="shrink-0">
+          <h2 className="text-lg font-black leading-tight text-slate-950">Task Register</h2>
+          <p className="text-xs font-bold text-slate-500">
+            {filteredRows.length.toLocaleString()} of {rows.length.toLocaleString()} rows{hasActiveColumnFilters || search || statusFilter ? " (filtered)" : ""}
+          </p>
         </div>
-        <div className="grid gap-2 text-sm font-black text-slate-700 sm:grid-cols-4 xl:min-w-[680px]">
-          <Summary label="Total Entries" value={String(rows.length)} />
-          <Summary label="Open" value={String(rows.filter((row) => row.status_open_close !== "Close").length)} />
-          <Summary label="Closed" value={String(rows.filter((row) => row.status_open_close === "Close").length)} />
-          <Summary label="Columns" value={`${visibleColumns.length} / ${taskLineColumns.length}`} />
-        </div>
-      </div>
 
-      <div className="mt-4 grid gap-2 lg:grid-cols-[minmax(280px,1fr)_180px_auto]">
-        <label className="flex h-11 items-center gap-2 rounded-md border border-slate-200 bg-white px-3">
+        <label className="flex h-10 min-w-[220px] flex-1 items-center gap-2 rounded-md border border-slate-200 bg-white px-3">
           <Search className="size-4 text-slate-400" />
           <input
             className="min-w-0 flex-1 border-0 bg-transparent text-sm font-semibold outline-none"
@@ -644,9 +639,10 @@ export function TaskLineRegister() {
             value={search}
           />
         </label>
+
         <select
           aria-label="Status Open/Close"
-          className="h-11 rounded-md border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 outline-none"
+          className="h-10 shrink-0 rounded-md border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 outline-none"
           onChange={(event) => setStatusFilter(event.target.value)}
           value={statusFilter}
         >
@@ -654,68 +650,69 @@ export function TaskLineRegister() {
           <option value="Open">Open</option>
           <option value="Close">Close</option>
         </select>
-        <div className="flex flex-wrap gap-2">
-          <div className="relative">
-            <button className={buttonClass("light")} onClick={() => setIsColumnOptionsOpen((current) => !current)} type="button">
-              <Settings2 className="size-4" />
-              Columns
-            </button>
-            {isColumnOptionsOpen ? (
-              <TaskLineColumnOptionsPanel
-                frozenColumnKeys={frozenColumnKeys}
-                hiddenColumnKeys={hiddenColumnKeys}
-                onApply={(layout) => {
-                  const normalizedLayout = normalizeTaskLineColumnLayout(layout);
-                  setColumnOrder(normalizedLayout.order);
-                  setHiddenColumnKeys(new Set(normalizedLayout.hiddenColumnKeys));
-                  setFrozenColumnKeys(new Set(normalizedLayout.frozenColumnKeys));
-                  setIsColumnOptionsOpen(false);
-                  saveTaskLineColumnLayout(normalizedLayout);
-                  addAuditLog({
-                    action: "taskline.column_layout",
-                    newValue: `${taskLineColumns.length - normalizedLayout.hiddenColumnKeys.length} visible columns`
-                  });
-                }}
-                onClose={() => setIsColumnOptionsOpen(false)}
-                orderedColumns={orderedColumns}
-              />
-            ) : null}
-          </div>
-          <button className={buttonClass("light")} onClick={() => setIsMasterOpen(true)} type="button">
-            <ListChecks className="size-4" />
-            Master
+
+        <div className="relative shrink-0">
+          <button
+            aria-label="Actions menu"
+            className={buttonClass("dark")}
+            onClick={() => setIsToolbarMenuOpen((current) => !current)}
+            type="button"
+          >
+            <Menu className="size-4" />
+            Actions
           </button>
-          <button className={buttonClass("primary")} onClick={addRow} type="button">
-            <Plus className="size-4" />
-            Add
-          </button>
-          <button className={buttonClass("dark")} onClick={exportView} type="button">
-            <Download className="size-4" />
-            Export View
-          </button>
-          <button className={buttonClass("light")} onClick={downloadTemplate} type="button">Template</button>
-          <button className={buttonClass("light")} onClick={() => fileInputRef.current?.click()} type="button">
-            <Upload className="size-4" />
-            Import
-          </button>
-          {hasActiveColumnFilters ? (
-            <button className={buttonClass("light")} onClick={() => setColumnFilters({})} type="button">Clear column filters</button>
+          {isToolbarMenuOpen ? (
+            <>
+              <div className="fixed inset-0 z-30" onClick={() => setIsToolbarMenuOpen(false)} />
+              <div className="absolute right-0 top-12 z-40 w-52 overflow-hidden rounded-md border border-slate-200 bg-white py-1 shadow-2xl">
+                <ToolbarMenuItem icon={Plus} label="Add row" onClick={() => { setIsToolbarMenuOpen(false); addRow(); }} />
+                <ToolbarMenuItem icon={ListChecks} label="Task Master" onClick={() => { setIsToolbarMenuOpen(false); setIsMasterOpen(true); }} />
+                <ToolbarMenuItem icon={Settings2} label="Columns" onClick={() => { setIsToolbarMenuOpen(false); setIsColumnOptionsOpen(true); }} />
+                <ToolbarMenuItem icon={Download} label="Export view" onClick={() => { setIsToolbarMenuOpen(false); exportView(); }} />
+                <ToolbarMenuItem icon={Download} label="Download template" onClick={() => { setIsToolbarMenuOpen(false); downloadTemplate(); }} />
+                <ToolbarMenuItem icon={Upload} label="Import" onClick={() => { setIsToolbarMenuOpen(false); fileInputRef.current?.click(); }} />
+                {hasActiveColumnFilters ? (
+                  <ToolbarMenuItem icon={X} label="Clear column filters" onClick={() => { setIsToolbarMenuOpen(false); setColumnFilters({}); }} />
+                ) : null}
+              </div>
+            </>
           ) : null}
-          <input
-            accept=".xlsx,.xls,.csv"
-            className="hidden"
-            onChange={(event) => {
-              const file = event.target.files?.[0];
-              if (file) void importWorkbook(file);
-              event.target.value = "";
-            }}
-            ref={fileInputRef}
-            type="file"
-          />
+          {isColumnOptionsOpen ? (
+            <TaskLineColumnOptionsPanel
+              frozenColumnKeys={frozenColumnKeys}
+              hiddenColumnKeys={hiddenColumnKeys}
+              onApply={(layout) => {
+                const normalizedLayout = normalizeTaskLineColumnLayout(layout);
+                setColumnOrder(normalizedLayout.order);
+                setHiddenColumnKeys(new Set(normalizedLayout.hiddenColumnKeys));
+                setFrozenColumnKeys(new Set(normalizedLayout.frozenColumnKeys));
+                setIsColumnOptionsOpen(false);
+                saveTaskLineColumnLayout(normalizedLayout);
+                addAuditLog({
+                  action: "taskline.column_layout",
+                  newValue: `${taskLineColumns.length - normalizedLayout.hiddenColumnKeys.length} visible columns`
+                });
+              }}
+              onClose={() => setIsColumnOptionsOpen(false)}
+              orderedColumns={orderedColumns}
+            />
+          ) : null}
         </div>
       </div>
 
-      <div className="mt-4 flex flex-wrap gap-2 border-b border-slate-200 pb-3">
+      <input
+        accept=".xlsx,.xls,.csv"
+        className="hidden"
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          if (file) void importWorkbook(file);
+          event.target.value = "";
+        }}
+        ref={fileInputRef}
+        type="file"
+      />
+
+      <div className="mt-3 flex flex-wrap gap-2 border-b border-slate-200 pb-2">
         <ViewButton active={viewMode === "register"} label="Register" onClick={() => setViewMode("register")} />
         <ViewButton active={viewMode === "audit"} label={`Audit Trail (${auditLogs.length})`} onClick={() => setViewMode("audit")} />
       </div>
@@ -1969,5 +1966,26 @@ function TaskLineMasterPanel({
         </footer>
       </section>
     </div>
+  );
+}
+
+function ToolbarMenuItem({
+  icon: Icon,
+  label,
+  onClick
+}: {
+  icon: ComponentType<{ className?: string }>;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
+      onClick={onClick}
+      type="button"
+    >
+      <Icon className="size-4 shrink-0 text-slate-500" />
+      {label}
+    </button>
   );
 }
