@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowDown, ArrowUp, Download, Filter, History, Pencil, Plus, Search, Settings2, Trash2, Upload, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Download, Filter, History, Pencil, Pin, Plus, Search, Settings2, Trash2, Upload, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import * as XLSX from "xlsx-js-style";
@@ -13,7 +13,7 @@ type TaskLineColumn = {
   width: number;
 };
 type TaskLineRow = Record<string, string>;
-type TaskLineColumnLayout = { hiddenColumnKeys: string[]; order: string[] };
+type TaskLineColumnLayout = { frozenColumnKeys: string[]; hiddenColumnKeys: string[]; order: string[] };
 type TaskLineAuditLog = {
   action: string;
   createdAt: string;
@@ -97,6 +97,7 @@ export function TaskLineRegister() {
   const [auditLogs, setAuditLogs] = useState<TaskLineAuditLog[]>([]);
   const [formDraft, setFormDraft] = useState<TaskLineRow | null>(null);
   const [hiddenColumnKeys, setHiddenColumnKeys] = useState<Set<string>>(() => new Set(getSavedTaskLineColumnLayout().hiddenColumnKeys));
+  const [frozenColumnKeys, setFrozenColumnKeys] = useState<Set<string>>(() => new Set(getSavedTaskLineColumnLayout().frozenColumnKeys));
   const [isColumnOptionsOpen, setIsColumnOptionsOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [message, setMessage] = useState("");
@@ -116,6 +117,21 @@ export function TaskLineRegister() {
     [hiddenColumnKeys, orderedColumns]
   );
   const tableWidth = useMemo(() => actionColumnWidth + visibleColumns.reduce((total, column) => total + column.width, 0), [visibleColumns]);
+  const frozenLefts = useMemo(() => {
+    const lefts = new Map<string, number>();
+    let acc = 0;
+    for (const column of visibleColumns) {
+      if (frozenColumnKeys.has(column.key)) {
+        lefts.set(column.key, acc);
+        acc += column.width;
+      }
+    }
+    return lefts;
+  }, [frozenColumnKeys, visibleColumns]);
+
+  function frozenInfo(key: string) {
+    return { isFrozen: frozenColumnKeys.has(key), left: frozenLefts.get(key) ?? 0 };
+  }
   const filteredRows = useMemo(() => {
     const query = search.trim().toLowerCase();
 
@@ -596,11 +612,13 @@ export function TaskLineRegister() {
             </button>
             {isColumnOptionsOpen ? (
               <TaskLineColumnOptionsPanel
+                frozenColumnKeys={frozenColumnKeys}
                 hiddenColumnKeys={hiddenColumnKeys}
                 onApply={(layout) => {
                   const normalizedLayout = normalizeTaskLineColumnLayout(layout);
                   setColumnOrder(normalizedLayout.order);
                   setHiddenColumnKeys(new Set(normalizedLayout.hiddenColumnKeys));
+                  setFrozenColumnKeys(new Set(normalizedLayout.frozenColumnKeys));
                   setIsColumnOptionsOpen(false);
                   saveTaskLineColumnLayout(normalizedLayout);
                   addAuditLog({
@@ -695,8 +713,13 @@ export function TaskLineRegister() {
                 const isAsc = sortState?.key === column.key && sortState.dir === "asc";
                 const isDesc = sortState?.key === column.key && sortState.dir === "desc";
                 const hasValueFilter = Boolean(valueFilters[column.key]) || (column.key === "due_date" && dueColorFilter.length > 0);
+                const frozen = frozenInfo(column.key);
                 return (
-                  <th className="border-r border-white/10 px-3 py-3 last:border-r-0" key={column.key}>
+                  <th
+                    className={`border-r border-white/10 px-3 py-3 last:border-r-0 ${frozen.isFrozen ? "sticky z-20 bg-slate-100" : ""}`}
+                    key={column.key}
+                    style={frozen.isFrozen ? { left: frozen.left } : undefined}
+                  >
                     <div className="flex items-center gap-1">
                       <button
                         className="flex min-w-0 flex-1 items-center justify-between gap-1 text-left"
@@ -762,8 +785,14 @@ export function TaskLineRegister() {
             </tr>
             <tr className="bg-slate-50">
               <th className="border-r border-slate-200 px-2 py-2" />
-              {visibleColumns.map((column) => (
-                  <th className="border-r border-slate-200 px-2 py-2 last:border-r-0" key={`filter-${column.key}`}>
+              {visibleColumns.map((column) => {
+                const frozen = frozenInfo(column.key);
+                return (
+                  <th
+                    className={`border-r border-slate-200 px-2 py-2 last:border-r-0 ${frozen.isFrozen ? "sticky z-20 bg-slate-50" : ""}`}
+                    key={`filter-${column.key}`}
+                    style={frozen.isFrozen ? { left: frozen.left } : undefined}
+                  >
                     {column.key === "serial_no" ? null : (
                       <input
                         aria-label={`Filter ${column.label}`}
@@ -774,7 +803,8 @@ export function TaskLineRegister() {
                       />
                     )}
                   </th>
-                ))}
+                );
+              })}
               </tr>
             </thead>
             <tbody>
@@ -795,15 +825,20 @@ export function TaskLineRegister() {
                       </button>
                     </div>
                   </td>
-                  {visibleColumns.map((column) => (
-                    <TaskLineCell
-                      column={column}
-                      key={`${row.__id}-${column.key}`}
-                      onChange={(value) => updateRow(row.__id, column.key, value)}
-                      row={row}
-                      serialNumber={(tablePage - 1) * taskLinePageSize + rowIndex + 1}
-                    />
-                  ))}
+                  {visibleColumns.map((column) => {
+                    const frozen = frozenInfo(column.key);
+                    return (
+                      <TaskLineCell
+                        column={column}
+                        frozenLeft={frozen.left}
+                        isFrozen={frozen.isFrozen}
+                        key={`${row.__id}-${column.key}`}
+                        onChange={(value) => updateRow(row.__id, column.key, value)}
+                        row={row}
+                        serialNumber={(tablePage - 1) * taskLinePageSize + rowIndex + 1}
+                      />
+                    );
+                  })}
                 </tr>
               )) : (
                 <tr><td className="px-4 py-8 font-bold text-slate-500" colSpan={visibleColumns.length + 1}>No TaskLine rows match the current filters.</td></tr>
@@ -836,18 +871,24 @@ export function TaskLineRegister() {
 
 function TaskLineCell({
   column,
+  frozenLeft,
+  isFrozen,
   onChange,
   row,
   serialNumber
 }: {
   column: TaskLineColumn;
+  frozenLeft: number;
+  isFrozen: boolean;
   onChange: (value: string) => void;
   row: TaskLineRow;
   serialNumber: number;
 }) {
+  const frozenStyle = isFrozen ? { left: frozenLeft } : undefined;
+
   if (column.key === "serial_no") {
     return (
-      <td className="border-r border-slate-100 px-2 py-2 last:border-r-0">
+      <td className={`border-r border-slate-100 px-2 py-2 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
         <span className="block h-8 px-1.5 py-1.5 font-semibold text-slate-700">{serialNumber}</span>
       </td>
     );
@@ -855,7 +896,7 @@ function TaskLineCell({
 
   if (column.type === "select") {
     return (
-      <td className="border-r border-slate-100 px-2 py-2 last:border-r-0">
+      <td className={`border-r border-slate-100 px-2 py-2 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
         <select
           className="h-8 w-full rounded-md border border-slate-200 bg-white px-2 text-xs font-bold outline-none focus:border-rose-300 focus:ring-2 focus:ring-rose-100"
           onChange={(event) => onChange(event.target.value)}
@@ -872,7 +913,10 @@ function TaskLineCell({
   const dueColor = column.key === "due_date" ? dueDateColorClass(row[column.key] ?? "") : "";
 
   return (
-    <td className={`border-r border-slate-100 px-2 py-2 last:border-r-0 ${dueColor}`}>
+    <td
+      className={`border-r border-slate-100 px-2 py-2 last:border-r-0 ${dueColor} ${isFrozen ? (dueColor ? "sticky z-[5]" : "sticky z-[5] bg-white") : ""}`}
+      style={frozenStyle}
+    >
       <input
         className="h-8 w-full rounded-md border border-transparent bg-transparent px-1.5 text-xs font-semibold text-slate-700 outline-none hover:border-slate-200 hover:bg-white focus:border-rose-300 focus:bg-white focus:ring-2 focus:ring-rose-100"
         onChange={(event) => onChange(event.target.value)}
@@ -954,17 +998,20 @@ function TaskLineForm({
 const formControlClass = "mt-1 h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm font-bold text-slate-900 outline-none focus:border-rose-300 focus:ring-2 focus:ring-rose-100";
 
 function TaskLineColumnOptionsPanel({
+  frozenColumnKeys,
   hiddenColumnKeys,
   onApply,
   onClose,
   orderedColumns
 }: {
+  frozenColumnKeys: Set<string>;
   hiddenColumnKeys: Set<string>;
   onApply: (layout: TaskLineColumnLayout) => void;
   onClose: () => void;
   orderedColumns: TaskLineColumn[];
 }) {
   const [draftHiddenColumnKeys, setDraftHiddenColumnKeys] = useState<Set<string>>(() => new Set(hiddenColumnKeys));
+  const [draftFrozenColumnKeys, setDraftFrozenColumnKeys] = useState<Set<string>>(() => new Set(frozenColumnKeys));
   const [draftOrder, setDraftOrder] = useState<string[]>(() => orderedColumns.map((column) => column.key));
   const draftColumns = useMemo(
     () => draftOrder.map((key) => taskLineColumnByKey.get(key)).filter((column): column is TaskLineColumn => Boolean(column)),
@@ -973,6 +1020,18 @@ function TaskLineColumnOptionsPanel({
 
   function toggleColumn(column: TaskLineColumn) {
     setDraftHiddenColumnKeys((current) => {
+      const next = new Set(current);
+      if (next.has(column.key)) {
+        next.delete(column.key);
+      } else {
+        next.add(column.key);
+      }
+      return next;
+    });
+  }
+
+  function toggleFreeze(column: TaskLineColumn) {
+    setDraftFrozenColumnKeys((current) => {
       const next = new Set(current);
       if (next.has(column.key)) {
         next.delete(column.key);
@@ -1002,17 +1061,30 @@ function TaskLineColumnOptionsPanel({
       <div className="flex items-start justify-between gap-3 border-b border-slate-200 pb-3">
         <div>
           <p className="text-xs font-black uppercase tracking-[0.14em] text-rose-700">Columns</p>
-          <p className="mt-1 text-sm font-bold text-slate-500">Hide fields and move columns up or down.</p>
+          <p className="mt-1 text-sm font-bold text-slate-500">Hide, reorder, or freeze (pin) columns to the left.</p>
         </div>
         <button className="rounded-md border border-slate-200 px-2 py-1 text-xs font-black text-slate-700" onClick={onClose} type="button">Close</button>
       </div>
       <div className="mt-3 max-h-[420px] space-y-2 overflow-y-auto pr-1">
         {draftColumns.map((column, index) => (
-          <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 rounded-md border border-slate-200 px-2 py-2" key={column.key}>
+          <div className="grid grid-cols-[minmax(0,1fr)_auto_auto_auto] items-center gap-2 rounded-md border border-slate-200 px-2 py-2" key={column.key}>
             <label className="flex min-w-0 cursor-pointer items-center gap-2">
               <input checked={!draftHiddenColumnKeys.has(column.key)} onChange={() => toggleColumn(column)} type="checkbox" />
               <span className="min-w-0 truncate text-sm font-bold text-slate-700">{column.label}</span>
             </label>
+            <button
+              aria-label={`Freeze ${column.label}`}
+              className={`inline-flex size-7 items-center justify-center rounded-md border transition ${
+                draftFrozenColumnKeys.has(column.key)
+                  ? "border-navy-600 bg-navy-600 text-white"
+                  : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+              }`}
+              onClick={() => toggleFreeze(column)}
+              title={draftFrozenColumnKeys.has(column.key) ? "Unfreeze column" : "Freeze column (pin to left)"}
+              type="button"
+            >
+              <Pin className="size-3.5" />
+            </button>
             <button
               aria-label={`Move ${column.label} up`}
               className="inline-flex size-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-35"
@@ -1040,12 +1112,13 @@ function TaskLineColumnOptionsPanel({
           onClick={() => {
             setDraftOrder(defaultTaskLineColumnOrder);
             setDraftHiddenColumnKeys(new Set());
+            setDraftFrozenColumnKeys(new Set());
           }}
           type="button"
         >
           Reset
         </button>
-        <button className={buttonClass("primary")} onClick={() => onApply({ hiddenColumnKeys: Array.from(draftHiddenColumnKeys), order: draftOrder })} type="button">
+        <button className={buttonClass("primary")} onClick={() => onApply({ frozenColumnKeys: Array.from(draftFrozenColumnKeys), hiddenColumnKeys: Array.from(draftHiddenColumnKeys), order: draftOrder })} type="button">
           Apply
         </button>
       </div>
@@ -1401,8 +1474,11 @@ function normalizeTaskLineColumnLayout(layout: Partial<TaskLineColumnLayout>): T
   const hiddenColumnKeys = Array.isArray(layout.hiddenColumnKeys)
     ? layout.hiddenColumnKeys.filter((key) => knownColumnKeys.has(key))
     : [];
+  const frozenColumnKeys = Array.isArray(layout.frozenColumnKeys)
+    ? layout.frozenColumnKeys.filter((key) => knownColumnKeys.has(key))
+    : [];
 
-  return { hiddenColumnKeys, order };
+  return { frozenColumnKeys, hiddenColumnKeys, order };
 }
 
 function saveTaskLineColumnLayout(layout: TaskLineColumnLayout) {
@@ -1415,16 +1491,16 @@ function saveTaskLineColumnLayout(layout: TaskLineColumnLayout) {
 
 function getSavedTaskLineColumnLayout() {
   if (typeof window === "undefined") {
-    return { hiddenColumnKeys: [], order: defaultTaskLineColumnOrder };
+    return { frozenColumnKeys: [], hiddenColumnKeys: [], order: defaultTaskLineColumnOrder };
   }
 
   try {
     const savedLayout = window.localStorage.getItem(taskLineColumnLayoutStorageKey);
     return savedLayout
       ? normalizeTaskLineColumnLayout(JSON.parse(savedLayout) as Partial<TaskLineColumnLayout>)
-      : { hiddenColumnKeys: [], order: defaultTaskLineColumnOrder };
+      : { frozenColumnKeys: [], hiddenColumnKeys: [], order: defaultTaskLineColumnOrder };
   } catch {
-    return { hiddenColumnKeys: [], order: defaultTaskLineColumnOrder };
+    return { frozenColumnKeys: [], hiddenColumnKeys: [], order: defaultTaskLineColumnOrder };
   }
 }
 
