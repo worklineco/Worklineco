@@ -699,7 +699,7 @@ export function TaskLineRegister() {
           </div>
         </div>
         <div className="max-h-[calc(100vh-260px)] overflow-auto rounded-md border border-slate-200 bg-white">
-          <table className="table-fixed border-collapse text-left text-sm" style={{ minWidth: tableWidth, width: tableWidth }}>
+          <table className="table-fixed border-separate border-spacing-0 text-left text-sm" style={{ minWidth: tableWidth, width: tableWidth }}>
             <colgroup>
               <col style={{ width: actionColumnWidth }} />
               {visibleColumns.map((column) => (
