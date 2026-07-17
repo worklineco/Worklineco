@@ -29,17 +29,34 @@ export async function POST(request: Request) {
     return auth.error;
   }
 
-  const payload = (await request.json()) as { id?: string; name?: string };
-  const name = text(payload.name);
-
-  if (!name) {
-    return NextResponse.json({ error: "Task name is required." }, { status: 400 });
-  }
+  const payload = (await request.json()) as { id?: string; name?: string; names?: string[] };
 
   const admin = createAdminClient();
   const organisation = await getOrganisationId(admin, auth.user);
   if ("error" in organisation) {
     return organisation.error;
+  }
+
+  if (Array.isArray(payload.names)) {
+    const unique = Array.from(new Set(payload.names.map((value) => text(value)).filter(Boolean)));
+    if (unique.length) {
+      const inserted = await admin
+        .from("taskline_task_master")
+        .upsert(unique.map((name) => ({ name, organisation_id: organisation.organisationId })), {
+          ignoreDuplicates: true,
+          onConflict: "organisation_id,name"
+        });
+      if (inserted.error) {
+        return errorResponse(inserted.error);
+      }
+    }
+    return listMasters(admin, organisation.organisationId);
+  }
+
+  const name = text(payload.name);
+
+  if (!name) {
+    return NextResponse.json({ error: "Task name is required." }, { status: 400 });
   }
 
   const id = text(payload.id);

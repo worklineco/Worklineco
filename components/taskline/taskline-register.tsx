@@ -111,6 +111,10 @@ export function TaskLineRegister() {
   const [isMasterOpen, setIsMasterOpen] = useState(false);
   const [masterMessage, setMasterMessage] = useState("");
   const taskMasterNames = useMemo(() => taskMasters.map((master) => master.name), [taskMasters]);
+  const uniqueTaskValues = useMemo(
+    () => Array.from(new Set(rows.map((row) => text(row.task)).filter(Boolean))).sort((first, second) => first.localeCompare(second)),
+    [rows]
+  );
 
   const orderedColumns = useMemo(
     () => columnOrder.map((key) => taskLineColumnByKey.get(key)).filter((column): column is TaskLineColumn => Boolean(column)),
@@ -349,6 +353,21 @@ export function TaskLineRegister() {
     const result = (await response.json()) as { error?: string; masters?: { id: string; name: string }[] };
     if (!response.ok) {
       setMasterMessage(result.error ?? "Could not delete task type.");
+      return;
+    }
+    setTaskMasters(result.masters ?? []);
+    setMasterMessage("");
+  }
+
+  async function importTaskMasters() {
+    const response = await fetch("/api/taskline/masters", {
+      body: JSON.stringify({ names: uniqueTaskValues }),
+      headers: { "Content-Type": "application/json" },
+      method: "POST"
+    });
+    const result = (await response.json()) as { error?: string; masters?: { id: string; name: string }[] };
+    if (!response.ok) {
+      setMasterMessage(result.error ?? "Could not import task types.");
       return;
     }
     setTaskMasters(result.masters ?? []);
@@ -924,10 +943,12 @@ export function TaskLineRegister() {
 
       {isMasterOpen ? (
         <TaskLineMasterPanel
+          existingCount={uniqueTaskValues.length}
           masters={taskMasters}
           message={masterMessage}
           onClose={() => setIsMasterOpen(false)}
           onDelete={deleteTaskMaster}
+          onImport={importTaskMasters}
           onSave={saveTaskMaster}
         />
       ) : null}
@@ -1849,16 +1870,20 @@ function parseTaskLineDueDate(value: string): Date | null {
 }
 
 function TaskLineMasterPanel({
+  existingCount,
   masters,
   message,
   onClose,
   onDelete,
+  onImport,
   onSave
 }: {
+  existingCount: number;
   masters: { id: string; name: string }[];
   message: string;
   onClose: () => void;
   onDelete: (id: string) => void;
+  onImport: () => void;
   onSave: (name: string, id?: string) => void;
 }) {
   const [newName, setNewName] = useState("");
@@ -1905,6 +1930,19 @@ function TaskLineMasterPanel({
             Add
           </button>
         </div>
+
+        {existingCount ? (
+          <div className="border-b border-slate-200 px-5 py-2">
+            <button
+              className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-navy-200 bg-navy-50 px-3 text-xs font-semibold text-navy-800 transition hover:bg-navy-100"
+              onClick={onImport}
+              type="button"
+            >
+              <Download className="size-4" />
+              Import {existingCount} task types from current data
+            </button>
+          </div>
+        ) : null}
 
         {message ? <p className="border-b border-slate-200 px-5 py-2 text-sm font-bold text-rose-700">{message}</p> : null}
 
