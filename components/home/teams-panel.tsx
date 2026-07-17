@@ -138,7 +138,13 @@ function SortableHeader({ activeKey, direction, label, onSort, sortKey }: { acti
   const Icon = activeKey !== sortKey ? ArrowUpDown : direction === "asc" ? ArrowUp : ArrowDown;
 
   return (
-    <button className="flex items-center gap-1 text-left transition hover:text-slate-900" onClick={() => onSort(sortKey)} type="button">
+    <button
+      aria-label={`Sort by ${label}`}
+      aria-pressed={activeKey === sortKey}
+      className="flex items-center gap-1 text-left transition hover:text-slate-900"
+      onClick={() => onSort(sortKey)}
+      type="button"
+    >
       <span>{label}</span>
       <Icon className="size-3.5" aria-hidden="true" />
     </button>
