@@ -379,9 +379,9 @@ async function loadCalendarEvents(
     const to = from + fetchBatchSize - 1;
     const { data, error } = await admin
       .from("tasks")
-      .select("id,organisation_id,title,description,due_at,custom_values,created_by,created_at,updated_at")
+      .select("id,custom_values")
       .eq("organisation_id", organisationId)
-      .order("created_at", { ascending: true })
+      .order("id", { ascending: true })
       .range(from, to);
 
     if (error) {
@@ -399,7 +399,7 @@ async function loadCalendarEvents(
   const roleText = `${text(user.user_metadata?.role)} ${text(user.user_metadata?.designation)}`.toLowerCase();
   const isPartner = access.canViewAll || roleText.includes("partner") || roleText.includes("owner") || roleText.includes("admin");
   const isArticle = roleText.includes("article");
-  const events: Array<{ due_date: string; entity: string; stage: string; task: string }> = [];
+  const events: Array<{ due_date: string; entity: string; name: string; stage: string; task: string }> = [];
 
   for (const record of rows) {
     const data = record.custom_values?.taskline_data ?? {};
@@ -426,6 +426,7 @@ async function loadCalendarEvents(
     events.push({
       due_date: dueDate,
       entity: text(data.entity),
+      name: text(data.name),
       stage: text(data.stage),
       task: text(data.task)
     });
