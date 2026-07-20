@@ -145,8 +145,8 @@ export default function Home() {
       <div className="mx-auto w-full max-w-none px-3 py-5 sm:px-5 lg:px-8">
         <section className="min-w-0">
           <header className="mb-1">
-            <h1 className="text-2xl font-bold text-slate-950">
-              {profileName ? `Welcome back, ${profileName.split(" ")[0]}` : "Dashboard"}
+            <h1 className="text-4xl font-bold text-navy-700">
+              {profileName ? `Welcome back, ${profileName}` : "Dashboard"}
             </h1>
             <p className="mt-1 text-sm font-medium text-slate-500">
               Jump into your workspace — compliance, billing, clients, and office scheduling in one place.
