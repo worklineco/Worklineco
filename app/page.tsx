@@ -23,7 +23,7 @@ import {
 import Link from "next/link";
 import type { ComponentType } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { MonthCalendar } from "@/components/home/month-calendar";
+import { MonthCalendar, type CalendarEvent } from "@/components/home/month-calendar";
 import { ProfilePanel } from "@/components/home/profile-panel";
 import { TeamsPanel } from "@/components/home/teams-panel";
 import { getCurrentUser } from "@/lib/supabase/session";
@@ -98,6 +98,7 @@ export default function Home() {
   const [isTeamsVisible, setIsTeamsVisible] = useState(false);
   const [profileName, setProfileName] = useState("");
   const [profileRole, setProfileRole] = useState("");
+  const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
   const teamsPanelRef = useRef<HTMLDivElement>(null);
   const dashboardLabel = useMemo(() => {
     const firstName = profileName.trim().split(/\s+/)[0];
@@ -120,6 +121,27 @@ export default function Home() {
       setProfileName(String(metadata.full_name ?? metadata.name ?? user?.email ?? ""));
       setProfileRole(String(metadata.role ?? ""));
     });
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+
+    fetch("/api/taskline?view=calendar", { credentials: "include" })
+      .then((response) => (response.ok ? response.json() : { events: [] }))
+      .then((data) => {
+        if (active) {
+          setCalendarEvents(Array.isArray(data?.events) ? data.events : []);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setCalendarEvents([]);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
   }, []);
 
   function toggleTeams() {
@@ -159,7 +181,7 @@ export default function Home() {
             ))}
           </section>
 
-          <MonthCalendar />
+          <MonthCalendar events={calendarEvents} />
 
           {isTeamsVisible ? (
             <div ref={teamsPanelRef}>

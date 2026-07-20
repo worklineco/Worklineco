@@ -85,7 +85,7 @@ const taskLineColumns = [
   "any_other_1"
 ];
 
-export async function GET() {
+export async function GET(request: Request) {
   const auth = await requireUser();
 
   if ("error" in auth) {
@@ -100,6 +100,11 @@ export async function GET() {
   }
 
   const access = getAccess(auth.user);
+
+  if (new URL(request.url).searchParams.get("view") === "calendar") {
+    return loadCalendarEvents(admin, organisation.organisationId, auth.user, access);
+  }
+
   const [records, auditLogs] = await Promise.all([
     loadTaskLineRecords(admin, organisation.organisationId, access),
     loadAuditLogs(admin, organisation.organisationId, access)
@@ -360,6 +365,95 @@ async function importRows(
     summary: { added, deleted, updated },
     rows: (refreshed.data ?? []).map(formatRecord)
   });
+}
+
+async function loadCalendarEvents(
+  admin: ReturnType<typeof createAdminClient>,
+  organisationId: string,
+  user: User,
+  access: AccessScope
+) {
+  const rows: TaskRecord[] = [];
+
+  for (let from = 0; ; from += fetchBatchSize) {
+    const to = from + fetchBatchSize - 1;
+    const { data, error } = await admin
+      .from("tasks")
+      .select("id,organisation_id,title,description,due_at,custom_values,created_by,created_at,updated_at")
+      .eq("organisation_id", organisationId)
+      .order("created_at", { ascending: true })
+      .range(from, to);
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    rows.push(...((data ?? []) as TaskRecord[]).filter(isTaskLineRecord));
+
+    if ((data ?? []).length < fetchBatchSize) {
+      break;
+    }
+  }
+
+  const fullName = normalizeName(user.user_metadata?.full_name ?? user.user_metadata?.name ?? user.email);
+  const roleText = `${text(user.user_metadata?.role)} ${text(user.user_metadata?.designation)}`.toLowerCase();
+  const isPartner = access.canViewAll || roleText.includes("partner") || roleText.includes("owner") || roleText.includes("admin");
+  const isArticle = roleText.includes("article");
+  const events: Array<{ due_date: string; entity: string; task: string }> = [];
+
+  for (const record of rows) {
+    const data = record.custom_values?.taskline_data ?? {};
+    const dueDate = normalizeDisplayDate(data.due_date);
+
+    if (!dueDate) {
+      continue;
+    }
+
+    let include = false;
+
+    if (isPartner) {
+      include = true;
+    } else if (isArticle) {
+      include = splitNames(data.resource).includes(fullName);
+    } else {
+      include = splitNames(data.name).includes(fullName);
+    }
+
+    if (!include) {
+      continue;
+    }
+
+    events.push({
+      due_date: dueDate,
+      entity: text(data.entity),
+      task: text(data.task)
+    });
+  }
+
+  return NextResponse.json({ events });
+}
+
+const nameHonorifics = new Set(["ca", "cs", "cma", "adv", "advocate", "mr", "mrs", "ms", "dr", "shri", "smt", "sh"]);
+
+function normalizeName(value: unknown) {
+  const parts = text(value)
+    .toLowerCase()
+    .replace(/[.,]/g, " ")
+    .split(/\s+/)
+    .filter(Boolean);
+
+  while (parts.length > 1 && nameHonorifics.has(parts[0])) {
+    parts.shift();
+  }
+
+  return parts.join(" ");
+}
+
+function splitNames(value: unknown) {
+  return text(value)
+    .split(/[,;/\n]+/)
+    .map(normalizeName)
+    .filter(Boolean);
 }
 
 async function loadTaskLineRecords(admin: ReturnType<typeof createAdminClient>, organisationId: string, access: AccessScope) {

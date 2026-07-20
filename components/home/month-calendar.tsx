@@ -5,10 +5,17 @@ import { useMemo, useState } from "react";
 
 const weekDays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
-export function MonthCalendar() {
+export type CalendarEvent = {
+  due_date: string;
+  entity: string;
+  task: string;
+};
+
+export function MonthCalendar({ events = [] }: { events?: CalendarEvent[] }) {
   const today = new Date();
   const [monthDate, setMonthDate] = useState(() => new Date(today.getFullYear(), today.getMonth(), 1));
   const calendarCells = useMemo(() => buildCalendarCells(monthDate), [monthDate]);
+  const eventsByDay = useMemo(() => groupEventsByDay(events), [events]);
   const monthLabel = monthDate.toLocaleString("en-IN", { month: "long", year: "numeric" });
 
   function changeMonth(offset: number) {
@@ -61,20 +68,45 @@ export function MonthCalendar() {
               cell.date.getMonth() === today.getMonth() &&
               cell.date.getFullYear() === today.getFullYear();
 
+            const dayEvents = eventsByDay.get(formatDayKey(cell.date)) ?? [];
+            const visibleEvents = dayEvents.slice(0, 3);
+            const extraCount = dayEvents.length - visibleEvents.length;
+
             return (
               <div
-                className={`min-h-20 border-b border-r border-slate-200 p-2 ${
+                className={`flex min-h-[104px] flex-col border-b border-r border-slate-200 p-2 ${
                   cell.isCurrentMonth ? "bg-white" : "bg-slate-50 text-slate-300"
                 } ${index % 7 === 6 ? "border-r-0" : ""}`}
                 key={cell.key}
               >
                 <span
-                  className={`inline-flex size-7 items-center justify-center rounded-full text-xs font-black ${
+                  className={`inline-flex size-7 shrink-0 items-center justify-center rounded-full text-xs font-black ${
                     isToday ? "bg-navy-700 text-white" : "text-slate-700"
                   }`}
                 >
                   {cell.date.getDate()}
                 </span>
+                {dayEvents.length > 0 ? (
+                  <div className="mt-1 flex flex-col gap-1">
+                    {visibleEvents.map((event, eventIndex) => (
+                      <div
+                        className="rounded-md border border-navy-100 bg-navy-50 px-1.5 py-1 text-left leading-tight"
+                        key={`${cell.key}-${eventIndex}`}
+                        title={`${event.entity}${event.entity && event.task ? " - " : ""}${event.task}`}
+                      >
+                        {event.entity ? (
+                          <p className="truncate text-[11px] font-bold text-navy-800">{event.entity}</p>
+                        ) : null}
+                        {event.task ? (
+                          <p className="truncate text-[10px] font-medium text-slate-600">{event.task}</p>
+                        ) : null}
+                      </div>
+                    ))}
+                    {extraCount > 0 ? (
+                      <span className="pl-0.5 text-[10px] font-bold text-navy-600">+{extraCount} more</span>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
             );
           })}
@@ -82,6 +114,34 @@ export function MonthCalendar() {
       </div>
     </section>
   );
+}
+
+function groupEventsByDay(events: CalendarEvent[]) {
+  const map = new Map<string, CalendarEvent[]>();
+
+  for (const event of events) {
+    const key = (event.due_date ?? "").trim();
+
+    if (!key) {
+      continue;
+    }
+
+    const existing = map.get(key);
+
+    if (existing) {
+      existing.push(event);
+    } else {
+      map.set(key, [event]);
+    }
+  }
+
+  return map;
+}
+
+function formatDayKey(date: Date) {
+  const day = String(date.getDate()).padStart(2, "0");
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  return `${day}-${month}-${date.getFullYear()}`;
 }
 
 function buildCalendarCells(monthDate: Date) {
