@@ -8,6 +8,7 @@ const weekDays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 export type CalendarEvent = {
   due_date: string;
   entity: string;
+  status?: string;
   task: string;
 };
 
@@ -92,13 +93,24 @@ export function MonthCalendar({ events = [] }: { events?: CalendarEvent[] }) {
                       <div
                         className="rounded-md border border-navy-100 bg-navy-50 px-1.5 py-1 text-left leading-tight"
                         key={`${cell.key}-${eventIndex}`}
-                        title={`${event.entity}${event.entity && event.task ? " - " : ""}${event.task}`}
+                        title={[event.entity, event.task, event.status].filter(Boolean).join(" - ")}
                       >
                         {event.entity ? (
                           <p className="truncate text-[11px] font-bold text-navy-800">{event.entity}</p>
                         ) : null}
                         {event.task ? (
                           <p className="truncate text-[10px] font-medium text-slate-600">{event.task}</p>
+                        ) : null}
+                        {event.status ? (
+                          <span
+                            className={`mt-0.5 inline-block rounded px-1 py-0.5 text-[9px] font-black uppercase leading-none ${
+                              event.status.toLowerCase().startsWith("close")
+                                ? "bg-emerald-100 text-emerald-700"
+                                : "bg-amber-100 text-amber-700"
+                            }`}
+                          >
+                            {event.status}
+                          </span>
                         ) : null}
                       </div>
                     ))}

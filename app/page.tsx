@@ -27,6 +27,7 @@ import { MonthCalendar, type CalendarEvent } from "@/components/home/month-calen
 import { ProfilePanel } from "@/components/home/profile-panel";
 import { TeamsPanel } from "@/components/home/teams-panel";
 import { getCurrentUser } from "@/lib/supabase/session";
+import { getCached, setCached } from "@/lib/data-cache";
 
 const navigation = [
   { href: "/", icon: LayoutDashboard, label: "Overview", tone: "bg-navy-100 text-navy-800" },
@@ -126,15 +127,22 @@ export default function Home() {
   useEffect(() => {
     let active = true;
 
+    const cached = getCached<CalendarEvent[]>("dashboard_calendar");
+    if (cached) {
+      setCalendarEvents(cached);
+    }
+
     fetch("/api/taskline?view=calendar", { credentials: "include" })
       .then((response) => (response.ok ? response.json() : { events: [] }))
       .then((data) => {
         if (active) {
-          setCalendarEvents(Array.isArray(data?.events) ? data.events : []);
+          const events = Array.isArray(data?.events) ? (data.events as CalendarEvent[]) : [];
+          setCalendarEvents(events);
+          setCached("dashboard_calendar", events);
         }
       })
       .catch(() => {
-        if (active) {
+        if (active && !cached) {
           setCalendarEvents([]);
         }
       });
