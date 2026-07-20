@@ -8,6 +8,7 @@ import {
   BookOpenCheck,
   BriefcaseBusiness,
   Building2,
+  CalendarClock,
   CalendarDays,
   ClipboardCheck,
   LayoutDashboard,
@@ -37,6 +38,7 @@ type NavItem = {
 
 const navItems: NavItem[] = [
   { href: "/", icon: LayoutDashboard, label: "Dashboard" },
+  { href: "/calendar", icon: CalendarClock, label: "Calendar" },
   { href: "/partner-dashboard", icon: BriefcaseBusiness, label: "Partner Dashboard" },
   { href: "/gst", icon: ClipboardCheck, label: "GST Tracker" },
   { href: "/gstat", icon: Scale, label: "GSTAT" },

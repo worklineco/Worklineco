@@ -399,7 +399,7 @@ async function loadCalendarEvents(
   const roleText = `${text(user.user_metadata?.role)} ${text(user.user_metadata?.designation)}`.toLowerCase();
   const isPartner = access.canViewAll || roleText.includes("partner") || roleText.includes("owner") || roleText.includes("admin");
   const isArticle = roleText.includes("article");
-  const events: Array<{ due_date: string; entity: string; status: string; task: string }> = [];
+  const events: Array<{ due_date: string; entity: string; stage: string; task: string }> = [];
 
   for (const record of rows) {
     const data = record.custom_values?.taskline_data ?? {};
@@ -426,7 +426,7 @@ async function loadCalendarEvents(
     events.push({
       due_date: dueDate,
       entity: text(data.entity),
-      status: text(data.status_open_close),
+      stage: text(data.stage),
       task: text(data.task)
     });
   }

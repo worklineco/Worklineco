@@ -23,11 +23,9 @@ import {
 import Link from "next/link";
 import type { ComponentType } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { MonthCalendar, type CalendarEvent } from "@/components/home/month-calendar";
 import { ProfilePanel } from "@/components/home/profile-panel";
 import { TeamsPanel } from "@/components/home/teams-panel";
 import { getCurrentUser } from "@/lib/supabase/session";
-import { getCached, setCached } from "@/lib/data-cache";
 
 const navigation = [
   { href: "/", icon: LayoutDashboard, label: "Overview", tone: "bg-navy-100 text-navy-800" },
@@ -99,7 +97,6 @@ export default function Home() {
   const [isTeamsVisible, setIsTeamsVisible] = useState(false);
   const [profileName, setProfileName] = useState("");
   const [profileRole, setProfileRole] = useState("");
-  const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
   const teamsPanelRef = useRef<HTMLDivElement>(null);
   const dashboardLabel = useMemo(() => {
     const firstName = profileName.trim().split(/\s+/)[0];
@@ -122,34 +119,6 @@ export default function Home() {
       setProfileName(String(metadata.full_name ?? metadata.name ?? user?.email ?? ""));
       setProfileRole(String(metadata.role ?? ""));
     });
-  }, []);
-
-  useEffect(() => {
-    let active = true;
-
-    const cached = getCached<CalendarEvent[]>("dashboard_calendar");
-    if (cached) {
-      setCalendarEvents(cached);
-    }
-
-    fetch("/api/taskline?view=calendar", { credentials: "include" })
-      .then((response) => (response.ok ? response.json() : { events: [] }))
-      .then((data) => {
-        if (active) {
-          const events = Array.isArray(data?.events) ? (data.events as CalendarEvent[]) : [];
-          setCalendarEvents(events);
-          setCached("dashboard_calendar", events);
-        }
-      })
-      .catch(() => {
-        if (active && !cached) {
-          setCalendarEvents([]);
-        }
-      });
-
-    return () => {
-      active = false;
-    };
   }, []);
 
   function toggleTeams() {
@@ -188,8 +157,6 @@ export default function Home() {
               <ProductCard item={item} key={item.title} />
             ))}
           </section>
-
-          <MonthCalendar events={calendarEvents} />
 
           {isTeamsVisible ? (
             <div ref={teamsPanelRef}>
