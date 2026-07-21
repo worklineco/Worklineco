@@ -1,4 +1,4 @@
-import { ArrowLeft, Building2 } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { ClientRecordsRegister } from "@/components/client-records/client-records-register";
 
@@ -8,33 +8,18 @@ export default function ClientRecordsPage() {
       <div className="pointer-events-none fixed inset-0 -z-10 " />
 
       <section className="mx-auto max-w-[1540px]">
-        <header className="rounded-[28px] border border-white/80 bg-white/90 p-5 shadow-[0_24px_80px_rgba(15,23,42,0.12)]">
-          <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <div className="inline-flex items-center gap-2 rounded-full bg-sky-100 px-3 py-1.5 text-xs font-black uppercase text-sky-800">
-                <Building2 className="size-3.5" />
-                Client Records
-              </div>
-              <h1 className="mt-4 text-4xl font-black leading-tight text-slate-950">
-                Client Records
-              </h1>
-              <p className="mt-3 max-w-3xl text-sm font-semibold leading-6 text-slate-600">
-                Maintain client particulars, registration details, GSTIN/UIN,
-                PAN/IT number, and address details in one Excel-ready register.
-              </p>
-            </div>
-
-            <Link
-              className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl bg-navy-700 px-4 text-sm font-black text-white"
-              href="/"
-            >
-              <ArrowLeft className="size-4" />
-              Workspace
-            </Link>
-          </div>
+        <header className="flex items-center justify-between gap-3">
+          <h1 className="text-2xl font-black text-slate-950">Client Records</h1>
+          <Link
+            className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-navy-700 px-4 text-sm font-black text-white"
+            href="/"
+          >
+            <ArrowLeft className="size-4" />
+            Workspace
+          </Link>
         </header>
 
-        <div className="mt-5">
+        <div className="mt-4">
           <ClientRecordsRegister />
         </div>
       </section>

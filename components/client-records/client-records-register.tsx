@@ -9,12 +9,14 @@ import {
   History,
   Plus,
   RefreshCw,
+  Menu,
   RotateCcw,
   Search,
   Trash2,
   Upload,
   X
 } from "lucide-react";
+import type { ComponentType } from "react";
 import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { getCached, setCached } from "@/lib/data-cache";
 import * as XLSX from "xlsx-js-style";
@@ -67,6 +69,7 @@ export function ClientRecordsRegister() {
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [isTrashOpen, setIsTrashOpen] = useState(false);
   const [isAuditOpen, setIsAuditOpen] = useState(false);
+  const [isActionsOpen, setIsActionsOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const dataHydratedRef = useRef(false);
@@ -297,53 +300,36 @@ export function ClientRecordsRegister() {
 
   return (
     <section className="rounded-[28px] border border-white/80 bg-white/90 p-5 shadow-[0_24px_80px_rgba(15,23,42,0.10)]">
-      <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <p className="text-xs font-black uppercase tracking-[0.16em] text-sky-700">Register</p>
-          <h2 className="mt-2 text-2xl font-black text-slate-950">Client Records</h2>
-          <p className="mt-2 text-sm font-bold text-slate-500">
-            {columns.length} columns - {isLoading ? "loading" : rows.length} rows
+          <h2 className="text-xl font-black text-slate-950">Client Records</h2>
+          <p className="text-xs font-bold text-slate-500">
+            {columns.length} columns · {isLoading ? "loading" : `${rows.length} rows`}
           </p>
         </div>
 
-        <div className="flex flex-wrap gap-2">
+        <div className="relative">
           <input accept=".csv,.xls,.xlsx" className="hidden" onChange={importExcel} ref={fileInputRef} type="file" />
-          <button className={buttonClass} onClick={() => fileInputRef.current?.click()} type="button">
-            <Upload className="size-4" />
-            Import Excel
+          <button className={`${buttonClass} bg-navy-700 text-white ring-slate-950`} onClick={() => setIsActionsOpen((current) => !current)} type="button">
+            <Menu className="size-4" />
+            Actions
           </button>
-          <button className={buttonClass} onClick={exportExcel} type="button">
-            <Download className="size-4" />
-            Export Excel
-          </button>
-          <button className={buttonClass} onClick={() => setIsFilterOpen((current) => !current)} type="button">
-            <Filter className="size-4" />
-            Filter
-          </button>
-          <button className={buttonClass} onClick={() => setSortState(null)} type="button">
-            {sortState?.direction === "desc" ? <ArrowDown className="size-4" /> : <ArrowUp className="size-4" />}
-            Sort
-          </button>
-          <button className={`${buttonClass} bg-emerald-50 text-emerald-800 ring-emerald-200`} onClick={() => setEditor({ row: createBlankRow() })} type="button">
-            <Plus className="size-4" />
-            Add
-          </button>
-          <button className={`${buttonClass} bg-rose-50 text-rose-800 ring-rose-200`} onClick={deleteSelectedRows} type="button">
-            <Trash2 className="size-4" />
-            Delete
-          </button>
-          <button className={buttonClass} onClick={() => setIsTrashOpen((current) => !current)} type="button">
-            <Trash2 className="size-4" />
-            Trash
-          </button>
-          <button className={buttonClass} onClick={() => setIsAuditOpen((current) => !current)} type="button">
-            <History className="size-4" />
-            Audit
-          </button>
-          <button className={`${buttonClass} bg-navy-700 text-white ring-slate-950`} onClick={loadRows} type="button">
-            <RefreshCw className="size-4" />
-            Refresh
-          </button>
+          {isActionsOpen ? (
+            <>
+              <div className="fixed inset-0 z-30" onClick={() => setIsActionsOpen(false)} />
+              <div className="absolute right-0 top-14 z-40 w-56 overflow-hidden rounded-2xl border border-slate-200 bg-white py-1 shadow-2xl">
+                <ClientMenuItem icon={Plus} label="Add" onClick={() => { setIsActionsOpen(false); setEditor({ row: createBlankRow() }); }} />
+                <ClientMenuItem icon={Filter} label="Filter" onClick={() => { setIsActionsOpen(false); setIsFilterOpen((current) => !current); }} />
+                <ClientMenuItem icon={sortState?.direction === "desc" ? ArrowDown : ArrowUp} label="Reset sort" onClick={() => { setIsActionsOpen(false); setSortState(null); }} />
+                <ClientMenuItem icon={Upload} label="Import Excel" onClick={() => { setIsActionsOpen(false); fileInputRef.current?.click(); }} />
+                <ClientMenuItem icon={Download} label="Export Excel" onClick={() => { setIsActionsOpen(false); exportExcel(); }} />
+                <ClientMenuItem icon={Trash2} label="Delete selected" onClick={() => { setIsActionsOpen(false); deleteSelectedRows(); }} />
+                <ClientMenuItem icon={Trash2} label="Trash" onClick={() => { setIsActionsOpen(false); setIsTrashOpen((current) => !current); }} />
+                <ClientMenuItem icon={History} label="Audit" onClick={() => { setIsActionsOpen(false); setIsAuditOpen((current) => !current); }} />
+                <ClientMenuItem icon={RefreshCw} label="Refresh" onClick={() => { setIsActionsOpen(false); void loadRows(); }} />
+              </div>
+            </>
+          ) : null}
         </div>
       </div>
 
@@ -571,6 +557,19 @@ export function ClientRecordsRegister() {
         </div>
       ) : null}
     </section>
+  );
+}
+
+function ClientMenuItem({ icon: Icon, label, onClick }: { icon: ComponentType<{ className?: string }>; label: string; onClick: () => void }) {
+  return (
+    <button
+      className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
+      onClick={onClick}
+      type="button"
+    >
+      <Icon className="size-4 shrink-0 text-slate-500" />
+      {label}
+    </button>
   );
 }
 
