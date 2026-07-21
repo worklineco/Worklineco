@@ -7,7 +7,7 @@ export default function EngagementLetterPage() {
     <main className="min-h-screen bg-[#f4f6fa] px-4 py-5 text-slate-950 sm:px-6 lg:px-8">
       <div className="pointer-events-none fixed inset-0 -z-10 " />
 
-      <section className="mx-auto max-w-[1540px]">
+      <section className="mx-auto w-full max-w-none">
         <header className="rounded-[28px] border border-white/80 bg-white/90 p-5 shadow-[0_24px_80px_rgba(15,23,42,0.12)]">
           <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
             <div>

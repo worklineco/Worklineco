@@ -7,7 +7,7 @@ export default function ClientRecordsPage() {
     <main className="min-h-screen bg-[#f4f6fa] px-4 py-5 text-slate-950 sm:px-6 lg:px-8">
       <div className="pointer-events-none fixed inset-0 -z-10 " />
 
-      <section className="mx-auto max-w-[1540px]">
+      <section className="mx-auto w-full max-w-none">
         <header className="flex items-center justify-between gap-3">
           <h1 className="text-2xl font-black text-slate-950">Client Records</h1>
           <Link
