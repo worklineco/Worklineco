@@ -310,7 +310,7 @@ export function ClientRecordsRegister() {
 
         <div className="relative">
           <input accept=".csv,.xls,.xlsx" className="hidden" onChange={importExcel} ref={fileInputRef} type="file" />
-          <button className={`${buttonClass} bg-navy-700 text-white ring-slate-950`} onClick={() => setIsActionsOpen((current) => !current)} type="button">
+          <button className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl bg-navy-700 px-4 text-sm font-black text-white ring-1 ring-navy-900 transition hover:bg-navy-600" onClick={() => setIsActionsOpen((current) => !current)} type="button">
             <Menu className="size-4" />
             Actions
           </button>
