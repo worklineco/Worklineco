@@ -317,10 +317,6 @@ export function BillingRegister() {
       }, {}),
     [masters]
   );
-  const teams = useMemo(
-    () => Array.from(new Set(records.map((record) => record.owner_team).filter(Boolean))).sort(),
-    [records]
-  );
   const orderedBillingColumns = useMemo(
     () =>
       columnOrder
@@ -997,8 +993,8 @@ export function BillingRegister() {
       ) : null}
 
       {viewMode === "register" ? (
-      <div className="mt-4 grid gap-2 lg:grid-cols-[minmax(220px,1fr)_160px_150px_140px]">
-        <label className="flex h-11 items-center gap-2 rounded-md border border-slate-200 bg-white px-3">
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        <label className="flex h-11 min-w-[220px] flex-1 items-center gap-2 rounded-md border border-slate-200 bg-white px-3">
           <Search className="size-4 text-slate-400" />
           <input
             className="min-w-0 flex-1 border-0 bg-transparent text-sm font-semibold outline-none"
@@ -1007,24 +1003,17 @@ export function BillingRegister() {
             value={filters.search}
           />
         </label>
-        <SelectFilter
-          label="Status"
-          onChange={(value) => setFilters((current) => ({ ...current, status: value }))}
-          options={mergedMasters.billing_status}
-          value={filters.status}
-        />
-        <SelectFilter
-          label="Team"
-          onChange={(value) => setFilters((current) => ({ ...current, team: value }))}
-          options={teams}
-          value={filters.team}
-        />
-        <SelectFilter
-          label="Source"
-          onChange={(value) => setFilters((current) => ({ ...current, source: value }))}
-          options={["manual", "gstat", "import"]}
-          value={filters.source}
-        />
+        <button
+          className={buttonClass("light")}
+          onClick={() => {
+            setFilters({ search: "", status: "", receiptStatus: "", team: "", source: "" });
+            setColumnFilters({});
+          }}
+          type="button"
+        >
+          <X className="size-4" />
+          Clear filters
+        </button>
       </div>
       ) : null}
 
@@ -1559,7 +1548,7 @@ function BillingSummaryPanel({
 }) {
   return (
     <section className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-3">
-      <div className="grid gap-3 xl:grid-cols-[260px_1fr_1fr_1fr]">
+      <div className="grid gap-3 xl:grid-cols-[260px_1fr_1fr]">
         <div className="rounded-md border border-slate-200 bg-white p-3">
           <p className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">Summary</p>
           <p className="mt-2 text-2xl font-black text-slate-950">{summary.rowCount}</p>
@@ -1569,7 +1558,6 @@ function BillingSummaryPanel({
         </div>
         <SummaryGroup activeLabel={activeBillingStatus} items={summary.billingStatus} onSelect={onFilterStatus} title="Billing Status" />
         <SummaryGroup activeLabel={activeReceiptStatus} items={summary.receivingStatus} onSelect={onFilterReceiptStatus} title="Receipt Status" />
-        <SummaryGroup items={summary.sources} title="Source" />
       </div>
     </section>
   );
@@ -1613,32 +1601,6 @@ function SummaryGroup({
         )}
       </div>
     </div>
-  );
-}
-
-function SelectFilter({
-  label,
-  onChange,
-  options,
-  value
-}: {
-  label: string;
-  onChange: (value: string) => void;
-  options: string[];
-  value: string;
-}) {
-  return (
-    <select
-      aria-label={label}
-      className="h-11 rounded-md border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 outline-none"
-      onChange={(event) => onChange(event.target.value)}
-      value={value}
-    >
-      <option value="">{label}: All</option>
-      {options.map((option) => (
-        <option key={option} value={option}>{option}</option>
-      ))}
-    </select>
   );
 }
 
