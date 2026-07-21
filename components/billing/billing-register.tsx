@@ -378,18 +378,6 @@ export function BillingRegister() {
   const selectedAuditLogs = selectedRecordId
     ? auditLogs.filter((log) => log.entity_id === selectedRecordId)
     : auditLogs.slice(0, 12);
-  const totals = useMemo(
-    () =>
-      filteredRecords.reduce(
-        (summary, record) => ({
-          billed: summary.billed + toNumber(record.total),
-          pending: summary.pending + (record.receiving_status === "Received" ? 0 : toNumber(record.total)),
-          received: summary.received + (record.receiving_status === "Received" ? toNumber(record.total) : 0)
-        }),
-        { billed: 0, pending: 0, received: 0 }
-      ),
-    [filteredRecords]
-  );
   const billingSummary = useMemo(() => getBillingSummary(filteredRecords), [filteredRecords]);
   const hasActiveColumnFilters = Object.values(columnFilters).some((value) => value.trim());
   const pageCount = Math.max(1, Math.ceil(filteredRecords.length / billingPageSize));
@@ -926,81 +914,12 @@ export function BillingRegister() {
 
   return (
     <section className={`w-full border border-slate-200 bg-white p-4 shadow-[0_18px_60px_rgba(15,23,42,0.10)] ${isFullscreen ? "fixed inset-3 z-50 flex flex-col overflow-hidden rounded-lg" : "rounded-lg"}`}>
-      <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
-        <div>
-          <p className="text-xs font-black uppercase tracking-[0.16em] text-navy-700">Firm-wide billing</p>
-          <h2 className="mt-1 text-2xl font-black text-slate-950">Billing Register</h2>
-          <p className="mt-1 text-sm font-bold text-slate-500">
-            {isLoading ? "Loading" : `${filteredRecords.length} visible of ${records.length} rows`} - total {formatMoney(totals.billed)}
-            {isFullTableLoading ? " - loading full table..." : ""}
-          </p>
-        </div>
-
-        <div className="grid gap-2 text-sm font-black text-slate-700 sm:grid-cols-3 xl:min-w-[520px]">
-          <Summary label="Received" value={formatMoney(totals.received)} />
-          <Summary label="Pending" value={formatMoney(totals.pending)} />
-          <Summary label="Access" value={access.canViewAll ? "All teams" : access.team || "Own rows"} />
-        </div>
-      </div>
-
-      <div className="mt-4 flex flex-wrap gap-2 border-b border-slate-200 pb-3">
-        <ViewButton active={viewMode === "register"} label="Register" onClick={() => setViewMode("register")} />
-        <ViewButton active={viewMode === "audit"} label="Audit Trail" onClick={() => { setViewMode("audit"); void loadBillingActivity(); }} />
-        <ViewButton active={viewMode === "trash"} label={`Trash (${trashRecords.length})`} onClick={() => { setViewMode("trash"); void loadBillingActivity(); }} />
-      </div>
-
-      {viewMode === "register" ? (
-        <div className="mt-4">
-          <button
-            className="flex w-full items-center justify-between gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-left text-sm font-black text-slate-700 transition hover:bg-slate-100"
-            onClick={() => setIsSummaryOpen((current) => !current)}
-            type="button"
-          >
-            <span>Summary — {billingSummary.rowCount} rows · {formatMoney(billingSummary.total)}</span>
-            <ChevronDown className={`size-4 shrink-0 text-slate-500 transition ${isSummaryOpen ? "rotate-180" : ""}`} />
-          </button>
-          {isSummaryOpen ? (
-            <BillingSummaryPanel
-              activeBillingStatus={filters.status}
-              activeReceiptStatus={filters.receiptStatus}
-              onFilterReceiptStatus={(receiptStatus) => setFilters((current) => ({ ...current, receiptStatus: current.receiptStatus === receiptStatus ? "" : receiptStatus }))}
-              onFilterStatus={(status) => setFilters((current) => ({ ...current, status: current.status === status ? "" : status }))}
-              summary={billingSummary}
-            />
-          ) : null}
-        </div>
-      ) : null}
-
-      {viewMode === "register" ? (
-      <div className="mt-4 grid gap-2 lg:grid-cols-[minmax(220px,1fr)_160px_150px_140px_auto]">
-        <label className="flex h-11 items-center gap-2 rounded-md border border-slate-200 bg-white px-3">
-          <Search className="size-4 text-slate-400" />
-          <input
-            className="min-w-0 flex-1 border-0 bg-transparent text-sm font-semibold outline-none"
-            onChange={(event) => setFilters((current) => ({ ...current, search: event.target.value }))}
-            placeholder="Search client, GSTIN, invoice, memo, team"
-            value={filters.search}
-          />
-        </label>
-        <SelectFilter
-          label="Status"
-          onChange={(value) => setFilters((current) => ({ ...current, status: value }))}
-          options={mergedMasters.billing_status}
-          value={filters.status}
-        />
-        <SelectFilter
-          label="Team"
-          onChange={(value) => setFilters((current) => ({ ...current, team: value }))}
-          options={teams}
-          value={filters.team}
-        />
-        <SelectFilter
-          label="Source"
-          onChange={(value) => setFilters((current) => ({ ...current, source: value }))}
-          options={["manual", "gstat", "import"]}
-          value={filters.source}
-        />
-        <div className="relative flex justify-end">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-xl font-black text-slate-950">
+          Billing Register{viewMode === "audit" ? " — Audit Trail" : viewMode === "trash" ? ` — Trash (${trashRecords.length})` : ""}
+          {isFullTableLoading ? <span className="ml-2 text-xs font-bold text-slate-400">loading…</span> : null}
+        </h2>
+        <div className="relative">
           <button className={buttonClass("dark")} onClick={() => setIsToolbarMenuOpen((current) => !current)} type="button">
             <Menu className="size-4" />
             Actions
@@ -1008,7 +927,13 @@ export function BillingRegister() {
           {isToolbarMenuOpen ? (
             <>
               <div className="fixed inset-0 z-30" onClick={() => setIsToolbarMenuOpen(false)} />
-              <div className="absolute right-0 top-12 z-40 w-52 overflow-hidden rounded-md border border-slate-200 bg-white py-1 shadow-2xl">
+              <div className="absolute right-0 top-12 z-40 w-56 overflow-hidden rounded-md border border-slate-200 bg-white py-1 shadow-2xl">
+                {viewMode !== "register" ? (
+                  <BillingMenuItem icon={RotateCcw} label="Register" onClick={() => { setIsToolbarMenuOpen(false); setViewMode("register"); }} />
+                ) : null}
+                <BillingMenuItem icon={History} label="Audit Trail" onClick={() => { setIsToolbarMenuOpen(false); setViewMode("audit"); void loadBillingActivity(); }} />
+                <BillingMenuItem icon={Trash2} label={`Trash (${trashRecords.length})`} onClick={() => { setIsToolbarMenuOpen(false); setViewMode("trash"); void loadBillingActivity(); }} />
+                <div className="my-1 border-t border-slate-100" />
                 <BillingMenuItem icon={Plus} label="Add row" onClick={() => { setIsToolbarMenuOpen(false); openAddForm(); }} />
                 <BillingMenuItem icon={Settings2} label="Columns" onClick={() => { setIsToolbarMenuOpen(false); setIsColumnOptionsOpen(true); }} />
                 <BillingMenuItem icon={Download} label="Export view" onClick={() => { setIsToolbarMenuOpen(false); exportWorkbook("view"); }} />
@@ -1047,6 +972,59 @@ export function BillingRegister() {
             type="file"
           />
         </div>
+      </div>
+
+      {viewMode === "register" ? (
+        <div className="mt-4">
+          <button
+            className="flex w-full items-center justify-between gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-left text-sm font-black text-slate-700 transition hover:bg-slate-100"
+            onClick={() => setIsSummaryOpen((current) => !current)}
+            type="button"
+          >
+            <span>Summary — {billingSummary.rowCount} rows · {formatMoney(billingSummary.total)}</span>
+            <ChevronDown className={`size-4 shrink-0 text-slate-500 transition ${isSummaryOpen ? "rotate-180" : ""}`} />
+          </button>
+          {isSummaryOpen ? (
+            <BillingSummaryPanel
+              activeBillingStatus={filters.status}
+              activeReceiptStatus={filters.receiptStatus}
+              onFilterReceiptStatus={(receiptStatus) => setFilters((current) => ({ ...current, receiptStatus: current.receiptStatus === receiptStatus ? "" : receiptStatus }))}
+              onFilterStatus={(status) => setFilters((current) => ({ ...current, status: current.status === status ? "" : status }))}
+              summary={billingSummary}
+            />
+          ) : null}
+        </div>
+      ) : null}
+
+      {viewMode === "register" ? (
+      <div className="mt-4 grid gap-2 lg:grid-cols-[minmax(220px,1fr)_160px_150px_140px]">
+        <label className="flex h-11 items-center gap-2 rounded-md border border-slate-200 bg-white px-3">
+          <Search className="size-4 text-slate-400" />
+          <input
+            className="min-w-0 flex-1 border-0 bg-transparent text-sm font-semibold outline-none"
+            onChange={(event) => setFilters((current) => ({ ...current, search: event.target.value }))}
+            placeholder="Search client, GSTIN, invoice, memo, team"
+            value={filters.search}
+          />
+        </label>
+        <SelectFilter
+          label="Status"
+          onChange={(value) => setFilters((current) => ({ ...current, status: value }))}
+          options={mergedMasters.billing_status}
+          value={filters.status}
+        />
+        <SelectFilter
+          label="Team"
+          onChange={(value) => setFilters((current) => ({ ...current, team: value }))}
+          options={teams}
+          value={filters.team}
+        />
+        <SelectFilter
+          label="Source"
+          onChange={(value) => setFilters((current) => ({ ...current, source: value }))}
+          options={["manual", "gstat", "import"]}
+          value={filters.source}
+        />
       </div>
       ) : null}
 
@@ -1638,15 +1616,6 @@ function SummaryGroup({
   );
 }
 
-function Summary({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-md border border-slate-200 bg-white px-3 py-2">
-      <p className="text-[10px] uppercase tracking-[0.14em] text-slate-500">{label}</p>
-      <p className="mt-1 truncate text-sm text-slate-950">{value}</p>
-    </div>
-  );
-}
-
 function SelectFilter({
   label,
   onChange,
@@ -1681,20 +1650,6 @@ function BillingMenuItem({ icon: Icon, label, onClick }: { icon: ComponentType<{
       type="button"
     >
       <Icon className="size-4 shrink-0 text-slate-500" />
-      {label}
-    </button>
-  );
-}
-
-function ViewButton({ active, label, onClick }: { active: boolean; label: string; onClick: () => void }) {
-  return (
-    <button
-      className={`inline-flex h-10 items-center justify-center rounded-md px-4 text-xs font-black uppercase transition ${
-        active ? "bg-navy-700 text-white" : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-      }`}
-      onClick={onClick}
-      type="button"
-    >
       {label}
     </button>
   );
