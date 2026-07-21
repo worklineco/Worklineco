@@ -8,6 +8,7 @@ import {
   BookOpenCheck,
   BriefcaseBusiness,
   Building2,
+  FileSignature,
   CalendarClock,
   CalendarDays,
   ClipboardCheck,
@@ -49,6 +50,7 @@ const navItems: NavItem[] = [
   { href: "/dco-policies", icon: BookOpenCheck, label: "DCo Policies" },
   { href: "/applause-board", icon: Megaphone, label: "Applause Board" },
   { href: "/client-records", icon: Building2, label: "Client Records" },
+  { href: "/engagement-letters", icon: FileSignature, label: "Engagement Letters" },
   { href: "/teams", icon: UsersRound, label: "Team Members" },
   { href: "/gstat/trash", icon: Trash2, label: "Trash" }
 ];

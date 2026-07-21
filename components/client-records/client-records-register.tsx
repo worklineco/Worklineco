@@ -43,7 +43,10 @@ const columns = [
   "Country",
   "Registration Type",
   "GSTIN/UIN",
-  "PAN/IT No."
+  "PAN/IT No.",
+  "Client Type",
+  "Retainer Fee",
+  "Billing Cycle"
 ];
 const importActionColumn = "Import Action";
 const importActionOptions = ["Add", "Update", "Delete"];

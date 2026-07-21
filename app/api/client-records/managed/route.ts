@@ -31,7 +31,10 @@ const columns = [
   "Country",
   "Registration Type",
   "GSTIN/UIN",
-  "PAN/IT No."
+  "PAN/IT No.",
+  "Client Type",
+  "Retainer Fee",
+  "Billing Cycle"
 ];
 
 export async function GET() {
