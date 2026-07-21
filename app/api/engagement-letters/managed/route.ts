@@ -24,6 +24,8 @@ const columns = [
   "Period",
   "Engagement Date",
   "Fee",
+  "Retainer Fee",
+  "Billing Cycle",
   "Zoho Drive Link",
   "Billed Status",
   "Remarks"

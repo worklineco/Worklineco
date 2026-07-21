@@ -15,6 +15,8 @@ const displayColumns = [
   "Period",
   "Engagement Date",
   "Fee",
+  "Retainer Fee",
+  "Billing Cycle",
   "Zoho Drive Link",
   "Billed Status",
   "Remarks"
@@ -26,6 +28,8 @@ const editableFields: { key: string; type: "date" | "number" | "select" | "text"
   { key: "Period", type: "text" },
   { key: "Engagement Date", type: "date" },
   { key: "Fee", type: "number" },
+  { key: "Retainer Fee", type: "number" },
+  { key: "Billing Cycle", type: "select", options: ["Monthly", "Quarterly", "Half-Yearly", "Yearly"] },
   { key: "Zoho Drive Link", type: "url", wide: true },
   { key: "Billed Status", type: "select", options: ["Unbilled", "Billed"] },
   { key: "Remarks", type: "textarea", wide: true }
@@ -280,6 +284,7 @@ export function EngagementLettersRegister() {
                         onChange={(event) => setEditor((current) => (current ? { ...current, row: { ...current.row, [field.key]: event.target.value } } : current))}
                         value={String(editor.row[field.key] ?? "")}
                       >
+                        <option value="">Select</option>
                         {(field.options ?? []).map((option) => (
                           <option key={option} value={option}>{option}</option>
                         ))}

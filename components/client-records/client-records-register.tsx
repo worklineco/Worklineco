@@ -44,9 +44,7 @@ const columns = [
   "Registration Type",
   "GSTIN/UIN",
   "PAN/IT No.",
-  "Client Type",
-  "Retainer Fee",
-  "Billing Cycle"
+  "Client Type"
 ];
 const importActionColumn = "Import Action";
 const importActionOptions = ["Add", "Update", "Delete"];
@@ -538,15 +536,31 @@ export function ClientRecordsRegister() {
               {columns.filter((column) => column !== "S.no.").map((column) => (
                 <label className="block" key={column}>
                   <span className="text-xs font-black uppercase text-slate-500">{column}</span>
-                  <input
-                    className="input mt-2"
-                    onChange={(event) =>
-                      setEditor((current) =>
-                        current ? { ...current, row: { ...current.row, [column]: event.target.value } } : current
-                      )
-                    }
-                    value={String(editor.row[column] ?? "")}
-                  />
+                  {column === "Client Type" ? (
+                    <select
+                      className="input mt-2"
+                      onChange={(event) =>
+                        setEditor((current) =>
+                          current ? { ...current, row: { ...current.row, [column]: event.target.value } } : current
+                        )
+                      }
+                      value={String(editor.row[column] ?? "")}
+                    >
+                      <option value="">Select</option>
+                      <option value="One-Time">One-Time</option>
+                      <option value="Retainer">Retainer</option>
+                    </select>
+                  ) : (
+                    <input
+                      className="input mt-2"
+                      onChange={(event) =>
+                        setEditor((current) =>
+                          current ? { ...current, row: { ...current.row, [column]: event.target.value } } : current
+                        )
+                      }
+                      value={String(editor.row[column] ?? "")}
+                    />
+                  )}
                 </label>
               ))}
             </div>

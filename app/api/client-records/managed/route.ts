@@ -32,9 +32,7 @@ const columns = [
   "Registration Type",
   "GSTIN/UIN",
   "PAN/IT No.",
-  "Client Type",
-  "Retainer Fee",
-  "Billing Cycle"
+  "Client Type"
 ];
 
 export async function GET() {
