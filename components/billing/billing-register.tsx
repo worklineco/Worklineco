@@ -1,6 +1,7 @@
 "use client";
 
-import { ArrowDown, ArrowUp, Download, History, Link2, Maximize2, Pencil, Plus, RotateCcw, Search, Settings2, ShieldCheck, Trash2, Upload, X } from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronDown, Download, History, Link2, Maximize2, Menu, Pencil, Plus, RotateCcw, Search, Settings2, ShieldCheck, Trash2, Upload, X } from "lucide-react";
+import type { ComponentType } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { getCached, setCached } from "@/lib/data-cache";
 import * as XLSX from "xlsx-js-style";
@@ -302,6 +303,8 @@ export function BillingRegister() {
   const [tablePage, setTablePage] = useState(1);
   const [trashRecords, setTrashRecords] = useState<TrashRecord[]>([]);
   const [viewMode, setViewMode] = useState<BillingView>("register");
+  const [isSummaryOpen, setIsSummaryOpen] = useState(false);
+  const [isToolbarMenuOpen, setIsToolbarMenuOpen] = useState(false);
   const [filters, setFilters] = useState({ search: "", status: "", receiptStatus: "", team: "", source: "" });
   const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
   const [masters, setMasters] = useState(defaultMasters);
@@ -947,13 +950,25 @@ export function BillingRegister() {
       </div>
 
       {viewMode === "register" ? (
-        <BillingSummaryPanel
-          activeBillingStatus={filters.status}
-          activeReceiptStatus={filters.receiptStatus}
-          onFilterReceiptStatus={(receiptStatus) => setFilters((current) => ({ ...current, receiptStatus: current.receiptStatus === receiptStatus ? "" : receiptStatus }))}
-          onFilterStatus={(status) => setFilters((current) => ({ ...current, status: current.status === status ? "" : status }))}
-          summary={billingSummary}
-        />
+        <div className="mt-4">
+          <button
+            className="flex w-full items-center justify-between gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-left text-sm font-black text-slate-700 transition hover:bg-slate-100"
+            onClick={() => setIsSummaryOpen((current) => !current)}
+            type="button"
+          >
+            <span>Summary — {billingSummary.rowCount} rows · {formatMoney(billingSummary.total)}</span>
+            <ChevronDown className={`size-4 shrink-0 text-slate-500 transition ${isSummaryOpen ? "rotate-180" : ""}`} />
+          </button>
+          {isSummaryOpen ? (
+            <BillingSummaryPanel
+              activeBillingStatus={filters.status}
+              activeReceiptStatus={filters.receiptStatus}
+              onFilterReceiptStatus={(receiptStatus) => setFilters((current) => ({ ...current, receiptStatus: current.receiptStatus === receiptStatus ? "" : receiptStatus }))}
+              onFilterStatus={(status) => setFilters((current) => ({ ...current, status: current.status === status ? "" : status }))}
+              summary={billingSummary}
+            />
+          ) : null}
+        </div>
       ) : null}
 
       {viewMode === "register" ? (
@@ -985,52 +1000,40 @@ export function BillingRegister() {
           options={["manual", "gstat", "import"]}
           value={filters.source}
         />
-        <div className="flex flex-wrap gap-2">
-          <div className="relative">
-            <button className={buttonClass("light")} onClick={() => setIsColumnOptionsOpen((current) => !current)} type="button">
-              <Settings2 className="size-4" />
-              Columns
-            </button>
-            {isColumnOptionsOpen ? (
-              <BillingColumnOptionsPanel
-                hiddenColumnKeys={hiddenColumnKeys}
-                onApply={(layout) => {
-                  const normalizedLayout = normalizeBillingColumnLayout(layout);
-                  setColumnOrder(normalizedLayout.order);
-                  setHiddenColumnKeys(new Set(normalizedLayout.hiddenColumnKeys));
-                  setIsColumnOptionsOpen(false);
-                }}
-                onClose={() => setIsColumnOptionsOpen(false)}
-                orderedColumns={orderedBillingColumns}
-              />
-            ) : null}
-          </div>
-          <button className={buttonClass("primary")} onClick={openAddForm} type="button">
-            <Plus className="size-4" />
-            Add
+        <div className="relative flex justify-end">
+          <button className={buttonClass("dark")} onClick={() => setIsToolbarMenuOpen((current) => !current)} type="button">
+            <Menu className="size-4" />
+            Actions
           </button>
-          <button className={buttonClass("dark")} onClick={() => exportWorkbook("view")} type="button">
-            <Download className="size-4" />
-            Export View
-          </button>
-          <button className={buttonClass("light")} onClick={() => exportWorkbook("full")} type="button">
-            <Download className="size-4" />
-            Export Full
-          </button>
-          <button className={buttonClass("light")} onClick={downloadTemplate} type="button">
-            Template
-          </button>
-          <button className={buttonClass("light")} onClick={() => fileInputRef.current?.click()} type="button">
-            <Upload className="size-4" />
-            Import
-          </button>
-          <button className={buttonClass("light")} onClick={() => setIsFullscreen((current) => !current)} type="button">
-            <Maximize2 className="size-4" />
-          </button>
-          {hasActiveColumnFilters ? (
-            <button className={buttonClass("light")} onClick={() => setColumnFilters({})} type="button">
-              Clear column filters
-            </button>
+          {isToolbarMenuOpen ? (
+            <>
+              <div className="fixed inset-0 z-30" onClick={() => setIsToolbarMenuOpen(false)} />
+              <div className="absolute right-0 top-12 z-40 w-52 overflow-hidden rounded-md border border-slate-200 bg-white py-1 shadow-2xl">
+                <BillingMenuItem icon={Plus} label="Add row" onClick={() => { setIsToolbarMenuOpen(false); openAddForm(); }} />
+                <BillingMenuItem icon={Settings2} label="Columns" onClick={() => { setIsToolbarMenuOpen(false); setIsColumnOptionsOpen(true); }} />
+                <BillingMenuItem icon={Download} label="Export view" onClick={() => { setIsToolbarMenuOpen(false); exportWorkbook("view"); }} />
+                <BillingMenuItem icon={Download} label="Export full" onClick={() => { setIsToolbarMenuOpen(false); exportWorkbook("full"); }} />
+                <BillingMenuItem icon={Download} label="Download template" onClick={() => { setIsToolbarMenuOpen(false); downloadTemplate(); }} />
+                <BillingMenuItem icon={Upload} label="Import" onClick={() => { setIsToolbarMenuOpen(false); fileInputRef.current?.click(); }} />
+                <BillingMenuItem icon={Maximize2} label={isFullscreen ? "Exit fullscreen" : "Fullscreen"} onClick={() => { setIsToolbarMenuOpen(false); setIsFullscreen((current) => !current); }} />
+                {hasActiveColumnFilters ? (
+                  <BillingMenuItem icon={X} label="Clear column filters" onClick={() => { setIsToolbarMenuOpen(false); setColumnFilters({}); }} />
+                ) : null}
+              </div>
+            </>
+          ) : null}
+          {isColumnOptionsOpen ? (
+            <BillingColumnOptionsPanel
+              hiddenColumnKeys={hiddenColumnKeys}
+              onApply={(layout) => {
+                const normalizedLayout = normalizeBillingColumnLayout(layout);
+                setColumnOrder(normalizedLayout.order);
+                setHiddenColumnKeys(new Set(normalizedLayout.hiddenColumnKeys));
+                setIsColumnOptionsOpen(false);
+              }}
+              onClose={() => setIsColumnOptionsOpen(false)}
+              orderedColumns={orderedBillingColumns}
+            />
           ) : null}
           <input
             accept=".xlsx,.xls,.csv"
@@ -1667,6 +1670,19 @@ function SelectFilter({
         <option key={option} value={option}>{option}</option>
       ))}
     </select>
+  );
+}
+
+function BillingMenuItem({ icon: Icon, label, onClick }: { icon: ComponentType<{ className?: string }>; label: string; onClick: () => void }) {
+  return (
+    <button
+      className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
+      onClick={onClick}
+      type="button"
+    >
+      <Icon className="size-4 shrink-0 text-slate-500" />
+      {label}
+    </button>
   );
 }
 
