@@ -20,6 +20,7 @@ type BillingRecord = {
   include_ope_in_fees?: string;
   import_action?: string;
   income_head?: string;
+  is_retainer?: string;
   invoice_date?: string | null;
   invoice_no?: string;
   memo_date?: string | null;
@@ -86,6 +87,7 @@ const billingSelectColumns = [
   "person_authorised",
   "voucher_type",
   "income_head",
+  "is_retainer",
   "group_name",
   "client",
   "gstin",
@@ -913,6 +915,7 @@ function cleanRecord(
     igst,
     include_ope_in_fees: includeOpeInFees,
     income_head: text(record.income_head),
+    is_retainer: text(record.is_retainer),
     invoice_date: dateOrNull(record.invoice_date),
     invoice_no: text(record.invoice_no),
     memo_date: dateOrNull(record.memo_date),
@@ -960,7 +963,7 @@ function cleanRecord(
 function isMissingCompatibilityColumn(error: unknown) {
   const message = isRecord(error) ? String(error.message ?? "") : String(error ?? "");
 
-  return ["address", "escalation_1", "include_ope_in_fees", "place_of_supply", "registration_type", "receiving_date", "serial_no"].some((column) =>
+  return ["address", "escalation_1", "include_ope_in_fees", "is_retainer", "place_of_supply", "registration_type", "receiving_date", "serial_no"].some((column) =>
     message.includes(column)
   );
 }
@@ -968,6 +971,7 @@ function isMissingCompatibilityColumn(error: unknown) {
 function stripCompatibilityColumns<T extends Record<string, unknown>>(record: T) {
   const {
     include_ope_in_fees: _includeOpeInFees,
+    is_retainer: _isRetainer,
     address: _address,
     escalation_1: _escalation1,
     place_of_supply: _placeOfSupply,

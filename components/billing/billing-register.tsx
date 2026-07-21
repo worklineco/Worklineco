@@ -20,6 +20,7 @@ type BillingRecord = {
   igst: number;
   include_ope_in_fees: string;
   income_head: string;
+  is_retainer: string;
   invoice_date: string | null;
   invoice_no: string;
   memo_date: string | null;
@@ -106,6 +107,7 @@ const emptyRecord: BillingRecord = {
   igst: 0,
   include_ope_in_fees: "No",
   income_head: "",
+  is_retainer: "",
   invoice_date: "",
   invoice_no: "",
   memo_date: "",
@@ -184,6 +186,7 @@ const billingColumns: BillingColumn[] = [
   { field: "owner_team", label: "Team", type: "text", width: 128 },
   { field: "source_module", label: "Source", type: "select", width: 110 },
   { field: "voucher_type", label: "Voucher", type: "select", width: 145 },
+  { field: "is_retainer", label: "Retainer Bill", type: "select", width: 130 },
   { field: "group_name", label: "Group", type: "select", width: 145 },
   { field: "gstin", label: "GSTIN", type: "text", width: 160 },
   { field: "client", label: "Client", type: "text", width: 220 },
@@ -222,6 +225,7 @@ const importHeaders: Array<{ field: BillingField; label: string }> = [
   { field: "serial_no", label: "S.No." },
   { field: "owner_team", label: "Team" },
   { field: "voucher_type", label: "Voucher Type" },
+  { field: "is_retainer", label: "Retainer Bill" },
   { field: "group_name", label: "Group" },
   { field: "gstin", label: "GSTIN" },
   { field: "client", label: "Client" },
@@ -2103,6 +2107,10 @@ function selectOptions(field: BillingField, masters: Record<string, string[]>) {
 
   if (field === "include_ope_in_fees") {
     return ["No", "Yes"];
+  }
+
+  if (field === "is_retainer") {
+    return ["", "Retainer", "Regular"];
   }
 
   return ["", ...(masters[field] ?? [])];
