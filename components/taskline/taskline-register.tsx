@@ -30,10 +30,12 @@ type TaskLineView = "audit" | "register";
 
 const importActionColumn = "Import Action";
 const importActionOptions = ["Add", "Update", "Delete"];
-const taskLineImportBatchSize = 100;
+const taskLineImportBatchSize = 250;
+const taskLineImportConcurrency = 3;
+const bulkDeleteLimit = 10;
 const taskLinePageSize = 200;
 const taskLineColumnLayoutStorageKey = "workline:taskline-column-layout:v2";
-const actionColumnWidth = 132;
+const actionColumnWidth = 156;
 const actionColumnKey = "__actions";
 const taskLineColumns: TaskLineColumn[] = [
   { key: "team", label: "Team", width: 120 },
@@ -125,6 +127,8 @@ export function TaskLineRegister() {
   const [message, setMessage] = useState("");
   const [editingRowId, setEditingRowId] = useState<string | null>(null);
   const [rows, setRows] = useState<TaskLineRow[]>([]);
+  const [selectedRowIds, setSelectedRowIds] = useState<Set<string>>(new Set());
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [tablePage, setTablePage] = useState(1);
@@ -694,6 +698,58 @@ export function TaskLineRegister() {
     }
   }
 
+  function toggleRowSelection(rowId: string) {
+    setSelectedRowIds((current) => {
+      const next = new Set(current);
+      if (next.has(rowId)) {
+        next.delete(rowId);
+        return next;
+      }
+      if (next.size >= bulkDeleteLimit) {
+        setMessage(`You can select a maximum of ${bulkDeleteLimit} tasks at once.`);
+        return current;
+      }
+      next.add(rowId);
+      return next;
+    });
+  }
+
+  async function deleteSelectedRows() {
+    const recordIds = Array.from(selectedRowIds);
+    if (!recordIds.length || recordIds.length > bulkDeleteLimit || isBulkDeleting) {
+      return;
+    }
+    if (!window.confirm(`Delete ${recordIds.length} selected TaskLine task${recordIds.length === 1 ? "" : "s"}?`)) {
+      return;
+    }
+
+    setIsBulkDeleting(true);
+    setMessage(`Deleting ${recordIds.length} selected TaskLine task${recordIds.length === 1 ? "" : "s"}...`);
+    try {
+      const response = await fetch("/api/taskline", {
+        body: JSON.stringify({ action: "bulk_delete", recordIds }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST"
+      });
+      const result = (await response.json().catch(() => ({}))) as { deleted?: number; error?: string };
+      if (!response.ok) {
+        setMessage(result.error ?? "Could not delete the selected TaskLine tasks.");
+        return;
+      }
+
+      const deletedIds = new Set(recordIds);
+      setRows((current) => current.filter((row) => !deletedIds.has(row.__id)));
+      setSelectedRowIds(new Set());
+      await loadTaskLine();
+      setMessage(`${result.deleted ?? recordIds.length} selected TaskLine task${(result.deleted ?? recordIds.length) === 1 ? "" : "s"} deleted.`);
+    } catch (error) {
+      console.error("TaskLine bulk delete error:", error);
+      setMessage("Could not delete the selected TaskLine tasks.");
+    } finally {
+      setIsBulkDeleting(false);
+    }
+  }
+
   function viewRowHistory(row: TaskLineRow) {
     setViewMode("audit");
     setMessage(`Showing audit trail. Row selected: ${getRowLabel(row, rows) || "TaskLine row"}.`);
@@ -759,11 +815,20 @@ export function TaskLineRegister() {
       }
 
       const importRows = importedRows
-        .map((rawRow) => ({
-          ...rowFromImport(rawRow),
-          import_action: text(rawRow[importActionColumn] || "Add"),
-          serial_no: text(rawRow["S. No."] || rawRow["S.No."] || rawRow["Serial No."])
-        }))
+        .map((rawRow) => {
+          const importAction = text(rawRow[importActionColumn] || "Add");
+          const serialNumber = text(rawRow["S. No."] || rawRow["S.No."] || rawRow["Serial No."]);
+          const serialIndex = Number.parseInt(serialNumber, 10) - 1;
+          const targetId = importAction.toLowerCase() === "add" || !Number.isInteger(serialIndex) || serialIndex < 0
+            ? ""
+            : text(filteredRows[serialIndex]?.__id);
+          return {
+            ...rowFromImport(rawRow),
+            import_action: importAction,
+            serial_no: serialNumber,
+            target_id: targetId
+          };
+        })
         .filter(hasTaskLineValue);
 
       if (!importRows.length) {
@@ -773,13 +838,22 @@ export function TaskLineRegister() {
 
       const summary = { added: 0, deleted: 0, updated: 0 };
 
-      for (let index = 0; index < importRows.length; index += taskLineImportBatchSize) {
-        const batch = importRows.slice(index, index + taskLineImportBatchSize);
-        const result = await postTaskLineImportBatch(batch);
-        summary.added += result.summary?.added ?? 0;
-        summary.updated += result.summary?.updated ?? 0;
-        summary.deleted += result.summary?.deleted ?? 0;
-        setMessage(`Importing ${file.name}: ${Math.min(index + taskLineImportBatchSize, importRows.length)} of ${importRows.length} rows processed...`);
+      const batches = Array.from({ length: Math.ceil(importRows.length / taskLineImportBatchSize) }, (_, index) =>
+        importRows.slice(index * taskLineImportBatchSize, (index + 1) * taskLineImportBatchSize)
+      );
+      let processed = 0;
+
+      for (let index = 0; index < batches.length; index += taskLineImportConcurrency) {
+        const batchGroup = batches.slice(index, index + taskLineImportConcurrency);
+        const results = await Promise.all(batchGroup.map(postTaskLineImportBatch));
+        for (let resultIndex = 0; resultIndex < results.length; resultIndex += 1) {
+          const result = results[resultIndex];
+          summary.added += result.summary?.added ?? 0;
+          summary.updated += result.summary?.updated ?? 0;
+          summary.deleted += result.summary?.deleted ?? 0;
+          processed += batchGroup[resultIndex].length;
+        }
+        setMessage(`Importing ${file.name}: ${processed} of ${importRows.length} rows processed...`);
       }
 
       await loadTaskLine();
@@ -915,6 +989,16 @@ export function TaskLineRegister() {
       <div className="mt-3">
         <div className="mb-1.5 flex items-center justify-end gap-1.5">
           {isLoading ? <span className="mr-auto text-xs font-bold text-slate-500">Loading TaskLine rows...</span> : null}
+          <button
+            className="inline-flex h-8 items-center gap-1 rounded-md border border-rose-200 bg-white px-3 text-xs font-bold text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40"
+            disabled={!selectedRowIds.size || selectedRowIds.size > bulkDeleteLimit || isBulkDeleting || isLoading}
+            onClick={() => void deleteSelectedRows()}
+            title={`Delete up to ${bulkDeleteLimit} selected tasks`}
+            type="button"
+          >
+            <Trash2 className="size-3.5" />
+            {isBulkDeleting ? "Deleting..." : `Delete selected (${selectedRowIds.size}/${bulkDeleteLimit})`}
+          </button>
           <button
             className="inline-flex h-8 items-center rounded-md border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 transition hover:bg-slate-50 disabled:opacity-40"
             disabled={tablePage <= 1 || isLoading}
@@ -1067,6 +1151,15 @@ export function TaskLineRegister() {
                   {actionColumnHidden ? null : (
                   <td className={`border-r border-slate-100 px-2 py-1 ${actionColumnFrozen ? "sticky left-0 z-[5] bg-white" : ""}`} style={actionColumnFrozen ? { left: 0 } : undefined}>
                     <div className="flex items-center gap-1">
+                      <input
+                        aria-label={`Select ${getRowLabel(row, rows) || "TaskLine row"}`}
+                        checked={selectedRowIds.has(row.__id)}
+                        className="size-3.5 shrink-0 cursor-pointer accent-rose-700"
+                        disabled={!selectedRowIds.has(row.__id) && selectedRowIds.size >= bulkDeleteLimit}
+                        onChange={() => toggleRowSelection(row.__id)}
+                        title={selectedRowIds.has(row.__id) ? "Remove from bulk selection" : "Select for bulk delete"}
+                        type="checkbox"
+                      />
                       <button className="inline-flex size-7 items-center justify-center rounded-md border border-sky-200 text-sky-700 hover:bg-sky-50" onClick={() => openEditForm(row)} title="Edit row" type="button">
                         <Pencil className="size-4" />
                       </button>

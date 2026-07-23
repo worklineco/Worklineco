@@ -5,6 +5,7 @@ import { NextResponse } from "next/server";
 
 type CookieToSet = { name: string; options: CookieOptions; value: string };
 type TaskLineRow = Record<string, string>;
+type TaskLineImportRow = TaskLineRow & { import_action?: string; serial_no?: string; target_id?: string };
 type TaskRecord = {
   created_at: string;
   created_by: string | null;
@@ -137,9 +138,10 @@ async function handlePost(request: Request) {
   }
 
   const payload = (await request.json()) as {
-    action?: "import" | "save";
-    importRows?: Array<TaskLineRow & { import_action?: string; serial_no?: string }>;
+    action?: "bulk_delete" | "import" | "save";
+    importRows?: TaskLineImportRow[];
     record?: TaskLineRow;
+    recordIds?: string[];
     returnRows?: boolean;
   };
   const admin = createAdminClient();
@@ -156,6 +158,10 @@ async function handlePost(request: Request) {
 
   if (payload.action === "import") {
     return importRows(admin, organisation.organisationId, auth.user, access, payload.importRows ?? [], payload.returnRows !== false);
+  }
+
+  if (payload.action === "bulk_delete") {
+    return bulkDeleteRows(admin, organisation.organisationId, auth.user, access, payload.recordIds ?? []);
   }
 
   const record = payload.record;
@@ -275,77 +281,153 @@ export async function DELETE(request: Request) {
   return NextResponse.json({ ok: true });
 }
 
+async function bulkDeleteRows(
+  admin: ReturnType<typeof createAdminClient>,
+  organisationId: string,
+  user: User,
+  access: AccessScope,
+  rawRecordIds: string[]
+) {
+  const recordIds = Array.from(new Set(rawRecordIds.map(text).filter(Boolean)));
+  if (!recordIds.length || recordIds.length > 10) {
+    return NextResponse.json({ error: "Select between 1 and 10 TaskLine tasks to delete." }, { status: 400 });
+  }
+
+  const existing = await admin
+    .from("tasks")
+    .select("id,organisation_id,title,description,due_at,custom_values,created_by,created_at,updated_at")
+    .eq("organisation_id", organisationId)
+    .in("id", recordIds);
+  if (existing.error) {
+    return NextResponse.json({ error: existing.error.message }, { status: 500 });
+  }
+
+  const records = ((existing.data ?? []) as TaskRecord[]).filter(
+    (record) => isTaskLineRecord(record) && canAccessRecord(record, access)
+  );
+  if (records.length !== recordIds.length) {
+    return NextResponse.json({ error: "One or more selected tasks are unavailable or outside your team access." }, { status: 403 });
+  }
+
+  const deleted = await admin.from("tasks").delete().eq("organisation_id", organisationId).in("id", recordIds);
+  if (deleted.error) {
+    return NextResponse.json({ error: deleted.error.message }, { status: 500 });
+  }
+
+  await writeAuditLog(admin, organisationId, user.id, "taskline.bulk_delete", records.map(auditValue), { deleted: records.length });
+  return NextResponse.json({ deleted: records.length });
+}
+
 async function importRows(
   admin: ReturnType<typeof createAdminClient>,
   organisationId: string,
   user: User,
   access: AccessScope,
-  rows: Array<TaskLineRow & { import_action?: string; serial_no?: string }>,
+  rows: TaskLineImportRow[],
   returnRows: boolean
 ) {
-  const existing = await loadTaskLineRecords(admin, organisationId, access);
+  const actionableRows = rows.map((row) => ({
+    action: text(row.import_action || "Add").toLowerCase(),
+    row,
+    targetId: text(row.target_id)
+  }));
+  const needsSerialFallback = actionableRows.some(
+    ({ action, targetId }) => (action === "update" || action === "delete") && !targetId
+  );
+  let existingRows: TaskRecord[] = [];
 
-  if (existing.error) {
-    return NextResponse.json({ error: existing.error.message }, { status: 500 });
+  if (needsSerialFallback) {
+    const existing = await loadTaskLineRecords(admin, organisationId, access);
+    if (existing.error) {
+      return NextResponse.json({ error: existing.error.message }, { status: 500 });
+    }
+    existingRows = existing.data ?? [];
   }
 
-  const existingRows = existing.data ?? [];
-  let added = 0;
-  let updated = 0;
-  let deleted = 0;
-
-  for (const row of rows) {
-    const action = text(row.import_action || "Add").toLowerCase();
-    const serialIndex = Number.parseInt(text(row.serial_no), 10) - 1;
-    const target = Number.isInteger(serialIndex) && serialIndex >= 0 ? existingRows[serialIndex] : null;
-
-    if (action === "delete") {
-      if (target?.id) {
-        await admin.from("tasks").delete().eq("id", target.id).eq("organisation_id", organisationId);
-        deleted += 1;
-      }
+  for (const item of actionableRows) {
+    if (item.targetId || (item.action !== "update" && item.action !== "delete")) {
       continue;
     }
+    const serialIndex = Number.parseInt(text(item.row.serial_no), 10) - 1;
+    item.targetId = Number.isInteger(serialIndex) && serialIndex >= 0 ? text(existingRows[serialIndex]?.id) : "";
+  }
 
-    if (action === "update") {
-      if (target?.id) {
-        const cleaned = applyTeamAccess(cleanRecord(row), access);
-        const updatedRow = await admin
-          .from("tasks")
-          .update({
-            ...toTaskValues(cleaned),
-            updated_at: new Date().toISOString()
-          })
-          .eq("id", target.id)
-          .eq("organisation_id", organisationId)
-          .select("id,organisation_id,title,description,due_at,custom_values,created_by,created_at,updated_at")
-          .single();
-
-        if (updatedRow.error) {
-          return NextResponse.json({ error: updatedRow.error.message }, { status: 500 });
-        }
-
-        updated += 1;
-      }
-      continue;
+  const requestedTargetIds = Array.from(
+    new Set(actionableRows.map(({ targetId }) => targetId).filter(Boolean))
+  );
+  const accessibleTargetIds = new Set<string>();
+  if (requestedTargetIds.length) {
+    const targets = await admin
+      .from("tasks")
+      .select("id,organisation_id,title,description,due_at,custom_values,created_by,created_at,updated_at")
+      .eq("organisation_id", organisationId)
+      .in("id", requestedTargetIds);
+    if (targets.error) {
+      return NextResponse.json({ error: targets.error.message }, { status: 500 });
     }
+    for (const record of (targets.data ?? []) as TaskRecord[]) {
+      if (isTaskLineRecord(record) && canAccessRecord(record, access)) {
+        accessibleTargetIds.add(record.id);
+      }
+    }
+  }
 
-    if (hasValue(row)) {
+  const deleteIds = Array.from(
+    new Set(
+      actionableRows
+        .filter(({ action, targetId }) => action === "delete" && accessibleTargetIds.has(targetId))
+        .map(({ targetId }) => targetId)
+    )
+  );
+  const updates = actionableRows.filter(
+    ({ action, targetId }) => action === "update" && accessibleTargetIds.has(targetId)
+  );
+  const inserts = actionableRows
+    .filter(({ action, row }) => action === "add" && hasValue(row))
+    .map(({ row }) => {
       const cleaned = applyTeamAccess(cleanRecord(row), access);
-      const inserted = await admin.from("tasks").insert({
+      return {
         ...toTaskValues(cleaned),
         created_by: null,
         organisation_id: organisationId,
         priority: "normal"
-      });
+      };
+    });
 
-      if (inserted.error) {
-        return NextResponse.json({ error: inserted.error.message }, { status: 500 });
-      }
+  const deleteRequest = deleteIds.length
+    ? admin.from("tasks").delete().eq("organisation_id", organisationId).in("id", deleteIds)
+    : Promise.resolve({ error: null });
+  const insertRequest = inserts.length
+    ? admin.from("tasks").insert(inserts)
+    : Promise.resolve({ error: null });
+  const [deleteResult, insertResult] = await Promise.all([deleteRequest, insertRequest]);
+  if (deleteResult.error) {
+    return NextResponse.json({ error: deleteResult.error.message }, { status: 500 });
+  }
+  if (insertResult.error) {
+    return NextResponse.json({ error: insertResult.error.message }, { status: 500 });
+  }
 
-      added += 1;
+  for (let index = 0; index < updates.length; index += 25) {
+    const updateResults = await Promise.all(
+      updates.slice(index, index + 25).map(({ row, targetId }) => {
+        const cleaned = applyTeamAccess(cleanRecord(row), access);
+        return admin
+          .from("tasks")
+          .update({ ...toTaskValues(cleaned), updated_at: new Date().toISOString() })
+          .eq("id", targetId)
+          .eq("organisation_id", organisationId);
+      })
+    );
+    const failedUpdate = updateResults.find((result) => result.error);
+    if (failedUpdate?.error) {
+      return NextResponse.json({ error: failedUpdate.error.message }, { status: 500 });
     }
   }
+
+  const added = inserts.length;
+  const updated = updates.length;
+  const deleted = deleteIds.length;
 
   await writeAuditLog(admin, organisationId, user.id, "taskline.import", null, { added, deleted, updated });
 
