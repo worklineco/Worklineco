@@ -298,7 +298,6 @@ export function TaskLineRegister() {
     }
     stageSeedDoneRef.current = true;
     if (stageMasters.length) {
-
       return;
     }
     const unique = Array.from(new Set(rows.map((row) => text(row.stage).trim()).filter(Boolean)));
@@ -599,7 +598,6 @@ export function TaskLineRegister() {
         body: JSON.stringify({ action: "save", record: formDraft }),
         headers: { "Content-Type": "application/json" },
         method: "POST"
-
       });
       const result = (await response.json()) as { error?: string; record?: TaskLineRow };
 
@@ -900,7 +898,6 @@ export function TaskLineRegister() {
         <select
           aria-label="Status Open/Close"
           className="h-10 shrink-0 rounded-md border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 outline-none"
-
           onChange={(event) => setStatusFilter(event.target.value)}
           value={statusFilter}
         >
@@ -1153,7 +1150,7 @@ export function TaskLineRegister() {
                 <tr className="border-b border-slate-100 last:border-b-0" key={row.__id}>
                   {actionColumnHidden ? null : (
                   <td className={`border-r border-slate-100 px-2 py-1 ${actionColumnFrozen ? "sticky left-0 z-[5] bg-white" : ""}`} style={actionColumnFrozen ? { left: 0 } : undefined}>
-                     <div className="flex items-center gap-1">
+                    <div className="flex items-center gap-1">
                       <input
                         aria-label={`Select ${getRowLabel(row, rows) || "TaskLine row"}`}
                         checked={selectedRowIds.has(row.__id)}
@@ -1201,7 +1198,6 @@ export function TaskLineRegister() {
             </tbody>
           </table>
         </div>
-
       </div>
       ) : null}
 
@@ -1502,7 +1498,6 @@ function TaskLineForm({
                     <option value="">Select stage</option>
                     {stageMasterNames.map((name) => (
                       <option key={name} value={name}>{name}</option>
-
                     ))}
                     {draft[column.key] && !stageMasterNames.includes(draft[column.key]) ? (
                       <option value={draft[column.key]}>{draft[column.key]} (not in master)</option>
@@ -1803,7 +1798,6 @@ function createEmptyRow(id: string): TaskLineRow {
       return row;
     },
     { __id: id }
-
   );
 }
 
@@ -2103,7 +2097,6 @@ function normalizeTaskLineColumnLayout(layout: Partial<TaskLineColumnLayout>): T
 
   return { frozenColumnKeys, hiddenColumnKeys, order };
 }
-
 
 function saveTaskLineColumnLayout(layout: TaskLineColumnLayout) {
   if (typeof window === "undefined") {
@@ -2405,7 +2398,6 @@ function TaskLineMasterPanel({
           </div>
           <button className="inline-flex size-9 items-center justify-center rounded-md border border-slate-200 text-slate-700 hover:bg-slate-50" onClick={onClose} title="Close" type="button">
             <X className="size-4" />
-
           </button>
         </header>
 
