@@ -298,7 +298,6 @@ async function bulkDeleteRows(
     .select("id,organisation_id,title,description,due_at,custom_values,created_by,created_at,updated_at")
     .eq("organisation_id", organisationId)
     .in("id", recordIds);
-
   if (existing.error) {
     return NextResponse.json({ error: existing.error.message }, { status: 500 });
   }
@@ -600,7 +599,6 @@ async function loadAuditLogs(admin: ReturnType<typeof createAdminClient>, organi
   }));
 }
 
-
 async function loadActorNames(admin: ReturnType<typeof createAdminClient>) {
   const names = new Map<string, string>();
   let page = 1;
@@ -899,7 +897,6 @@ async function requireUser() {
     data: { user },
     error
   } = await supabase.auth.getUser();
-
 
   if (error || !user) {
     return { error: NextResponse.json({ error: "Not authenticated." }, { status: 401 }) };
