@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  ArrowLeft,
   ArrowDown,
   ArrowUp,
   Download,
@@ -16,6 +17,7 @@ import {
   Upload,
   X
 } from "lucide-react";
+import Link from "next/link";
 import type { ComponentType } from "react";
 import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -63,7 +65,7 @@ const clientPageSize = 200;
 const clientSelectionColumnWidth = 40;
 const clientActionColumnWidth = 112;
 const clientColumnWidths: Record<string, number> = {
-  "S.no.": 64,
+  "S.no.": 84,
   Group: 120,
   Particulars: 200,
   "Email ID": 200,
@@ -453,15 +455,33 @@ export function ClientRecordsRegister() {
 
   return (
     <section className="w-full rounded-lg border border-slate-200 bg-white p-3 shadow-[0_18px_60px_rgba(15,23,42,0.10)]">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="shrink-0">
           <h2 className="text-lg font-black leading-tight text-slate-950">Client Records</h2>
           <p className="text-xs font-bold text-slate-500">
             {columns.length} columns · {isLoading ? "loading" : `${filteredRows.length.toLocaleString()} of ${rows.length.toLocaleString()} rows${hasActiveColumnFilters || search ? " (filtered)" : ""}`}
           </p>
         </div>
 
-        <div className="relative">
+        <label className="flex h-10 min-w-[220px] flex-1 items-center gap-2 rounded-md border border-slate-200 bg-white px-3">
+          <Search className="size-4 text-slate-400" />
+          <input
+            className="min-w-0 flex-1 border-0 bg-transparent text-sm font-semibold outline-none"
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Universal search"
+            value={search}
+          />
+        </label>
+
+        <Link
+          className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-4 text-sm font-black text-slate-700 transition hover:bg-slate-50"
+          href="/"
+        >
+          <ArrowLeft className="size-4" />
+          Workspace
+        </Link>
+
+        <div className="relative shrink-0">
           <input accept=".csv,.xls,.xlsx" className="hidden" onChange={importExcel} ref={fileInputRef} type="file" />
           <button className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-navy-700 px-4 text-sm font-black text-white ring-1 ring-navy-900 transition hover:bg-navy-600" onClick={() => setIsActionsOpen((current) => !current)} type="button">
             <Menu className="size-4" />
@@ -480,50 +500,7 @@ export function ClientRecordsRegister() {
                 <ClientMenuItem icon={Download} label="Export Excel" onClick={() => { setIsActionsOpen(false); exportExcel(); }} />
                 <ClientMenuItem icon={Trash2} label="Trash" onClick={() => { setIsActionsOpen(false); setIsTrashOpen((current) => !current); }} />
                 <ClientMenuItem icon={History} label="Audit" onClick={() => { setIsActionsOpen(false); setIsAuditOpen((current) => !current); }} />
-                <ClientMenuItem icon={RefreshCw} label="Refresh" onClick={() => { setIsActionsOpen(false); void loadRows(); }} />
-              </div>
-            </>
-          ) : null}
-        </div>
-      </div>
-
-      <div className="mt-3 flex h-10 items-center gap-2 rounded-md border border-slate-200 bg-white px-3">
-        <Search className="size-4 text-slate-400" />
-        <input
-          className="min-w-0 flex-1 border-0 bg-transparent text-sm font-semibold outline-none"
-          onChange={(event) => setSearch(event.target.value)}
-          placeholder="Universal search"
-          value={search}
-        />
-      </div>
-
-      {message ? (
-        <p className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-bold text-emerald-900">
-          {message}
-        </p>
-      ) : null}
-
-      <div className="mt-4 flex items-center justify-end gap-1.5">
-        <button
-          className="inline-flex h-8 items-center gap-1 rounded-md border border-rose-200 bg-white px-3 text-xs font-bold text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40"
-          disabled={!selectedIds.size || selectedIds.size > maxDeleteRows || isBulkDeleting || isLoading}
-          onClick={() => void deleteSelectedRows()}
-          title={`Delete up to ${maxDeleteRows} selected client records`}
-          type="button"
-        >
-          <Trash2 className="size-3.5" />
-          {isBulkDeleting ? "Deleting..." : `Delete selected (${selectedIds.size}/${maxDeleteRows})`}
-        </button>
-        <button className="inline-flex h-8 items-center rounded-md border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 disabled:opacity-40" disabled={tablePage <= 1 || isLoading} onClick={() => setTablePage((page) => Math.max(1, page - 1))} type="button">Prev</button>
-        <span className="inline-flex h-8 items-center rounded-md border border-slate-200 bg-white px-3 text-xs font-black text-slate-700">Page {tablePage} of {pageCount}</span>
-        <button className="inline-flex h-8 items-center rounded-md border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 disabled:opacity-40" disabled={tablePage >= pageCount || isLoading} onClick={() => setTablePage((page) => Math.min(pageCount, page + 1))} type="button">Next</button>
-      </div>
-
-      <div className="mt-2 max-h-[calc(100vh-150px)] overflow-auto rounded-md border border-slate-200 bg-white">
-        <table className="table-fixed border-collapse text-left text-sm" style={{ minWidth: clientSelectionColumnWidth + clientActionColumnWidth + columns.reduce((total, column) => total + clientColumnWidths[column], 0), width: clientSelectionColumnWidth + clientActionColumnWidth + columns.reduce((total, column) => total + clientColumnWidths[column], 0) }}>
-          <colgroup>
-            <col style={{ width: clientSelectionColumnWidth }} />
-            <col style={{ width: clientActionColumnWidth }} />
+                <ClientMenuItem icon={RefreshCw} label="Refresh" onClick={() => { setIsActionsOp…601 tokens truncated…le={{ width: clientActionColumnWidth }} />
             {columns.map((column) => <col key={column} style={{ width: clientColumnWidths[column] }} />)}
           </colgroup>
           <thead className="sticky top-0 z-10 bg-slate-100 text-[11px] font-semibold uppercase tracking-wide text-slate-600 [&_th]:border-b [&_th]:border-slate-200">
@@ -538,7 +515,7 @@ export function ClientRecordsRegister() {
                   <th className="border-b border-r border-slate-200 px-3 py-2" key={column}>
                     <div className="flex items-center gap-1">
                       <button className="flex min-w-0 flex-1 items-center justify-between gap-1 text-left" onClick={() => toggleSort(column)} title={`Sort by ${column}`} type="button">
-                        <span className="min-w-0 whitespace-normal break-words leading-tight">{column}</span>
+                        <span className={`min-w-0 leading-tight ${column === "S.no." ? "whitespace-nowrap" : "whitespace-normal break-words"}`}>{column}</span>
                         <span className="flex shrink-0 flex-col leading-none">
                           <ArrowUp className={`size-3 ${sortState?.column === column && sortState.direction === "asc" ? "text-navy-700" : "text-slate-300"}`} />
                           <ArrowDown className={`-mt-1 size-3 ${sortState?.column === column && sortState.direction === "desc" ? "text-navy-700" : "text-slate-300"}`} />
@@ -905,3 +882,4 @@ function formatDate(value: unknown) {
   if (!value) return "-";
   return new Date(String(value)).toLocaleString();
 }
+
