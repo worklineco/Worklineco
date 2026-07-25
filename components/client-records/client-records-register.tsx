@@ -500,7 +500,40 @@ export function ClientRecordsRegister() {
                 <ClientMenuItem icon={Download} label="Export Excel" onClick={() => { setIsActionsOpen(false); exportExcel(); }} />
                 <ClientMenuItem icon={Trash2} label="Trash" onClick={() => { setIsActionsOpen(false); setIsTrashOpen((current) => !current); }} />
                 <ClientMenuItem icon={History} label="Audit" onClick={() => { setIsActionsOpen(false); setIsAuditOpen((current) => !current); }} />
-                <ClientMenuItem icon={RefreshCw} label="Refresh" onClick={() => { setIsActionsOp…601 tokens truncated…le={{ width: clientActionColumnWidth }} />
+                <ClientMenuItem icon={RefreshCw} label="Refresh" onClick={() => { setIsActionsOpen(false); void loadRows(); }} />
+              </div>
+            </>
+          ) : null}
+        </div>
+      </div>
+
+      {message ? (
+        <p className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-bold text-emerald-900">
+          {message}
+        </p>
+      ) : null}
+
+      <div className="mt-3 flex items-center justify-end gap-1.5">
+        <button
+          className="inline-flex h-8 items-center gap-1 rounded-md border border-rose-200 bg-white px-3 text-xs font-bold text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40"
+          disabled={!selectedIds.size || selectedIds.size > maxDeleteRows || isBulkDeleting || isLoading}
+          onClick={() => void deleteSelectedRows()}
+          title={`Delete up to ${maxDeleteRows} selected client records`}
+          type="button"
+        >
+          <Trash2 className="size-3.5" />
+          {isBulkDeleting ? "Deleting..." : `Delete selected (${selectedIds.size}/${maxDeleteRows})`}
+        </button>
+        <button className="inline-flex h-8 items-center rounded-md border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 disabled:opacity-40" disabled={tablePage <= 1 || isLoading} onClick={() => setTablePage((page) => Math.max(1, page - 1))} type="button">Prev</button>
+        <span className="inline-flex h-8 items-center rounded-md border border-slate-200 bg-white px-3 text-xs font-black text-slate-700">Page {tablePage} of {pageCount}</span>
+        <button className="inline-flex h-8 items-center rounded-md border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 disabled:opacity-40" disabled={tablePage >= pageCount || isLoading} onClick={() => setTablePage((page) => Math.min(pageCount, page + 1))} type="button">Next</button>
+      </div>
+
+      <div className="mt-2 max-h-[calc(100vh-135px)] overflow-auto rounded-md border border-slate-200 bg-white">
+        <table className="table-fixed border-collapse text-left text-sm" style={{ minWidth: clientSelectionColumnWidth + clientActionColumnWidth + columns.reduce((total, column) => total + clientColumnWidths[column], 0), width: clientSelectionColumnWidth + clientActionColumnWidth + columns.reduce((total, column) => total + clientColumnWidths[column], 0) }}>
+          <colgroup>
+            <col style={{ width: clientSelectionColumnWidth }} />
+            <col style={{ width: clientActionColumnWidth }} />
             {columns.map((column) => <col key={column} style={{ width: clientColumnWidths[column] }} />)}
           </colgroup>
           <thead className="sticky top-0 z-10 bg-slate-100 text-[11px] font-semibold uppercase tracking-wide text-slate-600 [&_th]:border-b [&_th]:border-slate-200">
@@ -882,4 +915,3 @@ function formatDate(value: unknown) {
   if (!value) return "-";
   return new Date(String(value)).toLocaleString();
 }
-
