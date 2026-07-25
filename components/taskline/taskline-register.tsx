@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowDown, ArrowUp, ChevronDown, CircleDot, Download, Filter, History, ListChecks, Menu, Pencil, Pin, Plus, Search, Settings2, Trash2, Upload, X } from "lucide-react";
+import { ArrowDown, ArrowUp, CalendarDays, ChevronDown, CircleDot, Download, Filter, History, ListChecks, Menu, Pencil, Pin, Plus, Search, Settings2, Trash2, Upload, X } from "lucide-react";
 import type { ComponentType } from "react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -88,7 +88,24 @@ const taskLineColumnByKey = new Map(taskLineColumns.map((column) => [column.key,
 const defaultTaskLineColumnOrder = taskLineColumns.map((column) => column.key);
 const statusOptions = ["Open", "Close"];
 type TeamMemberLite = { designation: string; name: string; team: string };
+type EntityMasterOption = { entity: string; group: string };
 const emptyOptions: string[] = [];
+const teamOptions = ["Team-02", "Team-03", "Team-04", "Team-05", "Team-06", "Team-08"];
+const taskLineEntityListId = "taskline-entity-options";
+const taskLineSectionListId = "taskline-section-options";
+const taskLineStateListId = "taskline-state-options";
+const gstinStateOptions = [
+  ["01", "Jammu and Kashmir"], ["02", "Himachal Pradesh"], ["03", "Punjab"], ["04", "Chandigarh"],
+  ["05", "Uttarakhand"], ["06", "Haryana"], ["07", "Delhi"], ["08", "Rajasthan"], ["09", "Uttar Pradesh"],
+  ["10", "Bihar"], ["11", "Sikkim"], ["12", "Arunachal Pradesh"], ["13", "Nagaland"], ["14", "Manipur"],
+  ["15", "Mizoram"], ["16", "Tripura"], ["17", "Meghalaya"], ["18", "Assam"], ["19", "West Bengal"],
+  ["20", "Jharkhand"], ["21", "Odisha"], ["22", "Chhattisgarh"], ["23", "Madhya Pradesh"], ["24", "Gujarat"],
+  ["26", "Dadra and Nagar Haveli and Daman and Diu"], ["27", "Maharashtra"], ["29", "Karnataka"], ["30", "Goa"],
+  ["31", "Lakshadweep"], ["32", "Kerala"], ["33", "Tamil Nadu"], ["34", "Puducherry"],
+  ["35", "Andaman and Nicobar Islands"], ["36", "Telangana"], ["37", "Andhra Pradesh"], ["38", "Ladakh"],
+  ["97", "Other Territory"]
+] as const;
+const financialPeriodOptions = getFinancialPeriodOptions();
 
 function teamMatchKey(value: string) {
   const digits = String(value ?? "").match(/\d+/);
@@ -146,7 +163,14 @@ export function TaskLineRegister() {
   const [stageMastersFetched, setStageMastersFetched] = useState(false);
   const stageSeedDoneRef = useRef(false);
   const [teamMembers, setTeamMembers] = useState<TeamMemberLite[]>([]);
+  const [entityMasters, setEntityMasters] = useState<EntityMasterOption[]>([]);
   const rowsRef = useRef<TaskLineRow[]>([]);
+  const entityGroupByName = useMemo(
+    () => new Map(entityMasters.map((option) => [normalizeOptionKey(option.entity), option.group])),
+    [entityMasters]
+  );
+  const entityOptions = useMemo(() => entityMasters.map((option) => option.entity), [entityMasters]);
+  const sectionOptions = useMemo(() => uniqueSortedValues(rows.map((row) => row.section)), [rows]);
   const teamNameOptions = useMemo(() => {
     const partners = teamMembers
       .filter((member) => isPartnerDesignation(member.designation))
@@ -286,6 +310,7 @@ export function TaskLineRegister() {
     void loadMasters();
     void loadStageMasters();
     void loadTeamMembers();
+    void loadEntityMasters();
   }, []);
 
   useEffect(() => {
@@ -536,6 +561,31 @@ export function TaskLineRegister() {
     }
   }
 
+  async function loadEntityMasters() {
+    try {
+      const response = await fetch("/api/client-records/managed", { cache: "no-store" });
+      const result = (await response.json()) as { rows?: Array<Record<string, unknown>> };
+      if (!response.ok) {
+        return;
+      }
+
+      const optionsByName = new Map<string, EntityMasterOption>();
+      for (const row of result.rows ?? []) {
+        const entity = text(row.Particulars);
+        if (!entity) continue;
+        const key = normalizeOptionKey(entity);
+        const group = text(row.Group);
+        const existing = optionsByName.get(key);
+        if (!existing || (!existing.group && group)) {
+          optionsByName.set(key, { entity: existing?.entity ?? entity, group });
+        }
+      }
+      setEntityMasters(Array.from(optionsByName.values()).sort((a, b) => a.entity.localeCompare(b.entity, undefined, { numeric: true })));
+    } catch {
+      // Existing values remain visible if the client master is temporarily unavailable.
+    }
+  }
+
   async function loadTaskLine() {
     const cached = !dataHydratedRef.current
       ? getCached<{ auditLogs?: Array<Record<string, unknown>>; rows?: TaskLineRow[] }>("taskline")
@@ -583,6 +633,17 @@ export function TaskLineRegister() {
   function openEditForm(row: TaskLineRow) {
     setEditingRowId(row.__id);
     setFormDraft({ ...row });
+  }
+
+  function updateFormDraft(key: string, value: string) {
+    setFormDraft((current) => {
+      if (!current) return current;
+      if (key !== "entity") return { ...current, [key]: value };
+
+      const group = entityGroupByName.get(normalizeOptionKey(value)) ?? "";
+      setMessage(value && !group ? `No Entity Group mapping found for "${value}".` : "");
+      return { ...current, entity: value, entity_group: group };
+    });
   }
 
   async function saveFormDraft() {
@@ -652,13 +713,20 @@ export function TaskLineRegister() {
       });
     }
 
-    const nextRow = existing ? { ...existing, [key]: value } : null;
-    setRows((current) => current.map((item) => (item.__id === rowId ? { ...item, [key]: value } : item)));
+    const changes: Record<string, string> = { [key]: value };
+    if (key === "entity") {
+      const group = entityGroupByName.get(normalizeOptionKey(value)) ?? "";
+      changes.entity_group = group;
+      setMessage(value && !group ? `No Entity Group mapping found for "${value}".` : "");
+    }
+
+    const nextRow = existing ? { ...existing, ...changes } : null;
+    setRows((current) => current.map((item) => (item.__id === rowId ? { ...item, ...changes } : item)));
     if (nextRow) {
       void saveInlineRow(nextRow);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [entityGroupByName]);
 
   async function saveInlineRow(row: TaskLineRow) {
     try {
@@ -981,6 +1049,16 @@ export function TaskLineRegister() {
         type="file"
       />
 
+      <datalist id={taskLineEntityListId}>
+        {entityOptions.map((entity) => <option key={entity} value={entity} />)}
+      </datalist>
+      <datalist id={taskLineStateListId}>
+        {gstinStateOptions.map(([code, state]) => <option key={code} label={`GSTIN ${code}`} value={state} />)}
+      </datalist>
+      <datalist id={taskLineSectionListId}>
+        {sectionOptions.map((section) => <option key={section} value={section} />)}
+      </datalist>
+
       {message ? (
         <p className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-bold text-emerald-900">{message}</p>
       ) : null}
@@ -1209,7 +1287,7 @@ export function TaskLineRegister() {
         <TaskLineForm
           draft={formDraft}
           isEdit={Boolean(editingRowId)}
-          onChange={(key, value) => setFormDraft((current) => (current ? { ...current, [key]: value } : current))}
+          onChange={updateFormDraft}
           onClose={() => {
             setEditingRowId(null);
             setFormDraft(null);
@@ -1285,6 +1363,55 @@ const TaskLineCell = memo(function TaskLineCell({
     return (
       <td className={`border-r border-slate-100 px-2 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
         <span className="block h-7 px-1.5 py-1 font-semibold text-slate-700">{serialNumber}</span>
+      </td>
+    );
+  }
+
+  if (column.key === "team") {
+    const current = row[column.key] ?? "";
+    return (
+      <td className={`border-r border-slate-100 px-2 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
+        <select className="h-7 w-full rounded-md border border-slate-200 bg-white px-2 text-xs font-bold outline-none focus:border-rose-300 focus:ring-2 focus:ring-rose-100" onChange={(event) => onChange(event.target.value)} value={current}>
+          <option value="">Select team</option>
+          {teamOptions.map((team) => <option key={team} value={team}>{team}</option>)}
+          {current && !teamOptions.includes(current) ? <option hidden value={current}>{current}</option> : null}
+        </select>
+      </td>
+    );
+  }
+
+  if (["entity", "state_name", "section"].includes(column.key)) {
+    const listId = column.key === "entity" ? taskLineEntityListId : column.key === "state_name" ? taskLineStateListId : taskLineSectionListId;
+    return (
+      <td className={`border-r border-slate-100 px-2 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
+        <input
+          className="h-7 w-full rounded-md border border-transparent bg-transparent px-1.5 text-xs font-semibold text-slate-700 outline-none hover:border-slate-200 hover:bg-white focus:border-rose-300 focus:bg-white focus:ring-2 focus:ring-rose-100"
+          list={listId}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder={`Search ${column.label.toLowerCase()}`}
+          value={row[column.key] ?? ""}
+        />
+      </td>
+    );
+  }
+
+  if (column.key === "entity_group") {
+    return (
+      <td className={`border-r border-slate-100 bg-slate-50 px-2 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5]" : ""}`} style={frozenStyle}>
+        <input className="h-7 w-full cursor-not-allowed border-0 bg-transparent px-1.5 text-xs font-semibold text-slate-600 outline-none" readOnly title="Filled automatically from Entity" value={row[column.key] ?? ""} />
+      </td>
+    );
+  }
+
+  if (column.key === "period") {
+    const current = row[column.key] ?? "";
+    return (
+      <td className={`border-r border-slate-100 px-2 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
+        <select className="h-7 w-full rounded-md border border-slate-200 bg-white px-2 text-xs font-bold outline-none focus:border-rose-300 focus:ring-2 focus:ring-rose-100" onChange={(event) => onChange(event.target.value)} value={current}>
+          <option value="">Select period</option>
+          {financialPeriodOptions.map((period) => <option key={period} value={period}>{period}</option>)}
+          {current && !financialPeriodOptions.includes(current) ? <option hidden value={current}>{current}</option> : null}
+        </select>
       </td>
     );
   }
@@ -1390,6 +1517,15 @@ const TaskLineCell = memo(function TaskLineCell({
     );
   }
 
+  if (column.key === "due_date" || column.key === "ref_date") {
+    const dueColor = column.key === "due_date" ? dueDateColorClass(row[column.key] ?? "") : "";
+    return (
+      <td className={`border-r border-slate-100 px-2 py-1 last:border-r-0 ${dueColor} ${isFrozen ? (dueColor ? "sticky z-[5]" : "sticky z-[5] bg-white") : ""}`} style={frozenStyle}>
+        <TaskLineDateInput compact onChange={onChange} value={row[column.key] ?? ""} />
+      </td>
+    );
+  }
+
   const dueColor = column.key === "due_date" ? dueDateColorClass(row[column.key] ?? "") : "";
 
   return (
@@ -1447,7 +1583,31 @@ function TaskLineForm({
             {taskLineColumns.filter((column) => column.key !== "serial_no").map((column) => (
               <label className={["remarks", "issue", "document_link", "el_reference", "fee_comments"].includes(column.key) ? "xl:col-span-2" : ""} key={column.key}>
                 <span className="text-[10px] font-black uppercase text-slate-500">{column.label}</span>
-                {column.key === "name" ? (
+                {column.key === "team" ? (
+                  <select className={formControlClass} onChange={(event) => onChange(column.key, event.target.value)} value={draft[column.key] ?? ""}>
+                    <option value="">Select team</option>
+                    {teamOptions.map((team) => <option key={team} value={team}>{team}</option>)}
+                    {draft[column.key] && !teamOptions.includes(draft[column.key]) ? <option hidden value={draft[column.key]}>{draft[column.key]}</option> : null}
+                  </select>
+                ) : ["entity", "state_name", "section"].includes(column.key) ? (
+                  <input
+                    className={formControlClass}
+                    list={column.key === "entity" ? taskLineEntityListId : column.key === "state_name" ? taskLineStateListId : taskLineSectionListId}
+                    onChange={(event) => onChange(column.key, event.target.value)}
+                    placeholder={`Search ${column.label.toLowerCase()}`}
+                    value={draft[column.key] ?? ""}
+                  />
+                ) : column.key === "entity_group" ? (
+                  <input className={`${formControlClass} cursor-not-allowed bg-slate-50 text-slate-600`} readOnly title="Filled automatically from Entity" value={draft[column.key] ?? ""} />
+                ) : column.key === "period" ? (
+                  <select className={formControlClass} onChange={(event) => onChange(column.key, event.target.value)} value={draft[column.key] ?? ""}>
+                    <option value="">Select period</option>
+                    {financialPeriodOptions.map((period) => <option key={period} value={period}>{period}</option>)}
+                    {draft[column.key] && !financialPeriodOptions.includes(draft[column.key]) ? <option hidden value={draft[column.key]}>{draft[column.key]}</option> : null}
+                  </select>
+                ) : column.key === "due_date" || column.key === "ref_date" ? (
+                  <TaskLineDateInput onChange={(value) => onChange(column.key, value)} value={draft[column.key] ?? ""} />
+                ) : column.key === "name" ? (
                   <select
                     className={formControlClass}
                     onChange={(event) => onChange(column.key, event.target.value)}
@@ -1536,6 +1696,62 @@ function TaskLineForm({
           </button>
         </footer>
       </section>
+    </div>
+  );
+}
+
+function TaskLineDateInput({ compact = false, onChange, value }: { compact?: boolean; onChange: (value: string) => void; value: string }) {
+  const [draft, setDraft] = useState(value);
+
+  useEffect(() => {
+    setDraft(value);
+  }, [value]);
+
+  function commitManualValue(input: HTMLInputElement) {
+    const normalized = normalizeEditableTaskLineDate(draft);
+    if (normalized === null) {
+      input.setCustomValidity("Enter a valid date in DD-MM-YYYY format.");
+      input.reportValidity();
+      setDraft(value);
+      return;
+    }
+
+    input.setCustomValidity("");
+    setDraft(normalized);
+    if (normalized !== value) onChange(normalized);
+  }
+
+  return (
+    <div className={`relative ${compact ? "" : "mt-1"}`}>
+      <input
+        aria-label="Date in DD-MM-YYYY format"
+        className={compact
+          ? "h-7 w-full rounded-md border border-transparent bg-transparent py-1 pl-1.5 pr-8 text-xs font-semibold text-slate-700 outline-none hover:border-slate-200 hover:bg-white focus:border-rose-300 focus:bg-white focus:ring-2 focus:ring-rose-100"
+          : `${formControlClass.replace("mt-1 ", "")} pr-10`}
+        onBlur={(event) => commitManualValue(event.currentTarget)}
+        onChange={(event) => {
+          event.currentTarget.setCustomValidity("");
+          setDraft(event.target.value);
+        }}
+        placeholder="dd-mm-yyyy"
+        type="text"
+        value={draft}
+      />
+      <label className={`absolute right-1 top-1/2 -translate-y-1/2 cursor-pointer rounded text-slate-500 hover:bg-slate-100 hover:text-navy-700 ${compact ? "p-1" : "p-2"}`} title="Open calendar">
+        <CalendarDays className={compact ? "size-3.5" : "size-4"} />
+        <input
+          aria-label="Choose date from calendar"
+          className="absolute inset-0 size-full cursor-pointer opacity-0"
+          onChange={(event) => {
+            const normalized = normalizeEditableTaskLineDate(event.target.value) ?? "";
+            setDraft(normalized);
+            onChange(normalized);
+          }}
+          tabIndex={-1}
+          type="date"
+          value={displayDateToIso(draft)}
+        />
+      </label>
     </div>
   );
 }
@@ -2123,6 +2339,53 @@ function getSavedTaskLineColumnLayout() {
 
 function text(value: unknown) {
   return String(value ?? "").trim();
+}
+
+function normalizeOptionKey(value: unknown) {
+  return text(value).toLocaleLowerCase().replace(/\s+/g, " ");
+}
+
+function uniqueSortedValues(values: unknown[]) {
+  const unique = new Map<string, string>();
+  for (const value of values) {
+    const display = text(value);
+    if (display) unique.set(normalizeOptionKey(display), unique.get(normalizeOptionKey(display)) ?? display);
+  }
+  return Array.from(unique.values()).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+}
+
+function getFinancialPeriodOptions(now = new Date()) {
+  const currentYear = now.getFullYear();
+  const currentFinancialYearStart = now.getMonth() >= 3 ? currentYear : currentYear - 1;
+  const finalYear = Math.max(2026, currentFinancialYearStart);
+  return Array.from({ length: finalYear - 2017 + 1 }, (_, index) => {
+    const startYear = 2017 + index;
+    return `${startYear}-${String(startYear + 1).slice(-2)}`;
+  });
+}
+
+function normalizeEditableTaskLineDate(value: unknown): string | null {
+  const raw = text(value);
+  if (!raw) return "";
+
+  const dmy = raw.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
+  if (dmy) {
+    return makeDisplayDate(Number(dmy[3]), Number(dmy[2]), Number(dmy[1])) || null;
+  }
+
+  const iso = raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (iso) {
+    return makeDisplayDate(Number(iso[1]), Number(iso[2]), Number(iso[3])) || null;
+  }
+
+  return null;
+}
+
+function displayDateToIso(value: unknown) {
+  const normalized = normalizeEditableTaskLineDate(value);
+  if (!normalized) return "";
+  const [day, month, year] = normalized.split("-");
+  return `${year}-${month}-${day}`;
 }
 
 function TaskLineFilterMenu({
