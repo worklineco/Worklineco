@@ -17,7 +17,7 @@ const activeSourceKey = "client_records_register";
 const trashSourceKey = "client_records_trash";
 const defaultOrganisationCode = "DCO1433";
 const fetchBatchSize = 1000;
-const maxBulkDeleteRows = 5;
+const maxBulkDeleteRows = 10;
 const importActionColumn = "Import Action";
 const columns = [
   "S.no.",
