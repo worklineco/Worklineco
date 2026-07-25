@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowDown, ArrowUp, ChevronDown, CircleDot, Download, Filter, History, ListChecks, Menu, Pencil, Pin, Plus, Search, Settings2, Trash2, Upload, X } from "lucide-react";
+import { ArrowDown, ArrowUp, CalendarDays, ChevronDown, CircleDot, Download, Filter, History, ListChecks, Menu, Pencil, Pin, Plus, Search, Settings2, Trash2, Upload, X } from "lucide-react";
 import type { ComponentType } from "react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -87,6 +87,80 @@ const taskLineColumns: TaskLineColumn[] = [
 const taskLineColumnByKey = new Map(taskLineColumns.map((column) => [column.key, column]));
 const defaultTaskLineColumnOrder = taskLineColumns.map((column) => column.key);
 const statusOptions = ["Open", "Close"];
+const teamOptions = ["Team-02", "Team-03", "Team-04", "Team-05", "Team-06", "Team-08"];
+// Standard GSTIN state-code master list (same list used by the GSTAT module).
+const gstStateByCode: Record<string, string> = {
+  "01": "Jammu And Kashmir",
+  "02": "Himachal Pradesh",
+  "03": "Punjab",
+  "04": "Chandigarh",
+  "05": "Uttarakhand",
+  "06": "Haryana",
+  "07": "Delhi",
+  "08": "Rajasthan",
+  "09": "Uttar Pradesh",
+  "10": "Bihar",
+  "11": "Sikkim",
+  "12": "Arunachal Pradesh",
+  "13": "Nagaland",
+  "14": "Manipur",
+  "15": "Mizoram",
+  "16": "Tripura",
+  "17": "Meghalaya",
+  "18": "Assam",
+  "19": "West Bengal",
+  "20": "Jharkhand",
+  "21": "Orissa",
+  "22": "Chhattisgarh",
+  "23": "Madhya Pradesh",
+  "24": "Gujarat",
+  "26": "Dadra And Nagar Haveli & Daman And Diu",
+  "27": "Maharashtra",
+  "29": "Karnataka",
+  "30": "Goa",
+  "31": "Lakshadweep",
+  "32": "Kerala",
+  "33": "Tamil Nadu",
+  "34": "Puducherry",
+  "35": "Andaman And Nicobar",
+  "36": "Telangana",
+  "37": "Andhra Pradesh",
+  "38": "Ladakh",
+  "97": "Other Territory",
+  "99": "Other Country"
+};
+const stateNameOptions = Array.from(new Set(Object.values(gstStateByCode)));
+const gstStateCodeByName = new Map(Object.entries(gstStateByCode).map(([code, name]) => [name.toLowerCase(), code]));
+
+function gstStateCodeFor(stateName: string) {
+  return gstStateCodeByName.get(String(stateName ?? "").trim().toLowerCase()) ?? "";
+}
+
+function stateOptionLabel(stateName: string) {
+  const code = gstStateCodeFor(stateName);
+  return code ? `${code} - ${stateName}` : stateName;
+}
+
+// Financial years follow the April-to-March cycle. The list always spans
+// 2017-18 through at least 2026-27 and automatically extends by one entry
+// when a new financial year begins - no code change needed each year.
+const firstFinancialYearStart = 2017;
+const minimumFinancialYearStart = 2026;
+
+function financialYearLabel(startYear: number) {
+  return `${startYear}-${String((startYear + 1) % 100).padStart(2, "0")}`;
+}
+
+function buildPeriodOptions() {
+  const now = new Date();
+  const currentFinancialYearStart = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
+  const lastStart = Math.max(currentFinancialYearStart, minimumFinancialYearStart);
+  const options: string[] = [];
+  for (let year = firstFinancialYearStart; year <= lastStart; year += 1) {
+    options.push(financialYearLabel(year));
+  }
+  return options;
+}
 type TeamMemberLite = { designation: string; name: string; team: string };
 const emptyOptions: string[] = [];
 
@@ -146,7 +220,33 @@ export function TaskLineRegister() {
   const [stageMastersFetched, setStageMastersFetched] = useState(false);
   const stageSeedDoneRef = useRef(false);
   const [teamMembers, setTeamMembers] = useState<TeamMemberLite[]>([]);
+  const [clientEntities, setClientEntities] = useState<{ group: string; name: string }[]>([]);
   const rowsRef = useRef<TaskLineRow[]>([]);
+  const periodOptions = useMemo(() => buildPeriodOptions(), []);
+  const entityOptions = useMemo(() => clientEntities.map((entity) => entity.name), [clientEntities]);
+  const entityGroupByName = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const entity of clientEntities) {
+      map.set(entity.name.trim().toLowerCase(), entity.group);
+    }
+    return map;
+  }, [clientEntities]);
+  const entityGroupMapRef = useRef(entityGroupByName);
+  useEffect(() => {
+    entityGroupMapRef.current = entityGroupByName;
+  }, [entityGroupByName]);
+  const groupForEntity = useCallback(
+    (entity: string) => entityGroupByName.get(String(entity ?? "").trim().toLowerCase()) ?? "",
+    [entityGroupByName]
+  );
+  const sectionValuesKey = useMemo(() => rows.map((row) => text(row.section).trim()).filter(Boolean).join("\u0000"), [rows]);
+  const sectionOptions = useMemo(
+    () =>
+      Array.from(new Set(sectionValuesKey.split("\u0000").filter(Boolean))).sort((first, second) =>
+        first.localeCompare(second, undefined, { numeric: true })
+      ),
+    [sectionValuesKey]
+  );
   const teamNameOptions = useMemo(() => {
     const partners = teamMembers
       .filter((member) => isPartnerDesignation(member.designation))
@@ -286,6 +386,7 @@ export function TaskLineRegister() {
     void loadMasters();
     void loadStageMasters();
     void loadTeamMembers();
+    void loadClientEntities();
   }, []);
 
   useEffect(() => {
@@ -536,6 +637,36 @@ export function TaskLineRegister() {
     }
   }
 
+  async function loadClientEntities() {
+    try {
+      const response = await fetch("/api/client-records/managed", { cache: "no-store" });
+      const result = (await response.json().catch(() => ({}))) as { rows?: Record<string, unknown>[] };
+      if (!response.ok || !Array.isArray(result.rows)) {
+        return;
+      }
+      const seen = new Map<string, { group: string; name: string }>();
+      for (const row of result.rows) {
+        const name = text(row.Particulars).trim();
+        if (!name) {
+          continue;
+        }
+        const key = name.toLowerCase();
+        const group = text(row.Group).trim();
+        const existing = seen.get(key);
+        if (!existing) {
+          seen.set(key, { group, name });
+        } else if (!existing.group && group) {
+          existing.group = group;
+        }
+      }
+      setClientEntities(
+        Array.from(seen.values()).sort((first, second) => first.name.localeCompare(second.name, undefined, { numeric: true }))
+      );
+    } catch {
+      // ignore; Entity dropdown falls back to any existing value
+    }
+  }
+
   async function loadTaskLine() {
     const cached = !dataHydratedRef.current
       ? getCached<{ auditLogs?: Array<Record<string, unknown>>; rows?: TaskLineRow[] }>("taskline")
@@ -639,21 +770,32 @@ export function TaskLineRegister() {
   const updateRow = useCallback((rowId: string, key: string, value: string) => {
     const currentRows = rowsRef.current;
     const existing = currentRows.find((item) => item.__id === rowId);
-    const oldValue = existing?.[key] ?? "";
+    const updates: Record<string, string> = { [key]: value };
 
-    if (existing && oldValue !== value) {
-      addAuditLog({
-        action: "taskline.update_cell",
-        entityId: rowId,
-        field: taskLineColumnByKey.get(key)?.label ?? key,
-        newValue: value,
-        oldValue,
-        rowLabel: getRowLabel(existing, currentRows)
-      });
+    // Auto-populate Entity Group from the Client Records master whenever the
+    // selected Entity changes. If no mapping exists the field is left blank.
+    if (key === "entity" && text(existing?.entity) !== value) {
+      updates.entity_group = entityGroupMapRef.current.get(String(value ?? "").trim().toLowerCase()) ?? "";
     }
 
-    const nextRow = existing ? { ...existing, [key]: value } : null;
-    setRows((current) => current.map((item) => (item.__id === rowId ? { ...item, [key]: value } : item)));
+    if (existing) {
+      for (const [updateKey, updateValue] of Object.entries(updates)) {
+        const oldValue = existing[updateKey] ?? "";
+        if (oldValue !== updateValue) {
+          addAuditLog({
+            action: "taskline.update_cell",
+            entityId: rowId,
+            field: taskLineColumnByKey.get(updateKey)?.label ?? updateKey,
+            newValue: updateValue,
+            oldValue,
+            rowLabel: getRowLabel(existing, currentRows)
+          });
+        }
+      }
+    }
+
+    const nextRow = existing ? { ...existing, ...updates } : null;
+    setRows((current) => current.map((item) => (item.__id === rowId ? { ...item, ...updates } : item)));
     if (nextRow) {
       void saveInlineRow(nextRow);
     }
@@ -1177,13 +1319,17 @@ export function TaskLineRegister() {
                     return (
                       <TaskLineCell
                         column={column}
+                        entityOptions={entityOptions}
                         frozenLeft={frozen.left}
+                        groupForEntity={groupForEntity}
                         isFrozen={frozen.isFrozen}
                         key={`${row.__id}-${column.key}`}
                         nameOptions={rowNameOptions}
                         onCellChange={updateRow}
+                        periodOptions={periodOptions}
                         resourceOptions={rowResourceOptions}
                         row={row}
+                        sectionOptions={sectionOptions}
                         serialNumber={(tablePage - 1) * taskLinePageSize + rowIndex + 1}
                         stageMasterNames={stageMasterNames}
                         taskMasterNames={taskMasterNames}
@@ -1208,15 +1354,30 @@ export function TaskLineRegister() {
       {formDraft ? (
         <TaskLineForm
           draft={formDraft}
+          entityOptions={entityOptions}
+          groupForEntity={groupForEntity}
           isEdit={Boolean(editingRowId)}
-          onChange={(key, value) => setFormDraft((current) => (current ? { ...current, [key]: value } : current))}
+          onChange={(key, value) =>
+            setFormDraft((current) => {
+              if (!current) {
+                return current;
+              }
+              const next = { ...current, [key]: value };
+              if (key === "entity" && text(current.entity) !== value) {
+                next.entity_group = groupForEntity(value);
+              }
+              return next;
+            })
+          }
           onClose={() => {
             setEditingRowId(null);
             setFormDraft(null);
           }}
           onSubmit={saveFormDraft}
           nameOptionsForTeam={nameOptionsForTeam}
+          periodOptions={periodOptions}
           resourceOptionsForTeam={resourceOptionsForTeam}
+          sectionOptions={sectionOptions}
           stageMasterNames={stageMasterNames}
           taskMasterNames={taskMasterNames}
         />
@@ -1257,34 +1418,164 @@ export function TaskLineRegister() {
 
 const TaskLineCell = memo(function TaskLineCell({
   column,
+  entityOptions,
   frozenLeft,
+  groupForEntity,
   isFrozen,
   nameOptions,
   onCellChange,
+  periodOptions,
   resourceOptions,
   row,
+  sectionOptions,
   serialNumber,
   stageMasterNames,
   taskMasterNames
 }: {
   column: TaskLineColumn;
+  entityOptions: string[];
   frozenLeft: number;
+  groupForEntity: (entity: string) => string;
   isFrozen: boolean;
   nameOptions: string[];
   onCellChange: (rowId: string, key: string, value: string) => void;
+  periodOptions: string[];
   resourceOptions: string[];
   row: TaskLineRow;
+  sectionOptions: string[];
   serialNumber: number;
   stageMasterNames: string[];
   taskMasterNames: string[];
 }) {
   const frozenStyle = isFrozen ? { left: frozenLeft } : undefined;
   const onChange = (value: string) => onCellChange(row.__id, column.key, value);
+  const cellControlClass = "h-7 w-full rounded-md border border-slate-200 bg-white px-2 text-xs font-bold outline-none focus:border-rose-300 focus:ring-2 focus:ring-rose-100";
 
   if (column.key === "serial_no") {
     return (
       <td className={`border-r border-slate-100 px-2 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
         <span className="block h-7 px-1.5 py-1 font-semibold text-slate-700">{serialNumber}</span>
+      </td>
+    );
+  }
+
+  if (column.key === "team") {
+    const current = row[column.key] ?? "";
+    return (
+      <td className={`border-r border-slate-100 px-2 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
+        <select className={cellControlClass} onChange={(event) => onChange(event.target.value)} value={current}>
+          <option value="">Select</option>
+          {teamOptions.map((team) => (
+            <option key={team} value={team}>{team}</option>
+          ))}
+          {current && !teamOptions.includes(current) ? (
+            <option value={current}>{current}</option>
+          ) : null}
+        </select>
+      </td>
+    );
+  }
+
+  if (column.key === "entity") {
+    const current = row[column.key] ?? "";
+    return (
+      <td className={`border-r border-slate-100 px-2 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
+        <SearchableSelect
+          className={cellControlClass}
+          notInListHint="(not in master)"
+          onChange={onChange}
+          options={entityOptions}
+          placeholder="Select entity"
+          value={current}
+        />
+      </td>
+    );
+  }
+
+  if (column.key === "entity_group") {
+    const current = row[column.key] ?? "";
+    const entity = text(row.entity).trim();
+    const missingMapping = Boolean(entity) && !current && !groupForEntity(entity);
+    return (
+      <td className={`border-r border-slate-100 px-2 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
+        <input
+          className={`h-7 w-full rounded-md border px-1.5 text-xs font-semibold outline-none focus:bg-white focus:ring-2 ${
+            missingMapping
+              ? "border-amber-400 bg-amber-50 text-amber-800 placeholder:text-amber-600 focus:border-amber-400 focus:ring-amber-100"
+              : "border-transparent bg-transparent text-slate-700 hover:border-slate-200 hover:bg-white focus:border-rose-300 focus:ring-rose-100"
+          }`}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder={missingMapping ? "No group mapped" : "Auto-filled from Entity"}
+          title={missingMapping ? "No Entity Group mapping found for this entity in Client Records." : "Auto-populated from the Client Records master when an Entity is selected."}
+          value={current}
+        />
+      </td>
+    );
+  }
+
+  if (column.key === "state_name") {
+    const current = row[column.key] ?? "";
+    return (
+      <td className={`border-r border-slate-100 px-2 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
+        <SearchableSelect
+          className={cellControlClass}
+          getOptionLabel={stateOptionLabel}
+          notInListHint="(not a GSTIN state)"
+          onChange={onChange}
+          options={stateNameOptions}
+          placeholder="Select state"
+          value={current}
+        />
+      </td>
+    );
+  }
+
+  if (column.key === "period") {
+    const current = row[column.key] ?? "";
+    return (
+      <td className={`border-r border-slate-100 px-2 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
+        <select className={cellControlClass} onChange={(event) => onChange(event.target.value)} value={current}>
+          <option value="">Select</option>
+          {periodOptions.map((period) => (
+            <option key={period} value={period}>{period}</option>
+          ))}
+          {current && !periodOptions.includes(current) ? (
+            <option value={current}>{current}</option>
+          ) : null}
+        </select>
+      </td>
+    );
+  }
+
+  if (column.key === "section") {
+    const current = row[column.key] ?? "";
+    return (
+      <td className={`border-r border-slate-100 px-2 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
+        <SearchableSelect
+          allowCustom
+          className={cellControlClass}
+          onChange={onChange}
+          options={sectionOptions}
+          placeholder="Select section"
+          value={current}
+        />
+      </td>
+    );
+  }
+
+  if (column.type === "date") {
+    const dueColor = column.key === "due_date" ? dueDateColorClass(row[column.key] ?? "") : "";
+    return (
+      <td
+        className={`border-r border-slate-100 px-2 py-1 last:border-r-0 ${dueColor} ${isFrozen ? (dueColor ? "sticky z-[5]" : "sticky z-[5] bg-white") : ""}`}
+        style={frozenStyle}
+      >
+        <TaskLineDateInput
+          inputClassName="h-7 w-full rounded-md border border-transparent bg-transparent px-1.5 text-xs font-semibold text-slate-700 outline-none hover:border-slate-200 hover:bg-white focus:border-rose-300 focus:bg-white focus:ring-2 focus:ring-rose-100"
+          label={column.label}
+          onCommit={onChange}
+          value={row[column.key] ?? ""}
+        />
       </td>
     );
   }
@@ -1390,17 +1681,14 @@ const TaskLineCell = memo(function TaskLineCell({
     );
   }
 
-  const dueColor = column.key === "due_date" ? dueDateColorClass(row[column.key] ?? "") : "";
-
   return (
     <td
-      className={`border-r border-slate-100 px-2 py-1 last:border-r-0 ${dueColor} ${isFrozen ? (dueColor ? "sticky z-[5]" : "sticky z-[5] bg-white") : ""}`}
+      className={`border-r border-slate-100 px-2 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`}
       style={frozenStyle}
     >
       <input
         className="h-7 w-full rounded-md border border-transparent bg-transparent px-1.5 text-xs font-semibold text-slate-700 outline-none hover:border-slate-200 hover:bg-white focus:border-rose-300 focus:bg-white focus:ring-2 focus:ring-rose-100"
         onChange={(event) => onChange(event.target.value)}
-        placeholder={column.type === "date" ? "dd-mm-yyyy" : undefined}
         type={column.type === "number" || column.type === "money" ? "number" : "text"}
         value={row[column.key] ?? ""}
       />
@@ -1410,25 +1698,35 @@ const TaskLineCell = memo(function TaskLineCell({
 
 function TaskLineForm({
   draft,
+  entityOptions,
+  groupForEntity,
   isEdit,
   nameOptionsForTeam,
   onChange,
   onClose,
   onSubmit,
+  periodOptions,
   resourceOptionsForTeam,
+  sectionOptions,
   stageMasterNames,
   taskMasterNames
 }: {
   draft: TaskLineRow;
+  entityOptions: string[];
+  groupForEntity: (entity: string) => string;
   isEdit: boolean;
   nameOptionsForTeam: (team: string) => string[];
   onChange: (key: string, value: string) => void;
   onClose: () => void;
   onSubmit: () => void;
+  periodOptions: string[];
   resourceOptionsForTeam: (team: string) => string[];
+  sectionOptions: string[];
   stageMasterNames: string[];
   taskMasterNames: string[];
 }) {
+  const draftEntity = text(draft.entity).trim();
+  const entityGroupMappingMissing = Boolean(draftEntity) && !text(draft.entity_group).trim() && !groupForEntity(draftEntity);
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-navy-700/45 px-4 py-6">
       <section className="max-h-[90vh] w-full max-w-6xl overflow-hidden rounded-lg border border-slate-200 bg-white shadow-[0_24px_90px_rgba(15,23,42,0.30)]">
@@ -1447,7 +1745,82 @@ function TaskLineForm({
             {taskLineColumns.filter((column) => column.key !== "serial_no").map((column) => (
               <label className={["remarks", "issue", "document_link", "el_reference", "fee_comments"].includes(column.key) ? "xl:col-span-2" : ""} key={column.key}>
                 <span className="text-[10px] font-black uppercase text-slate-500">{column.label}</span>
-                {column.key === "name" ? (
+                {column.key === "team" ? (
+                  <select
+                    className={formControlClass}
+                    onChange={(event) => onChange(column.key, event.target.value)}
+                    value={draft[column.key] ?? ""}
+                  >
+                    <option value="">Select</option>
+                    {teamOptions.map((team) => (
+                      <option key={team} value={team}>{team}</option>
+                    ))}
+                    {draft[column.key] && !teamOptions.includes(draft[column.key]) ? (
+                      <option value={draft[column.key]}>{draft[column.key]}</option>
+                    ) : null}
+                  </select>
+                ) : column.key === "entity" ? (
+                  <SearchableSelect
+                    className={formControlClass}
+                    notInListHint="(not in master)"
+                    onChange={(value) => onChange(column.key, value)}
+                    options={entityOptions}
+                    placeholder="Select entity"
+                    value={draft[column.key] ?? ""}
+                  />
+                ) : column.key === "entity_group" ? (
+                  <>
+                    <input
+                      className={entityGroupMappingMissing ? `${formControlClass} border-amber-400 bg-amber-50` : formControlClass}
+                      onChange={(event) => onChange(column.key, event.target.value)}
+                      placeholder="Auto-filled from Entity"
+                      value={draft[column.key] ?? ""}
+                    />
+                    {entityGroupMappingMissing ? (
+                      <span className="mt-1 block text-[11px] font-bold text-amber-700">No Entity Group mapping found for this entity in Client Records.</span>
+                    ) : null}
+                  </>
+                ) : column.key === "state_name" ? (
+                  <SearchableSelect
+                    className={formControlClass}
+                    getOptionLabel={stateOptionLabel}
+                    notInListHint="(not a GSTIN state)"
+                    onChange={(value) => onChange(column.key, value)}
+                    options={stateNameOptions}
+                    placeholder="Select state"
+                    value={draft[column.key] ?? ""}
+                  />
+                ) : column.key === "period" ? (
+                  <select
+                    className={formControlClass}
+                    onChange={(event) => onChange(column.key, event.target.value)}
+                    value={draft[column.key] ?? ""}
+                  >
+                    <option value="">Select</option>
+                    {periodOptions.map((period) => (
+                      <option key={period} value={period}>{period}</option>
+                    ))}
+                    {draft[column.key] && !periodOptions.includes(draft[column.key]) ? (
+                      <option value={draft[column.key]}>{draft[column.key]}</option>
+                    ) : null}
+                  </select>
+                ) : column.key === "section" ? (
+                  <SearchableSelect
+                    allowCustom
+                    className={formControlClass}
+                    onChange={(value) => onChange(column.key, value)}
+                    options={sectionOptions}
+                    placeholder="Select section"
+                    value={draft[column.key] ?? ""}
+                  />
+                ) : column.type === "date" ? (
+                  <TaskLineDateInput
+                    inputClassName={formControlClass}
+                    label={column.label}
+                    onCommit={(value) => onChange(column.key, value)}
+                    value={draft[column.key] ?? ""}
+                  />
+                ) : column.key === "name" ? (
                   <select
                     className={formControlClass}
                     onChange={(event) => onChange(column.key, event.target.value)}
@@ -1518,7 +1891,6 @@ function TaskLineForm({
                   <input
                     className={formControlClass}
                     onChange={(event) => onChange(column.key, event.target.value)}
-                    placeholder={column.type === "date" ? "dd-mm-yyyy" : undefined}
                     type={column.type === "number" || column.type === "money" ? "number" : "text"}
                     value={draft[column.key] ?? ""}
                   />
@@ -1541,6 +1913,304 @@ function TaskLineForm({
 }
 
 const formControlClass = "mt-1 h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm font-bold text-slate-900 outline-none focus:border-rose-300 focus:ring-2 focus:ring-rose-100";
+
+function SearchableSelect({
+  allowCustom = false,
+  className,
+  getOptionLabel,
+  notInListHint,
+  onChange,
+  options,
+  placeholder = "Select",
+  value
+}: {
+  allowCustom?: boolean;
+  className: string;
+  getOptionLabel?: (option: string) => string;
+  notInListHint?: string;
+  onChange: (value: string) => void;
+  options: string[];
+  placeholder?: string;
+  value: string;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [menuPos, setMenuPos] = useState<{ left: number; maxHeight: number; top: number; width: number } | null>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const filteredOptions = useMemo(() => {
+    const normalized = query.trim().toLowerCase();
+    if (!normalized) {
+      return options;
+    }
+    return options.filter((option) => option.toLowerCase().includes(normalized) || (getOptionLabel?.(option) ?? "").toLowerCase().includes(normalized));
+  }, [getOptionLabel, options, query]);
+  const trimmedQuery = query.trim();
+  const canAddCustom = allowCustom && Boolean(trimmedQuery) && !options.some((option) => option.toLowerCase() === trimmedQuery.toLowerCase());
+  const valueNotInList = Boolean(value) && !options.includes(value);
+
+  useEffect(() => {
+    if (isOpen) {
+      searchRef.current?.focus();
+    }
+  }, [isOpen]);
+
+  function openMenu() {
+    const anchor = buttonRef.current;
+    if (!anchor) {
+      return;
+    }
+    const rect = anchor.getBoundingClientRect();
+    const width = Math.min(Math.max(rect.width, 240), window.innerWidth - 16);
+    const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
+    const top = rect.bottom + 4;
+    const maxHeight = Math.max(180, Math.min(320, window.innerHeight - top - 12));
+    setMenuPos({ left, maxHeight, top, width });
+    setQuery("");
+    setIsOpen(true);
+  }
+
+  function closeMenu() {
+    setIsOpen(false);
+    setMenuPos(null);
+  }
+
+  function chooseOption(option: string) {
+    onChange(option);
+    closeMenu();
+  }
+
+  return (
+    <>
+      <button
+        className={`${className} flex items-center justify-between gap-1 text-left`}
+        onClick={() => (isOpen ? closeMenu() : openMenu())}
+        ref={buttonRef}
+        title={value || placeholder}
+        type="button"
+      >
+        <span className={`min-w-0 flex-1 truncate ${value ? "" : "font-semibold text-slate-400"}`}>
+          {value || placeholder}
+          {valueNotInList && notInListHint ? <span className="ml-1 font-semibold text-amber-600">{notInListHint}</span> : null}
+        </span>
+        <ChevronDown className="size-3.5 shrink-0 text-slate-400" />
+      </button>
+      {isOpen && menuPos && typeof document !== "undefined"
+        ? createPortal(
+            <>
+              <div className="fixed inset-0 z-[79]" onMouseDown={closeMenu} />
+              <div
+                className="fixed z-[80] flex flex-col overflow-hidden rounded-md border border-slate-200 bg-white shadow-2xl"
+                style={{ left: menuPos.left, maxHeight: menuPos.maxHeight, top: menuPos.top, width: menuPos.width }}
+              >
+                <div className="flex shrink-0 items-center gap-2 border-b border-slate-200 px-2 py-1.5">
+                  <Search className="size-4 shrink-0 text-slate-400" />
+                  <input
+                    className="min-w-0 flex-1 bg-transparent text-sm font-semibold text-slate-900 outline-none placeholder:text-slate-400"
+                    onChange={(event) => setQuery(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Escape") {
+                        closeMenu();
+                      }
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        if (filteredOptions.length) {
+                          chooseOption(filteredOptions[0]);
+                        } else if (canAddCustom) {
+                          chooseOption(trimmedQuery);
+                        }
+                      }
+                    }}
+                    placeholder="Search"
+                    ref={searchRef}
+                    value={query}
+                  />
+                </div>
+                <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-1">
+                  {value ? (
+                    <button
+                      className="flex w-full items-center rounded px-2 py-1.5 text-left text-xs font-bold text-slate-500 hover:bg-slate-100"
+                      onClick={() => chooseOption("")}
+                      type="button"
+                    >
+                      Clear selection
+                    </button>
+                  ) : null}
+                  {filteredOptions.map((option) => (
+                    <button
+                      className={`flex w-full items-center rounded px-2 py-1.5 text-left text-sm font-semibold hover:bg-slate-100 ${
+                        option === value ? "bg-rose-50 text-rose-800" : "text-slate-900"
+                      }`}
+                      key={option}
+                      onClick={() => chooseOption(option)}
+                      title={getOptionLabel?.(option) ?? option}
+                      type="button"
+                    >
+                      <span className="min-w-0 truncate">{getOptionLabel?.(option) ?? option}</span>
+                    </button>
+                  ))}
+                  {canAddCustom ? (
+                    <button
+                      className="flex w-full items-center gap-1 rounded px-2 py-1.5 text-left text-sm font-bold text-navy-700 hover:bg-navy-50"
+                      onClick={() => chooseOption(trimmedQuery)}
+                      type="button"
+                    >
+                      <Plus className="size-3.5 shrink-0" />
+                      <span className="min-w-0 truncate">Use &quot;{trimmedQuery}&quot;</span>
+                    </button>
+                  ) : null}
+                  {!filteredOptions.length && !canAddCustom ? (
+                    <p className="px-2 py-4 text-center text-sm font-semibold text-slate-500">No matches found</p>
+                  ) : null}
+                </div>
+              </div>
+            </>,
+            document.body
+          )
+        : null}
+    </>
+  );
+}
+
+// Strict date parsing for manual entry: accepts dd-mm-yyyy, dd/mm/yyyy or
+// yyyy-mm-dd and rejects impossible calendar dates (e.g. 31-02-2026), which
+// parseTaskLineDueDate would silently roll over to the next month.
+function parseStrictTaskLineDate(raw: string): Date | null {
+  const dayMonthYear = raw.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
+  const yearMonthDay = raw.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
+  let day: number;
+  let month: number;
+  let year: number;
+  if (dayMonthYear) {
+    day = Number(dayMonthYear[1]);
+    month = Number(dayMonthYear[2]);
+    year = Number(dayMonthYear[3]);
+  } else if (yearMonthDay) {
+    year = Number(yearMonthDay[1]);
+    month = Number(yearMonthDay[2]);
+    day = Number(yearMonthDay[3]);
+  } else {
+    return null;
+  }
+  const date = new Date(year, month - 1, day);
+  return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day ? date : null;
+}
+
+function TaskLineDateInput({
+  inputClassName,
+  label,
+  onCommit,
+  value
+}: {
+  inputClassName: string;
+  label: string;
+  onCommit: (value: string) => void;
+  value: string;
+}) {
+  const [draft, setDraft] = useState(value);
+  const [isInvalid, setIsInvalid] = useState(false);
+  const dateInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setDraft(value);
+    setIsInvalid(false);
+  }, [value]);
+
+  const parsedValue = parseTaskLineDueDate(value);
+  const isoValue = parsedValue
+    ? `${parsedValue.getFullYear()}-${pad2(parsedValue.getMonth() + 1)}-${pad2(parsedValue.getDate())}`
+    : "";
+
+  function commitDraft() {
+    const raw = draft.trim();
+    if (!raw) {
+      setIsInvalid(false);
+      if (raw !== String(value ?? "").trim()) {
+        onCommit("");
+      }
+      return;
+    }
+    const parsed = parseStrictTaskLineDate(raw);
+    if (!parsed) {
+      setIsInvalid(true);
+      return;
+    }
+    const normalized = `${pad2(parsed.getDate())}-${pad2(parsed.getMonth() + 1)}-${parsed.getFullYear()}`;
+    setIsInvalid(false);
+    setDraft(normalized);
+    if (normalized !== value) {
+      onCommit(normalized);
+    }
+  }
+
+  function openCalendar() {
+    const picker = dateInputRef.current;
+    if (!picker) {
+      return;
+    }
+    try {
+      picker.showPicker();
+    } catch {
+      picker.focus();
+      picker.click();
+    }
+  }
+
+  return (
+    <div className="relative">
+      <input
+        aria-invalid={isInvalid}
+        aria-label={label}
+        className={`${inputClassName} pr-8 ${isInvalid ? "!border-rose-500 !bg-rose-50 !text-rose-700 focus:!ring-rose-200" : ""}`}
+        onBlur={commitDraft}
+        onChange={(event) => {
+          setDraft(event.target.value);
+          setIsInvalid(false);
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            commitDraft();
+          }
+        }}
+        placeholder="dd-mm-yyyy"
+        title={isInvalid ? "Invalid date. Enter the date as dd-mm-yyyy." : `${label} (dd-mm-yyyy)`}
+        type="text"
+        value={draft}
+      />
+      <button
+        aria-label={`Open calendar for ${label}`}
+        className="absolute right-1.5 top-1/2 inline-flex size-5 -translate-y-1/2 items-center justify-center rounded text-slate-400 hover:bg-slate-100 hover:text-navy-700"
+        onClick={openCalendar}
+        title="Pick a date from the calendar"
+        type="button"
+      >
+        <CalendarDays className="size-4" />
+      </button>
+      <input
+        aria-hidden="true"
+        className="pointer-events-none absolute bottom-0 right-0 h-0 w-0 opacity-0"
+        onChange={(event) => {
+          const iso = event.target.value;
+          if (!iso) {
+            return;
+          }
+          const [year, month, day] = iso.split("-").map(Number);
+          const normalized = `${pad2(day)}-${pad2(month)}-${year}`;
+          setDraft(normalized);
+          setIsInvalid(false);
+          if (normalized !== value) {
+            onCommit(normalized);
+          }
+        }}
+        ref={dateInputRef}
+        tabIndex={-1}
+        type="date"
+        value={isoValue}
+      />
+    </div>
+  );
+}
 
 function TaskLineColumnOptionsPanel({
   frozenColumnKeys,
