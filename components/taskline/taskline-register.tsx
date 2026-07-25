@@ -40,8 +40,8 @@ const selectionColumnWidth = 40;
 const actionColumnWidth = 112;
 const actionColumnKey = "__actions";
 const taskLineColumns: TaskLineColumn[] = [
-  { key: "team", label: "Team", width: 112 },
-  { key: "serial_no", label: "S. No.", width: 64 },
+  { key: "team", label: "Team", width: 132 },
+  { key: "serial_no", label: "S. No.", width: 84 },
   { key: "name", label: "Name", width: 150 },
   { key: "resource", label: "Resource", width: 140 },
   { key: "entity_group", label: "Entity Group", width: 150 },
@@ -54,7 +54,7 @@ const taskLineColumns: TaskLineColumn[] = [
   { key: "remarks", label: "Remarks", width: 200 },
   { key: "ref_date", label: "Order/SCN,etc. Ref. Date", type: "date", width: 180 },
   { key: "ref_no", label: "Order/SCN,etc. Ref. No", width: 180 },
-  { key: "period", label: "Period", width: 112 },
+  { key: "period", label: "Period", width: 140 },
   { key: "section", label: "Section (73/74/75)", width: 145 },
   { key: "issue", label: "Issue", width: 200 },
   { key: "refer_other_task", label: "Refer other Task", width: 170 },
@@ -1163,7 +1163,7 @@ export function TaskLineRegister() {
                         title={`Sort by ${column.label}`}
                         type="button"
                       >
-                        <span className="min-w-0 whitespace-normal break-words leading-tight">{column.label}</span>
+                        <span className={`min-w-0 leading-tight ${column.key === "serial_no" ? "whitespace-nowrap" : "whitespace-normal break-words"}`}>{column.label}</span>
                         <span className="flex shrink-0 flex-col leading-none">
                           <ArrowUp className={`size-3 ${isAsc ? "text-navy-700" : "text-slate-300"}`} />
                           <ArrowDown className={`-mt-1 size-3 ${isDesc ? "text-navy-700" : "text-slate-300"}`} />
