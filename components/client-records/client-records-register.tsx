@@ -32,6 +32,13 @@ type AuditLog = {
 };
 type EditorState = { row: RegisterRow; rowId?: string };
 type SortState = { column: string; direction: "asc" | "desc" } | null;
+type SaveActionResult = {
+  auditLogs?: AuditLog[];
+  error?: string;
+  rows?: RegisterRow[];
+  summary?: { added?: number; deleted?: number; skipped?: number; unchanged?: number; updated?: number };
+  trashRows?: RegisterRow[];
+};
 
 const columns = [
   "S.no.",
@@ -145,18 +152,13 @@ export function ClientRecordsRegister() {
     setIsLoading(false);
   }
 
-  async function saveAction(body: Record<string, unknown>, successMessage: string) {
+  async function saveAction(body: Record<string, unknown>, successMessage: string | ((result: SaveActionResult) => string)) {
     const response = await fetch("/api/client-records/managed", {
       body: JSON.stringify(body),
       headers: { "Content-Type": "application/json" },
       method: "POST"
     });
-    const result = (await response.json()) as {
-      auditLogs?: AuditLog[];
-      error?: string;
-      rows?: RegisterRow[];
-      trashRows?: RegisterRow[];
-    };
+    const result = (await response.json()) as SaveActionResult;
 
     if (!response.ok) {
       setMessage(result.error ?? "Could not save client records.");
@@ -167,7 +169,7 @@ export function ClientRecordsRegister() {
     setTrashRows(result.trashRows ?? []);
     setAuditLogs(result.auditLogs ?? []);
     setSelectedIds(new Set());
-    setMessage(successMessage);
+    setMessage(typeof successMessage === "function" ? successMessage(result) : successMessage);
     return true;
   }
 
@@ -180,21 +182,29 @@ export function ClientRecordsRegister() {
       const buffer = await file.arrayBuffer();
       const workbook = XLSX.read(buffer);
       const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+      if (!worksheet) {
+        setMessage("The selected file does not contain a worksheet.");
+        return;
+      }
       const rawRows = XLSX.utils.sheet_to_json<Array<string | number>>(worksheet, {
         blankrows: false,
         defval: "",
         header: 1
       });
-      const importColumns = columns.filter((column) => column !== "S.no.");
-      const headerIndex = rawRows.findIndex((row) =>
-        importColumns.every((column) => row.map((value) => String(value).trim()).includes(column))
-      );
-      const headerRow = headerIndex >= 0 ? rawRows[headerIndex].map((value) => String(value).trim()) : [];
+      const headerIndex = rawRows.findIndex((row) => {
+        const headers = new Set(row.map((value) => normalizeHeader(String(value))));
+        return headers.has(normalizeHeader(importActionColumn)) && headers.has(normalizeHeader("Particulars"));
+      });
+      if (headerIndex < 0) {
+        setMessage(`Could not find the "${importActionColumn}" and "Particulars" headers in ${file.name}.`);
+        return;
+      }
+      const headerRow = rawRows[headerIndex].map((value) => String(value).trim());
       const nextRows = rawRows
-        .slice(headerIndex >= 0 ? headerIndex + 1 : 1)
+        .slice(headerIndex + 1)
         .filter((row) => row.some((value) => String(value).trim()))
         .map((row, rowIndex) =>
-          [importActionColumn, ...columns].reduce<RegisterRow>((record, column, columnIndex) => {
+          [importActionColumn, ...columns].reduce<RegisterRow>((record, column) => {
             if (column === importActionColumn) {
               const sourceIndex = headerRow.findIndex((header) => normalizeHeader(header) === normalizeHeader(importActionColumn));
               record[column] = normalizeImportAction(row[sourceIndex >= 0 ? sourceIndex : 0]);
@@ -206,15 +216,36 @@ export function ClientRecordsRegister() {
               return record;
             }
 
-            const sourceIndex = headerRow.length
-              ? headerRow.findIndex((header) => header === column)
-              : importColumns.findIndex((header) => header === column);
-            record[column] = row[sourceIndex >= 0 ? sourceIndex : columnIndex] ?? "";
+            const sourceIndex = headerRow.findIndex((header) => normalizeHeader(header) === normalizeHeader(column));
+            record[column] = sourceIndex >= 0 ? row[sourceIndex] ?? "" : "";
             return record;
           }, {})
         );
+      let unchanged = 0;
+      const changedRows = nextRows.filter((row) => {
+        if (normalizeImportAction(row[importActionColumn]) !== "Update") return true;
+        const existing = findMatchingClientRow(rows, row);
+        if (existing && clientRowsMatch(existing, row)) {
+          unchanged += 1;
+          return false;
+        }
+        return true;
+      });
 
-      await saveAction({ action: "import", rows: nextRows }, `Processed ${nextRows.length} client record import rows.`);
+      if (!changedRows.length) {
+        setMessage(`No changes found in ${file.name}. ${unchanged} unchanged row${unchanged === 1 ? " was" : "s were"} skipped.`);
+        return;
+      }
+
+      setMessage(`Importing ${changedRows.length} changed client record${changedRows.length === 1 ? "" : "s"}...`);
+      await saveAction(
+        { action: "import", rows: changedRows },
+        (result) => {
+          const summary = result.summary ?? {};
+          const unchangedTotal = unchanged + (summary.unchanged ?? 0);
+          return `Imported ${file.name}: ${summary.added ?? 0} added, ${summary.updated ?? 0} updated, ${summary.deleted ?? 0} deleted; ${unchangedTotal} unchanged and ${summary.skipped ?? 0} unmatched skipped.`;
+        }
+      );
     } catch (error) {
       console.error("Client records import error:", error);
       setMessage("Could not import the selected Excel file.");
@@ -304,7 +335,7 @@ export function ClientRecordsRegister() {
         <div>
           <h2 className="text-xl font-black text-slate-950">Client Records</h2>
           <p className="text-xs font-bold text-slate-500">
-            {columns.length} columns · {isLoading ? "loading" : `${rows.length} rows`}
+            {columns.length} columns Â· {isLoading ? "loading" : `${rows.length} rows`}
           </p>
         </div>
 
@@ -623,6 +654,32 @@ function normalizeHeader(value: string) {
   return value.replace(/[^0-9a-z]/gi, "").toLowerCase();
 }
 
+function findMatchingClientRow(existingRows: RegisterRow[], incomingRow: RegisterRow) {
+  const incomingGstin = normalizeClientLookup(incomingRow["GSTIN/UIN"]);
+  const incomingPan = normalizeClientLookup(incomingRow["PAN/IT No."]);
+  const incomingName = normalizeClientLookup(incomingRow.Particulars);
+
+  return existingRows.find((row) =>
+    (incomingGstin && normalizeClientLookup(row["GSTIN/UIN"]) === incomingGstin) ||
+    (incomingPan && normalizeClientLookup(row["PAN/IT No."]) === incomingPan) ||
+    (incomingName && normalizeClientLookup(row.Particulars) === incomingName)
+  );
+}
+
+function clientRowsMatch(existing: RegisterRow, incoming: RegisterRow) {
+  return columns
+    .filter((column) => column !== "S.no.")
+    .every((column) => normalizeClientCell(existing[column]) === normalizeClientCell(incoming[column]));
+}
+
+function normalizeClientLookup(value: unknown) {
+  return String(value ?? "").replace(/[^0-9a-z]/gi, "").toLowerCase();
+}
+
+function normalizeClientCell(value: unknown) {
+  return String(value ?? "").trim().replace(/\r\n/g, "\n");
+}
+
 function addImportActionDropdown(worksheet: XLSX.WorkSheet, rowCount: number) {
   const worksheetWithValidation = worksheet as XLSX.WorkSheet & {
     "!dataValidation"?: Array<Record<string, unknown>>;
@@ -642,4 +699,3 @@ function formatDate(value: unknown) {
   if (!value) return "-";
   return new Date(String(value)).toLocaleString();
 }
-
