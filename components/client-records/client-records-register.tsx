@@ -507,6 +507,7 @@ export function ClientRecordsRegister() {
         </div>
       </div>
 
+
       {message ? (
         <p className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-bold text-emerald-900">
           {message}
