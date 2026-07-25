@@ -60,6 +60,23 @@ const importActionColumn = "Import Action";
 const importActionOptions = ["Add", "Update", "Delete"];
 const maxDeleteRows = 10;
 const clientPageSize = 200;
+const clientSelectionColumnWidth = 40;
+const clientActionColumnWidth = 112;
+const clientColumnWidths: Record<string, number> = {
+  "S.no.": 64,
+  Group: 120,
+  Particulars: 200,
+  "Email ID": 200,
+  "POC Name": 150,
+  "POC Contact no.": 145,
+  Address: 220,
+  State: 130,
+  Country: 110,
+  "Registration Type": 150,
+  "GSTIN/UIN": 175,
+  "PAN/IT No.": 140,
+  "Client Type": 130
+};
 const buttonClass =
   "inline-flex h-11 items-center justify-center gap-2 rounded-2xl bg-white px-4 text-sm font-black text-slate-800 ring-1 ring-slate-200 transition hover:bg-slate-50";
 
@@ -128,6 +145,8 @@ export function ClientRecordsRegister() {
     const start = (tablePage - 1) * clientPageSize;
     return filteredRows.slice(start, start + clientPageSize);
   }, [filteredRows, tablePage]);
+  const selectedPageCount = pagedRows.filter((row) => selectedIds.has(String(row.id))).length;
+  const allPageRowsSelected = pagedRows.length > 0 && selectedPageCount === pagedRows.length;
   const hasActiveColumnFilters = Object.values(columnFilters).some((value) => value.trim()) || Object.keys(valueFilters).length > 0;
 
   useEffect(() => {
@@ -374,11 +393,16 @@ export function ClientRecordsRegister() {
         next.delete(rowId);
         return next;
       }
-      if (next.size >= maxDeleteRows) {
-        setMessage(`You can select a maximum of ${maxDeleteRows} client records at once.`);
-        return current;
-      }
       next.add(rowId);
+      return next;
+    });
+  }
+
+  function togglePageSelection() {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (allPageRowsSelected) pagedRows.forEach((row) => next.delete(String(row.id)));
+      else pagedRows.forEach((row) => next.add(String(row.id)));
       return next;
     });
   }
@@ -496,9 +520,17 @@ export function ClientRecordsRegister() {
       </div>
 
       <div className="mt-2 max-h-[calc(100vh-150px)] overflow-auto rounded-md border border-slate-200 bg-white">
-        <table className="w-full min-w-[1780px] border-collapse text-left text-sm">
+        <table className="table-fixed border-collapse text-left text-sm" style={{ minWidth: clientSelectionColumnWidth + clientActionColumnWidth + columns.reduce((total, column) => total + clientColumnWidths[column], 0), width: clientSelectionColumnWidth + clientActionColumnWidth + columns.reduce((total, column) => total + clientColumnWidths[column], 0) }}>
+          <colgroup>
+            <col style={{ width: clientSelectionColumnWidth }} />
+            <col style={{ width: clientActionColumnWidth }} />
+            {columns.map((column) => <col key={column} style={{ width: clientColumnWidths[column] }} />)}
+          </colgroup>
           <thead className="sticky top-0 z-10 bg-slate-100 text-[11px] font-semibold uppercase tracking-wide text-slate-600 [&_th]:border-b [&_th]:border-slate-200">
             <tr>
+              <th className="border-b border-r border-slate-200 px-2 py-2 text-center">
+                <input aria-label="Select all client records on this page" checked={allPageRowsSelected} className="size-3.5 cursor-pointer accent-rose-700" onChange={togglePageSelection} ref={(input) => { if (input) input.indeterminate = selectedPageCount > 0 && !allPageRowsSelected; }} type="checkbox" />
+              </th>
               <th className="border-b border-r border-slate-200 px-3 py-2">Actions</th>
               {columns.map((column) => {
                 const hasFilter = Boolean(valueFilters[column]);
@@ -538,8 +570,9 @@ export function ClientRecordsRegister() {
             </tr>
             <tr className="bg-slate-50">
               <th className="border-b border-r border-slate-200 px-2 py-1" />
+              <th className="border-b border-r border-slate-200 px-2 py-1" />
               {columns.map((column) => (
-                <th className="border-b border-r border-slate-200 px-2 py-1" key={`filter-${column}`}>
+                <th className="border-b border-r border-slate-200 px-3 py-1" key={`filter-${column}`}>
                   {column === "S.no." ? null : <input aria-label={`Filter ${column}`} className="h-7 w-full rounded-md border border-slate-200 bg-white px-2 text-xs font-semibold normal-case text-slate-950 outline-none focus:border-navy-400" onChange={(event) => setColumnFilters((current) => ({ ...current, [column]: event.target.value }))} placeholder="Filter" value={columnFilters[column] ?? ""} />}
                 </th>
               ))}
@@ -547,23 +580,25 @@ export function ClientRecordsRegister() {
           </thead>
           <tbody>
             {isLoading ? (
-              <tr><td className="px-4 py-8 text-sm font-bold text-slate-500" colSpan={columns.length + 1}>Loading client records...</td></tr>
+              <tr><td className="px-4 py-8 text-sm font-bold text-slate-500" colSpan={columns.length + 2}>Loading client records...</td></tr>
             ) : pagedRows.length ? (
               pagedRows.map((row) => (
                 <tr className="border-b border-slate-100 last:border-b-0" key={String(row.id)}>
+                  <td className="border-r border-slate-100 px-2 py-1 text-center">
+                    <input aria-label={`Select ${String(row.Particulars || "client record")}`} checked={selectedIds.has(String(row.id))} className="size-3.5 cursor-pointer accent-rose-700" onChange={() => toggleRowSelection(String(row.id))} title={selectedIds.has(String(row.id)) ? "Remove from bulk selection" : "Select for bulk delete"} type="checkbox" />
+                  </td>
                   <td className="border-r border-slate-100 px-2 py-1">
                     <div className="flex items-center gap-1">
-                      <input aria-label={`Select ${String(row.Particulars || "client record")}`} checked={selectedIds.has(String(row.id))} className="size-3.5 shrink-0 cursor-pointer accent-rose-700" disabled={!selectedIds.has(String(row.id)) && selectedIds.size >= maxDeleteRows} onChange={() => toggleRowSelection(String(row.id))} title={selectedIds.has(String(row.id)) ? "Remove from bulk selection" : "Select for bulk delete"} type="checkbox" />
-                      <button className="inline-flex size-7 items-center justify-center rounded-md border border-sky-200 text-sky-700 hover:bg-sky-50" onClick={() => setEditor({ row: stripInternalFields(row), rowId: String(row.id) })} title="Edit client record" type="button"><Edit3 className="size-4" /></button>
-                      <button className="inline-flex size-7 items-center justify-center rounded-md border border-navy-200 text-navy-700 hover:bg-navy-50" onClick={() => viewRowHistory(row)} title="View history" type="button"><History className="size-4" /></button>
-                      <button className="inline-flex size-7 items-center justify-center rounded-md border border-rose-200 text-rose-700 hover:bg-rose-50" onClick={() => void deleteRow(row)} title="Delete client record" type="button"><Trash2 className="size-4" /></button>
+                      <button className="inline-flex size-7 items-center justify-center rounded border border-sky-200 text-sky-700 hover:bg-sky-50" onClick={() => setEditor({ row: stripInternalFields(row), rowId: String(row.id) })} title="Edit client record" type="button"><Edit3 className="size-3.5" /></button>
+                      <button className="inline-flex size-7 items-center justify-center rounded border border-navy-200 text-navy-700 hover:bg-navy-50" onClick={() => viewRowHistory(row)} title="View history" type="button"><History className="size-3.5" /></button>
+                      <button className="inline-flex size-7 items-center justify-center rounded border border-rose-200 text-rose-700 hover:bg-rose-50" onClick={() => void deleteRow(row)} title="Delete client record" type="button"><Trash2 className="size-3.5" /></button>
                     </div>
                   </td>
-                  {columns.map((column) => <td className="border-r border-slate-100 px-2 py-1 text-xs font-semibold text-slate-700" key={column}><span className="block min-h-7 px-1.5 py-1">{row[column] || "-"}</span></td>)}
+                  {columns.map((column) => <td className="border-r border-slate-100 px-3 py-1 text-xs font-semibold text-slate-700" key={column}><span className="block min-h-7 py-1">{row[column] || "-"}</span></td>)}
                 </tr>
               ))
             ) : (
-              <tr><td className="px-4 py-8 text-sm font-bold text-slate-500" colSpan={columns.length + 1}>No client records match the current filters.</td></tr>
+              <tr><td className="px-4 py-8 text-sm font-bold text-slate-500" colSpan={columns.length + 2}>No client records match the current filters.</td></tr>
             )}
           </tbody>
         </table>

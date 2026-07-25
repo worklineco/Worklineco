@@ -36,26 +36,27 @@ const bulkDeleteLimit = 10;
 const taskLinePageSize = 200;
 const taskLineRowsCacheKey = "taskline:rows:v2";
 const taskLineColumnLayoutStorageKey = "workline:taskline-column-layout:v2";
-const actionColumnWidth = 156;
+const selectionColumnWidth = 40;
+const actionColumnWidth = 112;
 const actionColumnKey = "__actions";
 const taskLineColumns: TaskLineColumn[] = [
-  { key: "team", label: "Team", width: 120 },
-  { key: "serial_no", label: "S. No.", width: 82 },
-  { key: "name", label: "Name", width: 160 },
-  { key: "resource", label: "Resource", width: 150 },
-  { key: "entity_group", label: "Entity Group", width: 170 },
-  { key: "entity", label: "Entity", width: 190 },
-  { key: "state_name", label: "State Name", width: 140 },
-  { key: "task", label: "Task", width: 230 },
-  { key: "due_date", label: "Due Date", type: "date", width: 135 },
-  { key: "stage", label: "Stage", width: 140 },
-  { key: "status_open_close", label: "Status Open/Close", type: "select", width: 170 },
-  { key: "remarks", label: "Remarks", width: 220 },
-  { key: "ref_date", label: "Order/SCN,etc. Ref. Date", type: "date", width: 200 },
-  { key: "ref_no", label: "Order/SCN,etc. Ref. No", width: 200 },
-  { key: "period", label: "Period", width: 120 },
-  { key: "section", label: "Section (73/74/75)", width: 160 },
-  { key: "issue", label: "Issue", width: 220 },
+  { key: "team", label: "Team", width: 112 },
+  { key: "serial_no", label: "S. No.", width: 64 },
+  { key: "name", label: "Name", width: 150 },
+  { key: "resource", label: "Resource", width: 140 },
+  { key: "entity_group", label: "Entity Group", width: 150 },
+  { key: "entity", label: "Entity", width: 180 },
+  { key: "state_name", label: "State Name", width: 130 },
+  { key: "task", label: "Task", width: 210 },
+  { key: "due_date", label: "Due Date", type: "date", width: 128 },
+  { key: "stage", label: "Stage", width: 132 },
+  { key: "status_open_close", label: "Status Open/Close", type: "select", width: 155 },
+  { key: "remarks", label: "Remarks", width: 200 },
+  { key: "ref_date", label: "Order/SCN,etc. Ref. Date", type: "date", width: 180 },
+  { key: "ref_no", label: "Order/SCN,etc. Ref. No", width: 180 },
+  { key: "period", label: "Period", width: 112 },
+  { key: "section", label: "Section (73/74/75)", width: 145 },
+  { key: "issue", label: "Issue", width: 200 },
   { key: "refer_other_task", label: "Refer other Task", width: 170 },
   { key: "appeal_no", label: "Appeal No.", width: 150 },
   { key: "order_type", label: "Order Type", width: 150 },
@@ -227,7 +228,7 @@ export function TaskLineRegister() {
   );
   const actionColumnHidden = hiddenColumnKeys.has(actionColumnKey);
   const actionColumnFrozen = frozenColumnKeys.has(actionColumnKey);
-  const tableWidth = useMemo(() => (actionColumnHidden ? 0 : actionColumnWidth) + visibleColumns.reduce((total, column) => total + column.width, 0), [actionColumnHidden, visibleColumns]);
+  const tableWidth = useMemo(() => selectionColumnWidth + (actionColumnHidden ? 0 : actionColumnWidth) + visibleColumns.reduce((total, column) => total + column.width, 0), [actionColumnHidden, visibleColumns]);
   const frozenLefts = useMemo(() => {
     const lefts = new Map<string, number>();
     let acc = actionColumnFrozen && !actionColumnHidden ? actionColumnWidth : 0;
@@ -302,6 +303,8 @@ export function TaskLineRegister() {
     const startIndex = (tablePage - 1) * taskLinePageSize;
     return filteredRows.slice(startIndex, startIndex + taskLinePageSize);
   }, [filteredRows, tablePage]);
+  const selectedPageCount = pagedRows.filter((row) => selectedRowIds.has(row.__id)).length;
+  const allPageRowsSelected = pagedRows.length > 0 && selectedPageCount === pagedRows.length;
 
   const dataHydratedRef = useRef(false);
 
@@ -795,11 +798,16 @@ export function TaskLineRegister() {
         next.delete(rowId);
         return next;
       }
-      if (next.size >= bulkDeleteLimit) {
-        setMessage(`You can select a maximum of ${bulkDeleteLimit} tasks at once.`);
-        return current;
-      }
       next.add(rowId);
+      return next;
+    });
+  }
+
+  function togglePageSelection() {
+    setSelectedRowIds((current) => {
+      const next = new Set(current);
+      if (allPageRowsSelected) pagedRows.forEach((row) => next.delete(row.__id));
+      else pagedRows.forEach((row) => next.add(row.__id));
       return next;
     });
   }
@@ -1111,6 +1119,7 @@ export function TaskLineRegister() {
         <div className="max-h-[calc(100vh-135px)] overflow-auto rounded-md border border-slate-200 bg-white">
           <table className="table-fixed border-separate border-spacing-0 text-left text-sm" style={{ minWidth: tableWidth, width: tableWidth }}>
             <colgroup>
+              <col style={{ width: selectionColumnWidth }} />
               {actionColumnHidden ? null : <col style={{ width: actionColumnWidth }} />}
               {visibleColumns.map((column) => (
                 <col key={column.key} style={{ width: column.width }} />
@@ -1118,6 +1127,16 @@ export function TaskLineRegister() {
             </colgroup>
             <thead className="sticky top-0 z-10 bg-slate-100 text-[11px] font-semibold uppercase tracking-wide text-slate-600 [&_th]:border-b [&_th]:border-slate-200">
             <tr>
+              <th className="border-r border-white/10 px-2 py-2 text-center" style={{ width: selectionColumnWidth }}>
+                <input
+                  aria-label="Select all tasks on this page"
+                  checked={allPageRowsSelected}
+                  className="size-3.5 cursor-pointer accent-rose-700"
+                  onChange={togglePageSelection}
+                  ref={(input) => { if (input) input.indeterminate = selectedPageCount > 0 && !allPageRowsSelected; }}
+                  type="checkbox"
+                />
+              </th>
               {actionColumnHidden ? null : (
                 <th
                   className={`border-r border-white/10 px-3 py-2 ${actionColumnFrozen ? "sticky left-0 z-20 bg-slate-100" : ""}`}
@@ -1201,6 +1220,7 @@ export function TaskLineRegister() {
               })}
             </tr>
             <tr className="bg-slate-50">
+              <th className="border-r border-slate-200 px-2 py-1" />
               {actionColumnHidden ? null : (
                 <th
                   className={`border-r border-slate-200 px-2 py-1 ${actionColumnFrozen ? "sticky left-0 z-20 bg-slate-50" : ""}`}
@@ -1211,7 +1231,7 @@ export function TaskLineRegister() {
                 const frozen = frozenInfo(column.key);
                 return (
                   <th
-                    className={`border-r border-slate-200 px-2 py-1 last:border-r-0 ${frozen.isFrozen ? "sticky z-20 bg-slate-50" : ""}`}
+                    className={`border-r border-slate-200 px-3 py-1 last:border-r-0 ${frozen.isFrozen ? "sticky z-20 bg-slate-50" : ""}`}
                     key={`filter-${column.key}`}
                     style={frozen.isFrozen ? { left: frozen.left } : undefined}
                   >
@@ -1231,32 +1251,33 @@ export function TaskLineRegister() {
             </thead>
             <tbody>
               {isLoading ? (
-                <tr><td className="px-4 py-8 font-bold text-slate-500" colSpan={visibleColumns.length + (actionColumnHidden ? 0 : 1)}>Loading TaskLine rows...</td></tr>
+                <tr><td className="px-4 py-8 font-bold text-slate-500" colSpan={visibleColumns.length + (actionColumnHidden ? 1 : 2)}>Loading TaskLine rows...</td></tr>
               ) : pagedRows.length ? pagedRows.map((row, rowIndex) => {
                 const rowNameOptions = nameOptionsForTeam(text(row.team));
                 const rowResourceOptions = resourceOptionsForTeam(text(row.team));
                 return (
                 <tr className="border-b border-slate-100 last:border-b-0" key={row.__id}>
+                  <td className="border-r border-slate-100 px-2 py-1 text-center">
+                    <input
+                      aria-label={`Select ${getRowLabel(row, rows) || "TaskLine row"}`}
+                      checked={selectedRowIds.has(row.__id)}
+                      className="size-3.5 cursor-pointer accent-rose-700"
+                      onChange={() => toggleRowSelection(row.__id)}
+                      title={selectedRowIds.has(row.__id) ? "Remove from bulk selection" : "Select for bulk delete"}
+                      type="checkbox"
+                    />
+                  </td>
                   {actionColumnHidden ? null : (
                   <td className={`border-r border-slate-100 px-2 py-1 ${actionColumnFrozen ? "sticky left-0 z-[5] bg-white" : ""}`} style={actionColumnFrozen ? { left: 0 } : undefined}>
                     <div className="flex items-center gap-1">
-                      <input
-                        aria-label={`Select ${getRowLabel(row, rows) || "TaskLine row"}`}
-                        checked={selectedRowIds.has(row.__id)}
-                        className="size-3.5 shrink-0 cursor-pointer accent-rose-700"
-                        disabled={!selectedRowIds.has(row.__id) && selectedRowIds.size >= bulkDeleteLimit}
-                        onChange={() => toggleRowSelection(row.__id)}
-                        title={selectedRowIds.has(row.__id) ? "Remove from bulk selection" : "Select for bulk delete"}
-                        type="checkbox"
-                      />
-                      <button className="inline-flex size-7 items-center justify-center rounded-md border border-sky-200 text-sky-700 hover:bg-sky-50" onClick={() => openEditForm(row)} title="Edit row" type="button">
-                        <Pencil className="size-4" />
+                      <button className="inline-flex size-7 items-center justify-center rounded border border-sky-200 text-sky-700 hover:bg-sky-50" onClick={() => openEditForm(row)} title="Edit row" type="button">
+                        <Pencil className="size-3.5" />
                       </button>
-                      <button className="inline-flex size-7 items-center justify-center rounded-md border border-navy-200 text-navy-700 hover:bg-navy-50" onClick={() => viewRowHistory(row)} title="View history" type="button">
-                        <History className="size-4" />
+                      <button className="inline-flex size-7 items-center justify-center rounded border border-navy-200 text-navy-700 hover:bg-navy-50" onClick={() => viewRowHistory(row)} title="View history" type="button">
+                        <History className="size-3.5" />
                       </button>
-                      <button className="inline-flex size-7 items-center justify-center rounded-md border border-rose-200 text-rose-700 hover:bg-rose-50" onClick={() => deleteRow(row)} title="Delete row" type="button">
-                        <Trash2 className="size-4" />
+                      <button className="inline-flex size-7 items-center justify-center rounded border border-rose-200 text-rose-700 hover:bg-rose-50" onClick={() => deleteRow(row)} title="Delete row" type="button">
+                        <Trash2 className="size-3.5" />
                       </button>
                     </div>
                   </td>
@@ -1284,7 +1305,7 @@ export function TaskLineRegister() {
                 </tr>
                 );
               }) : (
-                <tr><td className="px-4 py-8 font-bold text-slate-500" colSpan={visibleColumns.length + (actionColumnHidden ? 0 : 1)}>No TaskLine rows match the current filters.</td></tr>
+                <tr><td className="px-4 py-8 font-bold text-slate-500" colSpan={visibleColumns.length + (actionColumnHidden ? 1 : 2)}>No TaskLine rows match the current filters.</td></tr>
               )}
             </tbody>
           </table>
@@ -1382,7 +1403,7 @@ const TaskLineCell = memo(function TaskLineCell({
 
   if (column.key === "serial_no") {
     return (
-      <td className={`border-r border-slate-100 px-2 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
+      <td className={`border-r border-slate-100 px-3 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
         <span className="block h-7 px-1.5 py-1 font-semibold text-slate-700">{serialNumber}</span>
       </td>
     );
@@ -1391,7 +1412,7 @@ const TaskLineCell = memo(function TaskLineCell({
   if (column.key === "team") {
     const current = row[column.key] ?? "";
     return (
-      <td className={`border-r border-slate-100 px-2 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
+      <td className={`border-r border-slate-100 px-3 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
         <select className={compactSelectClass} onChange={(event) => onChange(event.target.value)} value={current}>
           <option value="">Select team</option>
           {teamOptions.map((team) => <option key={team} value={team}>{team}</option>)}
@@ -1409,7 +1430,7 @@ const TaskLineCell = memo(function TaskLineCell({
         ? gstinStateOptions.map(([, state]) => state)
         : sectionOptions;
     return (
-      <td className={`border-r border-slate-100 px-2 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
+      <td className={`border-r border-slate-100 px-3 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
         <select
           className={compactSelectClass}
           onChange={(event) => onChange(event.target.value)}
@@ -1425,7 +1446,7 @@ const TaskLineCell = memo(function TaskLineCell({
 
   if (column.key === "entity_group") {
     return (
-      <td className={`border-r border-slate-100 bg-slate-50 px-2 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5]" : ""}`} style={frozenStyle}>
+      <td className={`border-r border-slate-100 bg-slate-50 px-3 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5]" : ""}`} style={frozenStyle}>
         <input className="h-7 w-full cursor-not-allowed border-0 bg-transparent px-1.5 text-xs font-semibold text-slate-600 outline-none" readOnly title="Filled automatically from Entity" value={row[column.key] ?? ""} />
       </td>
     );
@@ -1434,7 +1455,7 @@ const TaskLineCell = memo(function TaskLineCell({
   if (column.key === "period") {
     const current = row[column.key] ?? "";
     return (
-      <td className={`border-r border-slate-100 px-2 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
+      <td className={`border-r border-slate-100 px-3 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
         <select className={compactSelectClass} onChange={(event) => onChange(event.target.value)} value={current}>
           <option value="">Select period</option>
           {financialPeriodOptions.map((period) => <option key={period} value={period}>{period}</option>)}
@@ -1447,7 +1468,7 @@ const TaskLineCell = memo(function TaskLineCell({
   if (column.key === "name") {
     const current = row[column.key] ?? "";
     return (
-      <td className={`border-r border-slate-100 px-2 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
+      <td className={`border-r border-slate-100 px-3 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
         <select
           className={compactSelectClass}
           onChange={(event) => onChange(event.target.value)}
@@ -1468,7 +1489,7 @@ const TaskLineCell = memo(function TaskLineCell({
   if (column.key === "resource") {
     const current = row[column.key] ?? "";
     return (
-      <td className={`border-r border-slate-100 px-2 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
+      <td className={`border-r border-slate-100 px-3 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
         <select
           className={compactSelectClass}
           onChange={(event) => onChange(event.target.value)}
@@ -1489,7 +1510,7 @@ const TaskLineCell = memo(function TaskLineCell({
   if (column.key === "task") {
     const current = row[column.key] ?? "";
     return (
-      <td className={`border-r border-slate-100 px-2 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
+      <td className={`border-r border-slate-100 px-3 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
         <select
           className={compactSelectClass}
           onChange={(event) => onChange(event.target.value)}
@@ -1510,7 +1531,7 @@ const TaskLineCell = memo(function TaskLineCell({
   if (column.key === "stage") {
     const current = row[column.key] ?? "";
     return (
-      <td className={`border-r border-slate-100 px-2 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
+      <td className={`border-r border-slate-100 px-3 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
         <select
           className={compactSelectClass}
           onChange={(event) => onChange(event.target.value)}
@@ -1530,7 +1551,7 @@ const TaskLineCell = memo(function TaskLineCell({
 
   if (column.type === "select") {
     return (
-      <td className={`border-r border-slate-100 px-2 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
+      <td className={`border-r border-slate-100 px-3 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
         <select
           className={compactSelectClass}
           onChange={(event) => onChange(event.target.value)}
@@ -1548,7 +1569,7 @@ const TaskLineCell = memo(function TaskLineCell({
   if (column.key === "due_date" || column.key === "ref_date") {
     const dueColor = column.key === "due_date" ? dueDateColorClass(row[column.key] ?? "") : "";
     return (
-      <td className={`border-r border-slate-100 px-2 py-1 last:border-r-0 ${dueColor} ${isFrozen ? (dueColor ? "sticky z-[5]" : "sticky z-[5] bg-white") : ""}`} style={frozenStyle}>
+      <td className={`border-r border-slate-100 px-3 py-1 last:border-r-0 ${dueColor} ${isFrozen ? (dueColor ? "sticky z-[5]" : "sticky z-[5] bg-white") : ""}`} style={frozenStyle}>
         <TaskLineDateInput compact onChange={onChange} value={row[column.key] ?? ""} />
       </td>
     );
@@ -1558,7 +1579,7 @@ const TaskLineCell = memo(function TaskLineCell({
 
   return (
     <td
-      className={`border-r border-slate-100 px-2 py-1 last:border-r-0 ${dueColor} ${isFrozen ? (dueColor ? "sticky z-[5]" : "sticky z-[5] bg-white") : ""}`}
+      className={`border-r border-slate-100 px-3 py-1 last:border-r-0 ${dueColor} ${isFrozen ? (dueColor ? "sticky z-[5]" : "sticky z-[5] bg-white") : ""}`}
       style={frozenStyle}
     >
       <input
