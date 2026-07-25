@@ -428,10 +428,10 @@ export function ClientRecordsRegister() {
   }
 
   return (
-    <section className="rounded-[28px] border border-white/80 bg-white/90 p-5 shadow-[0_24px_80px_rgba(15,23,42,0.10)]">
+    <section className="w-full rounded-lg border border-slate-200 bg-white p-3 shadow-[0_18px_60px_rgba(15,23,42,0.10)]">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-xl font-black text-slate-950">Client Records</h2>
+          <h2 className="text-lg font-black leading-tight text-slate-950">Client Records</h2>
           <p className="text-xs font-bold text-slate-500">
             {columns.length} columns · {isLoading ? "loading" : `${filteredRows.length.toLocaleString()} of ${rows.length.toLocaleString()} rows${hasActiveColumnFilters || search ? " (filtered)" : ""}`}
           </p>
@@ -439,14 +439,14 @@ export function ClientRecordsRegister() {
 
         <div className="relative">
           <input accept=".csv,.xls,.xlsx" className="hidden" onChange={importExcel} ref={fileInputRef} type="file" />
-          <button className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl bg-navy-700 px-4 text-sm font-black text-white ring-1 ring-navy-900 transition hover:bg-navy-600" onClick={() => setIsActionsOpen((current) => !current)} type="button">
+          <button className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-navy-700 px-4 text-sm font-black text-white ring-1 ring-navy-900 transition hover:bg-navy-600" onClick={() => setIsActionsOpen((current) => !current)} type="button">
             <Menu className="size-4" />
             Actions
           </button>
           {isActionsOpen ? (
             <>
               <div className="fixed inset-0 z-30" onClick={() => setIsActionsOpen(false)} />
-              <div className="absolute right-0 top-14 z-40 w-56 overflow-hidden rounded-2xl border border-slate-200 bg-white py-1 shadow-2xl">
+              <div className="absolute right-0 top-12 z-40 w-56 overflow-hidden rounded-md border border-slate-200 bg-white py-1 shadow-2xl">
                 <ClientMenuItem icon={Plus} label="Add" onClick={() => { setIsActionsOpen(false); setEditor({ row: createBlankRow() }); }} />
                 {hasActiveColumnFilters ? (
                   <ClientMenuItem icon={X} label="Clear column filters" onClick={() => { setIsActionsOpen(false); setColumnFilters({}); setValueFilters({}); }} />
@@ -463,10 +463,10 @@ export function ClientRecordsRegister() {
         </div>
       </div>
 
-      <div className="mt-5 flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3">
+      <div className="mt-3 flex h-10 items-center gap-2 rounded-md border border-slate-200 bg-white px-3">
         <Search className="size-4 text-slate-400" />
         <input
-          className="h-11 min-w-0 flex-1 border-0 bg-transparent text-sm font-semibold outline-none"
+          className="min-w-0 flex-1 border-0 bg-transparent text-sm font-semibold outline-none"
           onChange={(event) => setSearch(event.target.value)}
           placeholder="Universal search"
           value={search}
@@ -474,7 +474,7 @@ export function ClientRecordsRegister() {
       </div>
 
       {message ? (
-        <p className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-900">
+        <p className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-bold text-emerald-900">
           {message}
         </p>
       ) : null}
@@ -495,7 +495,7 @@ export function ClientRecordsRegister() {
         <button className="inline-flex h-8 items-center rounded-md border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 disabled:opacity-40" disabled={tablePage >= pageCount || isLoading} onClick={() => setTablePage((page) => Math.min(pageCount, page + 1))} type="button">Next</button>
       </div>
 
-      <div className="mt-2 max-h-[calc(100vh-190px)] overflow-auto rounded-2xl border border-slate-200 bg-white">
+      <div className="mt-2 max-h-[calc(100vh-150px)] overflow-auto rounded-md border border-slate-200 bg-white">
         <table className="w-full min-w-[1780px] border-collapse text-left text-sm">
           <thead className="sticky top-0 z-10 bg-slate-100 text-[11px] font-semibold uppercase tracking-wide text-slate-600 [&_th]:border-b [&_th]:border-slate-200">
             <tr>
@@ -559,7 +559,7 @@ export function ClientRecordsRegister() {
                       <button className="inline-flex size-7 items-center justify-center rounded-md border border-rose-200 text-rose-700 hover:bg-rose-50" onClick={() => void deleteRow(row)} title="Delete client record" type="button"><Trash2 className="size-4" /></button>
                     </div>
                   </td>
-                  {columns.map((column) => <td className="border-r border-slate-100 px-4 py-3 font-semibold text-slate-700" key={column}>{row[column] || "-"}</td>)}
+                  {columns.map((column) => <td className="border-r border-slate-100 px-2 py-1 text-xs font-semibold text-slate-700" key={column}><span className="block min-h-7 px-1.5 py-1">{row[column] || "-"}</span></td>)}
                 </tr>
               ))
             ) : (
