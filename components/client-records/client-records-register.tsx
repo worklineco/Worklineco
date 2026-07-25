@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import type { ComponentType } from "react";
 import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { getCached, setCached } from "@/lib/data-cache";
 import * as XLSX from "xlsx-js-style";
 
@@ -57,7 +58,8 @@ const columns = [
 ];
 const importActionColumn = "Import Action";
 const importActionOptions = ["Add", "Update", "Delete"];
-const maxDeleteRows = 5;
+const maxDeleteRows = 10;
+const clientPageSize = 200;
 const buttonClass =
   "inline-flex h-11 items-center justify-center gap-2 rounded-2xl bg-white px-4 text-sm font-black text-slate-800 ring-1 ring-slate-200 transition hover:bg-slate-50";
 
@@ -68,11 +70,16 @@ export function ClientRecordsRegister() {
   const [message, setMessage] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [search, setSearch] = useState("");
-  const [filterColumn, setFilterColumn] = useState("");
-  const [filterValue, setFilterValue] = useState("");
-  const [isFilterOpen, setIsFilterOpen] = useState(false);
+  const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
+  const [valueFilters, setValueFilters] = useState<Record<string, string[]>>({});
+  const [openFilterColumn, setOpenFilterColumn] = useState<string | null>(null);
+  const [filterDraft, setFilterDraft] = useState<string[]>([]);
+  const [filterSearch, setFilterSearch] = useState("");
+  const [filterMenuPos, setFilterMenuPos] = useState<{ left: number; maxHeight: number; top: number } | null>(null);
   const [sortState, setSortState] = useState<SortState>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
+  const [tablePage, setTablePage] = useState(1);
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [isTrashOpen, setIsTrashOpen] = useState(false);
   const [isAuditOpen, setIsAuditOpen] = useState(false);
@@ -88,31 +95,48 @@ export function ClientRecordsRegister() {
   const visibleRows = useMemo<RegisterRow[]>(() => withSerial(rows), [rows]);
   const filteredRows = useMemo<RegisterRow[]>(() => {
     const searchValue = search.trim().toLowerCase();
-    const filter = filterValue.trim().toLowerCase();
     let nextRows = visibleRows.filter((row) => {
       const matchesSearch =
         !searchValue ||
         columns.some((column) => String(row[column] ?? "").toLowerCase().includes(searchValue));
-      const matchesFilter =
-        !filterColumn ||
-        !filter ||
-        String(row[filterColumn] ?? "").toLowerCase().includes(filter);
+      const matchesTextFilters = columns.every((column) => {
+        const filter = String(columnFilters[column] ?? "").trim().toLowerCase();
+        return !filter || String(row[column] ?? "").toLowerCase().includes(filter);
+      });
+      const matchesValueFilters = columns.every((column) => {
+        const selected = valueFilters[column];
+        return !selected || selected.includes(String(row[column] ?? ""));
+      });
 
-      return matchesSearch && matchesFilter;
+      return matchesSearch && matchesTextFilters && matchesValueFilters;
     });
 
     if (sortState) {
       nextRows = [...nextRows].sort((first, second) => {
         const left = String(first[sortState.column] ?? "");
         const right = String(second[sortState.column] ?? "");
-        return sortState.direction === "asc" ? left.localeCompare(right) : right.localeCompare(left);
+        return sortState.direction === "asc"
+          ? left.localeCompare(right, undefined, { numeric: true })
+          : right.localeCompare(left, undefined, { numeric: true });
       });
     }
 
     return nextRows;
-  }, [filterColumn, filterValue, search, sortState, visibleRows]);
-  const selectedVisibleCount = filteredRows.filter((row) => selectedIds.has(String(row.id))).length;
-  const areAllVisibleSelected = filteredRows.length > 0 && selectedVisibleCount === filteredRows.length;
+  }, [columnFilters, search, sortState, valueFilters, visibleRows]);
+  const pageCount = Math.max(1, Math.ceil(filteredRows.length / clientPageSize));
+  const pagedRows = useMemo(() => {
+    const start = (tablePage - 1) * clientPageSize;
+    return filteredRows.slice(start, start + clientPageSize);
+  }, [filteredRows, tablePage]);
+  const hasActiveColumnFilters = Object.values(columnFilters).some((value) => value.trim()) || Object.keys(valueFilters).length > 0;
+
+  useEffect(() => {
+    setTablePage(1);
+  }, [columnFilters, search, sortState, valueFilters]);
+
+  useEffect(() => {
+    setTablePage((current) => Math.min(current, pageCount));
+  }, [pageCount]);
 
   async function loadRows() {
     const cached = !dataHydratedRef.current
@@ -279,16 +303,82 @@ export function ClientRecordsRegister() {
     });
   }
 
-  function toggleVisibleSelection() {
+  function uniqueValuesForColumn(column: string) {
+    return Array.from(new Set(visibleRows.map((row) => String(row[column] ?? ""))))
+      .sort((first, second) => first.localeCompare(second, undefined, { numeric: true }));
+  }
+
+  const openColumnOptions = useMemo(
+    () => (openFilterColumn ? uniqueValuesForColumn(openFilterColumn) : []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [openFilterColumn, visibleRows]
+  );
+  const visibleFilterOptions = useMemo(() => {
+    const query = filterSearch.trim().toLowerCase();
+    return query ? openColumnOptions.filter((value) => value.toLowerCase().includes(query)) : openColumnOptions;
+  }, [filterSearch, openColumnOptions]);
+
+  function openColumnFilter(column: string, anchor: HTMLElement) {
+    const options = uniqueValuesForColumn(column);
+    setOpenFilterColumn(column);
+    setFilterSearch("");
+    setFilterDraft(valueFilters[column] ? [...valueFilters[column]] : options);
+    const rect = anchor.getBoundingClientRect();
+    const width = 288;
+    const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
+    const top = rect.bottom + 4;
+    setFilterMenuPos({ left, maxHeight: Math.max(240, window.innerHeight - top - 16), top });
+  }
+
+  function closeColumnFilter() {
+    setOpenFilterColumn(null);
+    setFilterMenuPos(null);
+  }
+
+  function applyColumnFilter(column: string) {
+    const options = uniqueValuesForColumn(column);
+    setValueFilters((current) => {
+      const next = { ...current };
+      if (filterDraft.length >= options.length) delete next[column];
+      else next[column] = [...filterDraft];
+      return next;
+    });
+    closeColumnFilter();
+  }
+
+  function clearColumnFilter(column: string) {
+    setValueFilters((current) => {
+      const next = { ...current };
+      delete next[column];
+      return next;
+    });
+    closeColumnFilter();
+  }
+
+  function toggleDraftValue(value: string) {
+    setFilterDraft((current) => current.includes(value) ? current.filter((item) => item !== value) : [...current, value]);
+  }
+
+  function toggleVisibleDraftValues() {
+    const allSelected = visibleFilterOptions.every((value) => filterDraft.includes(value));
+    setFilterDraft((current) => {
+      if (allSelected) return current.filter((value) => !visibleFilterOptions.includes(value));
+      return Array.from(new Set([...current, ...visibleFilterOptions]));
+    });
+  }
+
+  function toggleRowSelection(rowId: string) {
     setSelectedIds((current) => {
       const next = new Set(current);
-
-      if (areAllVisibleSelected) {
-        filteredRows.forEach((row) => next.delete(String(row.id)));
-      } else {
-        filteredRows.forEach((row) => next.add(String(row.id)));
+      if (next.has(rowId)) {
+        next.delete(rowId);
+        return next;
       }
-
+      if (next.size >= maxDeleteRows) {
+        setMessage(`You can select a maximum of ${maxDeleteRows} client records at once.`);
+        return current;
+      }
+      next.add(rowId);
       return next;
     });
   }
@@ -296,19 +386,27 @@ export function ClientRecordsRegister() {
   async function deleteSelectedRows() {
     const ids = Array.from(selectedIds);
 
-    if (!ids.length) {
-      setMessage("Select client records to delete.");
-      return;
-    }
-
-    if (ids.length > maxDeleteRows) {
-      setMessage(`You can delete at most ${maxDeleteRows} client records at once.`);
-      return;
-    }
+    if (!ids.length || ids.length > maxDeleteRows || isBulkDeleting) return;
 
     if (!window.confirm(`Move ${ids.length} client record(s) to trash?`)) return;
 
-    await saveAction({ action: "delete", rowIds: ids }, `Moved ${ids.length} client record(s) to trash.`);
+    setIsBulkDeleting(true);
+    try {
+      await saveAction({ action: "delete", rowIds: ids }, `Moved ${ids.length} client record(s) to trash.`);
+    } finally {
+      setIsBulkDeleting(false);
+    }
+  }
+
+  async function deleteRow(row: RegisterRow) {
+    const name = String(row.Particulars || "this client record");
+    if (!window.confirm(`Move ${name} to trash?`)) return;
+    await saveAction({ action: "delete", rowIds: [String(row.id)] }, `Moved ${name} to trash.`);
+  }
+
+  function viewRowHistory(row: RegisterRow) {
+    setIsAuditOpen(true);
+    setMessage(`Showing audit history for ${String(row.Particulars || "the selected client record")}.`);
   }
 
   async function restoreRow(row: RegisterRow) {
@@ -335,7 +433,7 @@ export function ClientRecordsRegister() {
         <div>
           <h2 className="text-xl font-black text-slate-950">Client Records</h2>
           <p className="text-xs font-bold text-slate-500">
-            {columns.length} columns Â· {isLoading ? "loading" : `${rows.length} rows`}
+            {columns.length} columns Â· {isLoading ? "loading" : `${filteredRows.length.toLocaleString()} of ${rows.length.toLocaleString()} rows${hasActiveColumnFilters || search ? " (filtered)" : ""}`}
           </p>
         </div>
 
@@ -350,11 +448,12 @@ export function ClientRecordsRegister() {
               <div className="fixed inset-0 z-30" onClick={() => setIsActionsOpen(false)} />
               <div className="absolute right-0 top-14 z-40 w-56 overflow-hidden rounded-2xl border border-slate-200 bg-white py-1 shadow-2xl">
                 <ClientMenuItem icon={Plus} label="Add" onClick={() => { setIsActionsOpen(false); setEditor({ row: createBlankRow() }); }} />
-                <ClientMenuItem icon={Filter} label="Filter" onClick={() => { setIsActionsOpen(false); setIsFilterOpen((current) => !current); }} />
+                {hasActiveColumnFilters ? (
+                  <ClientMenuItem icon={X} label="Clear column filters" onClick={() => { setIsActionsOpen(false); setColumnFilters({}); setValueFilters({}); }} />
+                ) : null}
                 <ClientMenuItem icon={sortState?.direction === "desc" ? ArrowDown : ArrowUp} label="Reset sort" onClick={() => { setIsActionsOpen(false); setSortState(null); }} />
                 <ClientMenuItem icon={Upload} label="Import Excel" onClick={() => { setIsActionsOpen(false); fileInputRef.current?.click(); }} />
                 <ClientMenuItem icon={Download} label="Export Excel" onClick={() => { setIsActionsOpen(false); exportExcel(); }} />
-                <ClientMenuItem icon={Trash2} label="Delete selected" onClick={() => { setIsActionsOpen(false); deleteSelectedRows(); }} />
                 <ClientMenuItem icon={Trash2} label="Trash" onClick={() => { setIsActionsOpen(false); setIsTrashOpen((current) => !current); }} />
                 <ClientMenuItem icon={History} label="Audit" onClick={() => { setIsActionsOpen(false); setIsAuditOpen((current) => !current); }} />
                 <ClientMenuItem icon={RefreshCw} label="Refresh" onClick={() => { setIsActionsOpen(false); void loadRows(); }} />
@@ -374,94 +473,97 @@ export function ClientRecordsRegister() {
         />
       </div>
 
-      {isFilterOpen ? (
-        <div className="mt-4 grid gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-3 md:grid-cols-[240px_1fr_auto]">
-          <select className="input" onChange={(event) => setFilterColumn(event.target.value)} value={filterColumn}>
-            <option value="">Filter column</option>
-            {columns.map((column) => (
-              <option key={column} value={column}>
-                {column}
-              </option>
-            ))}
-          </select>
-          <input className="input" onChange={(event) => setFilterValue(event.target.value)} placeholder="Filter value" value={filterValue} />
-          <button className={buttonClass} onClick={() => { setFilterColumn(""); setFilterValue(""); }} type="button">
-            <X className="size-4" />
-            Clear
-          </button>
-        </div>
-      ) : null}
-
       {message ? (
         <p className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-900">
           {message}
         </p>
       ) : null}
 
-      <div className="mt-5 overflow-auto rounded-2xl border border-slate-200 bg-white">
+      <div className="mt-4 flex items-center justify-end gap-1.5">
+        <button
+          className="inline-flex h-8 items-center gap-1 rounded-md border border-rose-200 bg-white px-3 text-xs font-bold text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40"
+          disabled={!selectedIds.size || selectedIds.size > maxDeleteRows || isBulkDeleting || isLoading}
+          onClick={() => void deleteSelectedRows()}
+          title={`Delete up to ${maxDeleteRows} selected client records`}
+          type="button"
+        >
+          <Trash2 className="size-3.5" />
+          {isBulkDeleting ? "Deleting..." : `Delete selected (${selectedIds.size}/${maxDeleteRows})`}
+        </button>
+        <button className="inline-flex h-8 items-center rounded-md border border…30 tokens truncated…Click={() => setTablePage((page) => Math.max(1, page - 1))} type="button">Prev</button>
+        <span className="inline-flex h-8 items-center rounded-md border border-slate-200 bg-white px-3 text-xs font-black text-slate-700">Page {tablePage} of {pageCount}</span>
+        <button className="inline-flex h-8 items-center rounded-md border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 disabled:opacity-40" disabled={tablePage >= pageCount || isLoading} onClick={() => setTablePage((page) => Math.min(pageCount, page + 1))} type="button">Next</button>
+      </div>
+
+      <div className="mt-2 max-h-[calc(100vh-190px)] overflow-auto rounded-2xl border border-slate-200 bg-white">
         <table className="w-full min-w-[1780px] border-collapse text-left text-sm">
           <thead className="sticky top-0 z-10 bg-slate-100 text-[11px] font-semibold uppercase tracking-wide text-slate-600 [&_th]:border-b [&_th]:border-slate-200">
             <tr>
-              <th className="border-b border-r border-slate-200 px-4 py-3">
-                <input checked={areAllVisibleSelected} onChange={toggleVisibleSelection} type="checkbox" />
-              </th>
-              <th className="border-b border-r border-slate-200 px-4 py-3">Actions</th>
-              {columns.map((column) => (
-                <th className="border-b border-r border-slate-200 px-4 py-3" key={column}>
-                  <button className="inline-flex items-center gap-1" onClick={() => toggleSort(column)} type="button">
-                    {column}
-                    {sortState?.column === column ? (
-                      sortState.direction === "asc" ? <ArrowUp className="size-3" /> : <ArrowDown className="size-3" />
+              <th className="border-b border-r border-slate-200 px-3 py-2">Actions</th>
+              {columns.map((column) => {
+                const hasFilter = Boolean(valueFilters[column]);
+                return (
+                  <th className="border-b border-r border-slate-200 px-3 py-2" key={column}>
+                    <div className="flex items-center gap-1">
+                      <button className="flex min-w-0 flex-1 items-center justify-between gap-1 text-left" onClick={() => toggleSort(column)} title={`Sort by ${column}`} type="button">
+                        <span className="min-w-0 whitespace-normal break-words leading-tight">{column}</span>
+                        <span className="flex shrink-0 flex-col leading-none">
+                          <ArrowUp className={`size-3 ${sortState?.column === column && sortState.direction === "asc" ? "text-navy-700" : "text-slate-300"}`} />
+                          <ArrowDown className={`-mt-1 size-3 ${sortState?.column === column && sortState.direction === "desc" ? "text-navy-700" : "text-slate-300"}`} />
+                        </span>
+                      </button>
+                      <button aria-label={`Filter ${column}`} className={`inline-flex size-5 shrink-0 items-center justify-center rounded border ${hasFilter ? "border-navy-600 bg-navy-600 text-white" : "border-slate-300 bg-white text-slate-500"}`} onClick={(event) => openColumnFilter(column, event.currentTarget)} title={`Filter ${column}`} type="button"><Filter className="size-3" /></button>
+                    </div>
+                    {openFilterColumn === column && filterMenuPos ? (
+                      <ClientFilterMenu
+                        columnLabel={column}
+                        draft={filterDraft}
+                        hasFilter={hasFilter}
+                        menuPos={filterMenuPos}
+                        onApply={() => applyColumnFilter(column)}
+                        onCancel={closeColumnFilter}
+                        onClear={() => clearColumnFilter(column)}
+                        onSearchChange={setFilterSearch}
+                        onSortAsc={() => { setSortState({ column, direction: "asc" }); closeColumnFilter(); }}
+                        onSortDesc={() => { setSortState({ column, direction: "desc" }); closeColumnFilter(); }}
+                        onToggleAll={toggleVisibleDraftValues}
+                        onToggleValue={toggleDraftValue}
+                        search={filterSearch}
+                        visibleOptions={visibleFilterOptions}
+                      />
                     ) : null}
-                  </button>
+                  </th>
+                );
+              })}
+            </tr>
+            <tr className="bg-slate-50">
+              <th className="border-b border-r border-slate-200 px-2 py-1" />
+              {columns.map((column) => (
+                <th className="border-b border-r border-slate-200 px-2 py-1" key={`filter-${column}`}>
+                  {column === "S.no." ? null : <input aria-label={`Filter ${column}`} className="h-7 w-full rounded-md border border-slate-200 bg-white px-2 text-xs font-semibold normal-case text-slate-950 outline-none focus:border-navy-400" onChange={(event) => setColumnFilters((current) => ({ ...current, [column]: event.target.value }))} placeholder="Filter" value={columnFilters[column] ?? ""} />}
                 </th>
               ))}
             </tr>
           </thead>
           <tbody>
             {isLoading ? (
-              <tr>
-                <td className="px-4 py-8 text-sm font-bold text-slate-500" colSpan={columns.length + 2}>
-                  Loading client records...
-                </td>
-              </tr>
-            ) : filteredRows.length ? (
-              filteredRows.map((row) => (
+              <tr><td className="px-4 py-8 text-sm font-bold text-slate-500" colSpan={columns.length + 1}>Loading client records...</td></tr>
+            ) : pagedRows.length ? (
+              pagedRows.map((row) => (
                 <tr className="border-b border-slate-100 last:border-b-0" key={String(row.id)}>
-                  <td className="border-r border-slate-100 px-4 py-3">
-                    <input
-                      checked={selectedIds.has(String(row.id))}
-                      onChange={() =>
-                        setSelectedIds((current) => {
-                          const next = new Set(current);
-                          const id = String(row.id);
-                          if (next.has(id)) next.delete(id);
-                          else next.add(id);
-                          return next;
-                        })
-                      }
-                      type="checkbox"
-                    />
+                  <td className="border-r border-slate-100 px-2 py-1">
+                    <div className="flex items-center gap-1">
+                      <input aria-label={`Select ${String(row.Particulars || "client record")}`} checked={selectedIds.has(String(row.id))} className="size-3.5 shrink-0 cursor-pointer accent-rose-700" disabled={!selectedIds.has(String(row.id)) && selectedIds.size >= maxDeleteRows} onChange={() => toggleRowSelection(String(row.id))} title={selectedIds.has(String(row.id)) ? "Remove from bulk selection" : "Select for bulk delete"} type="checkbox" />
+                      <button className="inline-flex size-7 items-center justify-center rounded-md border border-sky-200 text-sky-700 hover:bg-sky-50" onClick={() => setEditor({ row: stripInternalFields(row), rowId: String(row.id) })} title="Edit client record" type="button"><Edit3 className="size-4" /></button>
+                      <button className="inline-flex size-7 items-center justify-center rounded-md border border-navy-200 text-navy-700 hover:bg-navy-50" onClick={() => viewRowHistory(row)} title="View history" type="button"><History className="size-4" /></button>
+                      <button className="inline-flex size-7 items-center justify-center rounded-md border border-rose-200 text-rose-700 hover:bg-rose-50" onClick={() => void deleteRow(row)} title="Delete client record" type="button"><Trash2 className="size-4" /></button>
+                    </div>
                   </td>
-                  <td className="border-r border-slate-100 px-4 py-3">
-                    <button className={`${buttonClass} h-9 px-3`} onClick={() => setEditor({ row: stripInternalFields(row), rowId: String(row.id) })} type="button">
-                      <Edit3 className="size-3.5" />
-                      Edit
-                    </button>
-                  </td>
-                  {columns.map((column) => (
-                    <td className="border-r border-slate-100 px-4 py-3 font-semibold text-slate-700" key={column}>
-                      {row[column] || "-"}
-                    </td>
-                  ))}
+                  {columns.map((column) => <td className="border-r border-slate-100 px-4 py-3 font-semibold text-slate-700" key={column}>{row[column] || "-"}</td>)}
                 </tr>
               ))
             ) : (
-              <tr>
-                <td className="px-4 py-8 text-sm font-bold text-slate-500" colSpan={columns.length + 2}>
-                  No client records found.
-                </td>
-              </tr>
+              <tr><td className="px-4 py-8 text-sm font-bold text-slate-500" colSpan={columns.length + 1}>No client records match the current filters.</td></tr>
             )}
           </tbody>
         </table>
@@ -601,6 +703,75 @@ function ClientMenuItem({ icon: Icon, label, onClick }: { icon: ComponentType<{ 
       <Icon className="size-4 shrink-0 text-slate-500" />
       {label}
     </button>
+  );
+}
+
+function ClientFilterMenu({
+  columnLabel,
+  draft,
+  hasFilter,
+  menuPos,
+  onApply,
+  onCancel,
+  onClear,
+  onSearchChange,
+  onSortAsc,
+  onSortDesc,
+  onToggleAll,
+  onToggleValue,
+  search,
+  visibleOptions
+}: {
+  columnLabel: string;
+  draft: string[];
+  hasFilter: boolean;
+  menuPos: { left: number; maxHeight: number; top: number };
+  onApply: () => void;
+  onCancel: () => void;
+  onClear: () => void;
+  onSearchChange: (value: string) => void;
+  onSortAsc: () => void;
+  onSortDesc: () => void;
+  onToggleAll: () => void;
+  onToggleValue: (value: string) => void;
+  search: string;
+  visibleOptions: string[];
+}) {
+  if (typeof document === "undefined") return null;
+  const allVisibleSelected = visibleOptions.length > 0 && visibleOptions.every((value) => draft.includes(value));
+  const someVisibleSelected = visibleOptions.some((value) => draft.includes(value)) && !allVisibleSelected;
+
+  return createPortal(
+    <div className="fixed z-[1000] flex w-72 flex-col overflow-hidden rounded-lg border border-slate-300 bg-white p-2 text-left text-slate-900 shadow-2xl" style={{ left: menuPos.left, maxHeight: menuPos.maxHeight, top: menuPos.top }}>
+      <div className="shrink-0 space-y-1 border-b border-slate-200 pb-2">
+        <button className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm font-semibold hover:bg-slate-100" onClick={onSortAsc} type="button"><span className="w-8 text-xs font-black text-navy-700">A-Z</span>Sort A to Z</button>
+        <button className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm font-semibold hover:bg-slate-100" onClick={onSortDesc} type="button"><span className="w-8 text-xs font-black text-navy-700">Z-A</span>Sort Z to A</button>
+      </div>
+      <button className="mt-2 flex w-full shrink-0 items-center gap-2 rounded-md px-2 py-2 text-sm font-semibold text-slate-500 hover:bg-slate-100 disabled:text-slate-300" disabled={!hasFilter} onClick={onClear} type="button"><X className="size-4" />Clear Filter From &quot;{columnLabel}&quot;</button>
+      <div className="mt-2 flex shrink-0 justify-end gap-2">
+        <button className="inline-flex h-9 items-center rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold" onClick={onCancel} type="button">Cancel</button>
+        <button className="inline-flex h-9 items-center rounded-md bg-navy-700 px-4 text-sm font-semibold text-white" onClick={onApply} type="button">OK</button>
+      </div>
+      <div className="mt-2 flex shrink-0 items-center gap-2 rounded-md border border-slate-300 px-2 py-1.5">
+        <Search className="size-4 text-slate-400" />
+        <input className="min-w-0 flex-1 bg-transparent text-sm font-semibold outline-none" onChange={(event) => onSearchChange(event.target.value)} placeholder="Search" value={search} />
+      </div>
+      <div className="mt-2 min-h-0 flex-1 overflow-y-auto border border-slate-200 bg-slate-50 p-2">
+        <label className="flex cursor-pointer items-center gap-2 text-sm font-semibold text-slate-950">
+          <input checked={allVisibleSelected} className="size-4 accent-navy-700" onChange={onToggleAll} ref={(input) => { if (input) input.indeterminate = someVisibleSelected; }} type="checkbox" />
+          (Select All)
+        </label>
+        <div className="mt-1 space-y-1">
+          {visibleOptions.length ? visibleOptions.map((value) => (
+            <label className="flex cursor-pointer items-center gap-2 text-sm font-semibold text-slate-950" key={value || "(blank)"}>
+              <input checked={draft.includes(value)} className="size-4 accent-navy-700" onChange={() => onToggleValue(value)} type="checkbox" />
+              <span className="min-w-0 truncate" title={value || "(Blank)"}>{value || "(Blank)"}</span>
+            </label>
+          )) : <p className="py-6 text-center text-sm font-semibold text-slate-500">No values found</p>}
+        </div>
+      </div>
+    </div>,
+    document.body
   );
 }
 
