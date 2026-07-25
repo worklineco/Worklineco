@@ -89,6 +89,10 @@ select {
   font-family: inherit;
 }
 
+select:focus {
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.12);
+}
+
 select option {
   background: #ffffff;
   color: #0f172a;
@@ -101,6 +105,11 @@ select option {
 select option:checked {
   background: linear-gradient(#203b78, #203b78);
   color: #ffffff;
+}
+
+select option:hover {
+  background: #e8eefc;
+  color: #203b78;
 }
 
 a {
