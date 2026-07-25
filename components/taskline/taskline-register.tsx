@@ -34,6 +34,7 @@ const taskLineImportBatchSize = 250;
 const taskLineImportConcurrency = 3;
 const bulkDeleteLimit = 10;
 const taskLinePageSize = 200;
+const taskLineRowsCacheKey = "taskline:rows:v2";
 const taskLineColumnLayoutStorageKey = "workline:taskline-column-layout:v2";
 const actionColumnWidth = 156;
 const actionColumnKey = "__actions";
@@ -133,6 +134,7 @@ export function TaskLineRegister() {
   const [dueColorFilter, setDueColorFilter] = useState<string[]>([]);
   const [columnOrder, setColumnOrder] = useState(() => getSavedTaskLineColumnLayout().order);
   const [auditLogs, setAuditLogs] = useState<TaskLineAuditLog[]>([]);
+  const [isAuditLoading, setIsAuditLoading] = useState(false);
   const [formDraft, setFormDraft] = useState<TaskLineRow | null>(null);
   const [hiddenColumnKeys, setHiddenColumnKeys] = useState<Set<string>>(() => new Set(getSavedTaskLineColumnLayout().hiddenColumnKeys));
   const [frozenColumnKeys, setFrozenColumnKeys] = useState<Set<string>>(() => new Set(getSavedTaskLineColumnLayout().frozenColumnKeys));
@@ -162,6 +164,7 @@ export function TaskLineRegister() {
   const [teamMembers, setTeamMembers] = useState<TeamMemberLite[]>([]);
   const [entityMasters, setEntityMasters] = useState<EntityMasterOption[]>([]);
   const rowsRef = useRef<TaskLineRow[]>([]);
+  const auditLoadedRef = useRef(false);
   const entityGroupByName = useMemo(
     () => new Map(entityMasters.map((option) => [normalizeOptionKey(option.entity), option.group])),
     [entityMasters]
@@ -585,13 +588,12 @@ export function TaskLineRegister() {
 
   async function loadTaskLine() {
     const cached = !dataHydratedRef.current
-      ? getCached<{ auditLogs?: Array<Record<string, unknown>>; rows?: TaskLineRow[] }>("taskline")
+      ? getCached<{ rows?: TaskLineRow[] }>(taskLineRowsCacheKey)
       : undefined;
     dataHydratedRef.current = true;
 
     if (cached) {
       setRows(cached.rows ?? []);
-      setAuditLogs((cached.auditLogs ?? []).map(formatServerAuditLog));
       setIsLoading(false);
     } else {
       setIsLoading(true);
@@ -600,7 +602,6 @@ export function TaskLineRegister() {
     try {
       const response = await fetch("/api/taskline", { cache: "no-store" });
       const result = (await response.json()) as {
-        auditLogs?: Array<Record<string, unknown>>;
         error?: string;
         rows?: TaskLineRow[];
       };
@@ -610,15 +611,39 @@ export function TaskLineRegister() {
         return;
       }
 
-      setCached("taskline", { auditLogs: result.auditLogs, rows: result.rows });
+      setCached(taskLineRowsCacheKey, { rows: result.rows });
       setRows(result.rows ?? []);
-      setAuditLogs((result.auditLogs ?? []).map(formatServerAuditLog));
       setMessage("");
     } catch (error) {
       console.error("TaskLine load error:", error);
       setMessage("Could not load TaskLine.");
     } finally {
       setIsLoading(false);
+    }
+  }
+
+  async function showAuditTrail(selectedRow?: TaskLineRow) {
+    setViewMode("audit");
+    if (selectedRow) {
+      setMessage(`Showing audit trail. Row selected: ${getRowLabel(selectedRow, rows) || "TaskLine row"}.`);
+    }
+    if (auditLoadedRef.current || isAuditLoading) return;
+
+    setIsAuditLoading(true);
+    try {
+      const response = await fetch("/api/taskline?view=audit", { cache: "no-store" });
+      const result = (await response.json()) as { auditLogs?: Array<Record<string, unknown>>; error?: string };
+      if (!response.ok) {
+        setMessage(result.error ?? "Could not load TaskLine audit trail.");
+        return;
+      }
+      setAuditLogs((result.auditLogs ?? []).map(formatServerAuditLog));
+      auditLoadedRef.current = true;
+    } catch (error) {
+      console.error("TaskLine audit load error:", error);
+      setMessage("Could not load TaskLine audit trail.");
+    } finally {
+      setIsAuditLoading(false);
     }
   }
 
@@ -816,8 +841,7 @@ export function TaskLineRegister() {
   }
 
   function viewRowHistory(row: TaskLineRow) {
-    setViewMode("audit");
-    setMessage(`Showing audit trail. Row selected: ${getRowLabel(row, rows) || "TaskLine row"}.`);
+    void showAuditTrail(row);
   }
 
   function downloadTemplate() {
@@ -1004,7 +1028,7 @@ export function TaskLineRegister() {
                 <ToolbarMenuItem icon={Download} label="Export view" onClick={() => { setIsToolbarMenuOpen(false); exportView(); }} />
                 <ToolbarMenuItem icon={Download} label="Download template" onClick={() => { setIsToolbarMenuOpen(false); downloadTemplate(); }} />
                 <ToolbarMenuItem icon={Upload} label="Import" onClick={() => { setIsToolbarMenuOpen(false); fileInputRef.current?.click(); }} />
-                <ToolbarMenuItem icon={History} label={viewMode === "register" ? `Audit Trail (${auditLogs.length})` : "Back to Register"} onClick={() => { setIsToolbarMenuOpen(false); setViewMode(viewMode === "register" ? "audit" : "register"); }} />
+                <ToolbarMenuItem icon={History} label={viewMode === "register" ? "Audit Trail" : "Back to Register"} onClick={() => { setIsToolbarMenuOpen(false); if (viewMode === "register") void showAuditTrail(); else setViewMode("register"); }} />
                 {hasActiveColumnFilters ? (
                   <ToolbarMenuItem icon={X} label="Clear column filters" onClick={() => { setIsToolbarMenuOpen(false); setColumnFilters({}); }} />
                 ) : null}
@@ -1269,7 +1293,9 @@ export function TaskLineRegister() {
       ) : null}
 
       {viewMode === "audit" ? (
-        <TaskLineAuditTable logs={auditLogs} rows={rows} />
+        isAuditLoading
+          ? <p className="mt-4 rounded-md border border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm font-bold text-slate-500">Loading audit trail...</p>
+          : <TaskLineAuditTable logs={auditLogs} rows={rows} />
       ) : null}
 
       {formDraft ? (
