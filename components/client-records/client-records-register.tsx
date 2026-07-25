@@ -433,7 +433,7 @@ export function ClientRecordsRegister() {
         <div>
           <h2 className="text-xl font-black text-slate-950">Client Records</h2>
           <p className="text-xs font-bold text-slate-500">
-            {columns.length} columns Â· {isLoading ? "loading" : `${filteredRows.length.toLocaleString()} of ${rows.length.toLocaleString()} rows${hasActiveColumnFilters || search ? " (filtered)" : ""}`}
+            {columns.length} columns · {isLoading ? "loading" : `${filteredRows.length.toLocaleString()} of ${rows.length.toLocaleString()} rows${hasActiveColumnFilters || search ? " (filtered)" : ""}`}
           </p>
         </div>
 
@@ -490,7 +490,7 @@ export function ClientRecordsRegister() {
           <Trash2 className="size-3.5" />
           {isBulkDeleting ? "Deleting..." : `Delete selected (${selectedIds.size}/${maxDeleteRows})`}
         </button>
-        <button className="inline-flex h-8 items-center rounded-md border border…30 tokens truncated…Click={() => setTablePage((page) => Math.max(1, page - 1))} type="button">Prev</button>
+        <button className="inline-flex h-8 items-center rounded-md border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 disabled:opacity-40" disabled={tablePage <= 1 || isLoading} onClick={() => setTablePage((page) => Math.max(1, page - 1))} type="button">Prev</button>
         <span className="inline-flex h-8 items-center rounded-md border border-slate-200 bg-white px-3 text-xs font-black text-slate-700">Page {tablePage} of {pageCount}</span>
         <button className="inline-flex h-8 items-center rounded-md border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 disabled:opacity-40" disabled={tablePage >= pageCount || isLoading} onClick={() => setTablePage((page) => Math.min(pageCount, page + 1))} type="button">Next</button>
       </div>
@@ -866,7 +866,4 @@ function addImportActionDropdown(worksheet: XLSX.WorkSheet, rowCount: number) {
   ];
 }
 
-function formatDate(value: unknown) {
-  if (!value) return "-";
-  return new Date(String(value)).toLocaleString();
-}
+function formatDate
