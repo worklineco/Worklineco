@@ -91,9 +91,6 @@ type TeamMemberLite = { designation: string; name: string; team: string };
 type EntityMasterOption = { entity: string; group: string };
 const emptyOptions: string[] = [];
 const teamOptions = ["Team-02", "Team-03", "Team-04", "Team-05", "Team-06", "Team-08"];
-const taskLineEntityListId = "taskline-entity-options";
-const taskLineSectionListId = "taskline-section-options";
-const taskLineStateListId = "taskline-state-options";
 const gstinStateOptions = [
   ["01", "Jammu and Kashmir"], ["02", "Himachal Pradesh"], ["03", "Punjab"], ["04", "Chandigarh"],
   ["05", "Uttarakhand"], ["06", "Haryana"], ["07", "Delhi"], ["08", "Rajasthan"], ["09", "Uttar Pradesh"],
@@ -1049,16 +1046,6 @@ export function TaskLineRegister() {
         type="file"
       />
 
-      <datalist id={taskLineEntityListId}>
-        {entityOptions.map((entity) => <option key={entity} value={entity} />)}
-      </datalist>
-      <datalist id={taskLineStateListId}>
-        {gstinStateOptions.map(([code, state]) => <option key={code} label={`GSTIN ${code}`} value={state} />)}
-      </datalist>
-      <datalist id={taskLineSectionListId}>
-        {sectionOptions.map((section) => <option key={section} value={section} />)}
-      </datalist>
-
       {message ? (
         <p className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-bold text-emerald-900">{message}</p>
       ) : null}
@@ -1255,6 +1242,7 @@ export function TaskLineRegister() {
                     return (
                       <TaskLineCell
                         column={column}
+                        entityOptions={entityOptions}
                         frozenLeft={frozen.left}
                         isFrozen={frozen.isFrozen}
                         key={`${row.__id}-${column.key}`}
@@ -1262,6 +1250,7 @@ export function TaskLineRegister() {
                         onCellChange={updateRow}
                         resourceOptions={rowResourceOptions}
                         row={row}
+                        sectionOptions={sectionOptions}
                         serialNumber={(tablePage - 1) * taskLinePageSize + rowIndex + 1}
                         stageMasterNames={stageMasterNames}
                         taskMasterNames={taskMasterNames}
@@ -1286,6 +1275,7 @@ export function TaskLineRegister() {
       {formDraft ? (
         <TaskLineForm
           draft={formDraft}
+          entityOptions={entityOptions}
           isEdit={Boolean(editingRowId)}
           onChange={updateFormDraft}
           onClose={() => {
@@ -1295,6 +1285,7 @@ export function TaskLineRegister() {
           onSubmit={saveFormDraft}
           nameOptionsForTeam={nameOptionsForTeam}
           resourceOptionsForTeam={resourceOptionsForTeam}
+          sectionOptions={sectionOptions}
           stageMasterNames={stageMasterNames}
           taskMasterNames={taskMasterNames}
         />
@@ -1335,23 +1326,27 @@ export function TaskLineRegister() {
 
 const TaskLineCell = memo(function TaskLineCell({
   column,
+  entityOptions,
   frozenLeft,
   isFrozen,
   nameOptions,
   onCellChange,
   resourceOptions,
   row,
+  sectionOptions,
   serialNumber,
   stageMasterNames,
   taskMasterNames
 }: {
   column: TaskLineColumn;
+  entityOptions: string[];
   frozenLeft: number;
   isFrozen: boolean;
   nameOptions: string[];
   onCellChange: (rowId: string, key: string, value: string) => void;
   resourceOptions: string[];
   row: TaskLineRow;
+  sectionOptions: string[];
   serialNumber: number;
   stageMasterNames: string[];
   taskMasterNames: string[];
@@ -1381,16 +1376,23 @@ const TaskLineCell = memo(function TaskLineCell({
   }
 
   if (["entity", "state_name", "section"].includes(column.key)) {
-    const listId = column.key === "entity" ? taskLineEntityListId : column.key === "state_name" ? taskLineStateListId : taskLineSectionListId;
+    const current = row[column.key] ?? "";
+    const options = column.key === "entity"
+      ? entityOptions
+      : column.key === "state_name"
+        ? gstinStateOptions.map(([, state]) => state)
+        : sectionOptions;
     return (
       <td className={`border-r border-slate-100 px-2 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
-        <input
-          className="h-7 w-full rounded-md border border-transparent bg-transparent px-1.5 text-xs font-semibold text-slate-700 outline-none hover:border-slate-200 hover:bg-white focus:border-rose-300 focus:bg-white focus:ring-2 focus:ring-rose-100"
-          list={listId}
+        <select
+          className="h-7 w-full rounded-md border border-slate-200 bg-white px-2 text-xs font-bold outline-none focus:border-rose-300 focus:ring-2 focus:ring-rose-100"
           onChange={(event) => onChange(event.target.value)}
-          placeholder={`Search ${column.label.toLowerCase()}`}
-          value={row[column.key] ?? ""}
-        />
+          value={current}
+        >
+          <option value="">Select {column.label}</option>
+          {options.map((option) => <option key={option} value={option}>{option}</option>)}
+          {current && !options.includes(current) ? <option value={current}>{current}</option> : null}
+        </select>
       </td>
     );
   }
@@ -1546,22 +1548,26 @@ const TaskLineCell = memo(function TaskLineCell({
 
 function TaskLineForm({
   draft,
+  entityOptions,
   isEdit,
   nameOptionsForTeam,
   onChange,
   onClose,
   onSubmit,
   resourceOptionsForTeam,
+  sectionOptions,
   stageMasterNames,
   taskMasterNames
 }: {
   draft: TaskLineRow;
+  entityOptions: string[];
   isEdit: boolean;
   nameOptionsForTeam: (team: string) => string[];
   onChange: (key: string, value: string) => void;
   onClose: () => void;
   onSubmit: () => void;
   resourceOptionsForTeam: (team: string) => string[];
+  sectionOptions: string[];
   stageMasterNames: string[];
   taskMasterNames: string[];
 }) {
@@ -1590,13 +1596,14 @@ function TaskLineForm({
                     {draft[column.key] && !teamOptions.includes(draft[column.key]) ? <option hidden value={draft[column.key]}>{draft[column.key]}</option> : null}
                   </select>
                 ) : ["entity", "state_name", "section"].includes(column.key) ? (
-                  <input
-                    className={formControlClass}
-                    list={column.key === "entity" ? taskLineEntityListId : column.key === "state_name" ? taskLineStateListId : taskLineSectionListId}
-                    onChange={(event) => onChange(column.key, event.target.value)}
-                    placeholder={`Search ${column.label.toLowerCase()}`}
-                    value={draft[column.key] ?? ""}
-                  />
+                  <select className={formControlClass} onChange={(event) => onChange(column.key, event.target.value)} value={draft[column.key] ?? ""}>
+                    <option value="">Select {column.label}</option>
+                    {(column.key === "entity" ? entityOptions : column.key === "state_name" ? gstinStateOptions.map(([, state]) => state) : sectionOptions)
+                      .map((option) => <option key={option} value={option}>{option}</option>)}
+                    {draft[column.key] && !(column.key === "entity" ? entityOptions : column.key === "state_name" ? gstinStateOptions.map(([, state]) => state) : sectionOptions).includes(draft[column.key]) ? (
+                      <option value={draft[column.key]}>{draft[column.key]}</option>
+                    ) : null}
+                  </select>
                 ) : column.key === "entity_group" ? (
                   <input className={`${formControlClass} cursor-not-allowed bg-slate-50 text-slate-600`} readOnly title="Filled automatically from Entity" value={draft[column.key] ?? ""} />
                 ) : column.key === "period" ? (
