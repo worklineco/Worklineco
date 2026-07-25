@@ -866,4 +866,7 @@ function addImportActionDropdown(worksheet: XLSX.WorkSheet, rowCount: number) {
   ];
 }
 
-function formatDate
+function formatDate(value: unknown) {
+  if (!value) return "-";
+  return new Date(String(value)).toLocaleString();
+}
