@@ -1392,7 +1392,7 @@ const TaskLineCell = memo(function TaskLineCell({
     const current = row[column.key] ?? "";
     return (
       <td className={`border-r border-slate-100 px-2 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
-        <select className="h-7 w-full rounded-md border border-slate-200 bg-white px-2 text-xs font-bold outline-none focus:border-rose-300 focus:ring-2 focus:ring-rose-100" onChange={(event) => onChange(event.target.value)} value={current}>
+        <select className={compactSelectClass} onChange={(event) => onChange(event.target.value)} value={current}>
           <option value="">Select team</option>
           {teamOptions.map((team) => <option key={team} value={team}>{team}</option>)}
           {current && !teamOptions.includes(current) ? <option hidden value={current}>{current}</option> : null}
@@ -1411,11 +1411,11 @@ const TaskLineCell = memo(function TaskLineCell({
     return (
       <td className={`border-r border-slate-100 px-2 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
         <select
-          className="h-7 w-full rounded-md border border-slate-200 bg-white px-2 text-xs font-bold outline-none focus:border-rose-300 focus:ring-2 focus:ring-rose-100"
+          className={compactSelectClass}
           onChange={(event) => onChange(event.target.value)}
           value={current}
         >
-          <option value="">Select {column.label}</option>
+          <option value="">{column.key === "section" ? "Select Section" : `Select ${column.label}`}</option>
           {options.map((option) => <option key={option} value={option}>{option}</option>)}
           {current && !options.includes(current) ? <option value={current}>{current}</option> : null}
         </select>
@@ -1435,7 +1435,7 @@ const TaskLineCell = memo(function TaskLineCell({
     const current = row[column.key] ?? "";
     return (
       <td className={`border-r border-slate-100 px-2 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
-        <select className="h-7 w-full rounded-md border border-slate-200 bg-white px-2 text-xs font-bold outline-none focus:border-rose-300 focus:ring-2 focus:ring-rose-100" onChange={(event) => onChange(event.target.value)} value={current}>
+        <select className={compactSelectClass} onChange={(event) => onChange(event.target.value)} value={current}>
           <option value="">Select period</option>
           {financialPeriodOptions.map((period) => <option key={period} value={period}>{period}</option>)}
           {current && !financialPeriodOptions.includes(current) ? <option hidden value={current}>{current}</option> : null}
@@ -1449,7 +1449,7 @@ const TaskLineCell = memo(function TaskLineCell({
     return (
       <td className={`border-r border-slate-100 px-2 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
         <select
-          className="h-7 w-full rounded-md border border-slate-200 bg-white px-2 text-xs font-bold outline-none focus:border-rose-300 focus:ring-2 focus:ring-rose-100"
+          className={compactSelectClass}
           onChange={(event) => onChange(event.target.value)}
           value={current}
         >
@@ -1470,7 +1470,7 @@ const TaskLineCell = memo(function TaskLineCell({
     return (
       <td className={`border-r border-slate-100 px-2 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
         <select
-          className="h-7 w-full rounded-md border border-slate-200 bg-white px-2 text-xs font-bold outline-none focus:border-rose-300 focus:ring-2 focus:ring-rose-100"
+          className={compactSelectClass}
           onChange={(event) => onChange(event.target.value)}
           value={current}
         >
@@ -1491,7 +1491,7 @@ const TaskLineCell = memo(function TaskLineCell({
     return (
       <td className={`border-r border-slate-100 px-2 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
         <select
-          className="h-7 w-full rounded-md border border-slate-200 bg-white px-2 text-xs font-bold outline-none focus:border-rose-300 focus:ring-2 focus:ring-rose-100"
+          className={compactSelectClass}
           onChange={(event) => onChange(event.target.value)}
           value={current}
         >
@@ -1512,7 +1512,7 @@ const TaskLineCell = memo(function TaskLineCell({
     return (
       <td className={`border-r border-slate-100 px-2 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
         <select
-          className="h-7 w-full rounded-md border border-slate-200 bg-white px-2 text-xs font-bold outline-none focus:border-rose-300 focus:ring-2 focus:ring-rose-100"
+          className={compactSelectClass}
           onChange={(event) => onChange(event.target.value)}
           value={current}
         >
@@ -1532,7 +1532,7 @@ const TaskLineCell = memo(function TaskLineCell({
     return (
       <td className={`border-r border-slate-100 px-2 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
         <select
-          className="h-7 w-full rounded-md border border-slate-200 bg-white px-2 text-xs font-bold outline-none focus:border-rose-300 focus:ring-2 focus:ring-rose-100"
+          className={compactSelectClass}
           onChange={(event) => onChange(event.target.value)}
           value={row[column.key] ?? ""}
         >
@@ -1616,14 +1616,14 @@ function TaskLineForm({
               <label className={["remarks", "issue", "document_link", "el_reference", "fee_comments"].includes(column.key) ? "xl:col-span-2" : ""} key={column.key}>
                 <span className="text-[10px] font-black uppercase text-slate-500">{column.label}</span>
                 {column.key === "team" ? (
-                  <select className={formControlClass} onChange={(event) => onChange(column.key, event.target.value)} value={draft[column.key] ?? ""}>
+                  <select className={formSelectControlClass} onChange={(event) => onChange(column.key, event.target.value)} value={draft[column.key] ?? ""}>
                     <option value="">Select team</option>
                     {teamOptions.map((team) => <option key={team} value={team}>{team}</option>)}
                     {draft[column.key] && !teamOptions.includes(draft[column.key]) ? <option hidden value={draft[column.key]}>{draft[column.key]}</option> : null}
                   </select>
                 ) : ["entity", "state_name", "section"].includes(column.key) ? (
-                  <select className={formControlClass} onChange={(event) => onChange(column.key, event.target.value)} value={draft[column.key] ?? ""}>
-                    <option value="">Select {column.label}</option>
+                  <select className={formSelectControlClass} onChange={(event) => onChange(column.key, event.target.value)} value={draft[column.key] ?? ""}>
+                    <option value="">{column.key === "section" ? "Select Section" : `Select ${column.label}`}</option>
                     {(column.key === "entity" ? entityOptions : column.key === "state_name" ? gstinStateOptions.map(([, state]) => state) : sectionOptions)
                       .map((option) => <option key={option} value={option}>{option}</option>)}
                     {draft[column.key] && !(column.key === "entity" ? entityOptions : column.key === "state_name" ? gstinStateOptions.map(([, state]) => state) : sectionOptions).includes(draft[column.key]) ? (
@@ -1633,7 +1633,7 @@ function TaskLineForm({
                 ) : column.key === "entity_group" ? (
                   <input className={`${formControlClass} cursor-not-allowed bg-slate-50 text-slate-600`} readOnly title="Filled automatically from Entity" value={draft[column.key] ?? ""} />
                 ) : column.key === "period" ? (
-                  <select className={formControlClass} onChange={(event) => onChange(column.key, event.target.value)} value={draft[column.key] ?? ""}>
+                  <select className={formSelectControlClass} onChange={(event) => onChange(column.key, event.target.value)} value={draft[column.key] ?? ""}>
                     <option value="">Select period</option>
                     {financialPeriodOptions.map((period) => <option key={period} value={period}>{period}</option>)}
                     {draft[column.key] && !financialPeriodOptions.includes(draft[column.key]) ? <option hidden value={draft[column.key]}>{draft[column.key]}</option> : null}
@@ -1642,7 +1642,7 @@ function TaskLineForm({
                   <TaskLineDateInput onChange={(value) => onChange(column.key, value)} value={draft[column.key] ?? ""} />
                 ) : column.key === "name" ? (
                   <select
-                    className={formControlClass}
+                    className={formSelectControlClass}
                     onChange={(event) => onChange(column.key, event.target.value)}
                     value={draft[column.key] ?? ""}
                   >
@@ -1656,7 +1656,7 @@ function TaskLineForm({
                   </select>
                 ) : column.key === "resource" ? (
                   <select
-                    className={formControlClass}
+                    className={formSelectControlClass}
                     onChange={(event) => onChange(column.key, event.target.value)}
                     value={draft[column.key] ?? ""}
                   >
@@ -1670,7 +1670,7 @@ function TaskLineForm({
                   </select>
                 ) : column.key === "task" ? (
                   <select
-                    className={formControlClass}
+                    className={formSelectControlClass}
                     onChange={(event) => onChange(column.key, event.target.value)}
                     value={draft[column.key] ?? ""}
                   >
@@ -1684,7 +1684,7 @@ function TaskLineForm({
                   </select>
                 ) : column.key === "stage" ? (
                   <select
-                    className={formControlClass}
+                    className={formSelectControlClass}
                     onChange={(event) => onChange(column.key, event.target.value)}
                     value={draft[column.key] ?? ""}
                   >
@@ -1698,7 +1698,7 @@ function TaskLineForm({
                   </select>
                 ) : column.type === "select" ? (
                   <select
-                    className={formControlClass}
+                    className={formSelectControlClass}
                     onChange={(event) => onChange(column.key, event.target.value)}
                     value={draft[column.key] ?? ""}
                   >
@@ -1789,7 +1789,9 @@ function TaskLineDateInput({ compact = false, onChange, value }: { compact?: boo
   );
 }
 
+const compactSelectClass = "h-7 w-full rounded-md border border-slate-200 bg-white pl-2 pr-7 text-xs font-bold outline-none focus:border-rose-300 focus:ring-2 focus:ring-rose-100";
 const formControlClass = "mt-1 h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm font-bold text-slate-900 outline-none focus:border-rose-300 focus:ring-2 focus:ring-rose-100";
+const formSelectControlClass = `${formControlClass} pr-9`;
 
 function TaskLineColumnOptionsPanel({
   frozenColumnKeys,
