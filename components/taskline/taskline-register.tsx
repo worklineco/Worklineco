@@ -457,7 +457,1757 @@ export function TaskLineRegister() {
     if (!trimmed) {
       return;
     }
-    const response = await fetc…18941 tokens truncated…{
+    const response = await fetch("/api/taskline/masters", {
+      body: JSON.stringify({ id, name: trimmed }),
+      headers: { "Content-Type": "application/json" },
+      method: "POST"
+    });
+    const result = (await response.json()) as { error?: string; masters?: { id: string; name: string }[] };
+    if (!response.ok) {
+      setMasterMessage(result.error ?? "Could not save task type.");
+      return;
+    }
+    setTaskMasters(result.masters ?? []);
+    setMasterMessage("");
+  }
+
+  async function deleteTaskMaster(id: string) {
+    const response = await fetch(`/api/taskline/masters?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+    const result = (await response.json()) as { error?: string; masters?: { id: string; name: string }[] };
+    if (!response.ok) {
+      setMasterMessage(result.error ?? "Could not delete task type.");
+      return;
+    }
+    setTaskMasters(result.masters ?? []);
+    setMasterMessage("");
+  }
+
+  async function loadStageMasters() {
+    try {
+      const response = await fetch("/api/taskline/masters?type=stage", { cache: "no-store" });
+      const result = (await response.json()) as { error?: string; masters?: { id: string; name: string }[] };
+      if (!response.ok) {
+        setStageMasterMessage(result.error ?? "Could not load stage master list.");
+        return;
+      }
+      setStageMasters(result.masters ?? []);
+      setStageMasterMessage("");
+    } catch {
+      setStageMasterMessage("Could not load stage master list.");
+    } finally {
+      setStageMastersFetched(true);
+    }
+  }
+
+  async function seedStageMasters(names: string[]) {
+    const response = await fetch("/api/taskline/masters", {
+      body: JSON.stringify({ names, type: "stage" }),
+      headers: { "Content-Type": "application/json" },
+      method: "POST"
+    });
+    const result = (await response.json()) as { error?: string; masters?: { id: string; name: string }[] };
+    if (response.ok) {
+      setStageMasters(result.masters ?? []);
+      setStageMasterMessage("");
+    }
+  }
+
+  async function saveStageMaster(name: string, id?: string) {
+    const trimmed = name.trim();
+    if (!trimmed) {
+      return;
+    }
+    const response = await fetch("/api/taskline/masters", {
+      body: JSON.stringify({ id, name: trimmed, type: "stage" }),
+      headers: { "Content-Type": "application/json" },
+      method: "POST"
+    });
+    const result = (await response.json()) as { error?: string; masters?: { id: string; name: string }[] };
+    if (!response.ok) {
+      setStageMasterMessage(result.error ?? "Could not save stage type.");
+      return;
+    }
+    setStageMasters(result.masters ?? []);
+    setStageMasterMessage("");
+  }
+
+  async function deleteStageMaster(id: string) {
+    const response = await fetch(`/api/taskline/masters?type=stage&id=${encodeURIComponent(id)}`, { method: "DELETE" });
+    const result = (await response.json()) as { error?: string; masters?: { id: string; name: string }[] };
+    if (!response.ok) {
+      setStageMasterMessage(result.error ?? "Could not delete stage type.");
+      return;
+    }
+    setStageMasters(result.masters ?? []);
+    setStageMasterMessage("");
+  }
+
+  async function loadTeamMembers() {
+    try {
+      const response = await fetch("/api/teams", { cache: "no-store" });
+      const result = (await response.json()) as { members?: { designation?: string; name?: string; team?: string }[] };
+      if (!response.ok) {
+        return;
+      }
+      setTeamMembers(
+        (result.members ?? []).map((member) => ({
+          designation: text(member.designation),
+          name: text(member.name),
+          team: text(member.team)
+        }))
+      );
+    } catch {
+      // ignore; Name/Resource dropdowns fall back to any existing value
+    }
+  }
+
+  async function loadEntityMasters() {
+    try {
+      const response = await fetch("/api/client-records/managed", { cache: "no-store" });
+      const result = (await response.json()) as { rows?: Array<Record<string, unknown>> };
+      if (!response.ok) {
+        return;
+      }
+
+      const optionsByName = new Map<string, EntityMasterOption>();
+      for (const row of result.rows ?? []) {
+        const entity = text(row.Particulars);
+        if (!entity) continue;
+        const key = normalizeOptionKey(entity);
+        const group = text(row.Group);
+        const existing = optionsByName.get(key);
+        if (!existing || (!existing.group && group)) {
+          optionsByName.set(key, { entity: existing?.entity ?? entity, group });
+        }
+      }
+      setEntityMasters(Array.from(optionsByName.values()).sort((a, b) => a.entity.localeCompare(b.entity, undefined, { numeric: true })));
+    } catch {
+      // Existing values remain visible if the client master is temporarily unavailable.
+    }
+  }
+
+  async function loadTaskLine() {
+    const cached = !dataHydratedRef.current
+      ? getCached<{ auditLogs?: Array<Record<string, unknown>>; rows?: TaskLineRow[] }>("taskline")
+      : undefined;
+    dataHydratedRef.current = true;
+
+    if (cached) {
+      setRows(cached.rows ?? []);
+      setAuditLogs((cached.auditLogs ?? []).map(formatServerAuditLog));
+      setIsLoading(false);
+    } else {
+      setIsLoading(true);
+    }
+
+    try {
+      const response = await fetch("/api/taskline", { cache: "no-store" });
+      const result = (await response.json()) as {
+        auditLogs?: Array<Record<string, unknown>>;
+        error?: string;
+        rows?: TaskLineRow[];
+      };
+
+      if (!response.ok) {
+        setMessage(result.error ?? "Could not load TaskLine.");
+        return;
+      }
+
+      setCached("taskline", { auditLogs: result.auditLogs, rows: result.rows });
+      setRows(result.rows ?? []);
+      setAuditLogs((result.auditLogs ?? []).map(formatServerAuditLog));
+      setMessage("");
+    } catch (error) {
+      console.error("TaskLine load error:", error);
+      setMessage("Could not load TaskLine.");
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  function addRow() {
+    setEditingRowId(null);
+    setFormDraft(createEmptyRow(`draft-${crypto.randomUUID()}`));
+  }
+
+  function openEditForm(row: TaskLineRow) {
+    setEditingRowId(row.__id);
+    setFormDraft({ ...row });
+  }
+
+  function updateFormDraft(key: string, value: string) {
+    setFormDraft((current) => {
+      if (!current) return current;
+      if (key !== "entity") return { ...current, [key]: value };
+
+      const group = entityGroupByName.get(normalizeOptionKey(value)) ?? "";
+      setMessage(value && !group ? `No Entity Group mapping found for "${value}".` : "");
+      return { ...current, entity: value, entity_group: group };
+    });
+  }
+
+  async function saveFormDraft() {
+    if (!formDraft) {
+      return;
+    }
+
+    const existingRow = editingRowId ? rows.find((row) => row.__id === editingRowId) : null;
+    setMessage(editingRowId ? "Saving TaskLine row..." : "Creating TaskLine row...");
+
+    try {
+      const response = await fetch("/api/taskline", {
+        body: JSON.stringify({ action: "save", record: formDraft }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST"
+      });
+      const result = (await response.json()) as { error?: string; record?: TaskLineRow };
+
+      if (!response.ok || !result.record) {
+        setMessage(result.error ?? "Could not save TaskLine row.");
+        return;
+      }
+
+      if (editingRowId) {
+        setRows((current) => current.map((row) => (row.__id === editingRowId ? result.record! : row)));
+        setMessage("TaskLine row updated.");
+      } else {
+        setRows((current) => [result.record!, ...current]);
+        setMessage("TaskLine row added.");
+      }
+
+      await loadTaskLine();
+    } catch (error) {
+      console.error("TaskLine save error:", error);
+      setMessage("Could not save TaskLine row.");
+      return;
+    }
+
+    if (editingRowId) {
+      addAuditLog({
+        action: "taskline.edit_row",
+        entityId: existingRow?.__id,
+        newValue: getChangedFields(existingRow ?? undefined, formDraft).join(", ") || "Row saved",
+        rowLabel: getRowLabel(existingRow ?? undefined, rows)
+      });
+    } else {
+      addAuditLog({ action: "taskline.add_row", newValue: getRowLabel(formDraft, [formDraft]) || "New row added" });
+    }
+
+    setEditingRowId(null);
+    setFormDraft(null);
+  }
+
+  const updateRow = useCallback((rowId: string, key: string, value: string) => {
+    const currentRows = rowsRef.current;
+    const existing = currentRows.find((item) => item.__id === rowId);
+    const oldValue = existing?.[key] ?? "";
+
+    if (existing && oldValue !== value) {
+      addAuditLog({
+        action: "taskline.update_cell",
+        entityId: rowId,
+        field: taskLineColumnByKey.get(key)?.label ?? key,
+        newValue: value,
+        oldValue,
+        rowLabel: getRowLabel(existing, currentRows)
+      });
+    }
+
+    const changes: Record<string, string> = { [key]: value };
+    if (key === "entity") {
+      const group = entityGroupByName.get(normalizeOptionKey(value)) ?? "";
+      changes.entity_group = group;
+      setMessage(value && !group ? `No Entity Group mapping found for "${value}".` : "");
+    }
+
+    const nextRow = existing ? { ...existing, ...changes } : null;
+    setRows((current) => current.map((item) => (item.__id === rowId ? { ...item, ...changes } : item)));
+    if (nextRow) {
+      void saveInlineRow(nextRow);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entityGroupByName]);
+
+  async function saveInlineRow(row: TaskLineRow) {
+    try {
+      await fetch("/api/taskline", {
+        body: JSON.stringify({ action: "save", record: row }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST"
+      });
+    } catch (error) {
+      console.error("TaskLine inline save error:", error);
+    }
+  }
+
+  async function deleteRow(row: TaskLineRow) {
+    if (!window.confirm(`Delete ${getRowLabel(row, rows) || "this TaskLine row"}?`)) {
+      return;
+    }
+
+    setMessage("Deleting TaskLine row...");
+
+    try {
+      const response = await fetch(`/api/taskline?id=${encodeURIComponent(row.__id)}`, { method: "DELETE" });
+      const result = (await response.json().catch(() => ({}))) as { error?: string };
+
+      if (!response.ok) {
+        setMessage(result.error ?? "Could not delete TaskLine row.");
+        return;
+      }
+
+      setRows((current) => current.filter((item) => item.__id !== row.__id));
+      addAuditLog({ action: "taskline.delete_row", entityId: row.__id, oldValue: getAuditRowLabel(row), rowLabel: getRowLabel(row, rows) });
+      await loadTaskLine();
+      setMessage("TaskLine row deleted.");
+    } catch (error) {
+      console.error("TaskLine delete error:", error);
+      setMessage("Could not delete TaskLine row.");
+    }
+  }
+
+  function toggleRowSelection(rowId: string) {
+    setSelectedRowIds((current) => {
+      const next = new Set(current);
+      if (next.has(rowId)) {
+        next.delete(rowId);
+        return next;
+      }
+      if (next.size >= bulkDeleteLimit) {
+        setMessage(`You can select a maximum of ${bulkDeleteLimit} tasks at once.`);
+        return current;
+      }
+      next.add(rowId);
+      return next;
+    });
+  }
+
+  async function deleteSelectedRows() {
+    const recordIds = Array.from(selectedRowIds);
+    if (!recordIds.length || recordIds.length > bulkDeleteLimit || isBulkDeleting) {
+      return;
+    }
+    if (!window.confirm(`Delete ${recordIds.length} selected TaskLine task${recordIds.length === 1 ? "" : "s"}?`)) {
+      return;
+    }
+
+    setIsBulkDeleting(true);
+    setMessage(`Deleting ${recordIds.length} selected TaskLine task${recordIds.length === 1 ? "" : "s"}...`);
+    try {
+      const response = await fetch("/api/taskline", {
+        body: JSON.stringify({ action: "bulk_delete", recordIds }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST"
+      });
+      const result = (await response.json().catch(() => ({}))) as { deleted?: number; error?: string };
+      if (!response.ok) {
+        setMessage(result.error ?? "Could not delete the selected TaskLine tasks.");
+        return;
+      }
+
+      const deletedIds = new Set(recordIds);
+      setRows((current) => current.filter((row) => !deletedIds.has(row.__id)));
+      setSelectedRowIds(new Set());
+      await loadTaskLine();
+      setMessage(`${result.deleted ?? recordIds.length} selected TaskLine task${(result.deleted ?? recordIds.length) === 1 ? "" : "s"} deleted.`);
+    } catch (error) {
+      console.error("TaskLine bulk delete error:", error);
+      setMessage("Could not delete the selected TaskLine tasks.");
+    } finally {
+      setIsBulkDeleting(false);
+    }
+  }
+
+  function viewRowHistory(row: TaskLineRow) {
+    setViewMode("audit");
+    setMessage(`Showing audit trail. Row selected: ${getRowLabel(row, rows) || "TaskLine row"}.`);
+  }
+
+  function downloadTemplate() {
+    const templateRow = taskLineColumns.reduce<Record<string, string>>(
+      (row, column) => {
+        row[column.label] = "";
+        return row;
+      },
+      { [importActionColumn]: "Add" }
+    );
+    const worksheet = XLSX.utils.json_to_sheet([templateRow], { header: [importActionColumn, ...taskLineColumns.map((column) => column.label)] });
+    worksheet["!cols"] = [importActionColumn, ...taskLineColumns.map((column) => column.label)].map(() => ({ wch: 22 }));
+    addImportActionDropdown(worksheet, 500);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "TaskLine Import");
+    XLSX.writeFile(workbook, "workline-taskline-import-template.xlsx");
+    addAuditLog({ action: "taskline.download_template", newValue: "Downloaded import template" });
+  }
+
+  function exportView() {
+    const exportRows = filteredRows.map((row, index) =>
+      taskLineColumns.reduce<Record<string, string | number>>(
+        (result, column) => {
+          result[column.label] = column.key === "serial_no" ? index + 1 : row[column.key] ?? "";
+          return result;
+        },
+        { [importActionColumn]: "Update" }
+      )
+    );
+    const worksheet = XLSX.utils.json_to_sheet(exportRows.length ? exportRows : [blankExportRow()], {
+      header: [importActionColumn, ...taskLineColumns.map((column) => column.label)]
+    });
+    worksheet["!cols"] = [importActionColumn, ...taskLineColumns.map((column) => column.label)].map(() => ({ wch: 22 }));
+    addImportActionDropdown(worksheet, Math.max(exportRows.length + 100, 500));
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "TaskLine");
+    XLSX.writeFile(workbook, "workline-taskline-current-view.xlsx");
+    addAuditLog({ action: "taskline.export_view", newValue: `${exportRows.length} rows exported` });
+    setMessage(`Exported ${exportRows.length} TaskLine rows.`);
+  }
+
+  async function importWorkbook(file: File) {
+    setMessage(`Importing ${file.name}...`);
+
+    try {
+      const data = await file.arrayBuffer();
+      const workbook = XLSX.read(data);
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+
+      if (!sheet) {
+        setMessage(`No worksheet found in ${file.name}.`);
+        return;
+      }
+
+      const importedRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "" });
+
+      if (!importedRows.length) {
+        setMessage(`No TaskLine rows found in ${file.name}.`);
+        return;
+      }
+
+      const importRows = importedRows
+        .map((rawRow) => {
+          const importAction = text(rawRow[importActionColumn] || "Add");
+          const serialNumber = text(rawRow["S. No."] || rawRow["S.No."] || rawRow["Serial No."]);
+          const serialIndex = Number.parseInt(serialNumber, 10) - 1;
+          const targetId = importAction.toLowerCase() === "add" || !Number.isInteger(serialIndex) || serialIndex < 0
+            ? ""
+            : text(filteredRows[serialIndex]?.__id);
+          return {
+            ...rowFromImport(rawRow),
+            import_action: importAction,
+            serial_no: serialNumber,
+            target_id: targetId
+          };
+        })
+        .filter(hasTaskLineValue);
+
+      if (!importRows.length) {
+        setMessage(`No filled TaskLine rows found in ${file.name}. Please enter data below the headers before importing.`);
+        return;
+      }
+
+      const summary = { added: 0, deleted: 0, updated: 0 };
+
+      const batches = Array.from({ length: Math.ceil(importRows.length / taskLineImportBatchSize) }, (_, index) =>
+        importRows.slice(index * taskLineImportBatchSize, (index + 1) * taskLineImportBatchSize)
+      );
+      let processed = 0;
+
+      for (let index = 0; index < batches.length; index += taskLineImportConcurrency) {
+        const batchGroup = batches.slice(index, index + taskLineImportConcurrency);
+        const results = await Promise.all(batchGroup.map(postTaskLineImportBatch));
+        for (let resultIndex = 0; resultIndex < results.length; resultIndex += 1) {
+          const result = results[resultIndex];
+          summary.added += result.summary?.added ?? 0;
+          summary.updated += result.summary?.updated ?? 0;
+          summary.deleted += result.summary?.deleted ?? 0;
+          processed += batchGroup[resultIndex].length;
+        }
+        setMessage(`Importing ${file.name}: ${processed} of ${importRows.length} rows processed...`);
+      }
+
+      await loadTaskLine();
+      setMessage(`Imported ${file.name}: ${summary.added} added, ${summary.updated} updated, ${summary.deleted} deleted.`);
+    } catch (error) {
+      console.error("TaskLine import error:", error);
+      setMessage(error instanceof Error ? error.message : "Could not import TaskLine rows. Please check the file and try again.");
+    }
+  }
+
+  function addAuditLog(log: Omit<TaskLineAuditLog, "createdAt" | "id">) {
+    setAuditLogs((current) => [
+      {
+        ...log,
+        createdAt: new Date().toISOString(),
+        id: crypto.randomUUID()
+      },
+      ...current
+    ]);
+  }
+
+  return (
+    <section className="w-full rounded-lg border border-slate-200 bg-white p-3 shadow-[0_18px_60px_rgba(15,23,42,0.10)]">
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="shrink-0">
+          <h2 className="text-lg font-black leading-tight text-slate-950">Task Register</h2>
+          <p className="text-xs font-bold text-slate-500">
+            {filteredRows.length.toLocaleString()} of {rows.length.toLocaleString()} rows{hasActiveColumnFilters || search || statusFilter ? " (filtered)" : ""}
+          </p>
+        </div>
+
+        <label className="flex h-10 min-w-[220px] flex-1 items-center gap-2 rounded-md border border-slate-200 bg-white px-3">
+          <Search className="size-4 text-slate-400" />
+          <input
+            className="min-w-0 flex-1 border-0 bg-transparent text-sm font-semibold outline-none"
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search task, entity, owner, document, invoice"
+            value={search}
+          />
+        </label>
+
+        <select
+          aria-label="Status Open/Close"
+          className="h-10 shrink-0 rounded-md border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 outline-none"
+          onChange={(event) => setStatusFilter(event.target.value)}
+          value={statusFilter}
+        >
+          <option value="">Status: All</option>
+          <option value="Open">Open</option>
+          <option value="Close">Close</option>
+        </select>
+
+        <div className="relative shrink-0">
+          <button
+            aria-label="Actions menu"
+            className={buttonClass("dark")}
+            onClick={() => setIsToolbarMenuOpen((current) => !current)}
+            type="button"
+          >
+            <Menu className="size-4" />
+            Actions
+          </button>
+          {isToolbarMenuOpen ? (
+            <>
+              <div className="fixed inset-0 z-30" onClick={() => { setIsToolbarMenuOpen(false); setIsMasterSubmenuOpen(false); }} />
+              <div className="absolute right-0 top-12 z-40 w-52 overflow-hidden rounded-md border border-slate-200 bg-white py-1 shadow-2xl">
+                <ToolbarMenuItem icon={Plus} label="Add row" onClick={() => { setIsToolbarMenuOpen(false); addRow(); }} />
+                <button
+                  className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
+                  onClick={() => setIsMasterSubmenuOpen((current) => !current)}
+                  type="button"
+                >
+                  <span className="flex items-center gap-2"><ListChecks className="size-4 shrink-0 text-slate-500" />Master</span>
+                  <ChevronDown className={`size-4 shrink-0 text-slate-400 transition ${isMasterSubmenuOpen ? "rotate-180" : ""}`} />
+                </button>
+                {isMasterSubmenuOpen ? (
+                  <div className="border-y border-slate-100 bg-slate-50 pl-3">
+                    <ToolbarMenuItem icon={ListChecks} label="Task Master" onClick={() => { setIsToolbarMenuOpen(false); setIsMasterSubmenuOpen(false); setMasterKind("task"); setIsMasterOpen(true); }} />
+                    <ToolbarMenuItem icon={CircleDot} label="Stage Master" onClick={() => { setIsToolbarMenuOpen(false); setIsMasterSubmenuOpen(false); setMasterKind("stage"); setIsMasterOpen(true); }} />
+                  </div>
+                ) : null}
+                <ToolbarMenuItem icon={Settings2} label="Columns" onClick={() => { setIsToolbarMenuOpen(false); setIsColumnOptionsOpen(true); }} />
+                <ToolbarMenuItem icon={Download} label="Export view" onClick={() => { setIsToolbarMenuOpen(false); exportView(); }} />
+                <ToolbarMenuItem icon={Download} label="Download template" onClick={() => { setIsToolbarMenuOpen(false); downloadTemplate(); }} />
+                <ToolbarMenuItem icon={Upload} label="Import" onClick={() => { setIsToolbarMenuOpen(false); fileInputRef.current?.click(); }} />
+                <ToolbarMenuItem icon={History} label={viewMode === "register" ? `Audit Trail (${auditLogs.length})` : "Back to Register"} onClick={() => { setIsToolbarMenuOpen(false); setViewMode(viewMode === "register" ? "audit" : "register"); }} />
+                {hasActiveColumnFilters ? (
+                  <ToolbarMenuItem icon={X} label="Clear column filters" onClick={() => { setIsToolbarMenuOpen(false); setColumnFilters({}); }} />
+                ) : null}
+              </div>
+            </>
+          ) : null}
+          {isColumnOptionsOpen ? (
+            <TaskLineColumnOptionsPanel
+              frozenColumnKeys={frozenColumnKeys}
+              hiddenColumnKeys={hiddenColumnKeys}
+              onApply={(layout) => {
+                const normalizedLayout = normalizeTaskLineColumnLayout(layout);
+                setColumnOrder(normalizedLayout.order);
+                setHiddenColumnKeys(new Set(normalizedLayout.hiddenColumnKeys));
+                setFrozenColumnKeys(new Set(normalizedLayout.frozenColumnKeys));
+                setIsColumnOptionsOpen(false);
+                saveTaskLineColumnLayout(normalizedLayout);
+                addAuditLog({
+                  action: "taskline.column_layout",
+                  newValue: `${taskLineColumns.length - normalizedLayout.hiddenColumnKeys.length} visible columns`
+                });
+              }}
+              onClose={() => setIsColumnOptionsOpen(false)}
+              orderedColumns={orderedColumns}
+            />
+          ) : null}
+        </div>
+      </div>
+
+      <input
+        accept=".xlsx,.xls,.csv"
+        className="hidden"
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          if (file) void importWorkbook(file);
+          event.target.value = "";
+        }}
+        ref={fileInputRef}
+        type="file"
+      />
+
+      <datalist id={taskLineEntityListId}>
+        {entityOptions.map((entity) => <option key={entity} value={entity} />)}
+      </datalist>
+      <datalist id={taskLineStateListId}>
+        {gstinStateOptions.map(([code, state]) => <option key={code} label={`GSTIN ${code}`} value={state} />)}
+      </datalist>
+      <datalist id={taskLineSectionListId}>
+        {sectionOptions.map((section) => <option key={section} value={section} />)}
+      </datalist>
+
+      {message ? (
+        <p className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-bold text-emerald-900">{message}</p>
+      ) : null}
+
+      {viewMode === "register" ? (
+      <div className="mt-3">
+        <div className="mb-1.5 flex items-center justify-end gap-1.5">
+          {isLoading ? <span className="mr-auto text-xs font-bold text-slate-500">Loading TaskLine rows...</span> : null}
+          <button
+            className="inline-flex h-8 items-center gap-1 rounded-md border border-rose-200 bg-white px-3 text-xs font-bold text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40"
+            disabled={!selectedRowIds.size || selectedRowIds.size > bulkDeleteLimit || isBulkDeleting || isLoading}
+            onClick={() => void deleteSelectedRows()}
+            title={`Delete up to ${bulkDeleteLimit} selected tasks`}
+            type="button"
+          >
+            <Trash2 className="size-3.5" />
+            {isBulkDeleting ? "Deleting..." : `Delete selected (${selectedRowIds.size}/${bulkDeleteLimit})`}
+          </button>
+          <button
+            className="inline-flex h-8 items-center rounded-md border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 transition hover:bg-slate-50 disabled:opacity-40"
+            disabled={tablePage <= 1 || isLoading}
+            onClick={() => setTablePage((currentPage) => Math.max(1, currentPage - 1))}
+            type="button"
+          >
+            Prev
+          </button>
+          <span className="inline-flex h-8 items-center rounded-md border border-slate-200 bg-white px-3 text-xs font-black text-slate-700">
+            Page {tablePage} of {pageCount}
+          </span>
+          <button
+            className="inline-flex h-8 items-center rounded-md border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 transition hover:bg-slate-50 disabled:opacity-40"
+            disabled={tablePage >= pageCount || isLoading}
+            onClick={() => setTablePage((currentPage) => Math.min(pageCount, currentPage + 1))}
+            type="button"
+          >
+            Next
+          </button>
+        </div>
+        <div className="max-h-[calc(100vh-135px)] overflow-auto rounded-md border border-slate-200 bg-white">
+          <table className="table-fixed border-separate border-spacing-0 text-left text-sm" style={{ minWidth: tableWidth, width: tableWidth }}>
+            <colgroup>
+              {actionColumnHidden ? null : <col style={{ width: actionColumnWidth }} />}
+              {visibleColumns.map((column) => (
+                <col key={column.key} style={{ width: column.width }} />
+              ))}
+            </colgroup>
+            <thead className="sticky top-0 z-10 bg-slate-100 text-[11px] font-semibold uppercase tracking-wide text-slate-600 [&_th]:border-b [&_th]:border-slate-200">
+            <tr>
+              {actionColumnHidden ? null : (
+                <th
+                  className={`border-r border-white/10 px-3 py-2 ${actionColumnFrozen ? "sticky left-0 z-20 bg-slate-100" : ""}`}
+                  style={actionColumnFrozen ? { left: 0, width: actionColumnWidth } : { width: actionColumnWidth }}
+                >
+                  Actions
+                </th>
+              )}
+              {visibleColumns.map((column) => {
+                const isAsc = sortState?.key === column.key && sortState.dir === "asc";
+                const isDesc = sortState?.key === column.key && sortState.dir === "desc";
+                const hasValueFilter = Boolean(valueFilters[column.key]) || (column.key === "due_date" && dueColorFilter.length > 0);
+                const frozen = frozenInfo(column.key);
+                return (
+                  <th
+                    className={`border-r border-white/10 px-3 py-2 last:border-r-0 ${frozen.isFrozen ? "sticky z-20 bg-slate-100" : ""}`}
+                    key={column.key}
+                    style={frozen.isFrozen ? { left: frozen.left } : undefined}
+                  >
+                    <div className="flex items-center gap-1">
+                      <button
+                        className="flex min-w-0 flex-1 items-center justify-between gap-1 text-left"
+                        onClick={() => toggleSort(column.key)}
+                        title={`Sort by ${column.label}`}
+                        type="button"
+                      >
+                        <span className="min-w-0 whitespace-normal break-words leading-tight">{column.label}</span>
+                        <span className="flex shrink-0 flex-col leading-none">
+                          <ArrowUp className={`size-3 ${isAsc ? "text-navy-700" : "text-slate-300"}`} />
+                          <ArrowDown className={`-mt-1 size-3 ${isDesc ? "text-navy-700" : "text-slate-300"}`} />
+                        </span>
+                      </button>
+                      <button
+                        aria-label={`Filter ${column.label}`}
+                        className={`inline-flex size-5 shrink-0 items-center justify-center rounded border transition ${
+                          hasValueFilter
+                            ? "border-navy-600 bg-navy-600 text-white"
+                            : "border-slate-300 bg-white text-slate-500 hover:bg-slate-100"
+                        }`}
+                        onClick={(event) => openColumnFilter(column.key, event.currentTarget)}
+                        title={`Filter ${column.label}`}
+                        type="button"
+                      >
+                        <Filter className="size-3" />
+                      </button>
+                    </div>
+                    {openFilterKey === column.key && filterMenuPos ? (
+                      <TaskLineFilterMenu
+                        colorOptions={column.key === "due_date" ? dueColorCategories : undefined}
+                        colorSelected={dueColorFilter}
+                        columnLabel={column.label}
+                        draft={filterDraft}
+                        hasFilter={hasValueFilter}
+                        onToggleColor={toggleDueColor}
+                        menuPos={filterMenuPos}
+                        onApply={() => applyColumnFilter(column.key)}
+                        onCancel={closeColumnFilter}
+                        onClear={() => {
+                          clearColumnFilter(column.key);
+                          if (column.key === "due_date") {
+                            setDueColorFilter([]);
+                          }
+                        }}
+                        onSearchChange={setFilterSearch}
+                        onSortAsc={() => {
+                          setSortState({ dir: "asc", key: column.key });
+                          closeColumnFilter();
+                        }}
+                        onSortDesc={() => {
+                          setSortState({ dir: "desc", key: column.key });
+                          closeColumnFilter();
+                        }}
+                        onToggleAll={toggleVisibleDraftValues}
+                        onToggleValue={toggleDraftValue}
+                        search={filterSearch}
+                        visibleOptions={visibleFilterOptions}
+                      />
+                    ) : null}
+                  </th>
+                );
+              })}
+            </tr>
+            <tr className="bg-slate-50">
+              {actionColumnHidden ? null : (
+                <th
+                  className={`border-r border-slate-200 px-2 py-1 ${actionColumnFrozen ? "sticky left-0 z-20 bg-slate-50" : ""}`}
+                  style={actionColumnFrozen ? { left: 0 } : undefined}
+                />
+              )}
+              {visibleColumns.map((column) => {
+                const frozen = frozenInfo(column.key);
+                return (
+                  <th
+                    className={`border-r border-slate-200 px-2 py-1 last:border-r-0 ${frozen.isFrozen ? "sticky z-20 bg-slate-50" : ""}`}
+                    key={`filter-${column.key}`}
+                    style={frozen.isFrozen ? { left: frozen.left } : undefined}
+                  >
+                    {column.key === "serial_no" ? null : (
+                      <input
+                        aria-label={`Filter ${column.label}`}
+                        className="h-7 w-full rounded-md border border-slate-200 bg-white px-2 text-xs font-semibold normal-case text-slate-950 outline-none focus:border-navy-400"
+                        onChange={(event) => setColumnFilters((current) => ({ ...current, [column.key]: event.target.value }))}
+                        placeholder="Filter"
+                        value={columnFilters[column.key] ?? ""}
+                      />
+                    )}
+                  </th>
+                );
+              })}
+              </tr>
+            </thead>
+            <tbody>
+              {isLoading ? (
+                <tr><td className="px-4 py-8 font-bold text-slate-500" colSpan={visibleColumns.length + (actionColumnHidden ? 0 : 1)}>Loading TaskLine rows...</td></tr>
+              ) : pagedRows.length ? pagedRows.map((row, rowIndex) => {
+                const rowNameOptions = nameOptionsForTeam(text(row.team));
+                const rowResourceOptions = resourceOptionsForTeam(text(row.team));
+                return (
+                <tr className="border-b border-slate-100 last:border-b-0" key={row.__id}>
+                  {actionColumnHidden ? null : (
+                  <td className={`border-r border-slate-100 px-2 py-1 ${actionColumnFrozen ? "sticky left-0 z-[5] bg-white" : ""}`} style={actionColumnFrozen ? { left: 0 } : undefined}>
+                    <div className="flex items-center gap-1">
+                      <input
+                        aria-label={`Select ${getRowLabel(row, rows) || "TaskLine row"}`}
+                        checked={selectedRowIds.has(row.__id)}
+                        className="size-3.5 shrink-0 cursor-pointer accent-rose-700"
+                        disabled={!selectedRowIds.has(row.__id) && selectedRowIds.size >= bulkDeleteLimit}
+                        onChange={() => toggleRowSelection(row.__id)}
+                        title={selectedRowIds.has(row.__id) ? "Remove from bulk selection" : "Select for bulk delete"}
+                        type="checkbox"
+                      />
+                      <button className="inline-flex size-7 items-center justify-center rounded-md border border-sky-200 text-sky-700 hover:bg-sky-50" onClick={() => openEditForm(row)} title="Edit row" type="button">
+                        <Pencil className="size-4" />
+                      </button>
+                      <button className="inline-flex size-7 items-center justify-center rounded-md border border-navy-200 text-navy-700 hover:bg-navy-50" onClick={() => viewRowHistory(row)} title="View history" type="button">
+                        <History className="size-4" />
+                      </button>
+                      <button className="inline-flex size-7 items-center justify-center rounded-md border border-rose-200 text-rose-700 hover:bg-rose-50" onClick={() => deleteRow(row)} title="Delete row" type="button">
+                        <Trash2 className="size-4" />
+                      </button>
+                    </div>
+                  </td>
+                  )}
+                  {visibleColumns.map((column) => {
+                    const frozen = frozenInfo(column.key);
+                    return (
+                      <TaskLineCell
+                        column={column}
+                        frozenLeft={frozen.left}
+                        isFrozen={frozen.isFrozen}
+                        key={`${row.__id}-${column.key}`}
+                        nameOptions={rowNameOptions}
+                        onCellChange={updateRow}
+                        resourceOptions={rowResourceOptions}
+                        row={row}
+                        serialNumber={(tablePage - 1) * taskLinePageSize + rowIndex + 1}
+                        stageMasterNames={stageMasterNames}
+                        taskMasterNames={taskMasterNames}
+                      />
+                    );
+                  })}
+                </tr>
+                );
+              }) : (
+                <tr><td className="px-4 py-8 font-bold text-slate-500" colSpan={visibleColumns.length + (actionColumnHidden ? 0 : 1)}>No TaskLine rows match the current filters.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      ) : null}
+
+      {viewMode === "audit" ? (
+        <TaskLineAuditTable logs={auditLogs} rows={rows} />
+      ) : null}
+
+      {formDraft ? (
+        <TaskLineForm
+          draft={formDraft}
+          isEdit={Boolean(editingRowId)}
+          onChange={updateFormDraft}
+          onClose={() => {
+            setEditingRowId(null);
+            setFormDraft(null);
+          }}
+          onSubmit={saveFormDraft}
+          nameOptionsForTeam={nameOptionsForTeam}
+          resourceOptionsForTeam={resourceOptionsForTeam}
+          stageMasterNames={stageMasterNames}
+          taskMasterNames={taskMasterNames}
+        />
+      ) : null}
+
+      {isMasterOpen ? (
+        masterKind === "stage" ? (
+          <TaskLineMasterPanel
+            addPlaceholder="Add a new stage type"
+            emptyText="No stage types yet. Add one above."
+            heading="Stage Master"
+            masters={stageMasters}
+            message={stageMasterMessage}
+            onClose={() => setIsMasterOpen(false)}
+            onDelete={deleteStageMaster}
+            onSave={saveStageMaster}
+            subheading="Stage in TaskLine can only be chosen from this list."
+            title="Manage stage types"
+          />
+        ) : (
+          <TaskLineMasterPanel
+            addPlaceholder="Add a new task type"
+            emptyText="No task types yet. Add one above."
+            heading="Task Master"
+            masters={taskMasters}
+            message={masterMessage}
+            onClose={() => setIsMasterOpen(false)}
+            onDelete={deleteTaskMaster}
+            onSave={saveTaskMaster}
+            subheading="Tasks in TaskLine can only be chosen from this list."
+            title="Manage task types"
+          />
+        )
+      ) : null}
+    </section>
+  );
+}
+
+const TaskLineCell = memo(function TaskLineCell({
+  column,
+  frozenLeft,
+  isFrozen,
+  nameOptions,
+  onCellChange,
+  resourceOptions,
+  row,
+  serialNumber,
+  stageMasterNames,
+  taskMasterNames
+}: {
+  column: TaskLineColumn;
+  frozenLeft: number;
+  isFrozen: boolean;
+  nameOptions: string[];
+  onCellChange: (rowId: string, key: string, value: string) => void;
+  resourceOptions: string[];
+  row: TaskLineRow;
+  serialNumber: number;
+  stageMasterNames: string[];
+  taskMasterNames: string[];
+}) {
+  const frozenStyle = isFrozen ? { left: frozenLeft } : undefined;
+  const onChange = (value: string) => onCellChange(row.__id, column.key, value);
+
+  if (column.key === "serial_no") {
+    return (
+      <td className={`border-r border-slate-100 px-2 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
+        <span className="block h-7 px-1.5 py-1 font-semibold text-slate-700">{serialNumber}</span>
+      </td>
+    );
+  }
+
+  if (column.key === "team") {
+    const current = row[column.key] ?? "";
+    return (
+      <td className={`border-r border-slate-100 px-2 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
+        <select className="h-7 w-full rounded-md border border-slate-200 bg-white px-2 text-xs font-bold outline-none focus:border-rose-300 focus:ring-2 focus:ring-rose-100" onChange={(event) => onChange(event.target.value)} value={current}>
+          <option value="">Select team</option>
+          {teamOptions.map((team) => <option key={team} value={team}>{team}</option>)}
+          {current && !teamOptions.includes(current) ? <option hidden value={current}>{current}</option> : null}
+        </select>
+      </td>
+    );
+  }
+
+  if (["entity", "state_name", "section"].includes(column.key)) {
+    const listId = column.key === "entity" ? taskLineEntityListId : column.key === "state_name" ? taskLineStateListId : taskLineSectionListId;
+    return (
+      <td className={`border-r border-slate-100 px-2 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
+        <input
+          className="h-7 w-full rounded-md border border-transparent bg-transparent px-1.5 text-xs font-semibold text-slate-700 outline-none hover:border-slate-200 hover:bg-white focus:border-rose-300 focus:bg-white focus:ring-2 focus:ring-rose-100"
+          list={listId}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder={`Search ${column.label.toLowerCase()}`}
+          value={row[column.key] ?? ""}
+        />
+      </td>
+    );
+  }
+
+  if (column.key === "entity_group") {
+    return (
+      <td className={`border-r border-slate-100 bg-slate-50 px-2 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5]" : ""}`} style={frozenStyle}>
+        <input className="h-7 w-full cursor-not-allowed border-0 bg-transparent px-1.5 text-xs font-semibold text-slate-600 outline-none" readOnly title="Filled automatically from Entity" value={row[column.key] ?? ""} />
+      </td>
+    );
+  }
+
+  if (column.key === "period") {
+    const current = row[column.key] ?? "";
+    return (
+      <td className={`border-r border-slate-100 px-2 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
+        <select className="h-7 w-full rounded-md border border-slate-200 bg-white px-2 text-xs font-bold outline-none focus:border-rose-300 focus:ring-2 focus:ring-rose-100" onChange={(event) => onChange(event.target.value)} value={current}>
+          <option value="">Select period</option>
+          {financialPeriodOptions.map((period) => <option key={period} value={period}>{period}</option>)}
+          {current && !financialPeriodOptions.includes(current) ? <option hidden value={current}>{current}</option> : null}
+        </select>
+      </td>
+    );
+  }
+
+  if (column.key === "name") {
+    const current = row[column.key] ?? "";
+    return (
+      <td className={`border-r border-slate-100 px-2 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
+        <select
+          className="h-7 w-full rounded-md border border-slate-200 bg-white px-2 text-xs font-bold outline-none focus:border-rose-300 focus:ring-2 focus:ring-rose-100"
+          onChange={(event) => onChange(event.target.value)}
+          value={current}
+        >
+          <option value="">Select</option>
+          {nameOptions.map((name) => (
+            <option key={name} value={name}>{name}</option>
+          ))}
+          {current && !nameOptions.includes(current) ? (
+            <option value={current}>{current}</option>
+          ) : null}
+        </select>
+      </td>
+    );
+  }
+
+  if (column.key === "resource") {
+    const current = row[column.key] ?? "";
+    return (
+      <td className={`border-r border-slate-100 px-2 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
+        <select
+          className="h-7 w-full rounded-md border border-slate-200 bg-white px-2 text-xs font-bold outline-none focus:border-rose-300 focus:ring-2 focus:ring-rose-100"
+          onChange={(event) => onChange(event.target.value)}
+          value={current}
+        >
+          <option value="">Select</option>
+          {resourceOptions.map((name) => (
+            <option key={name} value={name}>{name}</option>
+          ))}
+          {current && !resourceOptions.includes(current) ? (
+            <option value={current}>{current}</option>
+          ) : null}
+        </select>
+      </td>
+    );
+  }
+
+  if (column.key === "task") {
+    const current = row[column.key] ?? "";
+    return (
+      <td className={`border-r border-slate-100 px-2 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
+        <select
+          className="h-7 w-full rounded-md border border-slate-200 bg-white px-2 text-xs font-bold outline-none focus:border-rose-300 focus:ring-2 focus:ring-rose-100"
+          onChange={(event) => onChange(event.target.value)}
+          value={current}
+        >
+          <option value="">Select task</option>
+          {taskMasterNames.map((name) => (
+            <option key={name} value={name}>{name}</option>
+          ))}
+          {current && !taskMasterNames.includes(current) ? (
+            <option value={current}>{current} (not in master)</option>
+          ) : null}
+        </select>
+      </td>
+    );
+  }
+
+  if (column.key === "stage") {
+    const current = row[column.key] ?? "";
+    return (
+      <td className={`border-r border-slate-100 px-2 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
+        <select
+          className="h-7 w-full rounded-md border border-slate-200 bg-white px-2 text-xs font-bold outline-none focus:border-rose-300 focus:ring-2 focus:ring-rose-100"
+          onChange={(event) => onChange(event.target.value)}
+          value={current}
+        >
+          <option value="">Select stage</option>
+          {stageMasterNames.map((name) => (
+            <option key={name} value={name}>{name}</option>
+          ))}
+          {current && !stageMasterNames.includes(current) ? (
+            <option value={current}>{current} (not in master)</option>
+          ) : null}
+        </select>
+      </td>
+    );
+  }
+
+  if (column.type === "select") {
+    return (
+      <td className={`border-r border-slate-100 px-2 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
+        <select
+          className="h-7 w-full rounded-md border border-slate-200 bg-white px-2 text-xs font-bold outline-none focus:border-rose-300 focus:ring-2 focus:ring-rose-100"
+          onChange={(event) => onChange(event.target.value)}
+          value={row[column.key] ?? ""}
+        >
+          <option value="">Select</option>
+          {statusOptions.map((option) => (
+            <option key={option} value={option}>{option}</option>
+          ))}
+        </select>
+      </td>
+    );
+  }
+
+  if (column.key === "due_date" || column.key === "ref_date") {
+    const dueColor = column.key === "due_date" ? dueDateColorClass(row[column.key] ?? "") : "";
+    return (
+      <td className={`border-r border-slate-100 px-2 py-1 last:border-r-0 ${dueColor} ${isFrozen ? (dueColor ? "sticky z-[5]" : "sticky z-[5] bg-white") : ""}`} style={frozenStyle}>
+        <TaskLineDateInput compact onChange={onChange} value={row[column.key] ?? ""} />
+      </td>
+    );
+  }
+
+  const dueColor = column.key === "due_date" ? dueDateColorClass(row[column.key] ?? "") : "";
+
+  return (
+    <td
+      className={`border-r border-slate-100 px-2 py-1 last:border-r-0 ${dueColor} ${isFrozen ? (dueColor ? "sticky z-[5]" : "sticky z-[5] bg-white") : ""}`}
+      style={frozenStyle}
+    >
+      <input
+        className="h-7 w-full rounded-md border border-transparent bg-transparent px-1.5 text-xs font-semibold text-slate-700 outline-none hover:border-slate-200 hover:bg-white focus:border-rose-300 focus:bg-white focus:ring-2 focus:ring-rose-100"
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={column.type === "date" ? "dd-mm-yyyy" : undefined}
+        type={column.type === "number" || column.type === "money" ? "number" : "text"}
+        value={row[column.key] ?? ""}
+      />
+    </td>
+  );
+});
+
+function TaskLineForm({
+  draft,
+  isEdit,
+  nameOptionsForTeam,
+  onChange,
+  onClose,
+  onSubmit,
+  resourceOptionsForTeam,
+  stageMasterNames,
+  taskMasterNames
+}: {
+  draft: TaskLineRow;
+  isEdit: boolean;
+  nameOptionsForTeam: (team: string) => string[];
+  onChange: (key: string, value: string) => void;
+  onClose: () => void;
+  onSubmit: () => void;
+  resourceOptionsForTeam: (team: string) => string[];
+  stageMasterNames: string[];
+  taskMasterNames: string[];
+}) {
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-navy-700/45 px-4 py-6">
+      <section className="max-h-[90vh] w-full max-w-6xl overflow-hidden rounded-lg border border-slate-200 bg-white shadow-[0_24px_90px_rgba(15,23,42,0.30)]">
+        <header className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
+          <div>
+            <p className="text-xs font-black uppercase tracking-[0.14em] text-rose-700">{isEdit ? "Edit TaskLine row" : "New TaskLine row"}</p>
+            <h3 className="mt-1 text-2xl font-black text-slate-950">{isEdit ? "Update task entry" : "Create task entry"}</h3>
+          </div>
+          <button className="inline-flex size-9 items-center justify-center rounded-md border border-slate-200 text-slate-700 hover:bg-slate-50" onClick={onClose} title="Close form" type="button">
+            <X className="size-4" />
+          </button>
+        </header>
+
+        <div className="max-h-[68vh] overflow-auto p-5">
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            {taskLineColumns.filter((column) => column.key !== "serial_no").map((column) => (
+              <label className={["remarks", "issue", "document_link", "el_reference", "fee_comments"].includes(column.key) ? "xl:col-span-2" : ""} key={column.key}>
+                <span className="text-[10px] font-black uppercase text-slate-500">{column.label}</span>
+                {column.key === "team" ? (
+                  <select className={formControlClass} onChange={(event) => onChange(column.key, event.target.value)} value={draft[column.key] ?? ""}>
+                    <option value="">Select team</option>
+                    {teamOptions.map((team) => <option key={team} value={team}>{team}</option>)}
+                    {draft[column.key] && !teamOptions.includes(draft[column.key]) ? <option hidden value={draft[column.key]}>{draft[column.key]}</option> : null}
+                  </select>
+                ) : ["entity", "state_name", "section"].includes(column.key) ? (
+                  <input
+                    className={formControlClass}
+                    list={column.key === "entity" ? taskLineEntityListId : column.key === "state_name" ? taskLineStateListId : taskLineSectionListId}
+                    onChange={(event) => onChange(column.key, event.target.value)}
+                    placeholder={`Search ${column.label.toLowerCase()}`}
+                    value={draft[column.key] ?? ""}
+                  />
+                ) : column.key === "entity_group" ? (
+                  <input className={`${formControlClass} cursor-not-allowed bg-slate-50 text-slate-600`} readOnly title="Filled automatically from Entity" value={draft[column.key] ?? ""} />
+                ) : column.key === "period" ? (
+                  <select className={formControlClass} onChange={(event) => onChange(column.key, event.target.value)} value={draft[column.key] ?? ""}>
+                    <option value="">Select period</option>
+                    {financialPeriodOptions.map((period) => <option key={period} value={period}>{period}</option>)}
+                    {draft[column.key] && !financialPeriodOptions.includes(draft[column.key]) ? <option hidden value={draft[column.key]}>{draft[column.key]}</option> : null}
+                  </select>
+                ) : column.key === "due_date" || column.key === "ref_date" ? (
+                  <TaskLineDateInput onChange={(value) => onChange(column.key, value)} value={draft[column.key] ?? ""} />
+                ) : column.key === "name" ? (
+                  <select
+                    className={formControlClass}
+                    onChange={(event) => onChange(column.key, event.target.value)}
+                    value={draft[column.key] ?? ""}
+                  >
+                    <option value="">Select</option>
+                    {nameOptionsForTeam(draft.team ?? "").map((name) => (
+                      <option key={name} value={name}>{name}</option>
+                    ))}
+                    {draft[column.key] && !nameOptionsForTeam(draft.team ?? "").includes(draft[column.key]) ? (
+                      <option value={draft[column.key]}>{draft[column.key]}</option>
+                    ) : null}
+                  </select>
+                ) : column.key === "resource" ? (
+                  <select
+                    className={formControlClass}
+                    onChange={(event) => onChange(column.key, event.target.value)}
+                    value={draft[column.key] ?? ""}
+                  >
+                    <option value="">Select</option>
+                    {resourceOptionsForTeam(draft.team ?? "").map((name) => (
+                      <option key={name} value={name}>{name}</option>
+                    ))}
+                    {draft[column.key] && !resourceOptionsForTeam(draft.team ?? "").includes(draft[column.key]) ? (
+                      <option value={draft[column.key]}>{draft[column.key]}</option>
+                    ) : null}
+                  </select>
+                ) : column.key === "task" ? (
+                  <select
+                    className={formControlClass}
+                    onChange={(event) => onChange(column.key, event.target.value)}
+                    value={draft[column.key] ?? ""}
+                  >
+                    <option value="">Select task</option>
+                    {taskMasterNames.map((name) => (
+                      <option key={name} value={name}>{name}</option>
+                    ))}
+                    {draft[column.key] && !taskMasterNames.includes(draft[column.key]) ? (
+                      <option value={draft[column.key]}>{draft[column.key]} (not in master)</option>
+                    ) : null}
+                  </select>
+                ) : column.key === "stage" ? (
+                  <select
+                    className={formControlClass}
+                    onChange={(event) => onChange(column.key, event.target.value)}
+                    value={draft[column.key] ?? ""}
+                  >
+                    <option value="">Select stage</option>
+                    {stageMasterNames.map((name) => (
+                      <option key={name} value={name}>{name}</option>
+                    ))}
+                    {draft[column.key] && !stageMasterNames.includes(draft[column.key]) ? (
+                      <option value={draft[column.key]}>{draft[column.key]} (not in master)</option>
+                    ) : null}
+                  </select>
+                ) : column.type === "select" ? (
+                  <select
+                    className={formControlClass}
+                    onChange={(event) => onChange(column.key, event.target.value)}
+                    value={draft[column.key] ?? ""}
+                  >
+                    <option value="">Select</option>
+                    {statusOptions.map((option) => (
+                      <option key={option} value={option}>{option}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    className={formControlClass}
+                    onChange={(event) => onChange(column.key, event.target.value)}
+                    placeholder={column.type === "date" ? "dd-mm-yyyy" : undefined}
+                    type={column.type === "number" || column.type === "money" ? "number" : "text"}
+                    value={draft[column.key] ?? ""}
+                  />
+                )}
+              </label>
+            ))}
+          </div>
+        </div>
+
+        <footer className="flex justify-end gap-2 border-t border-slate-200 px-5 py-4">
+          <button className={buttonClass("light")} onClick={onClose} type="button">Cancel</button>
+          <button className={buttonClass("primary")} onClick={onSubmit} type="button">
+            {isEdit ? <Pencil className="size-4" /> : <Plus className="size-4" />}
+            {isEdit ? "Save Changes" : "Create"}
+          </button>
+        </footer>
+      </section>
+    </div>
+  );
+}
+
+function TaskLineDateInput({ compact = false, onChange, value }: { compact?: boolean; onChange: (value: string) => void; value: string }) {
+  const [draft, setDraft] = useState(value);
+
+  useEffect(() => {
+    setDraft(value);
+  }, [value]);
+
+  function commitManualValue(input: HTMLInputElement) {
+    const normalized = normalizeEditableTaskLineDate(draft);
+    if (normalized === null) {
+      input.setCustomValidity("Enter a valid date in DD-MM-YYYY format.");
+      input.reportValidity();
+      setDraft(value);
+      return;
+    }
+
+    input.setCustomValidity("");
+    setDraft(normalized);
+    if (normalized !== value) onChange(normalized);
+  }
+
+  return (
+    <div className={`relative ${compact ? "" : "mt-1"}`}>
+      <input
+        aria-label="Date in DD-MM-YYYY format"
+        className={compact
+          ? "h-7 w-full rounded-md border border-transparent bg-transparent py-1 pl-1.5 pr-8 text-xs font-semibold text-slate-700 outline-none hover:border-slate-200 hover:bg-white focus:border-rose-300 focus:bg-white focus:ring-2 focus:ring-rose-100"
+          : `${formControlClass.replace("mt-1 ", "")} pr-10`}
+        onBlur={(event) => commitManualValue(event.currentTarget)}
+        onChange={(event) => {
+          event.currentTarget.setCustomValidity("");
+          setDraft(event.target.value);
+        }}
+        placeholder="dd-mm-yyyy"
+        type="text"
+        value={draft}
+      />
+      <label className={`absolute right-1 top-1/2 -translate-y-1/2 cursor-pointer rounded text-slate-500 hover:bg-slate-100 hover:text-navy-700 ${compact ? "p-1" : "p-2"}`} title="Open calendar">
+        <CalendarDays className={compact ? "size-3.5" : "size-4"} />
+        <input
+          aria-label="Choose date from calendar"
+          className="absolute inset-0 size-full cursor-pointer opacity-0"
+          onChange={(event) => {
+            const normalized = normalizeEditableTaskLineDate(event.target.value) ?? "";
+            setDraft(normalized);
+            onChange(normalized);
+          }}
+          tabIndex={-1}
+          type="date"
+          value={displayDateToIso(draft)}
+        />
+      </label>
+    </div>
+  );
+}
+
+const formControlClass = "mt-1 h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm font-bold text-slate-900 outline-none focus:border-rose-300 focus:ring-2 focus:ring-rose-100";
+
+function TaskLineColumnOptionsPanel({
+  frozenColumnKeys,
+  hiddenColumnKeys,
+  onApply,
+  onClose,
+  orderedColumns
+}: {
+  frozenColumnKeys: Set<string>;
+  hiddenColumnKeys: Set<string>;
+  onApply: (layout: TaskLineColumnLayout) => void;
+  onClose: () => void;
+  orderedColumns: TaskLineColumn[];
+}) {
+  const [draftHiddenColumnKeys, setDraftHiddenColumnKeys] = useState<Set<string>>(() => new Set(hiddenColumnKeys));
+  const [draftFrozenColumnKeys, setDraftFrozenColumnKeys] = useState<Set<string>>(() => new Set(frozenColumnKeys));
+  const [draftOrder, setDraftOrder] = useState<string[]>(() => orderedColumns.map((column) => column.key));
+  const draftColumns = useMemo(
+    () => draftOrder.map((key) => taskLineColumnByKey.get(key)).filter((column): column is TaskLineColumn => Boolean(column)),
+    [draftOrder]
+  );
+
+  function toggleHiddenKey(key: string) {
+    setDraftHiddenColumnKeys((current) => {
+      const next = new Set(current);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  }
+
+  function toggleFrozenKey(key: string) {
+    setDraftFrozenColumnKeys((current) => {
+      const next = new Set(current);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  }
+
+  function toggleColumn(column: TaskLineColumn) {
+    setDraftHiddenColumnKeys((current) => {
+      const next = new Set(current);
+      if (next.has(column.key)) {
+        next.delete(column.key);
+      } else {
+        next.add(column.key);
+      }
+      return next;
+    });
+  }
+
+  function toggleFreeze(column: TaskLineColumn) {
+    setDraftFrozenColumnKeys((current) => {
+      const next = new Set(current);
+      if (next.has(column.key)) {
+        next.delete(column.key);
+      } else {
+        next.add(column.key);
+      }
+      return next;
+    });
+  }
+
+  function moveColumn(column: TaskLineColumn, direction: "down" | "up") {
+    setDraftOrder((current) => {
+      const index = current.indexOf(column.key);
+      const nextIndex = direction === "up" ? index - 1 : index + 1;
+      if (index < 0 || nextIndex < 0 || nextIndex >= current.length) {
+        return current;
+      }
+
+      const next = [...current];
+      [next[index], next[nextIndex]] = [next[nextIndex], next[index]];
+      return next;
+    });
+  }
+
+  return (
+    <div className="absolute right-0 top-12 z-40 w-[390px] rounded-md border border-slate-200 bg-white p-3 text-slate-950 shadow-2xl">
+      <div className="flex items-start justify-between gap-3 border-b border-slate-200 pb-3">
+        <div>
+          <p className="text-xs font-black uppercase tracking-[0.14em] text-rose-700">Columns</p>
+          <p className="mt-1 text-sm font-bold text-slate-500">Hide, reorder, or freeze (pin) columns to the left.</p>
+        </div>
+        <button className="rounded-md border border-slate-200 px-2 py-1 text-xs font-black text-slate-700" onClick={onClose} type="button">Close</button>
+      </div>
+      <div className="mt-3 max-h-[420px] space-y-2 overflow-y-auto pr-1">
+        <div className="grid grid-cols-[minmax(0,1fr)_auto_auto_auto] items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-2 py-2">
+          <label className="flex min-w-0 cursor-pointer items-center gap-2">
+            <input checked={!draftHiddenColumnKeys.has(actionColumnKey)} onChange={() => toggleHiddenKey(actionColumnKey)} type="checkbox" />
+            <span className="min-w-0 truncate text-sm font-bold text-slate-700">Actions</span>
+          </label>
+          <button
+            aria-label="Freeze Actions"
+            className={`inline-flex size-7 items-center justify-center rounded-md border transition ${
+              draftFrozenColumnKeys.has(actionColumnKey)
+                ? "border-navy-600 bg-navy-600 text-white"
+                : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+            }`}
+            onClick={() => toggleFrozenKey(actionColumnKey)}
+            title={draftFrozenColumnKeys.has(actionColumnKey) ? "Unfreeze column" : "Freeze column (pin to left)"}
+            type="button"
+          >
+            <Pin className="size-3.5" />
+          </button>
+          <span />
+          <span />
+        </div>
+        {draftColumns.map((column, index) => (
+          <div className="grid grid-cols-[minmax(0,1fr)_auto_auto_auto] items-center gap-2 rounded-md border border-slate-200 px-2 py-2" key={column.key}>
+            <label className="flex min-w-0 cursor-pointer items-center gap-2">
+              <input checked={!draftHiddenColumnKeys.has(column.key)} onChange={() => toggleColumn(column)} type="checkbox" />
+              <span className="min-w-0 truncate text-sm font-bold text-slate-700">{column.label}</span>
+            </label>
+            <button
+              aria-label={`Freeze ${column.label}`}
+              className={`inline-flex size-7 items-center justify-center rounded-md border transition ${
+                draftFrozenColumnKeys.has(column.key)
+                  ? "border-navy-600 bg-navy-600 text-white"
+                  : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+              }`}
+              onClick={() => toggleFreeze(column)}
+              title={draftFrozenColumnKeys.has(column.key) ? "Unfreeze column" : "Freeze column (pin to left)"}
+              type="button"
+            >
+              <Pin className="size-3.5" />
+            </button>
+            <button
+              aria-label={`Move ${column.label} up`}
+              className="inline-flex size-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-35"
+              disabled={index === 0}
+              onClick={() => moveColumn(column, "up")}
+              type="button"
+            >
+              <ArrowUp className="size-3.5" />
+            </button>
+            <button
+              aria-label={`Move ${column.label} down`}
+              className="inline-flex size-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-35"
+              disabled={index === draftColumns.length - 1}
+              onClick={() => moveColumn(column, "down")}
+              type="button"
+            >
+              <ArrowDown className="size-3.5" />
+            </button>
+          </div>
+        ))}
+      </div>
+      <div className="mt-3 flex justify-end gap-2 border-t border-slate-200 pt-3">
+        <button
+          className={buttonClass("light")}
+          onClick={() => {
+            setDraftOrder(defaultTaskLineColumnOrder);
+            setDraftHiddenColumnKeys(new Set());
+            setDraftFrozenColumnKeys(new Set());
+          }}
+          type="button"
+        >
+          Reset
+        </button>
+        <button className={buttonClass("primary")} onClick={() => onApply({ frozenColumnKeys: Array.from(draftFrozenColumnKeys), hiddenColumnKeys: Array.from(draftHiddenColumnKeys), order: draftOrder })} type="button">
+          Apply
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function TaskLineAuditTable({ logs, rows }: { logs: TaskLineAuditLog[]; rows: TaskLineRow[] }) {
+  const serialByRowId = useMemo(() => {
+    const map = new Map<string, number>();
+    rows.forEach((row, index) => map.set(row.__id, index + 1));
+    return map;
+  }, [rows]);
+
+  function rowNumber(log: TaskLineAuditLog) {
+    const serial = log.entityId ? serialByRowId.get(log.entityId) : undefined;
+    return serial ? String(serial) : "-";
+  }
+
+  return (
+    <section className="mt-4 overflow-hidden rounded-md border border-slate-200 bg-white">
+      <div className="flex items-center gap-2 border-b border-slate-200 px-4 py-3">
+        <History className="size-4 text-rose-700" />
+        <h3 className="text-sm font-black uppercase tracking-[0.14em] text-slate-700">Edit History</h3>
+      </div>
+      <div className="max-h-[calc(100vh-130px)] overflow-auto">
+        <table className="w-full min-w-[860px] border-collapse text-left text-sm">
+          <thead className="sticky top-0 z-10 bg-slate-100 text-[11px] font-semibold uppercase tracking-wide text-slate-600 [&_th]:border-b [&_th]:border-slate-200">
+            <tr>
+              <th className="px-3 py-2">Time</th>
+              <th className="px-3 py-2">Action</th>
+              <th className="px-3 py-2">Changed By</th>
+              <th className="px-3 py-2">Row</th>
+              <th className="px-3 py-2">Field</th>
+              <th className="px-3 py-2">Old Value</th>
+              <th className="px-3 py-2">New Value</th>
+            </tr>
+          </thead>
+          <tbody>
+            {logs.length ? logs.map((log) => (
+              <tr className="border-b border-slate-100 last:border-b-0" key={log.id}>
+                <td className="px-3 py-2 text-xs font-bold text-slate-500">{formatAuditTime(log.createdAt)}</td>
+                <td className="px-3 py-2 font-black text-slate-900">{formatAuditAction(log.action)}</td>
+                <td className="px-3 py-2 font-bold text-slate-700">{log.actorName || "-"}</td>
+                <td className="px-3 py-2 font-bold text-slate-700">{rowNumber(log)}</td>
+                <td className="px-3 py-2 font-semibold text-slate-700">{log.field || "-"}</td>
+                <td className="max-w-[280px] whitespace-normal px-3 py-2 font-semibold leading-5 text-slate-500" title={log.oldValue || ""}>{log.oldValue || "-"}</td>
+                <td className="max-w-[280px] whitespace-normal px-3 py-2 font-semibold leading-5 text-slate-900" title={log.newValue || ""}>{log.newValue || "-"}</td>
+              </tr>
+            )) : (
+              <tr>
+                <td className="px-4 py-8 text-center font-bold text-slate-500" colSpan={7}>No TaskLine edit history yet.</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function Summary({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-md border border-slate-200 bg-white px-3 py-2">
+      <p className="text-[10px] uppercase tracking-[0.14em] text-slate-500">{label}</p>
+      <p className="mt-1 truncate text-sm text-slate-950">{value}</p>
+    </div>
+  );
+}
+
+function buttonClass(tone: "dark" | "light" | "primary") {
+  const base = "inline-flex h-11 items-center justify-center gap-2 rounded-md px-4 text-sm font-black transition disabled:cursor-not-allowed disabled:opacity-50";
+  if (tone === "primary") {
+    return `${base} bg-navy-700 text-white hover:bg-navy-800`;
+  }
+  if (tone === "dark") {
+    return `${base} bg-navy-700 text-white hover:bg-navy-800`;
+  }
+
+  return `${base} border border-slate-200 bg-white text-slate-800 hover:bg-slate-50`;
+}
+
+function createEmptyRow(id: string): TaskLineRow {
+  return taskLineColumns.reduce<TaskLineRow>(
+    (row, column) => {
+      row[column.key] = "";
+      return row;
+    },
+    { __id: id }
+  );
+}
+
+function rowFromImport(rawRow: Record<string, unknown>) {
+  return taskLineColumns.reduce<TaskLineRow>(
+    (row, column) => {
+      const value = rawRow[column.label];
+      row[column.key] = column.type === "date" ? normalizeTaskLineDateInput(value) : text(value);
+      return row;
+    },
+    { __id: `import-${crypto.randomUUID()}` }
+  );
+}
+
+function normalizeTaskLineDateInput(value: unknown) {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return toDisplayDate(value);
+  }
+
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return excelSerialDateToDisplay(value);
+  }
+
+  const rawValue = text(value);
+
+  if (!rawValue) {
+    return "";
+  }
+
+  const excelSerial = Number(rawValue);
+
+  if (/^\d{4,6}(\.0+)?$/.test(rawValue) && Number.isFinite(excelSerial)) {
+    return excelSerialDateToDisplay(excelSerial);
+  }
+
+  const dayMonthYear = rawValue.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{2}|\d{4})$/);
+
+  if (dayMonthYear) {
+    const day = Number(dayMonthYear[1]);
+    const month = Number(dayMonthYear[2]);
+    const year = Number(dayMonthYear[3].length === 2 ? `20${dayMonthYear[3]}` : dayMonthYear[3]);
+    return makeDisplayDate(year, month, day);
+  }
+
+  const yearMonthDay = rawValue.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
+
+  if (yearMonthDay) {
+    return makeDisplayDate(Number(yearMonthDay[1]), Number(yearMonthDay[2]), Number(yearMonthDay[3]));
+  }
+
+  const parsed = new Date(rawValue);
+  return Number.isNaN(parsed.getTime()) ? rawValue : toDisplayDate(parsed);
+}
+
+function excelSerialDateToDisplay(value: number) {
+  const date = new Date(Date.UTC(1899, 11, 30));
+  date.setUTCDate(date.getUTCDate() + Math.floor(value));
+  return toDisplayDate(date);
+}
+
+function makeDisplayDate(year: number, month: number, day: number) {
+  const date = new Date(Date.UTC(year, month - 1, day));
+
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) {
+    return "";
+  }
+
+  return toDisplayDate(date);
+}
+
+function toDisplayDate(value: Date) {
+  return `${pad2(value.getUTCDate())}-${pad2(value.getUTCMonth() + 1)}-${value.getUTCFullYear()}`;
+}
+
+function pad2(value: number) {
+  return String(value).padStart(2, "0");
+}
+
+async function postTaskLineImportBatch(importRows: TaskLineRow[]) {
+  const response = await fetch("/api/taskline", {
+    body: JSON.stringify({ action: "import", importRows, returnRows: false }),
+    headers: { "Content-Type": "application/json" },
+    method: "POST"
+  });
+  const result = (await response.json().catch(() => ({}))) as {
+    error?: string;
+    summary?: { added: number; deleted: number; updated: number };
+  };
+
+  if (!response.ok) {
+    throw new Error(result.error ?? `Could not import TaskLine rows. Server returned ${response.status}.`);
+  }
+
+  return result;
+}
+
+function hasTaskLineValue(row: TaskLineRow) {
+  return taskLineColumns.some((column) => column.key !== "serial_no" && text(row[column.key]).trim());
+}
+
+function getRowLabel(row: TaskLineRow | undefined, rows: TaskLineRow[]) {
+  if (!row) {
+    return "";
+  }
+
+  const serialNumber = rows.findIndex((item) => item.__id === row.__id) + 1;
+  const name = text(row.name || row.task || row.entity);
+  return [serialNumber ? `#${serialNumber}` : "", name].filter(Boolean).join(" - ");
+}
+
+function getChangedFields(oldRow: TaskLineRow | undefined, nextRow: TaskLineRow) {
+  if (!oldRow) {
+    return ["Row saved"];
+  }
+
+  return taskLineColumns
+    .filter((column) => text(oldRow[column.key]) !== text(nextRow[column.key]))
+    .map((column) => column.label);
+}
+
+function toDisplayRow(row: TaskLineRow) {
+  return taskLineColumns.reduce<Record<string, string>>((result, column) => {
+    result[column.label] = row[column.key] ?? "";
+    return result;
+  }, {});
+}
+
+function formatAuditAction(action: string) {
+  return action.replace("taskline.", "").replace(/_/g, " ");
+}
+
+function formatAuditTime(value: string) {
+  return new Intl.DateTimeFormat("en-IN", {
+    dateStyle: "medium",
+    timeStyle: "short"
+  }).format(new Date(value));
+}
+
+function formatServerAuditLog(log: Record<string, unknown>): TaskLineAuditLog {
+  const oldValue = readAuditValue(log.old_value);
+  const newValue = readAuditValue(log.new_value);
+  const change = summarizeAuditChange(oldValue, newValue);
+
+  return {
+    action: text(log.action),
+    actorName: text(log.actor_name),
+    createdAt: text(log.created_at),
+    entityId: text(log.entity_id) || readAuditId(log.old_value) || readAuditId(log.new_value),
+    field: change.field,
+    id: text(log.id) || crypto.randomUUID(),
+    newValue: change.newValue,
+    oldValue: change.oldValue,
+    rowLabel: getAuditRowLabel(oldValue || newValue)
+  };
+}
+
+function readAuditId(value: unknown) {
+  if (value && typeof value === "object" && "id" in value) {
+    return text((value as { id?: unknown }).id);
+  }
+  return "";
+}
+
+function summarizeAuditChange(oldValue: TaskLineRow | null, newValue: TaskLineRow | null) {
+  const summarySource = newValue ?? oldValue;
+  if (summarySource && ("added" in summarySource || "updated" in summarySource || "deleted" in summarySource)) {
+    return { field: "Import", newValue: summarizeAuditValue(newValue), oldValue: summarizeAuditValue(oldValue) };
+  }
+
+  if (oldValue && newValue) {
+    const changed = taskLineColumns.filter((column) => text(oldValue[column.key]) !== text(newValue[column.key]));
+    if (!changed.length) {
+      return { field: "-", newValue: "-", oldValue: "-" };
+    }
+    return {
+      field: changed.map((column) => column.label).join(", "),
+      newValue: changed.map((column) => text(newValue[column.key]) || "-").join("; "),
+      oldValue: changed.map((column) => text(oldValue[column.key]) || "-").join("; ")
+    };
+  }
+
+  if (newValue) {
+    return { field: "New row", newValue: getAuditRowLabel(newValue) || "New row", oldValue: "-" };
+  }
+
+  if (oldValue) {
+    return { field: "Deleted row", newValue: "-", oldValue: getAuditRowLabel(oldValue) || "Deleted row" };
+  }
+
+  return { field: "-", newValue: "-", oldValue: "-" };
+}
+
+function readAuditValue(value: unknown) {
+  if (!value || typeof value !== "object") {
     return null;
   }
 
@@ -1027,4 +2777,3 @@ function ToolbarMenuItem({
     </button>
   );
 }
-
