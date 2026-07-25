@@ -34,6 +34,75 @@ textarea {
   font: inherit;
 }
 
+/* Consistent, compact scrollbars for data tables and other scrollable panels. */
+:where(.overflow-auto, .overflow-x-auto, .overflow-y-auto) {
+  scrollbar-color: rgba(32, 59, 120, 0.42) transparent;
+  scrollbar-width: thin;
+}
+
+:where(.overflow-auto, .overflow-x-auto, .overflow-y-auto)::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+
+:where(.overflow-auto, .overflow-x-auto, .overflow-y-auto)::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+:where(.overflow-auto, .overflow-x-auto, .overflow-y-auto)::-webkit-scrollbar-thumb {
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: rgba(32, 59, 120, 0.42);
+  background-clip: padding-box;
+}
+
+.wl-sidebar-scroll {
+  scrollbar-color: transparent transparent;
+  scrollbar-width: thin;
+}
+
+.wl-sidebar-scroll::-webkit-scrollbar {
+  width: 5px;
+}
+
+.wl-sidebar-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.wl-sidebar-scroll::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: transparent;
+}
+
+.wl-sidebar-scroll:hover {
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+}
+
+.wl-sidebar-scroll:hover::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+/* Keep native selects visually aligned with the WorkLine design system. */
+select {
+  border-radius: 0.375rem;
+  color-scheme: light;
+  font-family: inherit;
+}
+
+select option {
+  background: #ffffff;
+  color: #0f172a;
+  font-family: inherit;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  padding: 0.5rem 0.75rem;
+}
+
+select option:checked {
+  background: linear-gradient(#203b78, #203b78);
+  color: #ffffff;
+}
+
 a {
   color: inherit;
   text-decoration: none;
