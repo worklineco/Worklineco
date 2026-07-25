@@ -101,22 +101,23 @@ export async function GET(request: Request) {
   }
 
   const access = getAccess(auth.user);
+  const view = new URL(request.url).searchParams.get("view");
 
-  if (new URL(request.url).searchParams.get("view") === "calendar") {
+  if (view === "calendar") {
     return loadCalendarEvents(admin, organisation.organisationId, auth.user, access);
   }
 
-  const [records, auditLogs] = await Promise.all([
-    loadTaskLineRecords(admin, organisation.organisationId, access),
-    loadAuditLogs(admin, organisation.organisationId, access)
-  ]);
+  if (view === "audit") {
+    return NextResponse.json({ auditLogs: await loadAuditLogs(admin, organisation.organisationId, access) });
+  }
+
+  const records = await loadTaskLineRecords(admin, organisation.organisationId, access);
 
   if (records.error) {
     return NextResponse.json({ error: records.error.message }, { status: 500 });
   }
 
   return NextResponse.json({
-    auditLogs,
     rows: (records.data ?? []).map(formatRecord)
   });
 }
@@ -549,6 +550,7 @@ async function loadTaskLineRecords(admin: ReturnType<typeof createAdminClient>, 
       .from("tasks")
       .select("id,organisation_id,title,description,due_at,custom_values,created_by,created_at,updated_at")
       .eq("organisation_id", organisationId)
+      .eq("custom_values->>workline_module", moduleKey)
       .order("created_at", { ascending: true })
       .range(from, to);
 
