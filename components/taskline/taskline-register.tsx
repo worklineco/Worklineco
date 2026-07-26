@@ -5,7 +5,7 @@ import type { ComponentType } from "react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import * as XLSX from "xlsx-js-style";
-import { getCached, setCached } from "@/lib/data-cache";
+import { clearCached, getCached, setCached } from "@/lib/data-cache";
 
 type TaskLineColumn = {
   key: string;
@@ -34,7 +34,8 @@ const taskLineImportBatchSize = 250;
 const taskLineImportConcurrency = 3;
 const bulkDeleteLimit = 10;
 const taskLinePageSize = 200;
-const taskLineRowsCacheKey = "taskline:rows:v2";
+const taskLineWindowSize = taskLinePageSize * 2;
+const taskLineRowsCacheKey = "taskline:rows:v3";
 const taskLineColumnLayoutStorageKey = "workline:taskline-column-layout:v2";
 const selectionColumnWidth = 40;
 const actionColumnWidth = 112;
@@ -131,6 +132,7 @@ export function TaskLineRegister() {
   const [openFilterKey, setOpenFilterKey] = useState<string | null>(null);
   const [filterDraft, setFilterDraft] = useState<string[]>([]);
   const [filterSearch, setFilterSearch] = useState("");
+  const [openColumnOptions, setOpenColumnOptions] = useState<string[]>([]);
   const [filterMenuPos, setFilterMenuPos] = useState<{ left: number; maxHeight: number; top: number } | null>(null);
   const [dueColorFilter, setDueColorFilter] = useState<string[]>([]);
   const [columnOrder, setColumnOrder] = useState(() => getSavedTaskLineColumnLayout().order);
@@ -144,6 +146,9 @@ export function TaskLineRegister() {
   const [message, setMessage] = useState("");
   const [editingRowId, setEditingRowId] = useState<string | null>(null);
   const [rows, setRows] = useState<TaskLineRow[]>([]);
+  const [totalRowCount, setTotalRowCount] = useState(0);
+  const [windowOffset, setWindowOffset] = useState(0);
+  const [isFullDatasetLoaded, setIsFullDatasetLoaded] = useState(false);
   const [selectedRowIds, setSelectedRowIds] = useState<Set<string>>(new Set());
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
   const [search, setSearch] = useState("");
@@ -166,6 +171,13 @@ export function TaskLineRegister() {
   const [entityMasters, setEntityMasters] = useState<EntityMasterOption[]>([]);
   const rowsRef = useRef<TaskLineRow[]>([]);
   const auditLoadedRef = useRef(false);
+  const taskLineRequestIdRef = useRef(0);
+  const fullDatasetLoadingRef = useRef<Promise<TaskLineRow[]> | null>(null);
+  const fullRowsCacheRef = useRef<TaskLineRow[] | null>(null);
+  const taskMastersRequestedRef = useRef(false);
+  const stageMastersRequestedRef = useRef(false);
+  const teamMembersRequestedRef = useRef(false);
+  const entityMastersRequestedRef = useRef(false);
   const entityGroupByName = useMemo(
     () => new Map(entityMasters.map((option) => [normalizeOptionKey(option.entity), option.group])),
     [entityMasters]
@@ -244,77 +256,50 @@ export function TaskLineRegister() {
   function frozenInfo(key: string) {
     return { isFrozen: frozenColumnKeys.has(key), left: frozenLefts.get(key) ?? 0 };
   }
-  const filteredRows = useMemo(() => {
-    const query = search.trim().toLowerCase();
-
-    const result = rows.filter((row) => {
-      const matchesSearch = !query || taskLineColumns.some((column) => text(row[column.key]).toLowerCase().includes(query));
-      const matchesStatus = !statusFilter || row.status_open_close === statusFilter;
-      const matchesColumnFilters = visibleColumns.every((column) => {
-        const filter = text(columnFilters[column.key]).trim().toLowerCase();
-        return !filter || text(row[column.key]).toLowerCase().includes(filter);
-      });
-      const matchesValueFilters = visibleColumns.every((column) => {
-        const selected = valueFilters[column.key];
-        return !selected || selected.includes(text(row[column.key]));
-      });
-      const matchesDueColor = !dueColorFilter.length || dueColorFilter.includes(dueDateCategory(text(row.due_date)));
-
-      return matchesSearch && matchesStatus && matchesColumnFilters && matchesValueFilters && matchesDueColor;
-    });
-
-    if (sortState) {
-      const factor = sortState.dir === "asc" ? 1 : -1;
-      const sortType = taskLineColumnByKey.get(sortState.key)?.type;
-
-      return [...result].sort((first, second) => {
-        const rawA = text(first[sortState.key]);
-        const rawB = text(second[sortState.key]);
-
-        if (sortType === "date") {
-          const dateA = parseTaskLineDueDate(rawA);
-          const dateB = parseTaskLineDueDate(rawB);
-          if (!dateA && !dateB) return 0;
-          if (!dateA) return 1;
-          if (!dateB) return -1;
-          return factor * (dateA.getTime() - dateB.getTime());
-        }
-
-        if (sortType === "number" || sortType === "money") {
-          const numA = rawA === "" ? NaN : Number(rawA.replace(/[^0-9.-]/g, ""));
-          const numB = rawB === "" ? NaN : Number(rawB.replace(/[^0-9.-]/g, ""));
-          const validA = !Number.isNaN(numA);
-          const validB = !Number.isNaN(numB);
-          if (!validA && !validB) return 0;
-          if (!validA) return 1;
-          if (!validB) return -1;
-          return factor * (numA - numB);
-        }
-
-        return factor * rawA.localeCompare(rawB, undefined, { numeric: true });
-      });
-    }
-
-    return result;
-  }, [columnFilters, dueColorFilter, rows, search, sortState, statusFilter, valueFilters, visibleColumns]);
+  const filteredRows = useMemo(
+    () => filterAndSortTaskLineRows(rows, visibleColumns, {
+      columnFilters,
+      dueColorFilter,
+      search,
+      sortState,
+      statusFilter,
+      valueFilters
+    }),
+    [columnFilters, dueColorFilter, rows, search, sortState, statusFilter, valueFilters, visibleColumns]
+  );
   const hasActiveColumnFilters = Object.values(columnFilters).some((value) => value.trim());
-  const pageCount = Math.max(1, Math.ceil(filteredRows.length / taskLinePageSize));
+  const hasActiveDataQuery = Boolean(
+    search.trim() ||
+    statusFilter ||
+    sortState ||
+    hasActiveColumnFilters ||
+    dueColorFilter.length ||
+    Object.values(valueFilters).some((values) => values.length)
+  );
+  const pageCount = Math.max(1, Math.ceil((hasActiveDataQuery ? filteredRows.length : totalRowCount) / taskLinePageSize));
   const pagedRows = useMemo(() => {
-    const startIndex = (tablePage - 1) * taskLinePageSize;
+    const startIndex = isFullDatasetLoaded || hasActiveDataQuery
+      ? (tablePage - 1) * taskLinePageSize
+      : (tablePage - 1) * taskLinePageSize - windowOffset;
     return filteredRows.slice(startIndex, startIndex + taskLinePageSize);
-  }, [filteredRows, tablePage]);
+  }, [filteredRows, hasActiveDataQuery, isFullDatasetLoaded, tablePage, windowOffset]);
   const selectedPageCount = pagedRows.filter((row) => selectedRowIds.has(row.__id)).length;
   const allPageRowsSelected = pagedRows.length > 0 && selectedPageCount === pagedRows.length;
 
-  const dataHydratedRef = useRef(false);
+  useEffect(() => {
+    void loadTaskLineWindow(0);
+  }, []);
 
   useEffect(() => {
-    void loadTaskLine();
-    void loadMasters();
-    void loadStageMasters();
-    void loadTeamMembers();
-    void loadEntityMasters();
-  }, []);
+    if (hasActiveDataQuery && !isFullDatasetLoaded) {
+      void loadFullTaskLine();
+    } else if (!hasActiveDataQuery && isFullDatasetLoaded) {
+      setTablePage(1);
+      void loadTaskLineWindow(0);
+    }
+    // Querying the complete dataset is intentionally deferred until a global filter or sort is used.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasActiveDataQuery, isFullDatasetLoaded]);
 
   useEffect(() => {
     rowsRef.current = rows;
@@ -340,50 +325,78 @@ export function TaskLineRegister() {
   }, [columnFilters, dueColorFilter, search, sortState, statusFilter, valueFilters]);
 
   useEffect(() => {
-    setTablePage((currentPage) => Math.min(currentPage, pageCount));
-  }, [pageCount]);
+    const nextPage = Math.min(tablePage, pageCount);
+    if (nextPage === tablePage) return;
 
-  function uniqueValuesForColumn(key: string) {
+    setTablePage(nextPage);
+    if (!hasActiveDataQuery && !isFullDatasetLoaded) {
+      const nextOffset = Math.floor((nextPage - 1) / 2) * taskLineWindowSize;
+      if (nextOffset !== windowOffset) {
+        void loadTaskLineWindow(nextOffset, false);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasActiveDataQuery, isFullDatasetLoaded, pageCount, tablePage, windowOffset]);
+
+  function uniqueValuesForColumn(key: string, sourceRows = rows) {
     const values = new Set<string>();
-    for (const row of rows) {
+    for (const row of sourceRows) {
       values.add(text(row[key]));
     }
     return Array.from(values).sort((first, second) => first.localeCompare(second, undefined, { numeric: true }));
   }
 
-  const openColumnOptions = useMemo(
-    () => (openFilterKey ? uniqueValuesForColumn(openFilterKey) : []),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [openFilterKey, rows]
-  );
   const visibleFilterOptions = useMemo(() => {
     const query = filterSearch.trim().toLowerCase();
     return query ? openColumnOptions.filter((value) => value.toLowerCase().includes(query)) : openColumnOptions;
   }, [openColumnOptions, filterSearch]);
 
-  function openColumnFilter(key: string, anchor: HTMLElement) {
-    const options = uniqueValuesForColumn(key);
-    setOpenFilterKey(key);
-    setFilterSearch("");
-    setFilterDraft(valueFilters[key] ? [...valueFilters[key]] : options);
+  async function openColumnFilter(key: string, anchor: HTMLElement) {
     const rect = anchor.getBoundingClientRect();
     const width = 288;
     const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
     const top = rect.bottom + 4;
     const maxHeight = Math.max(240, window.innerHeight - top - 16);
+    let sourceRows = rows;
+
+    if (fullRowsCacheRef.current) {
+      sourceRows = fullRowsCacheRef.current;
+    } else if (!isFullDatasetLoaded) {
+      setMessage("Loading all TaskLine filter values...");
+      try {
+        const response = await fetch("/api/taskline?all=1", { cache: "no-store" });
+        const result = (await response.json()) as { error?: string; rows?: TaskLineRow[] };
+        if (!response.ok) {
+          setMessage(result.error ?? "Could not load TaskLine filter values.");
+          return;
+        }
+        sourceRows = result.rows ?? [];
+        fullRowsCacheRef.current = sourceRows;
+        setMessage("");
+      } catch {
+        setMessage("Could not load TaskLine filter values.");
+        return;
+      }
+    }
+
+    const options = uniqueValuesForColumn(key, sourceRows);
+    setOpenFilterKey(key);
+    setOpenColumnOptions(options);
+    setFilterSearch("");
+    setFilterDraft(valueFilters[key] ? [...valueFilters[key]] : options);
     setFilterMenuPos({ left, maxHeight, top });
   }
 
   function closeColumnFilter() {
     setOpenFilterKey(null);
+    setOpenColumnOptions([]);
     setFilterMenuPos(null);
   }
 
   function applyColumnFilter(key: string) {
-    const options = uniqueValuesForColumn(key);
     setValueFilters((current) => {
       const next = { ...current };
-      if (filterDraft.length >= options.length) {
+      if (filterDraft.length >= openColumnOptions.length) {
         delete next[key];
       } else {
         next[key] = [...filterDraft];
@@ -441,16 +454,20 @@ export function TaskLineRegister() {
   }
 
   async function loadMasters() {
+    if (taskMastersRequestedRef.current) return;
+    taskMastersRequestedRef.current = true;
     try {
       const response = await fetch("/api/taskline/masters", { cache: "no-store" });
       const result = (await response.json()) as { error?: string; masters?: { id: string; name: string }[] };
       if (!response.ok) {
+        taskMastersRequestedRef.current = false;
         setMasterMessage(result.error ?? "Could not load task master list.");
         return;
       }
       setTaskMasters(result.masters ?? []);
       setMasterMessage("");
     } catch {
+      taskMastersRequestedRef.current = false;
       setMasterMessage("Could not load task master list.");
     }
   }
@@ -486,16 +503,20 @@ export function TaskLineRegister() {
   }
 
   async function loadStageMasters() {
+    if (stageMastersRequestedRef.current) return;
+    stageMastersRequestedRef.current = true;
     try {
       const response = await fetch("/api/taskline/masters?type=stage", { cache: "no-store" });
       const result = (await response.json()) as { error?: string; masters?: { id: string; name: string }[] };
       if (!response.ok) {
+        stageMastersRequestedRef.current = false;
         setStageMasterMessage(result.error ?? "Could not load stage master list.");
         return;
       }
       setStageMasters(result.masters ?? []);
       setStageMasterMessage("");
     } catch {
+      stageMastersRequestedRef.current = false;
       setStageMasterMessage("Could not load stage master list.");
     } finally {
       setStageMastersFetched(true);
@@ -546,10 +567,13 @@ export function TaskLineRegister() {
   }
 
   async function loadTeamMembers() {
+    if (teamMembersRequestedRef.current) return;
+    teamMembersRequestedRef.current = true;
     try {
       const response = await fetch("/api/teams", { cache: "no-store" });
       const result = (await response.json()) as { members?: { designation?: string; name?: string; team?: string }[] };
       if (!response.ok) {
+        teamMembersRequestedRef.current = false;
         return;
       }
       setTeamMembers(
@@ -560,15 +584,19 @@ export function TaskLineRegister() {
         }))
       );
     } catch {
+      teamMembersRequestedRef.current = false;
       // ignore; Name/Resource dropdowns fall back to any existing value
     }
   }
 
   async function loadEntityMasters() {
+    if (entityMastersRequestedRef.current) return;
+    entityMastersRequestedRef.current = true;
     try {
       const response = await fetch("/api/client-records/managed", { cache: "no-store" });
       const result = (await response.json()) as { rows?: Array<Record<string, unknown>> };
       if (!response.ok) {
+        entityMastersRequestedRef.current = false;
         return;
       }
 
@@ -585,43 +613,170 @@ export function TaskLineRegister() {
       }
       setEntityMasters(Array.from(optionsByName.values()).sort((a, b) => a.entity.localeCompare(b.entity, undefined, { numeric: true })));
     } catch {
+      entityMastersRequestedRef.current = false;
       // Existing values remain visible if the client master is temporarily unavailable.
     }
   }
 
-  async function loadTaskLine() {
-    const cached = !dataHydratedRef.current
-      ? getCached<{ rows?: TaskLineRow[] }>(taskLineRowsCacheKey)
+  function loadDropdownOptions(columnKey: string) {
+    if (columnKey === "entity") {
+      void loadEntityMasters();
+    } else if (columnKey === "name" || columnKey === "resource") {
+      void loadTeamMembers();
+    } else if (columnKey === "task") {
+      void loadMasters();
+    } else if (columnKey === "stage") {
+      void loadStageMasters();
+    }
+  }
+
+  function loadEditorOptions() {
+    void Promise.all([loadMasters(), loadStageMasters(), loadTeamMembers(), loadEntityMasters()]);
+  }
+
+  async function loadTaskLineWindow(offset: number, useCache = true) {
+    const normalizedOffset = Math.max(0, Math.floor(offset / taskLineWindowSize) * taskLineWindowSize);
+    const cacheKey = `${taskLineRowsCacheKey}:${normalizedOffset}`;
+    const requestId = ++taskLineRequestIdRef.current;
+    const cached = useCache
+      ? getCached<{ offset?: number; rows?: TaskLineRow[]; total?: number }>(cacheKey)
       : undefined;
-    dataHydratedRef.current = true;
 
     if (cached) {
       setRows(cached.rows ?? []);
+      setTotalRowCount(cached.total ?? cached.rows?.length ?? 0);
+      setWindowOffset(cached.offset ?? normalizedOffset);
+      setIsFullDatasetLoaded(false);
       setIsLoading(false);
     } else {
       setIsLoading(true);
     }
 
     try {
-      const response = await fetch("/api/taskline", { cache: "no-store" });
+      const response = await fetch(`/api/taskline?offset=${normalizedOffset}&limit=${taskLineWindowSize}`, { cache: "no-store" });
       const result = (await response.json()) as {
         error?: string;
+        offset?: number;
         rows?: TaskLineRow[];
+        total?: number;
       };
 
       if (!response.ok) {
-        setMessage(result.error ?? "Could not load TaskLine.");
-        return;
+        if (requestId === taskLineRequestIdRef.current) {
+          setMessage(result.error ?? "Could not load TaskLine.");
+        }
+        return cached?.rows ?? [];
       }
 
-      setCached(taskLineRowsCacheKey, { rows: result.rows });
-      setRows(result.rows ?? []);
+      if (requestId !== taskLineRequestIdRef.current) {
+        return result.rows ?? [];
+      }
+
+      const nextRows = result.rows ?? [];
+      const nextTotal = result.total ?? nextRows.length;
+      setCached(cacheKey, { offset: result.offset ?? normalizedOffset, rows: nextRows, total: nextTotal });
+      setRows(nextRows);
+      setTotalRowCount(nextTotal);
+      setWindowOffset(result.offset ?? normalizedOffset);
+      setIsFullDatasetLoaded(false);
+      setSelectedRowIds(new Set());
       setMessage("");
+      return nextRows;
     } catch (error) {
-      console.error("TaskLine load error:", error);
-      setMessage("Could not load TaskLine.");
+      console.error("TaskLine window load error:", error);
+      if (requestId === taskLineRequestIdRef.current) {
+        setMessage("Could not load TaskLine.");
+      }
+      return cached?.rows ?? [];
     } finally {
-      setIsLoading(false);
+      if (requestId === taskLineRequestIdRef.current) {
+        setIsLoading(false);
+      }
+    }
+  }
+
+  async function loadFullTaskLine() {
+    if (fullDatasetLoadingRef.current) {
+      return fullDatasetLoadingRef.current;
+    }
+
+    if (fullRowsCacheRef.current) {
+      const cachedRows = fullRowsCacheRef.current;
+      setRows(cachedRows);
+      setTotalRowCount(cachedRows.length);
+      setWindowOffset(0);
+      setIsFullDatasetLoaded(true);
+      setSelectedRowIds(new Set());
+      return cachedRows;
+    }
+
+    const request = (async () => {
+      const requestId = ++taskLineRequestIdRef.current;
+      setIsLoading(true);
+
+      try {
+        const response = await fetch("/api/taskline?all=1", { cache: "no-store" });
+        const result = (await response.json()) as { error?: string; rows?: TaskLineRow[] };
+
+        if (!response.ok) {
+          if (requestId === taskLineRequestIdRef.current) {
+            setMessage(result.error ?? "Could not load the complete TaskLine view.");
+          }
+          return [];
+        }
+
+        const nextRows = result.rows ?? [];
+        fullRowsCacheRef.current = nextRows;
+        if (requestId === taskLineRequestIdRef.current) {
+          setRows(nextRows);
+          setTotalRowCount(nextRows.length);
+          setWindowOffset(0);
+          setIsFullDatasetLoaded(true);
+          setSelectedRowIds(new Set());
+          setMessage("");
+        }
+        return nextRows;
+      } catch (error) {
+        console.error("TaskLine complete load error:", error);
+        if (requestId === taskLineRequestIdRef.current) {
+          setMessage("Could not load the complete TaskLine view.");
+        }
+        return [];
+      } finally {
+        if (requestId === taskLineRequestIdRef.current) {
+          setIsLoading(false);
+        }
+      }
+    })();
+
+    fullDatasetLoadingRef.current = request;
+    try {
+      return await request;
+    } finally {
+      fullDatasetLoadingRef.current = null;
+    }
+  }
+
+  async function reloadTaskLine() {
+    fullRowsCacheRef.current = null;
+    for (let offset = 0; offset < Math.max(totalRowCount, taskLineWindowSize); offset += taskLineWindowSize) {
+      clearCached(`${taskLineRowsCacheKey}:${offset}`);
+    }
+    if (hasActiveDataQuery || isFullDatasetLoaded) {
+      return loadFullTaskLine();
+    }
+
+    const offset = Math.floor((tablePage - 1) / 2) * taskLineWindowSize;
+    return loadTaskLineWindow(offset, false);
+  }
+
+  function goToPage(nextPage: number) {
+    const boundedPage = Math.max(1, Math.min(pageCount, nextPage));
+    const nextOffset = Math.floor((boundedPage - 1) / 2) * taskLineWindowSize;
+    setTablePage(boundedPage);
+
+    if (!hasActiveDataQuery && !isFullDatasetLoaded && nextOffset !== windowOffset) {
+      void loadTaskLineWindow(nextOffset);
     }
   }
 
@@ -651,11 +806,13 @@ export function TaskLineRegister() {
   }
 
   function addRow() {
+    loadEditorOptions();
     setEditingRowId(null);
     setFormDraft(createEmptyRow(`draft-${crypto.randomUUID()}`));
   }
 
   function openEditForm(row: TaskLineRow) {
+    loadEditorOptions();
     setEditingRowId(row.__id);
     setFormDraft({ ...row });
   }
@@ -700,7 +857,7 @@ export function TaskLineRegister() {
         setMessage("TaskLine row added.");
       }
 
-      await loadTaskLine();
+      await reloadTaskLine();
     } catch (error) {
       console.error("TaskLine save error:", error);
       setMessage("Could not save TaskLine row.");
@@ -783,7 +940,7 @@ export function TaskLineRegister() {
 
       setRows((current) => current.filter((item) => item.__id !== row.__id));
       addAuditLog({ action: "taskline.delete_row", entityId: row.__id, oldValue: getAuditRowLabel(row), rowLabel: getRowLabel(row, rows) });
-      await loadTaskLine();
+      await reloadTaskLine();
       setMessage("TaskLine row deleted.");
     } catch (error) {
       console.error("TaskLine delete error:", error);
@@ -838,7 +995,7 @@ export function TaskLineRegister() {
       const deletedIds = new Set(recordIds);
       setRows((current) => current.filter((row) => !deletedIds.has(row.__id)));
       setSelectedRowIds(new Set());
-      await loadTaskLine();
+      await reloadTaskLine();
       setMessage(`${result.deleted ?? recordIds.length} selected TaskLine task${(result.deleted ?? recordIds.length) === 1 ? "" : "s"} deleted.`);
     } catch (error) {
       console.error("TaskLine bulk delete error:", error);
@@ -869,8 +1026,37 @@ export function TaskLineRegister() {
     addAuditLog({ action: "taskline.download_template", newValue: "Downloaded import template" });
   }
 
-  function exportView() {
-    const exportRows = filteredRows.map((row, index) =>
+  async function exportView() {
+    setMessage("Preparing TaskLine export...");
+    let sourceRows = rows;
+
+    if (fullRowsCacheRef.current) {
+      sourceRows = fullRowsCacheRef.current;
+    } else if (!isFullDatasetLoaded) {
+      try {
+        const response = await fetch("/api/taskline?all=1", { cache: "no-store" });
+        const result = (await response.json()) as { error?: string; rows?: TaskLineRow[] };
+        if (!response.ok) {
+          setMessage(result.error ?? "Could not prepare TaskLine export.");
+          return;
+        }
+        sourceRows = result.rows ?? [];
+        fullRowsCacheRef.current = sourceRows;
+      } catch {
+        setMessage("Could not prepare TaskLine export.");
+        return;
+      }
+    }
+
+    const exportSourceRows = filterAndSortTaskLineRows(sourceRows, visibleColumns, {
+      columnFilters,
+      dueColorFilter,
+      search,
+      sortState,
+      statusFilter,
+      valueFilters
+    });
+    const exportRows = exportSourceRows.map((row, index) =>
       taskLineColumns.reduce<Record<string, string | number>>(
         (result, column) => {
           result[column.label] = column.key === "serial_no" ? index + 1 : row[column.key] ?? "";
@@ -916,9 +1102,10 @@ export function TaskLineRegister() {
           const importAction = text(rawRow[importActionColumn] || "Add");
           const serialNumber = text(rawRow["S. No."] || rawRow["S.No."] || rawRow["Serial No."]);
           const serialIndex = Number.parseInt(serialNumber, 10) - 1;
+          const localSerialIndex = isFullDatasetLoaded || hasActiveDataQuery ? serialIndex : serialIndex - windowOffset;
           const targetId = importAction.toLowerCase() === "add" || !Number.isInteger(serialIndex) || serialIndex < 0
             ? ""
-            : text(filteredRows[serialIndex]?.__id);
+            : text((isFullDatasetLoaded || hasActiveDataQuery ? filteredRows : rows)[localSerialIndex]?.__id);
           return {
             ...rowFromImport(rawRow),
             import_action: importAction,
@@ -953,7 +1140,7 @@ export function TaskLineRegister() {
         setMessage(`Importing ${file.name}: ${processed} of ${importRows.length} rows processed...`);
       }
 
-      await loadTaskLine();
+      await reloadTaskLine();
       setMessage(`Imported ${file.name}: ${summary.added} added, ${summary.updated} updated, ${summary.deleted} deleted.`);
     } catch (error) {
       console.error("TaskLine import error:", error);
@@ -978,7 +1165,9 @@ export function TaskLineRegister() {
         <div className="shrink-0">
           <h2 className="text-lg font-black leading-tight text-slate-950">Task Register</h2>
           <p className="text-xs font-bold text-slate-500">
-            {filteredRows.length.toLocaleString()} of {rows.length.toLocaleString()} rows{hasActiveColumnFilters || search || statusFilter ? " (filtered)" : ""}
+            {hasActiveDataQuery
+              ? `${filteredRows.length.toLocaleString()} of ${totalRowCount.toLocaleString()} rows (filtered)`
+              : `${totalRowCount.toLocaleString()} rows · ${rows.length.toLocaleString()} loaded`}
           </p>
         </div>
 
@@ -1028,12 +1217,12 @@ export function TaskLineRegister() {
                 </button>
                 {isMasterSubmenuOpen ? (
                   <div className="border-y border-slate-100 bg-slate-50 pl-3">
-                    <ToolbarMenuItem icon={ListChecks} label="Task Master" onClick={() => { setIsToolbarMenuOpen(false); setIsMasterSubmenuOpen(false); setMasterKind("task"); setIsMasterOpen(true); }} />
-                    <ToolbarMenuItem icon={CircleDot} label="Stage Master" onClick={() => { setIsToolbarMenuOpen(false); setIsMasterSubmenuOpen(false); setMasterKind("stage"); setIsMasterOpen(true); }} />
+                    <ToolbarMenuItem icon={ListChecks} label="Task Master" onClick={() => { setIsToolbarMenuOpen(false); setIsMasterSubmenuOpen(false); setMasterKind("task"); setIsMasterOpen(true); void loadMasters(); }} />
+                    <ToolbarMenuItem icon={CircleDot} label="Stage Master" onClick={() => { setIsToolbarMenuOpen(false); setIsMasterSubmenuOpen(false); setMasterKind("stage"); setIsMasterOpen(true); void loadStageMasters(); }} />
                   </div>
                 ) : null}
                 <ToolbarMenuItem icon={Settings2} label="Columns" onClick={() => { setIsToolbarMenuOpen(false); setIsColumnOptionsOpen(true); }} />
-                <ToolbarMenuItem icon={Download} label="Export view" onClick={() => { setIsToolbarMenuOpen(false); exportView(); }} />
+                <ToolbarMenuItem icon={Download} label="Export view" onClick={() => { setIsToolbarMenuOpen(false); void exportView(); }} />
                 <ToolbarMenuItem icon={Download} label="Download template" onClick={() => { setIsToolbarMenuOpen(false); downloadTemplate(); }} />
                 <ToolbarMenuItem icon={Upload} label="Import" onClick={() => { setIsToolbarMenuOpen(false); fileInputRef.current?.click(); }} />
                 <ToolbarMenuItem icon={History} label={viewMode === "register" ? "Audit Trail" : "Back to Register"} onClick={() => { setIsToolbarMenuOpen(false); if (viewMode === "register") void showAuditTrail(); else setViewMode("register"); }} />
@@ -1099,7 +1288,7 @@ export function TaskLineRegister() {
           <button
             className="inline-flex h-8 items-center rounded-md border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 transition hover:bg-slate-50 disabled:opacity-40"
             disabled={tablePage <= 1 || isLoading}
-            onClick={() => setTablePage((currentPage) => Math.max(1, currentPage - 1))}
+            onClick={() => goToPage(tablePage - 1)}
             type="button"
           >
             Prev
@@ -1110,7 +1299,7 @@ export function TaskLineRegister() {
           <button
             className="inline-flex h-8 items-center rounded-md border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 transition hover:bg-slate-50 disabled:opacity-40"
             disabled={tablePage >= pageCount || isLoading}
-            onClick={() => setTablePage((currentPage) => Math.min(pageCount, currentPage + 1))}
+            onClick={() => goToPage(tablePage + 1)}
             type="button"
           >
             Next
@@ -1293,6 +1482,7 @@ export function TaskLineRegister() {
                         key={`${row.__id}-${column.key}`}
                         nameOptions={rowNameOptions}
                         onCellChange={updateRow}
+                        onDropdownOpen={loadDropdownOptions}
                         resourceOptions={rowResourceOptions}
                         row={row}
                         sectionOptions={sectionOptions}
@@ -1371,6 +1561,71 @@ export function TaskLineRegister() {
   );
 }
 
+function filterAndSortTaskLineRows(
+  sourceRows: TaskLineRow[],
+  visibleColumns: TaskLineColumn[],
+  options: {
+    columnFilters: Record<string, string>;
+    dueColorFilter: string[];
+    search: string;
+    sortState: { dir: "asc" | "desc"; key: string } | null;
+    statusFilter: string;
+    valueFilters: Record<string, string[]>;
+  }
+) {
+  const query = options.search.trim().toLowerCase();
+  const result = sourceRows.filter((row) => {
+    const matchesSearch = !query || taskLineColumns.some((column) => text(row[column.key]).toLowerCase().includes(query));
+    const matchesStatus = !options.statusFilter || row.status_open_close === options.statusFilter;
+    const matchesColumnFilters = visibleColumns.every((column) => {
+      const filter = text(options.columnFilters[column.key]).trim().toLowerCase();
+      return !filter || text(row[column.key]).toLowerCase().includes(filter);
+    });
+    const matchesValueFilters = visibleColumns.every((column) => {
+      const selected = options.valueFilters[column.key];
+      return !selected || selected.includes(text(row[column.key]));
+    });
+    const matchesDueColor = !options.dueColorFilter.length || options.dueColorFilter.includes(dueDateCategory(text(row.due_date)));
+
+    return matchesSearch && matchesStatus && matchesColumnFilters && matchesValueFilters && matchesDueColor;
+  });
+
+  if (!options.sortState) {
+    return result;
+  }
+
+  const factor = options.sortState.dir === "asc" ? 1 : -1;
+  const sortKey = options.sortState.key;
+  const sortType = taskLineColumnByKey.get(sortKey)?.type;
+
+  return [...result].sort((first, second) => {
+    const rawA = text(first[sortKey]);
+    const rawB = text(second[sortKey]);
+
+    if (sortType === "date") {
+      const dateA = parseTaskLineDueDate(rawA);
+      const dateB = parseTaskLineDueDate(rawB);
+      if (!dateA && !dateB) return 0;
+      if (!dateA) return 1;
+      if (!dateB) return -1;
+      return factor * (dateA.getTime() - dateB.getTime());
+    }
+
+    if (sortType === "number" || sortType === "money") {
+      const numA = rawA === "" ? NaN : Number(rawA.replace(/[^0-9.-]/g, ""));
+      const numB = rawB === "" ? NaN : Number(rawB.replace(/[^0-9.-]/g, ""));
+      const validA = !Number.isNaN(numA);
+      const validB = !Number.isNaN(numB);
+      if (!validA && !validB) return 0;
+      if (!validA) return 1;
+      if (!validB) return -1;
+      return factor * (numA - numB);
+    }
+
+    return factor * rawA.localeCompare(rawB, undefined, { numeric: true });
+  });
+}
+
 const TaskLineCell = memo(function TaskLineCell({
   column,
   entityOptions,
@@ -1378,6 +1633,7 @@ const TaskLineCell = memo(function TaskLineCell({
   isFrozen,
   nameOptions,
   onCellChange,
+  onDropdownOpen,
   resourceOptions,
   row,
   sectionOptions,
@@ -1391,6 +1647,7 @@ const TaskLineCell = memo(function TaskLineCell({
   isFrozen: boolean;
   nameOptions: string[];
   onCellChange: (rowId: string, key: string, value: string) => void;
+  onDropdownOpen: (columnKey: string) => void;
   resourceOptions: string[];
   row: TaskLineRow;
   sectionOptions: string[];
@@ -1413,11 +1670,7 @@ const TaskLineCell = memo(function TaskLineCell({
     const current = row[column.key] ?? "";
     return (
       <td className={`border-r border-slate-100 px-3 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
-        <select className={compactSelectClass} onChange={(event) => onChange(event.target.value)} value={current}>
-          <option value="">Select team</option>
-          {teamOptions.map((team) => <option key={team} value={team}>{team}</option>)}
-          {current && !teamOptions.includes(current) ? <option hidden value={current}>{current}</option> : null}
-        </select>
+        <LazyTaskLineSelect current={current} onChange={onChange} options={teamOptions} placeholder="Select team" />
       </td>
     );
   }
@@ -1431,15 +1684,13 @@ const TaskLineCell = memo(function TaskLineCell({
         : sectionOptions;
     return (
       <td className={`border-r border-slate-100 px-3 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
-        <select
-          className={compactSelectClass}
-          onChange={(event) => onChange(event.target.value)}
-          value={current}
-        >
-          <option value="">{column.key === "section" ? "Select Section" : `Select ${column.label}`}</option>
-          {options.map((option) => <option key={option} value={option}>{option}</option>)}
-          {current && !options.includes(current) ? <option value={current}>{current}</option> : null}
-        </select>
+        <LazyTaskLineSelect
+          current={current}
+          onChange={onChange}
+          onOpen={() => onDropdownOpen(column.key)}
+          options={options}
+          placeholder={column.key === "section" ? "Select Section" : `Select ${column.label}`}
+        />
       </td>
     );
   }
@@ -1456,11 +1707,7 @@ const TaskLineCell = memo(function TaskLineCell({
     const current = row[column.key] ?? "";
     return (
       <td className={`border-r border-slate-100 px-3 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
-        <select className={compactSelectClass} onChange={(event) => onChange(event.target.value)} value={current}>
-          <option value="">Select period</option>
-          {financialPeriodOptions.map((period) => <option key={period} value={period}>{period}</option>)}
-          {current && !financialPeriodOptions.includes(current) ? <option hidden value={current}>{current}</option> : null}
-        </select>
+        <LazyTaskLineSelect current={current} onChange={onChange} options={financialPeriodOptions} placeholder="Select period" />
       </td>
     );
   }
@@ -1469,19 +1716,7 @@ const TaskLineCell = memo(function TaskLineCell({
     const current = row[column.key] ?? "";
     return (
       <td className={`border-r border-slate-100 px-3 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
-        <select
-          className={compactSelectClass}
-          onChange={(event) => onChange(event.target.value)}
-          value={current}
-        >
-          <option value="">Select</option>
-          {nameOptions.map((name) => (
-            <option key={name} value={name}>{name}</option>
-          ))}
-          {current && !nameOptions.includes(current) ? (
-            <option value={current}>{current}</option>
-          ) : null}
-        </select>
+        <LazyTaskLineSelect current={current} onChange={onChange} onOpen={() => onDropdownOpen(column.key)} options={nameOptions} placeholder="Select" />
       </td>
     );
   }
@@ -1490,19 +1725,7 @@ const TaskLineCell = memo(function TaskLineCell({
     const current = row[column.key] ?? "";
     return (
       <td className={`border-r border-slate-100 px-3 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
-        <select
-          className={compactSelectClass}
-          onChange={(event) => onChange(event.target.value)}
-          value={current}
-        >
-          <option value="">Select</option>
-          {resourceOptions.map((name) => (
-            <option key={name} value={name}>{name}</option>
-          ))}
-          {current && !resourceOptions.includes(current) ? (
-            <option value={current}>{current}</option>
-          ) : null}
-        </select>
+        <LazyTaskLineSelect current={current} onChange={onChange} onOpen={() => onDropdownOpen(column.key)} options={resourceOptions} placeholder="Select" />
       </td>
     );
   }
@@ -1511,19 +1734,7 @@ const TaskLineCell = memo(function TaskLineCell({
     const current = row[column.key] ?? "";
     return (
       <td className={`border-r border-slate-100 px-3 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
-        <select
-          className={compactSelectClass}
-          onChange={(event) => onChange(event.target.value)}
-          value={current}
-        >
-          <option value="">Select task</option>
-          {taskMasterNames.map((name) => (
-            <option key={name} value={name}>{name}</option>
-          ))}
-          {current && !taskMasterNames.includes(current) ? (
-            <option value={current}>{current} (not in master)</option>
-          ) : null}
-        </select>
+        <LazyTaskLineSelect current={current} onChange={onChange} onOpen={() => onDropdownOpen(column.key)} options={taskMasterNames} placeholder="Select task" />
       </td>
     );
   }
@@ -1532,19 +1743,7 @@ const TaskLineCell = memo(function TaskLineCell({
     const current = row[column.key] ?? "";
     return (
       <td className={`border-r border-slate-100 px-3 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
-        <select
-          className={compactSelectClass}
-          onChange={(event) => onChange(event.target.value)}
-          value={current}
-        >
-          <option value="">Select stage</option>
-          {stageMasterNames.map((name) => (
-            <option key={name} value={name}>{name}</option>
-          ))}
-          {current && !stageMasterNames.includes(current) ? (
-            <option value={current}>{current} (not in master)</option>
-          ) : null}
-        </select>
+        <LazyTaskLineSelect current={current} onChange={onChange} onOpen={() => onDropdownOpen(column.key)} options={stageMasterNames} placeholder="Select stage" />
       </td>
     );
   }
@@ -1552,16 +1751,7 @@ const TaskLineCell = memo(function TaskLineCell({
   if (column.type === "select") {
     return (
       <td className={`border-r border-slate-100 px-3 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
-        <select
-          className={compactSelectClass}
-          onChange={(event) => onChange(event.target.value)}
-          value={row[column.key] ?? ""}
-        >
-          <option value="">Select</option>
-          {statusOptions.map((option) => (
-            <option key={option} value={option}>{option}</option>
-          ))}
-        </select>
+        <LazyTaskLineSelect current={row[column.key] ?? ""} onChange={onChange} options={statusOptions} placeholder="Select" />
       </td>
     );
   }
@@ -1592,6 +1782,51 @@ const TaskLineCell = memo(function TaskLineCell({
     </td>
   );
 });
+
+function LazyTaskLineSelect({
+  current,
+  onChange,
+  onOpen,
+  options,
+  placeholder
+}: {
+  current: string;
+  onChange: (value: string) => void;
+  onOpen?: () => void;
+  options: readonly string[];
+  placeholder: string;
+}) {
+  const [isActive, setIsActive] = useState(false);
+
+  function activate() {
+    setIsActive(true);
+    onOpen?.();
+  }
+
+  return (
+    <select
+      className={compactSelectClass}
+      onBlur={() => setIsActive(false)}
+      onChange={(event) => {
+        onChange(event.target.value);
+        setIsActive(false);
+      }}
+      onFocus={activate}
+      onMouseDown={activate}
+      value={current}
+    >
+      {isActive ? (
+        <>
+          <option value="">{placeholder}</option>
+          {options.filter(Boolean).map((option) => <option key={option} value={option}>{option}</option>)}
+          {current && !options.includes(current) ? <option value={current}>{current}</option> : null}
+        </>
+      ) : (
+        <option value={current}>{current || placeholder}</option>
+      )}
+    </select>
+  );
+}
 
 function TaskLineForm({
   draft,
