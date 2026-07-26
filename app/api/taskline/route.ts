@@ -30,6 +30,14 @@ type AuditLog = {
   new_value: unknown;
   old_value: unknown;
 };
+type TaskNotification = {
+  due_date: string;
+  entity: string;
+  id: string;
+  kind: "assigned" | "due_tomorrow";
+  occurred_at: string;
+  task: string;
+};
 type AccessScope = {
   canViewAll: boolean;
   role: string;
@@ -104,6 +112,10 @@ export async function GET(request: Request) {
   const access = getAccess(auth.user);
   const searchParams = new URL(request.url).searchParams;
   const view = searchParams.get("view");
+
+  if (view === "notifications") {
+    return loadTaskLineNotifications(admin, organisation.organisationId, auth.user);
+  }
 
   if (view === "calendar") {
     return loadCalendarEvents(admin, organisation.organisationId, auth.user, access);
@@ -471,6 +483,117 @@ async function importRows(
   });
 }
 
+async function loadTaskLineNotifications(
+  admin: ReturnType<typeof createAdminClient>,
+  organisationId: string,
+  user: User
+) {
+  const identity = taskNotificationIdentity(user);
+
+  if (!identity.name) {
+    return NextResponse.json({ notifications: [] as TaskNotification[] });
+  }
+
+  const tomorrowKey = indiaDateKey(1);
+  const dayAfterTomorrowKey = indiaDateKey(2);
+  const assignmentLookback = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  const [dueTasks, assignmentLogs] = await Promise.all([
+    admin
+      .from("tasks")
+      .select("id,organisation_id,title,description,due_at,custom_values,created_by,created_at,updated_at")
+      .eq("organisation_id", organisationId)
+      .eq("custom_values->>workline_module", moduleKey)
+      .gte("due_at", `${tomorrowKey}T00:00:00.000Z`)
+      .lt("due_at", `${dayAfterTomorrowKey}T00:00:00.000Z`)
+      .order("due_at", { ascending: true }),
+    admin
+      .from("audit_logs")
+      .select("id,action,entity_id,old_value,new_value,created_at,actor_user_id")
+      .eq("organisation_id", organisationId)
+      .eq("entity_type", "taskline_record")
+      .in("action", ["taskline.create", "taskline.update"])
+      .gte("created_at", assignmentLookback)
+      .order("created_at", { ascending: false })
+      .limit(500)
+  ]);
+
+  if (dueTasks.error) {
+    return NextResponse.json({ error: dueTasks.error.message }, { status: 500 });
+  }
+
+  const candidateLogs = assignmentLogs.error
+    ? []
+    : ((assignmentLogs.data ?? []) as AuditLog[]).filter((log) => {
+        const previous = taskLineAuditData(log.old_value);
+        const next = taskLineAuditData(log.new_value);
+        return taskIsAssignedTo(next, identity) && !taskIsAssignedTo(previous, identity);
+      });
+  const candidateIds = Array.from(new Set(candidateLogs.map((log) => text(log.entity_id) || readId(log.new_value) || "").filter(Boolean)));
+  let currentAssignmentTasks: TaskRecord[] = [];
+
+  if (candidateIds.length) {
+    const currentTasks = await admin
+      .from("tasks")
+      .select("id,organisation_id,title,description,due_at,custom_values,created_by,created_at,updated_at")
+      .eq("organisation_id", organisationId)
+      .eq("custom_values->>workline_module", moduleKey)
+      .in("id", candidateIds);
+
+    if (!currentTasks.error) {
+      currentAssignmentTasks = (currentTasks.data ?? []) as TaskRecord[];
+    }
+  }
+
+  const currentTasksById = new Map(currentAssignmentTasks.map((record) => [record.id, record]));
+  const includedAssignmentTaskIds = new Set<string>();
+  const assignedNotifications: TaskNotification[] = [];
+
+  for (const log of candidateLogs) {
+    const recordId = text(log.entity_id) || readId(log.new_value) || "";
+    const record = currentTasksById.get(recordId);
+    const row = record?.custom_values?.taskline_data ?? {};
+
+    if (!record || includedAssignmentTaskIds.has(recordId) || !taskIsAssignedTo(row, identity) || taskLineIsClosed(row)) {
+      continue;
+    }
+
+    includedAssignmentTaskIds.add(recordId);
+    assignedNotifications.push({
+      due_date: normalizeDisplayDate(row.due_date),
+      entity: text(row.entity),
+      id: `assigned:${log.id}`,
+      kind: "assigned",
+      occurred_at: log.created_at,
+      task: text(row.task)
+    });
+
+    if (assignedNotifications.length >= 20) {
+      break;
+    }
+  }
+
+  const dueNotifications = ((dueTasks.data ?? []) as TaskRecord[])
+    .filter((record) => {
+      const row = record.custom_values?.taskline_data ?? {};
+      return isTaskLineRecord(record) && taskIsAssignedTo(row, identity) && !taskLineIsClosed(row);
+    })
+    .map<TaskNotification>((record) => {
+      const row = record.custom_values?.taskline_data ?? {};
+      return {
+        due_date: normalizeDisplayDate(row.due_date),
+        entity: text(row.entity),
+        id: `due:${record.id}:${tomorrowKey}`,
+        kind: "due_tomorrow",
+        occurred_at: `${tomorrowKey}T00:00:00.000Z`,
+        task: text(row.task)
+      };
+    });
+
+  return NextResponse.json({
+    notifications: [...dueNotifications, ...assignedNotifications].slice(0, 40)
+  });
+}
+
 async function loadCalendarEvents(
   admin: ReturnType<typeof createAdminClient>,
   organisationId: string,
@@ -560,6 +683,44 @@ function splitNames(value: unknown) {
     .split(/[,;/\n]+/)
     .map(normalizeName)
     .filter(Boolean);
+}
+
+function taskNotificationIdentity(user: User) {
+  const roleText = `${text(user.user_metadata?.role)} ${text(user.user_metadata?.designation)}`.toLowerCase();
+  return {
+    field: roleText.includes("article") ? "resource" as const : "name" as const,
+    name: normalizeName(user.user_metadata?.full_name ?? user.user_metadata?.name ?? user.email)
+  };
+}
+
+function taskIsAssignedTo(row: TaskLineRow, identity: ReturnType<typeof taskNotificationIdentity>) {
+  return Boolean(identity.name) && splitNames(row[identity.field]).includes(identity.name);
+}
+
+function taskLineAuditData(value: unknown): TaskLineRow {
+  if (!value || typeof value !== "object") {
+    return {};
+  }
+
+  const data = (value as { data?: unknown }).data;
+  return data && typeof data === "object" ? data as TaskLineRow : {};
+}
+
+function taskLineIsClosed(row: TaskLineRow) {
+  const status = text(row.status_open_close).toLowerCase();
+  return status === "close" || status === "closed";
+}
+
+function indiaDateKey(dayOffset: number) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    day: "2-digit",
+    month: "2-digit",
+    timeZone: "Asia/Kolkata",
+    year: "numeric"
+  }).formatToParts(new Date());
+  const part = (type: Intl.DateTimeFormatPartTypes) => Number(parts.find((item) => item.type === type)?.value ?? 0);
+  const date = new Date(Date.UTC(part("year"), part("month") - 1, part("day") + dayOffset));
+  return `${date.getUTCFullYear()}-${pad2(date.getUTCMonth() + 1)}-${pad2(date.getUTCDate())}`;
 }
 
 async function loadTaskLineRecords(admin: ReturnType<typeof createAdminClient>, organisationId: string, access: AccessScope) {
