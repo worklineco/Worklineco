@@ -43,12 +43,22 @@ type AccessScope = {
   role: string;
   team: string;
 };
+type TaskLineQuery = {
+  columnFilters: Record<string, string>;
+  dueColorFilter: string[];
+  search: string;
+  sortState: { dir: "asc" | "desc"; key: string } | null;
+  statusFilter: string;
+  valueFilters: Record<string, string[]>;
+};
 
 const defaultOrganisationCode = "DCO1433";
 const fetchBatchSize = 1000;
 const maxTaskLineWindowSize = 400;
 const moduleKey = "taskline";
 const taskLineDateColumns = new Set(["due_date", "ref_date", "entry_date", "completion_date"]);
+const taskLineMoneyColumns = new Set(["total_agreed_fee", "amount_raised", "amount_realised", "counsel_fee", "referral_fee"]);
+const taskLineNumberColumns = new Set(["reminder_days"]);
 const taskLineColumns = [
   "team",
   "name",
@@ -125,11 +135,53 @@ export async function GET(request: Request) {
     return NextResponse.json({ auditLogs: await loadAuditLogs(admin, organisation.organisationId, access) });
   }
 
+  if (view === "filter-options") {
+    const column = text(searchParams.get("column"));
+
+    if (column === "serial_no") {
+      return NextResponse.json({ column, values: [] });
+    }
+
+    if (!taskLineColumns.includes(column)) {
+      return NextResponse.json({ error: "Invalid TaskLine filter column." }, { status: 400 });
+    }
+
+    const records = await loadTaskLineRecords(admin, organisation.organisationId, access);
+
+    if (records.error) {
+      return NextResponse.json({ error: records.error.message }, { status: 500 });
+    }
+
+    const values = Array.from(
+      new Set((records.data ?? []).map((record) => text(formatRecord(record)[column])))
+    ).sort((first, second) => first.localeCompare(second, undefined, { numeric: true }));
+
+    return NextResponse.json({ column, values });
+  }
+
   const requestedLimit = Number.parseInt(searchParams.get("limit") ?? "", 10);
 
   if (Number.isInteger(requestedLimit) && requestedLimit > 0) {
     const offset = Math.max(0, Number.parseInt(searchParams.get("offset") ?? "0", 10) || 0);
     const limit = Math.min(requestedLimit, maxTaskLineWindowSize);
+    const query = parseTaskLineQuery(searchParams);
+
+    if (hasTaskLineQuery(query)) {
+      const records = await loadTaskLineRecords(admin, organisation.organisationId, access);
+
+      if (records.error) {
+        return NextResponse.json({ error: records.error.message }, { status: 500 });
+      }
+
+      const matchingRows = filterAndSortTaskLineRows((records.data ?? []).map(formatRecord), query);
+      return NextResponse.json({
+        limit,
+        offset,
+        rows: matchingRows.slice(offset, offset + limit),
+        total: matchingRows.length
+      });
+    }
+
     const records = await loadTaskLineRecordWindow(admin, organisation.organisationId, access, offset, limit);
 
     if (records.error) {
@@ -153,6 +205,155 @@ export async function GET(request: Request) {
   return NextResponse.json({
     rows: (records.data ?? []).map(formatRecord)
   });
+}
+
+function parseTaskLineQuery(searchParams: URLSearchParams): TaskLineQuery {
+  const allowedColumns = new Set(taskLineColumns);
+  const rawSortKey = text(searchParams.get("sortKey"));
+  const rawSortDir = searchParams.get("sortDir");
+
+  return {
+    columnFilters: parseStringRecord(searchParams.get("columnFilters"), allowedColumns),
+    dueColorFilter: parseStringArray(searchParams.get("dueColors")),
+    search: text(searchParams.get("q")),
+    sortState: allowedColumns.has(rawSortKey) && (rawSortDir === "asc" || rawSortDir === "desc")
+      ? { dir: rawSortDir, key: rawSortKey }
+      : null,
+    statusFilter: text(searchParams.get("status")),
+    valueFilters: parseStringArrayRecord(searchParams.get("valueFilters"), allowedColumns)
+  };
+}
+
+function hasTaskLineQuery(query: TaskLineQuery) {
+  return Boolean(
+    query.search.trim() ||
+    query.statusFilter ||
+    query.sortState ||
+    query.dueColorFilter.length ||
+    Object.values(query.columnFilters).some((value) => value.trim()) ||
+    Object.values(query.valueFilters).some((values) => values.length)
+  );
+}
+
+function parseStringRecord(raw: string | null, allowedKeys: Set<string>) {
+  const result: Record<string, string> = {};
+  const parsed = parseJsonObject(raw);
+
+  for (const [key, value] of Object.entries(parsed)) {
+    if (allowedKeys.has(key) && typeof value === "string" && value.trim()) {
+      result[key] = value;
+    }
+  }
+
+  return result;
+}
+
+function parseStringArrayRecord(raw: string | null, allowedKeys: Set<string>) {
+  const result: Record<string, string[]> = {};
+  const parsed = parseJsonObject(raw);
+
+  for (const [key, value] of Object.entries(parsed)) {
+    if (!allowedKeys.has(key) || !Array.isArray(value)) {
+      continue;
+    }
+
+    const values = value.filter((item): item is string => typeof item === "string");
+    if (values.length) {
+      result[key] = values;
+    }
+  }
+
+  return result;
+}
+
+function parseStringArray(raw: string | null) {
+  if (!raw) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function parseJsonObject(raw: string | null): Record<string, unknown> {
+  if (!raw) {
+    return {};
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+  } catch {
+    return {};
+  }
+}
+
+function filterAndSortTaskLineRows(sourceRows: TaskLineRow[], query: TaskLineQuery) {
+  const search = query.search.trim().toLowerCase();
+  const result = sourceRows.filter((row) => {
+    const matchesSearch = !search || taskLineColumns.some((column) => text(row[column]).toLowerCase().includes(search));
+    const matchesStatus = !query.statusFilter || text(row.status_open_close) === query.statusFilter;
+    const matchesColumns = Object.entries(query.columnFilters).every(([key, value]) =>
+      text(row[key]).toLowerCase().includes(value.trim().toLowerCase())
+    );
+    const matchesValues = Object.entries(query.valueFilters).every(([key, values]) => values.includes(text(row[key])));
+    const matchesDueColor = !query.dueColorFilter.length || query.dueColorFilter.includes(taskLineDueDateCategory(text(row.due_date)));
+    return matchesSearch && matchesStatus && matchesColumns && matchesValues && matchesDueColor;
+  });
+
+  if (!query.sortState) {
+    return result;
+  }
+
+  const factor = query.sortState.dir === "asc" ? 1 : -1;
+  const sortKey = query.sortState.key;
+  return [...result].sort((first, second) => {
+    const rawA = text(first[sortKey]);
+    const rawB = text(second[sortKey]);
+
+    if (taskLineDateColumns.has(sortKey)) {
+      const dateA = parseDisplayDate(normalizeDisplayDate(rawA));
+      const dateB = parseDisplayDate(normalizeDisplayDate(rawB));
+      if (!dateA && !dateB) return 0;
+      if (!dateA) return 1;
+      if (!dateB) return -1;
+      return factor * (dateA.getTime() - dateB.getTime());
+    }
+
+    if (taskLineNumberColumns.has(sortKey) || taskLineMoneyColumns.has(sortKey)) {
+      const numA = rawA === "" ? Number.NaN : Number(rawA.replace(/[^0-9.-]/g, ""));
+      const numB = rawB === "" ? Number.NaN : Number(rawB.replace(/[^0-9.-]/g, ""));
+      const validA = !Number.isNaN(numA);
+      const validB = !Number.isNaN(numB);
+      if (!validA && !validB) return 0;
+      if (!validA) return 1;
+      if (!validB) return -1;
+      return factor * (numA - numB);
+    }
+
+    return factor * rawA.localeCompare(rawB, undefined, { numeric: true });
+  });
+}
+
+function taskLineDueDateCategory(value: string) {
+  const due = parseDisplayDate(normalizeDisplayDate(value));
+  if (!due) return "none";
+
+  const todayKey = indiaDateKey(0);
+  const [year, month, day] = todayKey.split("-").map(Number);
+  const today = new Date(Date.UTC(year, month - 1, day));
+  const diffDays = Math.round((due.getTime() - today.getTime()) / 86400000);
+  if (diffDays < 0) return "overdue";
+  if (diffDays === 0) return "today";
+  if (diffDays <= 7) return "d7";
+  if (diffDays <= 15) return "d15";
+  if (diffDays <= 30) return "d30";
+  if (diffDays <= 90) return "d90";
+  return "none";
 }
 
 export async function POST(request: Request) {
