@@ -38,6 +38,7 @@ type AccessScope = {
 
 const defaultOrganisationCode = "DCO1433";
 const fetchBatchSize = 1000;
+const maxTaskLineWindowSize = 400;
 const moduleKey = "taskline";
 const taskLineDateColumns = new Set(["due_date", "ref_date", "entry_date", "completion_date"]);
 const taskLineColumns = [
@@ -101,7 +102,8 @@ export async function GET(request: Request) {
   }
 
   const access = getAccess(auth.user);
-  const view = new URL(request.url).searchParams.get("view");
+  const searchParams = new URL(request.url).searchParams;
+  const view = searchParams.get("view");
 
   if (view === "calendar") {
     return loadCalendarEvents(admin, organisation.organisationId, auth.user, access);
@@ -109,6 +111,25 @@ export async function GET(request: Request) {
 
   if (view === "audit") {
     return NextResponse.json({ auditLogs: await loadAuditLogs(admin, organisation.organisationId, access) });
+  }
+
+  const requestedLimit = Number.parseInt(searchParams.get("limit") ?? "", 10);
+
+  if (Number.isInteger(requestedLimit) && requestedLimit > 0) {
+    const offset = Math.max(0, Number.parseInt(searchParams.get("offset") ?? "0", 10) || 0);
+    const limit = Math.min(requestedLimit, maxTaskLineWindowSize);
+    const records = await loadTaskLineRecordWindow(admin, organisation.organisationId, access, offset, limit);
+
+    if (records.error) {
+      return NextResponse.json({ error: records.error.message }, { status: 500 });
+    }
+
+    return NextResponse.json({
+      limit,
+      offset,
+      rows: (records.data ?? []).map(formatRecord),
+      total: records.count ?? 0
+    });
   }
 
   const records = await loadTaskLineRecords(admin, organisation.organisationId, access);
@@ -566,6 +587,39 @@ async function loadTaskLineRecords(admin: ReturnType<typeof createAdminClient>, 
   }
 }
 
+async function loadTaskLineRecordWindow(
+  admin: ReturnType<typeof createAdminClient>,
+  organisationId: string,
+  access: AccessScope,
+  offset: number,
+  limit: number
+) {
+  let query = admin
+    .from("tasks")
+    .select("id,organisation_id,title,description,due_at,custom_values,created_by,created_at,updated_at", { count: "exact" })
+    .eq("organisation_id", organisationId)
+    .eq("custom_values->>workline_module", moduleKey)
+    .order("created_at", { ascending: true });
+
+  if (!access.canViewAll) {
+    const teamValues = taskLineTeamVariants(access.team);
+
+    if (!teamValues.length) {
+      return { count: 0, data: [] as TaskRecord[], error: null };
+    }
+
+    query = query.in("custom_values->taskline_data->>team", teamValues);
+  }
+
+  const { count, data, error } = await query.range(offset, offset + limit - 1);
+
+  return {
+    count: count ?? 0,
+    data: ((data ?? []) as TaskRecord[]).filter((record) => isTaskLineRecord(record) && canAccessRecord(record, access)),
+    error
+  };
+}
+
 async function loadAuditLogs(admin: ReturnType<typeof createAdminClient>, organisationId: string, access: AccessScope) {
   const logs = await admin
     .from("audit_logs")
@@ -909,6 +963,26 @@ async function requireUser() {
 
 function text(value: unknown) {
   return String(value ?? "").trim();
+}
+
+function taskLineTeamVariants(value: unknown) {
+  const current = text(value);
+  const digits = current.match(/\d+/)?.[0];
+
+  if (!digits) {
+    return current ? [current] : [];
+  }
+
+  const teamNumber = Number.parseInt(digits, 10);
+  const padded = String(teamNumber).padStart(2, "0");
+
+  return Array.from(new Set([
+    current,
+    `Team-${padded}`,
+    `Team ${padded}`,
+    `Team-${teamNumber}`,
+    `Team ${teamNumber}`
+  ]));
 }
 
 function normalizeTeam(value: unknown) {
