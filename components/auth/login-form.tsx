@@ -60,7 +60,13 @@ export function LoginForm() {
   const isValidOrg = orgId.trim().toUpperCase() === organisationId;
   const needsTeam = ["Article Assistant", "Associate", "Manager", "Senior Manager"].includes(role);
   const needsPartner = role === "Partner";
-  const teamEmail = needsTeam ? teamEmailByName[team] : "";
+  const needsAccountsApproval = role === "Accounts";
+  const teamEmail = needsTeam
+    ? teamEmailByName[team]
+    : needsAccountsApproval
+      ? "commercials.dco@gmail.com"
+      : "";
+  const approvalLabel = needsAccountsApproval ? "Accounts access" : team;
 
   function changeMode(nextMode: "signin" | "signup") {
     setMode(nextMode);
@@ -158,7 +164,7 @@ export function LoginForm() {
       if (teamEmail) {
         const teamOtpResult = await sendOtp({
           email: teamEmail,
-          label: team,
+          label: approvalLabel,
           purpose: "team"
         });
 
@@ -170,7 +176,7 @@ export function LoginForm() {
         }
 
         setSignupStep("teamOtp");
-        setMessage(`Team OTP sent to ${teamEmail}.`);
+        setMessage(`Approval OTP sent to ${teamEmail}.`);
         setMessageType("success");
         setIsLoading(false);
         return;
@@ -400,7 +406,7 @@ export function LoginForm() {
 
         {mode === "signup" && signupStep === "teamOtp" ? (
           <label className="block">
-            <span className="text-xs font-black uppercase text-slate-500">Team OTP</span>
+            <span className="text-xs font-black uppercase text-slate-500">Approval OTP</span>
             <input
               className={inputClass}
               inputMode="numeric"
@@ -424,7 +430,7 @@ export function LoginForm() {
               ? "Send email OTP"
               : signupStep === "emailOtp"
                 ? "Verify email OTP"
-                : "Verify team OTP and create account"}
+                : "Verify approval OTP and create account"}
           {!isLoading ? <ArrowRight className="size-4" /> : null}
         </button>
 
