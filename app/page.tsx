@@ -24,6 +24,7 @@ import Link from "next/link";
 import type { ComponentType } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ProfilePanel } from "@/components/home/profile-panel";
+import { TaskNotificationBell } from "@/components/home/task-notification-bell";
 import { TeamsPanel } from "@/components/home/teams-panel";
 import { getCurrentUser } from "@/lib/supabase/session";
 
@@ -143,13 +144,16 @@ export default function Home() {
 
       <div className="mx-auto w-full max-w-none px-3 py-5 sm:px-5 lg:px-8">
         <section className="min-w-0">
-          <header className="mb-1">
-            <h1 className="text-4xl font-bold text-navy-700">
-              {profileName ? `Welcome back, ${profileName}` : "Dashboard"}
-            </h1>
-            <p className="mt-1 text-sm font-medium text-slate-500">
-              Jump into your workspace — compliance, billing, clients, and office scheduling in one place.
-            </p>
+          <header className="mb-1 flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <h1 className="text-3xl font-bold text-navy-700 sm:text-4xl">
+                {profileName ? `Welcome back, ${profileName}` : "Dashboard"}
+              </h1>
+              <p className="mt-1 text-sm font-medium text-slate-500">
+                Jump into your workspace — compliance, billing, clients, and office scheduling in one place.
+              </p>
+            </div>
+            <TaskNotificationBell />
           </header>
 
           <section className="mt-5 grid gap-5 xl:grid-cols-2">

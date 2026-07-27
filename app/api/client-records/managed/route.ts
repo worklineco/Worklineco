@@ -17,7 +17,7 @@ const activeSourceKey = "client_records_register";
 const trashSourceKey = "client_records_trash";
 const defaultOrganisationCode = "DCO1433";
 const fetchBatchSize = 1000;
-const maxBulkDeleteRows = 5;
+const maxBulkDeleteRows = 10;
 const importActionColumn = "Import Action";
 const columns = [
   "S.no.",
@@ -246,27 +246,33 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: inserted.error.message }, { status: 500 });
     }
 
-    const updateResults = await Promise.all(
-      updateItems.map(async (item) => {
-        const existing = findMatchingClientRecord(existingRows, item.row);
-
-        if (!existing) {
-          return { error: null, skipped: true };
-        }
-
-        const updated = await admin
-          .from("clients")
-          .update({
-            custom_values: { ...item.row, source: activeSourceKey },
-            name: getClientName(item.row),
-            updated_at: new Date().toISOString()
-          })
-          .eq("id", existing.id)
-          .eq("organisation_id", organisation.organisationId);
-
-        return { error: updated.error, skipped: false };
-      })
-    );
+    const resolvedUpdates = updateItems.map((item) => ({
+      existing: findMatchingClientRecord(existingRows, item.row),
+      row: item.row
+    }));
+    const changedUpdates: Array<{ existing: ClientRecord; row: RegisterRow }> = [];
+    for (const item of resolvedUpdates) {
+      if (item.existing && !clientRecordMatches(item.existing, item.row)) {
+        changedUpdates.push({ existing: item.existing, row: item.row });
+      }
+    }
+    const updateResults: Array<{ error: { message: string } | null }> = [];
+    for (let index = 0; index < changedUpdates.length; index += 25) {
+      const batchResults = await Promise.all(
+        changedUpdates.slice(index, index + 25).map(({ existing, row }) =>
+          admin
+            .from("clients")
+            .update({
+              custom_values: { ...row, source: activeSourceKey },
+              name: getClientName(row),
+              updated_at: new Date().toISOString()
+            })
+            .eq("id", existing.id)
+            .eq("organisation_id", organisation.organisationId)
+        )
+      );
+      updateResults.push(...batchResults.map((result) => ({ error: result.error })));
+    }
     const updateError = updateResults.find((result) => result.error)?.error;
 
     if (updateError) {
@@ -282,19 +288,28 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: deleteError.message }, { status: 500 });
     }
 
-    await writeAuditLog(admin, organisation.organisationId, auth.user.id, "client_record.import", null, {
+    const skippedUpdates = resolvedUpdates.filter((item) => !item.existing).length;
+    const unchangedUpdates = resolvedUpdates.filter((item) => item.existing && clientRecordMatches(item.existing, item.row)).length;
+    const summary = {
       added: addRows.length,
       deleted: deleteMatches.length,
       row_count: cleanedRows.length,
-      updated: updateItems.length - updateResults.filter((result) => result.skipped).length
-    });
-    return loadResponse(admin, organisation.organisationId);
+      skipped: skippedUpdates,
+      unchanged: unchangedUpdates,
+      updated: changedUpdates.length
+    };
+    await writeAuditLog(admin, organisation.organisationId, auth.user.id, "client_record.import", null, summary);
+    return loadResponse(admin, organisation.organisationId, summary);
   }
 
   return NextResponse.json({ error: "Unsupported client records action." }, { status: 400 });
 }
 
-async function loadResponse(admin: ReturnType<typeof createAdminClient>, organisationId: string) {
+async function loadResponse(
+  admin: ReturnType<typeof createAdminClient>,
+  organisationId: string,
+  summary?: { added: number; deleted: number; row_count: number; skipped: number; unchanged: number; updated: number }
+) {
   const [active, trash, audit] = await Promise.all([
     loadClients(admin, organisationId, activeSourceKey, true),
     loadClients(admin, organisationId, trashSourceKey, false),
@@ -312,6 +327,7 @@ async function loadResponse(admin: ReturnType<typeof createAdminClient>, organis
   return NextResponse.json({
     auditLogs: audit,
     rows: (active.data ?? []).map((client, index) => normalizeClientRow(client, index)),
+    ...(summary ? { summary } : {}),
     trashRows: (trash.data ?? []).map((client, index) => normalizeClientRow(client, index))
   });
 }
@@ -642,4 +658,15 @@ function findMatchingClientRecord(rows: ClientRecord[], incomingRow: RegisterRow
 
 function normalizeLookupValue(value: unknown) {
   return String(value ?? "").replace(/[^0-9a-z]/gi, "").toLowerCase();
+}
+
+function clientRecordMatches(existing: ClientRecord, incoming: RegisterRow) {
+  const values = existing.custom_values ?? {};
+  return columns
+    .filter((column) => column !== "S.no.")
+    .every((column) => normalizeCellValue(values[column]) === normalizeCellValue(incoming[column]));
+}
+
+function normalizeCellValue(value: unknown) {
+  return String(value ?? "").trim().replace(/\r\n/g, "\n");
 }

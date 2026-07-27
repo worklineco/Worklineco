@@ -141,7 +141,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </button>
         </div>
 
-        <nav className="flex-1 space-y-1 overflow-y-auto px-3 pb-4">
+        <nav className="wl-sidebar-scroll flex-1 space-y-1 overflow-y-auto px-3 pb-4">
           {visibleNav.map((item) => {
             const Icon = item.icon;
             const active = isActive(item.href);
@@ -208,7 +208,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               </button>
             </div>
 
-            <nav className="flex-1 space-y-1 overflow-y-auto px-3 pb-4">
+            <nav className="wl-sidebar-scroll flex-1 space-y-1 overflow-y-auto px-3 pb-4">
               {visibleNav.map((item) => {
                 const Icon = item.icon;
                 const active = isActive(item.href);

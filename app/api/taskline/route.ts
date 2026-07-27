@@ -5,6 +5,7 @@ import { NextResponse } from "next/server";
 
 type CookieToSet = { name: string; options: CookieOptions; value: string };
 type TaskLineRow = Record<string, string>;
+type TaskLineImportRow = TaskLineRow & { import_action?: string; serial_no?: string; target_id?: string };
 type TaskRecord = {
   created_at: string;
   created_by: string | null;
@@ -29,16 +30,35 @@ type AuditLog = {
   new_value: unknown;
   old_value: unknown;
 };
+type TaskNotification = {
+  due_date: string;
+  entity: string;
+  id: string;
+  kind: "assigned" | "due_tomorrow";
+  occurred_at: string;
+  task: string;
+};
 type AccessScope = {
   canViewAll: boolean;
   role: string;
   team: string;
 };
+type TaskLineQuery = {
+  columnFilters: Record<string, string>;
+  dueColorFilter: string[];
+  search: string;
+  sortState: { dir: "asc" | "desc"; key: string } | null;
+  statusFilter: string;
+  valueFilters: Record<string, string[]>;
+};
 
 const defaultOrganisationCode = "DCO1433";
 const fetchBatchSize = 1000;
+const maxTaskLineWindowSize = 400;
 const moduleKey = "taskline";
 const taskLineDateColumns = new Set(["due_date", "ref_date", "entry_date", "completion_date"]);
+const taskLineMoneyColumns = new Set(["total_agreed_fee", "amount_raised", "amount_realised", "counsel_fee", "referral_fee"]);
+const taskLineNumberColumns = new Set(["reminder_days"]);
 const taskLineColumns = [
   "team",
   "name",
@@ -100,24 +120,240 @@ export async function GET(request: Request) {
   }
 
   const access = getAccess(auth.user);
+  const searchParams = new URL(request.url).searchParams;
+  const view = searchParams.get("view");
 
-  if (new URL(request.url).searchParams.get("view") === "calendar") {
+  if (view === "notifications") {
+    return loadTaskLineNotifications(admin, organisation.organisationId, auth.user);
+  }
+
+  if (view === "calendar") {
     return loadCalendarEvents(admin, organisation.organisationId, auth.user, access);
   }
 
-  const [records, auditLogs] = await Promise.all([
-    loadTaskLineRecords(admin, organisation.organisationId, access),
-    loadAuditLogs(admin, organisation.organisationId, access)
-  ]);
+  if (view === "audit") {
+    return NextResponse.json({ auditLogs: await loadAuditLogs(admin, organisation.organisationId, access) });
+  }
+
+  if (view === "filter-options") {
+    const column = text(searchParams.get("column"));
+
+    if (column === "serial_no") {
+      return NextResponse.json({ column, values: [] });
+    }
+
+    if (!taskLineColumns.includes(column)) {
+      return NextResponse.json({ error: "Invalid TaskLine filter column." }, { status: 400 });
+    }
+
+    const records = await loadTaskLineRecords(admin, organisation.organisationId, access);
+
+    if (records.error) {
+      return NextResponse.json({ error: records.error.message }, { status: 500 });
+    }
+
+    const values = Array.from(
+      new Set((records.data ?? []).map((record) => text(formatRecord(record)[column])))
+    ).sort((first, second) => first.localeCompare(second, undefined, { numeric: true }));
+
+    return NextResponse.json({ column, values });
+  }
+
+  const requestedLimit = Number.parseInt(searchParams.get("limit") ?? "", 10);
+
+  if (Number.isInteger(requestedLimit) && requestedLimit > 0) {
+    const offset = Math.max(0, Number.parseInt(searchParams.get("offset") ?? "0", 10) || 0);
+    const limit = Math.min(requestedLimit, maxTaskLineWindowSize);
+    const query = parseTaskLineQuery(searchParams);
+
+    if (hasTaskLineQuery(query)) {
+      const records = await loadTaskLineRecords(admin, organisation.organisationId, access);
+
+      if (records.error) {
+        return NextResponse.json({ error: records.error.message }, { status: 500 });
+      }
+
+      const matchingRows = filterAndSortTaskLineRows((records.data ?? []).map(formatRecord), query);
+      return NextResponse.json({
+        limit,
+        offset,
+        rows: matchingRows.slice(offset, offset + limit),
+        total: matchingRows.length
+      });
+    }
+
+    const records = await loadTaskLineRecordWindow(admin, organisation.organisationId, access, offset, limit);
+
+    if (records.error) {
+      return NextResponse.json({ error: records.error.message }, { status: 500 });
+    }
+
+    return NextResponse.json({
+      limit,
+      offset,
+      rows: (records.data ?? []).map(formatRecord),
+      total: records.count ?? 0
+    });
+  }
+
+  const records = await loadTaskLineRecords(admin, organisation.organisationId, access);
 
   if (records.error) {
     return NextResponse.json({ error: records.error.message }, { status: 500 });
   }
 
   return NextResponse.json({
-    auditLogs,
     rows: (records.data ?? []).map(formatRecord)
   });
+}
+
+function parseTaskLineQuery(searchParams: URLSearchParams): TaskLineQuery {
+  const allowedColumns = new Set(taskLineColumns);
+  const rawSortKey = text(searchParams.get("sortKey"));
+  const rawSortDir = searchParams.get("sortDir");
+
+  return {
+    columnFilters: parseStringRecord(searchParams.get("columnFilters"), allowedColumns),
+    dueColorFilter: parseStringArray(searchParams.get("dueColors")),
+    search: text(searchParams.get("q")),
+    sortState: allowedColumns.has(rawSortKey) && (rawSortDir === "asc" || rawSortDir === "desc")
+      ? { dir: rawSortDir, key: rawSortKey }
+      : null,
+    statusFilter: text(searchParams.get("status")),
+    valueFilters: parseStringArrayRecord(searchParams.get("valueFilters"), allowedColumns)
+  };
+}
+
+function hasTaskLineQuery(query: TaskLineQuery) {
+  return Boolean(
+    query.search.trim() ||
+    query.statusFilter ||
+    query.sortState ||
+    query.dueColorFilter.length ||
+    Object.values(query.columnFilters).some((value) => value.trim()) ||
+    Object.values(query.valueFilters).some((values) => values.length)
+  );
+}
+
+function parseStringRecord(raw: string | null, allowedKeys: Set<string>) {
+  const result: Record<string, string> = {};
+  const parsed = parseJsonObject(raw);
+
+  for (const [key, value] of Object.entries(parsed)) {
+    if (allowedKeys.has(key) && typeof value === "string" && value.trim()) {
+      result[key] = value;
+    }
+  }
+
+  return result;
+}
+
+function parseStringArrayRecord(raw: string | null, allowedKeys: Set<string>) {
+  const result: Record<string, string[]> = {};
+  const parsed = parseJsonObject(raw);
+
+  for (const [key, value] of Object.entries(parsed)) {
+    if (!allowedKeys.has(key) || !Array.isArray(value)) {
+      continue;
+    }
+
+    const values = value.filter((item): item is string => typeof item === "string");
+    if (values.length) {
+      result[key] = values;
+    }
+  }
+
+  return result;
+}
+
+function parseStringArray(raw: string | null) {
+  if (!raw) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function parseJsonObject(raw: string | null): Record<string, unknown> {
+  if (!raw) {
+    return {};
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+  } catch {
+    return {};
+  }
+}
+
+function filterAndSortTaskLineRows(sourceRows: TaskLineRow[], query: TaskLineQuery) {
+  const search = query.search.trim().toLowerCase();
+  const result = sourceRows.filter((row) => {
+    const matchesSearch = !search || taskLineColumns.some((column) => text(row[column]).toLowerCase().includes(search));
+    const matchesStatus = !query.statusFilter || text(row.status_open_close) === query.statusFilter;
+    const matchesColumns = Object.entries(query.columnFilters).every(([key, value]) =>
+      text(row[key]).toLowerCase().includes(value.trim().toLowerCase())
+    );
+    const matchesValues = Object.entries(query.valueFilters).every(([key, values]) => values.includes(text(row[key])));
+    const matchesDueColor = !query.dueColorFilter.length || query.dueColorFilter.includes(taskLineDueDateCategory(text(row.due_date)));
+    return matchesSearch && matchesStatus && matchesColumns && matchesValues && matchesDueColor;
+  });
+
+  if (!query.sortState) {
+    return result;
+  }
+
+  const factor = query.sortState.dir === "asc" ? 1 : -1;
+  const sortKey = query.sortState.key;
+  return [...result].sort((first, second) => {
+    const rawA = text(first[sortKey]);
+    const rawB = text(second[sortKey]);
+
+    if (taskLineDateColumns.has(sortKey)) {
+      const dateA = parseDisplayDate(normalizeDisplayDate(rawA));
+      const dateB = parseDisplayDate(normalizeDisplayDate(rawB));
+      if (!dateA && !dateB) return 0;
+      if (!dateA) return 1;
+      if (!dateB) return -1;
+      return factor * (dateA.getTime() - dateB.getTime());
+    }
+
+    if (taskLineNumberColumns.has(sortKey) || taskLineMoneyColumns.has(sortKey)) {
+      const numA = rawA === "" ? Number.NaN : Number(rawA.replace(/[^0-9.-]/g, ""));
+      const numB = rawB === "" ? Number.NaN : Number(rawB.replace(/[^0-9.-]/g, ""));
+      const validA = !Number.isNaN(numA);
+      const validB = !Number.isNaN(numB);
+      if (!validA && !validB) return 0;
+      if (!validA) return 1;
+      if (!validB) return -1;
+      return factor * (numA - numB);
+    }
+
+    return factor * rawA.localeCompare(rawB, undefined, { numeric: true });
+  });
+}
+
+function taskLineDueDateCategory(value: string) {
+  const due = parseDisplayDate(normalizeDisplayDate(value));
+  if (!due) return "none";
+
+  const todayKey = indiaDateKey(0);
+  const [year, month, day] = todayKey.split("-").map(Number);
+  const today = new Date(Date.UTC(year, month - 1, day));
+  const diffDays = Math.round((due.getTime() - today.getTime()) / 86400000);
+  if (diffDays < 0) return "overdue";
+  if (diffDays === 0) return "today";
+  if (diffDays <= 7) return "d7";
+  if (diffDays <= 15) return "d15";
+  if (diffDays <= 30) return "d30";
+  if (diffDays <= 90) return "d90";
+  return "none";
 }
 
 export async function POST(request: Request) {
@@ -137,9 +373,10 @@ async function handlePost(request: Request) {
   }
 
   const payload = (await request.json()) as {
-    action?: "import" | "save";
-    importRows?: Array<TaskLineRow & { import_action?: string; serial_no?: string }>;
+    action?: "bulk_delete" | "import" | "save";
+    importRows?: TaskLineImportRow[];
     record?: TaskLineRow;
+    recordIds?: string[];
     returnRows?: boolean;
   };
   const admin = createAdminClient();
@@ -156,6 +393,10 @@ async function handlePost(request: Request) {
 
   if (payload.action === "import") {
     return importRows(admin, organisation.organisationId, auth.user, access, payload.importRows ?? [], payload.returnRows !== false);
+  }
+
+  if (payload.action === "bulk_delete") {
+    return bulkDeleteRows(admin, organisation.organisationId, auth.user, access, payload.recordIds ?? []);
   }
 
   const record = payload.record;
@@ -275,77 +516,153 @@ export async function DELETE(request: Request) {
   return NextResponse.json({ ok: true });
 }
 
+async function bulkDeleteRows(
+  admin: ReturnType<typeof createAdminClient>,
+  organisationId: string,
+  user: User,
+  access: AccessScope,
+  rawRecordIds: string[]
+) {
+  const recordIds = Array.from(new Set(rawRecordIds.map(text).filter(Boolean)));
+  if (!recordIds.length || recordIds.length > 10) {
+    return NextResponse.json({ error: "Select between 1 and 10 TaskLine tasks to delete." }, { status: 400 });
+  }
+
+  const existing = await admin
+    .from("tasks")
+    .select("id,organisation_id,title,description,due_at,custom_values,created_by,created_at,updated_at")
+    .eq("organisation_id", organisationId)
+    .in("id", recordIds);
+  if (existing.error) {
+    return NextResponse.json({ error: existing.error.message }, { status: 500 });
+  }
+
+  const records = ((existing.data ?? []) as TaskRecord[]).filter(
+    (record) => isTaskLineRecord(record) && canAccessRecord(record, access)
+  );
+  if (records.length !== recordIds.length) {
+    return NextResponse.json({ error: "One or more selected tasks are unavailable or outside your team access." }, { status: 403 });
+  }
+
+  const deleted = await admin.from("tasks").delete().eq("organisation_id", organisationId).in("id", recordIds);
+  if (deleted.error) {
+    return NextResponse.json({ error: deleted.error.message }, { status: 500 });
+  }
+
+  await writeAuditLog(admin, organisationId, user.id, "taskline.bulk_delete", records.map(auditValue), { deleted: records.length });
+  return NextResponse.json({ deleted: records.length });
+}
+
 async function importRows(
   admin: ReturnType<typeof createAdminClient>,
   organisationId: string,
   user: User,
   access: AccessScope,
-  rows: Array<TaskLineRow & { import_action?: string; serial_no?: string }>,
+  rows: TaskLineImportRow[],
   returnRows: boolean
 ) {
-  const existing = await loadTaskLineRecords(admin, organisationId, access);
+  const actionableRows = rows.map((row) => ({
+    action: text(row.import_action || "Add").toLowerCase(),
+    row,
+    targetId: text(row.target_id)
+  }));
+  const needsSerialFallback = actionableRows.some(
+    ({ action, targetId }) => (action === "update" || action === "delete") && !targetId
+  );
+  let existingRows: TaskRecord[] = [];
 
-  if (existing.error) {
-    return NextResponse.json({ error: existing.error.message }, { status: 500 });
+  if (needsSerialFallback) {
+    const existing = await loadTaskLineRecords(admin, organisationId, access);
+    if (existing.error) {
+      return NextResponse.json({ error: existing.error.message }, { status: 500 });
+    }
+    existingRows = existing.data ?? [];
   }
 
-  const existingRows = existing.data ?? [];
-  let added = 0;
-  let updated = 0;
-  let deleted = 0;
-
-  for (const row of rows) {
-    const action = text(row.import_action || "Add").toLowerCase();
-    const serialIndex = Number.parseInt(text(row.serial_no), 10) - 1;
-    const target = Number.isInteger(serialIndex) && serialIndex >= 0 ? existingRows[serialIndex] : null;
-
-    if (action === "delete") {
-      if (target?.id) {
-        await admin.from("tasks").delete().eq("id", target.id).eq("organisation_id", organisationId);
-        deleted += 1;
-      }
+  for (const item of actionableRows) {
+    if (item.targetId || (item.action !== "update" && item.action !== "delete")) {
       continue;
     }
+    const serialIndex = Number.parseInt(text(item.row.serial_no), 10) - 1;
+    item.targetId = Number.isInteger(serialIndex) && serialIndex >= 0 ? text(existingRows[serialIndex]?.id) : "";
+  }
 
-    if (action === "update") {
-      if (target?.id) {
-        const cleaned = applyTeamAccess(cleanRecord(row), access);
-        const updatedRow = await admin
-          .from("tasks")
-          .update({
-            ...toTaskValues(cleaned),
-            updated_at: new Date().toISOString()
-          })
-          .eq("id", target.id)
-          .eq("organisation_id", organisationId)
-          .select("id,organisation_id,title,description,due_at,custom_values,created_by,created_at,updated_at")
-          .single();
-
-        if (updatedRow.error) {
-          return NextResponse.json({ error: updatedRow.error.message }, { status: 500 });
-        }
-
-        updated += 1;
-      }
-      continue;
+  const requestedTargetIds = Array.from(
+    new Set(actionableRows.map(({ targetId }) => targetId).filter(Boolean))
+  );
+  const accessibleTargetIds = new Set<string>();
+  if (requestedTargetIds.length) {
+    const targets = await admin
+      .from("tasks")
+      .select("id,organisation_id,title,description,due_at,custom_values,created_by,created_at,updated_at")
+      .eq("organisation_id", organisationId)
+      .in("id", requestedTargetIds);
+    if (targets.error) {
+      return NextResponse.json({ error: targets.error.message }, { status: 500 });
     }
+    for (const record of (targets.data ?? []) as TaskRecord[]) {
+      if (isTaskLineRecord(record) && canAccessRecord(record, access)) {
+        accessibleTargetIds.add(record.id);
+      }
+    }
+  }
 
-    if (hasValue(row)) {
+  const deleteIds = Array.from(
+    new Set(
+      actionableRows
+        .filter(({ action, targetId }) => action === "delete" && accessibleTargetIds.has(targetId))
+        .map(({ targetId }) => targetId)
+    )
+  );
+  const updates = actionableRows.filter(
+    ({ action, targetId }) => action === "update" && accessibleTargetIds.has(targetId)
+  );
+  const inserts = actionableRows
+    .filter(({ action, row }) => action === "add" && hasValue(row))
+    .map(({ row }) => {
       const cleaned = applyTeamAccess(cleanRecord(row), access);
-      const inserted = await admin.from("tasks").insert({
+      return {
         ...toTaskValues(cleaned),
         created_by: null,
         organisation_id: organisationId,
         priority: "normal"
-      });
+      };
+    });
 
-      if (inserted.error) {
-        return NextResponse.json({ error: inserted.error.message }, { status: 500 });
-      }
+  const deleteRequest = deleteIds.length
+    ? admin.from("tasks").delete().eq("organisation_id", organisationId).in("id", deleteIds)
+    : Promise.resolve({ error: null });
+  const insertRequest = inserts.length
+    ? admin.from("tasks").insert(inserts)
+    : Promise.resolve({ error: null });
+  const [deleteResult, insertResult] = await Promise.all([deleteRequest, insertRequest]);
+  if (deleteResult.error) {
+    return NextResponse.json({ error: deleteResult.error.message }, { status: 500 });
+  }
+  if (insertResult.error) {
+    return NextResponse.json({ error: insertResult.error.message }, { status: 500 });
+  }
 
-      added += 1;
+  for (let index = 0; index < updates.length; index += 25) {
+    const updateResults = await Promise.all(
+      updates.slice(index, index + 25).map(({ row, targetId }) => {
+        const cleaned = applyTeamAccess(cleanRecord(row), access);
+        return admin
+          .from("tasks")
+          .update({ ...toTaskValues(cleaned), updated_at: new Date().toISOString() })
+          .eq("id", targetId)
+          .eq("organisation_id", organisationId);
+      })
+    );
+    const failedUpdate = updateResults.find((result) => result.error);
+    if (failedUpdate?.error) {
+      return NextResponse.json({ error: failedUpdate.error.message }, { status: 500 });
     }
   }
+
+  const added = inserts.length;
+  const updated = updates.length;
+  const deleted = deleteIds.length;
 
   await writeAuditLog(admin, organisationId, user.id, "taskline.import", null, { added, deleted, updated });
 
@@ -364,6 +681,117 @@ async function importRows(
   return NextResponse.json({
     summary: { added, deleted, updated },
     rows: (refreshed.data ?? []).map(formatRecord)
+  });
+}
+
+async function loadTaskLineNotifications(
+  admin: ReturnType<typeof createAdminClient>,
+  organisationId: string,
+  user: User
+) {
+  const identity = taskNotificationIdentity(user);
+
+  if (!identity.name) {
+    return NextResponse.json({ notifications: [] as TaskNotification[] });
+  }
+
+  const tomorrowKey = indiaDateKey(1);
+  const dayAfterTomorrowKey = indiaDateKey(2);
+  const assignmentLookback = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  const [dueTasks, assignmentLogs] = await Promise.all([
+    admin
+      .from("tasks")
+      .select("id,organisation_id,title,description,due_at,custom_values,created_by,created_at,updated_at")
+      .eq("organisation_id", organisationId)
+      .eq("custom_values->>workline_module", moduleKey)
+      .gte("due_at", `${tomorrowKey}T00:00:00.000Z`)
+      .lt("due_at", `${dayAfterTomorrowKey}T00:00:00.000Z`)
+      .order("due_at", { ascending: true }),
+    admin
+      .from("audit_logs")
+      .select("id,action,entity_id,old_value,new_value,created_at,actor_user_id")
+      .eq("organisation_id", organisationId)
+      .eq("entity_type", "taskline_record")
+      .in("action", ["taskline.create", "taskline.update"])
+      .gte("created_at", assignmentLookback)
+      .order("created_at", { ascending: false })
+      .limit(500)
+  ]);
+
+  if (dueTasks.error) {
+    return NextResponse.json({ error: dueTasks.error.message }, { status: 500 });
+  }
+
+  const candidateLogs = assignmentLogs.error
+    ? []
+    : ((assignmentLogs.data ?? []) as AuditLog[]).filter((log) => {
+        const previous = taskLineAuditData(log.old_value);
+        const next = taskLineAuditData(log.new_value);
+        return taskIsAssignedTo(next, identity) && !taskIsAssignedTo(previous, identity);
+      });
+  const candidateIds = Array.from(new Set(candidateLogs.map((log) => text(log.entity_id) || readId(log.new_value) || "").filter(Boolean)));
+  let currentAssignmentTasks: TaskRecord[] = [];
+
+  if (candidateIds.length) {
+    const currentTasks = await admin
+      .from("tasks")
+      .select("id,organisation_id,title,description,due_at,custom_values,created_by,created_at,updated_at")
+      .eq("organisation_id", organisationId)
+      .eq("custom_values->>workline_module", moduleKey)
+      .in("id", candidateIds);
+
+    if (!currentTasks.error) {
+      currentAssignmentTasks = (currentTasks.data ?? []) as TaskRecord[];
+    }
+  }
+
+  const currentTasksById = new Map(currentAssignmentTasks.map((record) => [record.id, record]));
+  const includedAssignmentTaskIds = new Set<string>();
+  const assignedNotifications: TaskNotification[] = [];
+
+  for (const log of candidateLogs) {
+    const recordId = text(log.entity_id) || readId(log.new_value) || "";
+    const record = currentTasksById.get(recordId);
+    const row = record?.custom_values?.taskline_data ?? {};
+
+    if (!record || includedAssignmentTaskIds.has(recordId) || !taskIsAssignedTo(row, identity) || taskLineIsClosed(row)) {
+      continue;
+    }
+
+    includedAssignmentTaskIds.add(recordId);
+    assignedNotifications.push({
+      due_date: normalizeDisplayDate(row.due_date),
+      entity: text(row.entity),
+      id: `assigned:${log.id}`,
+      kind: "assigned",
+      occurred_at: log.created_at,
+      task: text(row.task)
+    });
+
+    if (assignedNotifications.length >= 20) {
+      break;
+    }
+  }
+
+  const dueNotifications = ((dueTasks.data ?? []) as TaskRecord[])
+    .filter((record) => {
+      const row = record.custom_values?.taskline_data ?? {};
+      return isTaskLineRecord(record) && taskIsAssignedTo(row, identity) && !taskLineIsClosed(row);
+    })
+    .map<TaskNotification>((record) => {
+      const row = record.custom_values?.taskline_data ?? {};
+      return {
+        due_date: normalizeDisplayDate(row.due_date),
+        entity: text(row.entity),
+        id: `due:${record.id}:${tomorrowKey}`,
+        kind: "due_tomorrow",
+        occurred_at: `${tomorrowKey}T00:00:00.000Z`,
+        task: text(row.task)
+      };
+    });
+
+  return NextResponse.json({
+    notifications: [...dueNotifications, ...assignedNotifications].slice(0, 40)
   });
 }
 
@@ -458,6 +886,44 @@ function splitNames(value: unknown) {
     .filter(Boolean);
 }
 
+function taskNotificationIdentity(user: User) {
+  const roleText = `${text(user.user_metadata?.role)} ${text(user.user_metadata?.designation)}`.toLowerCase();
+  return {
+    field: roleText.includes("article") ? "resource" as const : "name" as const,
+    name: normalizeName(user.user_metadata?.full_name ?? user.user_metadata?.name ?? user.email)
+  };
+}
+
+function taskIsAssignedTo(row: TaskLineRow, identity: ReturnType<typeof taskNotificationIdentity>) {
+  return Boolean(identity.name) && splitNames(row[identity.field]).includes(identity.name);
+}
+
+function taskLineAuditData(value: unknown): TaskLineRow {
+  if (!value || typeof value !== "object") {
+    return {};
+  }
+
+  const data = (value as { data?: unknown }).data;
+  return data && typeof data === "object" ? data as TaskLineRow : {};
+}
+
+function taskLineIsClosed(row: TaskLineRow) {
+  const status = text(row.status_open_close).toLowerCase();
+  return status === "close" || status === "closed";
+}
+
+function indiaDateKey(dayOffset: number) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    day: "2-digit",
+    month: "2-digit",
+    timeZone: "Asia/Kolkata",
+    year: "numeric"
+  }).formatToParts(new Date());
+  const part = (type: Intl.DateTimeFormatPartTypes) => Number(parts.find((item) => item.type === type)?.value ?? 0);
+  const date = new Date(Date.UTC(part("year"), part("month") - 1, part("day") + dayOffset));
+  return `${date.getUTCFullYear()}-${pad2(date.getUTCMonth() + 1)}-${pad2(date.getUTCDate())}`;
+}
+
 async function loadTaskLineRecords(admin: ReturnType<typeof createAdminClient>, organisationId: string, access: AccessScope) {
   const rows: TaskRecord[] = [];
 
@@ -467,6 +933,7 @@ async function loadTaskLineRecords(admin: ReturnType<typeof createAdminClient>, 
       .from("tasks")
       .select("id,organisation_id,title,description,due_at,custom_values,created_by,created_at,updated_at")
       .eq("organisation_id", organisationId)
+      .eq("custom_values->>workline_module", moduleKey)
       .order("created_at", { ascending: true })
       .range(from, to);
 
@@ -480,6 +947,39 @@ async function loadTaskLineRecords(admin: ReturnType<typeof createAdminClient>, 
       return { data: rows, error: null };
     }
   }
+}
+
+async function loadTaskLineRecordWindow(
+  admin: ReturnType<typeof createAdminClient>,
+  organisationId: string,
+  access: AccessScope,
+  offset: number,
+  limit: number
+) {
+  let query = admin
+    .from("tasks")
+    .select("id,organisation_id,title,description,due_at,custom_values,created_by,created_at,updated_at", { count: "exact" })
+    .eq("organisation_id", organisationId)
+    .eq("custom_values->>workline_module", moduleKey)
+    .order("created_at", { ascending: true });
+
+  if (!access.canViewAll) {
+    const teamValues = taskLineTeamVariants(access.team);
+
+    if (!teamValues.length) {
+      return { count: 0, data: [] as TaskRecord[], error: null };
+    }
+
+    query = query.in("custom_values->taskline_data->>team", teamValues);
+  }
+
+  const { count, data, error } = await query.range(offset, offset + limit - 1);
+
+  return {
+    count: count ?? 0,
+    data: ((data ?? []) as TaskRecord[]).filter((record) => isTaskLineRecord(record) && canAccessRecord(record, access)),
+    error
+  };
 }
 
 async function loadAuditLogs(admin: ReturnType<typeof createAdminClient>, organisationId: string, access: AccessScope) {
@@ -825,6 +1325,26 @@ async function requireUser() {
 
 function text(value: unknown) {
   return String(value ?? "").trim();
+}
+
+function taskLineTeamVariants(value: unknown) {
+  const current = text(value);
+  const digits = current.match(/\d+/)?.[0];
+
+  if (!digits) {
+    return current ? [current] : [];
+  }
+
+  const teamNumber = Number.parseInt(digits, 10);
+  const padded = String(teamNumber).padStart(2, "0");
+
+  return Array.from(new Set([
+    current,
+    `Team-${padded}`,
+    `Team ${padded}`,
+    `Team-${teamNumber}`,
+    `Team ${teamNumber}`
+  ]));
 }
 
 function normalizeTeam(value: unknown) {
