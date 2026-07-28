@@ -853,20 +853,79 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
       const headerIndex = findHeaderRow(rawRows);
       const headerRow = rawRows[headerIndex]?.map((value) => String(value).trim()) ?? [];
       const secondHeaderRow = rawRows[headerIndex + 1]?.map((value) => String(value).trim()) ?? [];
+      if (normalizeHeader(headerRow[0] ?? "") !== normalizeHeader(importActionColumn)) {
+        setMessage(`Column A must be "${importActionColumn}" in ${file.name}.`);
+        return;
+      }
+
       const headerMap = createGstatImportHeaderMap(headerRow, secondHeaderRow);
-      const hasSecondHeaderRow = demandColumns.some((column) => headerMap.get(normalizeHeader(column.key)) !== undefined);
-      const dataStartIndex = headerIndex + (hasSecondHeaderRow ? 2 : 1);
-      const nextRows = rawRows
+       const importedRows = rawRows
         .slice(dataStartIndex)
         .filter((rawRow) => rawRow.some((value) => String(value).trim()))
-        .map((rawRow, rowIndex) => {
-          const actionIndex = headerMap.get(normalizeHeader(importActionColumn));
+        .map((rawRow, rowIndex): AppealRow => {
+          const data = columns.reduce<RowData>((row, column) => {
+            const sourceIndex = getColumnImportSourceIndex(headerMap, column);
+            const value = sourceIndex === undefined ? "" : rawRow[sourceIndex];
+            row[column.key] =
+              column.key === "Sno"
+                ? value || rowIndex + 1
+                : dateFields.has(column.key)
+                  ? normalizeDateValue(value)
+                  : value ?? "";
+            return row;
+          }, {});
+          const importedRowNumber = Number(data.Sno);
 
           return {
-          data: columns.reduce<RowData>((row, column, columnIndex) => {
-            const sourceIndex = headerMap.get(normalizeHeader(column.key)) ?? headerMap.get(normalizeHeader(column.label));
-            const value = rawRow[sourceIndex ?? columnIndex];
-            row[column.key] =
+            data,
+            import_action: normalizeImportAction(rawRow[0]),
+            row_number:
+              Number.isFinite(importedRowNumber) && importedRowNumber > 0
+                ? importedRowNumber
+                : rowIndex + 1
+          };
+        });
+      let unchanged = 0;
+      const nextRows = importedRows.flatMap<AppealRow>((row) => {
+        const importAction = normalizeImportAction(row.import_action);
+
+        if (importAction === "Add") {
+          return [row];
+        }
+
+        const existing = findMatchingGstatImportRow(rows, row);
+
+        if (!existing) {
+          return [row];
+        }
+
+        const targetRow = {
+          ...row,
+          id: existing.id,
+          row_number: existing.row_number ?? row.row_number
+        };
+
+        if (importAction === "Delete") {
+          return [targetRow];
+        }
+
+        const changedData = getChangedGstatImportData(existing.data, row.data, importedColumnKeys);
+
+        if (!Object.keys(changedData).length) {
+          unchanged += 1;
+          return [];
+        }
+
+        return [
+          {
+            ...targetRow,
+            data: {
+              Sno: targetRow.row_number ?? existing.data.Sno ?? row.data.Sno,
+              ...changedData
+            }
+          }
+        ];
+      });  row[column.key] =
               column.key === "Sno"
                 ? value || rowIndex + 1
                 : dateFields.has(column.key)
@@ -879,28 +938,47 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
         };
         });
 
-      if (!nextRows.length) {
+      if (!importedRows.length) {
         setMessage("No GSTAT rows found in the selected Excel file.");
-        event.target.value = "";
         return;
       }
+
+      if (!nextRows.length) {
+        setMessage(`No changes found in ${file.name}. ${unchanged} unchanged row${unchanged === 1 ? " was" : "s were"} skipped.`);
+        return;
+      }
+
+      setMessage(`Importing ${nextRows.length} changed GSTAT row${nextRows.length === 1 ? "" : "s"}...`);
 
       const response = await fetch("/api/gstat", {
         body: JSON.stringify({ action: "import", rows: nextRows }),
         headers: { "Content-Type": "application/json" },
         method: "POST"
       });
-      const result = (await response.json()) as { error?: string; rows?: AppealRow[] };
+      const result = (await response.json()) as {
+        error?: string;
+        rows?: AppealRow[];
+        summary?: { added?: number; deleted?: number; skipped?: number; unchanged?: number; updated?: number };
+      };
 
       if (!response.ok) {
         setMessage(`Could not import ${nextRows.length} row${nextRows.length === 1 ? "" : "s"}: ${result.error ?? "database save failed"}`);
-        event.target.value = "";
         return;
       }
 
-      setRows(result.rows?.length ? normalizeRows(result.rows) : rows);
+      const refreshedRows = result.rows
+        ? result.rows.length
+          ? normalizeRows(result.rows)
+          : initialRows
+        : rows;
+      const summary = result.summary ?? {};
+      const unchangedTotal = unchanged + (summary.unchanged ?? 0);
+      setCached("gstat", refreshedRows);
+      setRows(refreshedRows);
       setSelectedRowKeys(new Set());
-      setMessage(`${nextRows.length} GSTAT import row${nextRows.length === 1 ? "" : "s"} processed from ${file.name}. Audit log updated.`);
+      setMessage(
+        `Imported ${file.name}: ${summary.added ?? 0} added, ${summary.updated ?? 0} updated, ${summary.deleted ?? 0} deleted; ${unchangedTotal} unchanged and ${summary.skipped ?? 0} unmatched skipped.`
+      );
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Could not read the selected Excel file.");
     } finally {
@@ -3506,24 +3584,33 @@ function findHeaderRow(rawRows: Array<Array<string | number>>) {
 
 function createGstatImportHeaderMap(firstHeaderRow: string[], secondHeaderRow: string[]) {
   const headerMap = new Map<string, number>();
+  const groupedHeaderLabels = new Set(groupedColumns.map((group) => normalizeHeader(group.label)));
+  let activeGroup = "";
 
   firstHeaderRow.forEach((header, index) => {
     const normalizedHeader = normalizeHeader(header);
+    const secondHeader = secondHeaderRow[index] ?? "";
+    const normalizedSecondHeader = normalizeHeader(secondHeader);
 
     if (normalizedHeader) {
       headerMap.set(normalizedHeader, index);
+      activeGroup = groupedHeaderLabels.has(normalizedHeader) ? header : "";
     }
-  });
 
-  secondHeaderRow.forEach((header, index) => {
-    const normalizedHeader = normalizeHeader(header);
+    if (normalizedSecondHeader) {
+      headerMap.set(normalizedSecondHeader, index);
 
-    if (normalizedHeader) {
-      headerMap.set(normalizedHeader, index);
+      if (activeGroup) {
+        headerMap.set(normalizeHeader(`${activeGroup} ${secondHeader}`), index);
+      }
     }
   });
 
   return headerMap;
+}
+
+function getColumnImportSourceIndex(headerMap: Map<string, number>, column: Column) {
+  return headerMap.get(normalizeHeader(column.key)) ?? headerMap.get(normalizeHeader(column.label));
 }
 
 function normalizeImportAction(value: unknown) {
@@ -3538,6 +3625,53 @@ function normalizeImportAction(value: unknown) {
   }
 
   return "Add";
+}
+
+function findMatchingGstatImportRow(currentRows: AppealRow[], incomingRow: AppealRow) {
+  if (incomingRow.id) {
+    const matchedById = currentRows.find((row) => row.id === incomingRow.id);
+
+    if (matchedById) {
+      return matchedById;
+    }
+  }
+
+  const incomingRowNumber = Number(incomingRow.row_number ?? incomingRow.data.Sno);
+
+  if (!Number.isFinite(incomingRowNumber) || incomingRowNumber <= 0) {
+    return null;
+  }
+
+  return currentRows.find((row) => Number(row.row_number ?? row.data.Sno) === incomingRowNumber) ?? null;
+}
+
+function getChangedGstatImportData(
+  existingData: RowData,
+  importedData: RowData,
+  importedColumnKeys: Set<string>
+) {
+  return columns.reduce<RowData>((changedData, column) => {
+    if (column.key === "Sno" || !importedColumnKeys.has(column.key)) {
+      return changedData;
+    }
+
+    const existingValue = normalizeGstatImportCellValue(existingData[column.key], column);
+    const importedValue = normalizeGstatImportCellValue(importedData[column.key], column);
+
+    if (existingValue !== importedValue) {
+      changedData[column.key] = importedData[column.key] ?? "";
+    }
+
+    return changedData;
+  }, {});
+}
+
+function normalizeGstatImportCellValue(value: string | number | undefined, column: Column) {
+  if (dateFields.has(column.key)) {
+    return normalizeDateValue(value);
+  }
+
+  return String(value ?? "").trim().replace(/\r\n/g, "\n");
 }
 
 function normalizeHeader(value: string) {
