@@ -63,6 +63,7 @@ const baseColumns: Column[] = [
   "Status",
   "NTBD Reason",
   "Proceedings Status",
+  "Bench",
   "Next Hearing Date",
   "Entity Group",
   "Entity Name",
@@ -125,6 +126,7 @@ const columnWidths: Record<string, number> = {
   "Status": 96,
   "NTBD Reason": 170,
   "Proceedings Status": 132,
+  "Bench": 132,
   "Next Hearing Date": 116,
   "Entity Group": 142,
   "Entity Name": 214,
@@ -242,6 +244,7 @@ const editorSections = [
       "Status",
       "NTBD Reason",
       "Proceedings Status",
+      "Bench",
       "Next Hearing Date",
       "Entity Group",
       "Entity Name",
@@ -2483,7 +2486,29 @@ function saveColumnLayout(layout: ColumnLayout) {
 function normalizeColumnLayout(layout: Partial<ColumnLayout>): ColumnLayout {
   const knownColumnKeys = new Set(defaultColumnOrder);
   const savedOrder = Array.isArray(layout.order) ? layout.order.filter((key) => knownColumnKeys.has(key)) : [];
-  const order = [...savedOrder, ...defaultColumnOrder.filter((key) => !savedOrder.includes(key))];
+  const order = [...savedOrder];
+  defaultColumnOrder.forEach((key) => {
+    if (order.includes(key)) {
+      return;
+    }
+
+    if (key === "Bench") {
+      const proceedingsStatusIndex = order.indexOf("Proceedings Status");
+      const nextHearingDateIndex = order.indexOf("Next Hearing Date");
+
+      if (proceedingsStatusIndex >= 0) {
+        order.splice(proceedingsStatusIndex + 1, 0, key);
+        return;
+      }
+
+      if (nextHearingDateIndex >= 0) {
+        order.splice(nextHearingDateIndex, 0, key);
+        return;
+      }
+    }
+
+    order.push(key);
+  });
   const hiddenColumnKeys = Array.isArray(layout.hiddenColumnKeys)
     ? layout.hiddenColumnKeys.filter((key) => knownColumnKeys.has(key))
     : [];
