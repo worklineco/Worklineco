@@ -149,52 +149,63 @@ export async function POST(request: Request) {
       return appendedResponse;
     }
 
-    const updateResults = await Promise.all(
-      updateRows.map(async (item) => {
-        const matched = findMatchingGstatRow(existingRows, item.row);
+    const updateResults: Array<{
+      error: { message: string } | null;
+      outcome: "skipped" | "unchanged" | "updated";
+    }> = [];
 
-        if (!matched) {
-          return { skipped: true };
-        }
+    for (let index = 0; index < updateRows.length; index += 25) {
+      const batchResults = await Promise.all(
+        updateRows.slice(index, index + 25).map(async (item) => {
+          const matched = findMatchingGstatRow(existingRows, item.row);
 
-        const nextData = {
-          ...item.row.data,
-          Sno: matched.row_number ?? item.row.data.Sno ?? 1
-        };
-        const changes = changedFields(matched.data ?? {}, nextData);
+          if (!matched) {
+            return { error: null, outcome: "skipped" as const };
+          }
 
-        if (!changes.length) {
-          return { skipped: false };
-        }
+          const nextData = {
+            ...(matched.data ?? {}),
+            ...(item.row.data ?? {}),
+            Sno: matched.row_number ?? item.row.data.Sno ?? 1
+          };
+          const changes = changedFields(matched.data ?? {}, nextData);
 
-        const updated = await admin
-          .from("gstat_appeals")
-          .update({
-            data: nextData,
-            updated_at: new Date().toISOString(),
-            updated_by: auth.user.id
-          })
-          .eq("id", matched.id)
-          .select("id,row_number,data,updated_at")
-          .single();
+          if (!changes.length) {
+            return { error: null, outcome: "unchanged" as const };
+          }
 
-        if (!updated.error) {
-          await admin.from("gstat_audit_logs").insert(
-            changes.map((change) => ({
-              action: "update",
-              actor_user_id: auth.user.id,
-              appeal_id: matched.id,
-              field_name: change.field,
-              new_value: change.newValue,
-              old_value: change.oldValue,
-              organisation_code: organisationCode
-            }))
-          );
-        }
+          const updated = await admin
+            .from("gstat_appeals")
+            .update({
+              data: nextData,
+              updated_at: new Date().toISOString(),
+              updated_by: auth.user.id
+            })
+            .eq("id", matched.id)
+            .eq("organisation_code", organisationCode)
+            .select("id,row_number,data,updated_at")
+            .single();
 
-        return { error: updated.error, skipped: false };
-      })
-    );
+          if (!updated.error) {
+            await admin.from("gstat_audit_logs").insert(
+              changes.map((change) => ({
+                action: "update",
+                actor_user_id: auth.user.id,
+                appeal_id: matched.id,
+                field_name: change.field,
+                new_value: change.newValue,
+                old_value: change.oldValue,
+                organisation_code: organisationCode
+              }))
+            );
+          }
+
+          return { error: updated.error, outcome: "updated" as const };
+        })
+      );
+      updateResults.push(...batchResults);
+    }
+
     const updateError = updateResults.find((result) => result.error)?.error;
 
     if (updateError) {
@@ -223,16 +234,22 @@ export async function POST(request: Request) {
       }
     }
 
+    const summary = {
+      added: addRows.length,
+      deleted: uniqueDeleteMatches.length,
+      row_count: importRows.length,
+      skipped:
+        updateResults.filter((result) => result.outcome === "skipped").length +
+        Math.max(0, deleteRows.length - uniqueDeleteMatches.length),
+      unchanged: updateResults.filter((result) => result.outcome === "unchanged").length,
+      updated: updateResults.filter((result) => result.outcome === "updated").length
+    };
+
     await admin.from("gstat_audit_logs").insert({
       action: "import",
       actor_user_id: auth.user.id,
       field_name: "import",
-      new_value: {
-        added: addRows.length,
-        deleted: uniqueDeleteMatches.length,
-        row_count: importRows.length,
-        updated: updateRows.length - updateResults.filter((result) => result.skipped).length
-      },
+      new_value: summary,
       old_value: { row_count: previous.data?.length ?? 0 },
       organisation_code: organisationCode
     });
@@ -247,7 +264,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: current.error.message }, { status: 500 });
     }
 
-    return NextResponse.json({ rows: filterRowsForAccess(current.data ?? [], access) });
+    return NextResponse.json({
+      rows: filterRowsForAccess(current.data ?? [], access),
+      summary
+    });
   }
 
   return replaceRows(
