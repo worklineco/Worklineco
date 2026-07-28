@@ -845,6 +845,12 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
       const buffer = await file.arrayBuffer();
       const workbook = XLSX.read(buffer);
       const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+
+      if (!worksheet) {
+        setMessage(`No worksheet found in ${file.name}.`);
+        return;
+      }
+
       const rawRows = XLSX.utils.sheet_to_json<Array<string | number>>(worksheet, {
         blankrows: false,
         defval: "",
@@ -853,13 +859,23 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
       const headerIndex = findHeaderRow(rawRows);
       const headerRow = rawRows[headerIndex]?.map((value) => String(value).trim()) ?? [];
       const secondHeaderRow = rawRows[headerIndex + 1]?.map((value) => String(value).trim()) ?? [];
+
       if (normalizeHeader(headerRow[0] ?? "") !== normalizeHeader(importActionColumn)) {
         setMessage(`Column A must be "${importActionColumn}" in ${file.name}.`);
         return;
       }
 
       const headerMap = createGstatImportHeaderMap(headerRow, secondHeaderRow);
-       const importedRows = rawRows
+      const importedColumnKeys = new Set(
+        columns
+          .filter((column) => getColumnImportSourceIndex(headerMap, column) !== undefined)
+          .map((column) => column.key)
+      );
+      const hasSecondHeaderRow = demandColumns.some(
+        (column) => headerMap.get(normalizeHeader(column.key)) !== undefined
+      );
+      const dataStartIndex = headerIndex + (hasSecondHeaderRow ? 2 : 1);
+      const importedRows = rawRows
         .slice(dataStartIndex)
         .filter((rawRow) => rawRow.some((value) => String(value).trim()))
         .map((rawRow, rowIndex): AppealRow => {
@@ -925,18 +941,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
             }
           }
         ];
-      });  row[column.key] =
-              column.key === "Sno"
-                ? value || rowIndex + 1
-                : dateFields.has(column.key)
-                  ? normalizeDateValue(value)
-                  : value ?? "";
-            return row;
-          }, {}),
-          import_action: normalizeImportAction(rawRow[actionIndex ?? 0]),
-          row_number: rowIndex + 1
-        };
-        });
+      });
 
       if (!importedRows.length) {
         setMessage("No GSTAT rows found in the selected Excel file.");
@@ -944,7 +949,9 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
       }
 
       if (!nextRows.length) {
-        setMessage(`No changes found in ${file.name}. ${unchanged} unchanged row${unchanged === 1 ? " was" : "s were"} skipped.`);
+        setMessage(
+          `No changes found in ${file.name}. ${unchanged} unchanged row${unchanged === 1 ? " was" : "s were"} skipped.`
+        );
         return;
       }
 
@@ -962,7 +969,9 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
       };
 
       if (!response.ok) {
-        setMessage(`Could not import ${nextRows.length} row${nextRows.length === 1 ? "" : "s"}: ${result.error ?? "database save failed"}`);
+        setMessage(
+          `Could not import ${nextRows.length} row${nextRows.length === 1 ? "" : "s"}: ${result.error ?? "database save failed"}`
+        );
         return;
       }
 
@@ -980,6 +989,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
         `Imported ${file.name}: ${summary.added ?? 0} added, ${summary.updated ?? 0} updated, ${summary.deleted ?? 0} deleted; ${unchangedTotal} unchanged and ${summary.skipped ?? 0} unmatched skipped.`
       );
     } catch (error) {
+      console.error("GSTAT import error:", error);
       setMessage(error instanceof Error ? error.message : "Could not read the selected Excel file.");
     } finally {
       event.target.value = "";
