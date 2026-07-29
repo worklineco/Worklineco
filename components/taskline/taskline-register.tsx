@@ -34,9 +34,7 @@ const taskLineImportBatchSize = 250;
 const taskLineImportConcurrency = 3;
 const bulkDeleteLimit = 10;
 const taskLinePageSize = 200;
-const taskLineWindowSize = taskLinePageSize * 2;
 const taskLineRowsCacheKey = "taskline:rows:v4";
-const taskLineFilterOptionsCacheMs = 5 * 60 * 1000;
 const taskLineColumnLayoutStorageKey = "workline:taskline-column-layout:v2";
 const selectionColumnWidth = 40;
 const actionColumnWidth = 112;
@@ -148,8 +146,6 @@ export function TaskLineRegister() {
   const [message, setMessage] = useState("");
   const [editingRowId, setEditingRowId] = useState<string | null>(null);
   const [rows, setRows] = useState<TaskLineRow[]>([]);
-  const [totalRowCount, setTotalRowCount] = useState(0);
-  const [windowOffset, setWindowOffset] = useState(0);
   const [selectedRowIds, setSelectedRowIds] = useState<Set<string>>(new Set());
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
   const [search, setSearch] = useState("");
@@ -174,10 +170,7 @@ export function TaskLineRegister() {
   const auditLoadedRef = useRef(false);
   const taskLineRequestIdRef = useRef(0);
   const fullRowsCacheRef = useRef<TaskLineRow[] | null>(null);
-  const filterOptionsCacheRef = useRef(new Map<string, { expiresAt: number; values: string[] }>());
   const filterOptionsRequestIdRef = useRef(0);
-  const taskLineCacheKeysRef = useRef(new Set<string>());
-  const prefetchRequestsRef = useRef(new Set<string>());
   const queryEffectReadyRef = useRef(false);
   const taskMastersRequestedRef = useRef(false);
   const stageMastersRequestedRef = useRef(false);
@@ -261,7 +254,10 @@ export function TaskLineRegister() {
   function frozenInfo(key: string) {
     return { isFrozen: frozenColumnKeys.has(key), left: frozenLefts.get(key) ?? 0 };
   }
-  const filteredRows = rows;
+  const filteredRows = useMemo(
+    () => applyTaskLineFilters(rows, { columnFilters, dueColorFilter, search, sortState, statusFilter, valueFilters }),
+    [rows, columnFilters, dueColorFilter, search, sortState, statusFilter, valueFilters]
+  );
   const hasActiveColumnFilters = Object.values(columnFilters).some((value) => value.trim());
   const hasActiveDataQuery = Boolean(
     search.trim() ||
@@ -282,16 +278,16 @@ export function TaskLineRegister() {
     }),
     [columnFilters, dueColorFilter, search, sortState, statusFilter, valueFilters, visibleColumns]
   );
-  const pageCount = Math.max(1, Math.ceil(totalRowCount / taskLinePageSize));
+  const pageCount = Math.max(1, Math.ceil(filteredRows.length / taskLinePageSize));
   const pagedRows = useMemo(() => {
-    const startIndex = (tablePage - 1) * taskLinePageSize - windowOffset;
+    const startIndex = (tablePage - 1) * taskLinePageSize;
     return filteredRows.slice(startIndex, startIndex + taskLinePageSize);
-  }, [filteredRows, tablePage, windowOffset]);
+  }, [filteredRows, tablePage]);
   const selectedPageCount = pagedRows.filter((row) => selectedRowIds.has(row.__id)).length;
   const allPageRowsSelected = pagedRows.length > 0 && selectedPageCount === pagedRows.length;
 
   useEffect(() => {
-    void loadTaskLineWindow(0);
+    void loadAllTaskLine();
   }, []);
 
   useEffect(() => {
@@ -302,11 +298,6 @@ export function TaskLineRegister() {
 
     setTablePage(1);
     setSelectedRowIds(new Set());
-    const timer = window.setTimeout(() => {
-      void loadTaskLineWindow(0);
-    }, 300);
-
-    return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [taskLineQueryString]);
 
@@ -331,77 +322,30 @@ export function TaskLineRegister() {
 
   useEffect(() => {
     const nextPage = Math.min(tablePage, pageCount);
-    if (nextPage === tablePage) return;
-
-    setTablePage(nextPage);
-    const nextOffset = Math.floor((nextPage - 1) / 2) * taskLineWindowSize;
-    if (nextOffset !== windowOffset) {
-      void loadTaskLineWindow(nextOffset, false);
+    if (nextPage !== tablePage) {
+      setTablePage(nextPage);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pageCount, tablePage, windowOffset]);
-
-  useEffect(() => {
-    if (isLoading || tablePage % 2 !== 0) return;
-    const nextOffset = windowOffset + taskLineWindowSize;
-    if (nextOffset < totalRowCount) {
-      void prefetchTaskLineWindow(nextOffset);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLoading, tablePage, taskLineQueryString, totalRowCount, windowOffset]);
+  }, [pageCount, tablePage]);
 
   const visibleFilterOptions = useMemo(() => {
     const query = filterSearch.trim().toLowerCase();
     return query ? openColumnOptions.filter((value) => value.toLowerCase().includes(query)) : openColumnOptions;
   }, [openColumnOptions, filterSearch]);
 
-  async function openColumnFilter(key: string, anchor: HTMLElement) {
+  function openColumnFilter(key: string, anchor: HTMLElement) {
     const rect = anchor.getBoundingClientRect();
     const width = 288;
     const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
     const top = rect.bottom + 4;
     const maxHeight = Math.max(240, window.innerHeight - top - 16);
-    const cached = filterOptionsCacheRef.current.get(key);
-    let options = cached && cached.expiresAt > Date.now() ? cached.values : null;
+    const options = uniqueSortedValues(rowsRef.current.map((row) => text(row[key])));
 
     setOpenFilterKey(key);
     setFilterSearch("");
     setFilterMenuPos({ left, maxHeight, top });
-
-    if (options) {
-      setOpenColumnOptions(options);
-      setFilterDraft(valueFilters[key] ? [...valueFilters[key]] : options);
-      setIsFilterOptionsLoading(false);
-      return;
-    }
-
-    const requestId = ++filterOptionsRequestIdRef.current;
-    setOpenColumnOptions([]);
-    setFilterDraft(valueFilters[key] ? [...valueFilters[key]] : []);
-    setIsFilterOptionsLoading(true);
-
-    try {
-      const response = await fetch(`/api/taskline?view=filter-options&column=${encodeURIComponent(key)}`, { cache: "no-store" });
-      const result = (await response.json()) as { error?: string; values?: string[] };
-      if (requestId !== filterOptionsRequestIdRef.current) return;
-      if (!response.ok) {
-        setMessage(result.error ?? "Could not load TaskLine filter values.");
-        return;
-      }
-      options = result.values ?? [];
-      filterOptionsCacheRef.current.set(key, { expiresAt: Date.now() + taskLineFilterOptionsCacheMs, values: options });
-      setOpenColumnOptions(options);
-      setFilterDraft(valueFilters[key] ? [...valueFilters[key]] : options);
-      setMessage("");
-    } catch {
-      if (requestId === filterOptionsRequestIdRef.current) {
-        setMessage("Could not load TaskLine filter values.");
-      }
-    } finally {
-      if (requestId === filterOptionsRequestIdRef.current) {
-        setIsFilterOptionsLoading(false);
-      }
-    }
+    setOpenColumnOptions(options);
+    setFilterDraft(valueFilters[key] ? [...valueFilters[key]] : options);
+    setIsFilterOptionsLoading(false);
   }
 
   function closeColumnFilter() {
@@ -653,47 +597,20 @@ export function TaskLineRegister() {
     void Promise.all([loadMasters(), loadStageMasters(), loadTeamMembers(), loadEntityMasters()]);
   }
 
-  function taskLineWindowUrl(offset: number) {
-    const params = new URLSearchParams({
-      limit: String(taskLineWindowSize),
-      offset: String(offset)
-    });
-    if (taskLineQueryString) {
-      new URLSearchParams(taskLineQueryString).forEach((value, key) => params.set(key, value));
-    }
-    return `/api/taskline?${params.toString()}`;
-  }
-
-  function taskLineWindowCacheKey(offset: number) {
-    return `${taskLineRowsCacheKey}:${taskLineQueryString || "default"}:${offset}`;
-  }
-
-  async function loadTaskLineWindow(offset: number, useCache = true) {
-    const normalizedOffset = Math.max(0, Math.floor(offset / taskLineWindowSize) * taskLineWindowSize);
-    const cacheKey = taskLineWindowCacheKey(normalizedOffset);
-    taskLineCacheKeysRef.current.add(cacheKey);
+  async function loadAllTaskLine(useCache = true) {
     const requestId = ++taskLineRequestIdRef.current;
-    const cached = useCache
-      ? getCached<{ offset?: number; rows?: TaskLineRow[]; total?: number }>(cacheKey)
-      : undefined;
+    const cached = useCache ? getCached<{ rows?: TaskLineRow[] }>(taskLineRowsCacheKey) : undefined;
 
-    if (cached) {
-      setRows(cached.rows ?? []);
-      setTotalRowCount(cached.total ?? cached.rows?.length ?? 0);
-      setWindowOffset(cached.offset ?? normalizedOffset);
+    if (cached?.rows?.length) {
+      setRows(cached.rows);
       setIsLoading(false);
     } else {
       setIsLoading(true);
     }
 
     try {
-      const response = await fetch(taskLineWindowUrl(normalizedOffset), { cache: "no-store" });
-      const result = (await response.json()) as {
-        error?: string;
-        offset?: number;
-        rows?: TaskLineRow[];
-        total?: number;
-      };
+      const response = await fetch("/api/taskline", { cache: "no-store" });
+      const result = (await response.json()) as { error?: string; rows?: TaskLineRow[] };
 
       if (!response.ok) {
         if (requestId === taskLineRequestIdRef.current) {
@@ -707,16 +624,12 @@ export function TaskLineRegister() {
       }
 
       const nextRows = result.rows ?? [];
-      const nextTotal = result.total ?? nextRows.length;
-      setCached(cacheKey, { offset: result.offset ?? normalizedOffset, rows: nextRows, total: nextTotal });
+      setCached(taskLineRowsCacheKey, { rows: nextRows });
       setRows(nextRows);
-      setTotalRowCount(nextTotal);
-      setWindowOffset(result.offset ?? normalizedOffset);
-      setSelectedRowIds(new Set());
       setMessage("");
       return nextRows;
     } catch (error) {
-      console.error("TaskLine window load error:", error);
+      console.error("TaskLine load error:", error);
       if (requestId === taskLineRequestIdRef.current) {
         setMessage("Could not load TaskLine.");
       }
@@ -728,53 +641,13 @@ export function TaskLineRegister() {
     }
   }
 
-  async function prefetchTaskLineWindow(offset: number) {
-    const normalizedOffset = Math.max(0, Math.floor(offset / taskLineWindowSize) * taskLineWindowSize);
-    const cacheKey = taskLineWindowCacheKey(normalizedOffset);
-    taskLineCacheKeysRef.current.add(cacheKey);
-    if (getCached(cacheKey) || prefetchRequestsRef.current.has(cacheKey)) return;
-
-    prefetchRequestsRef.current.add(cacheKey);
-    try {
-      const response = await fetch(taskLineWindowUrl(normalizedOffset), { cache: "no-store" });
-      const result = (await response.json()) as {
-        offset?: number;
-        rows?: TaskLineRow[];
-        total?: number;
-      };
-      if (response.ok) {
-        setCached(cacheKey, {
-          offset: result.offset ?? normalizedOffset,
-          rows: result.rows ?? [],
-          total: result.total ?? result.rows?.length ?? 0
-        });
-      }
-    } catch {
-      // Prefetch is optional; the normal page request will retry if it fails.
-    } finally {
-      prefetchRequestsRef.current.delete(cacheKey);
-    }
-  }
-
   async function reloadTaskLine() {
-    fullRowsCacheRef.current = null;
-    filterOptionsCacheRef.current.clear();
-    prefetchRequestsRef.current.clear();
-    for (const cacheKey of taskLineCacheKeysRef.current) {
-      clearCached(cacheKey);
-    }
-    const offset = Math.floor((tablePage - 1) / 2) * taskLineWindowSize;
-    return loadTaskLineWindow(offset, false);
+    clearCached(taskLineRowsCacheKey);
+    return loadAllTaskLine(false);
   }
 
   function goToPage(nextPage: number) {
-    const boundedPage = Math.max(1, Math.min(pageCount, nextPage));
-    const nextOffset = Math.floor((boundedPage - 1) / 2) * taskLineWindowSize;
-    setTablePage(boundedPage);
-
-    if (nextOffset !== windowOffset) {
-      void loadTaskLineWindow(nextOffset);
-    }
+    setTablePage(Math.max(1, Math.min(pageCount, nextPage)));
   }
 
   async function showAuditTrail(selectedRow?: TaskLineRow) {
@@ -854,7 +727,6 @@ export function TaskLineRegister() {
         setMessage("TaskLine row added.");
       }
 
-      await reloadTaskLine();
     } catch (error) {
       console.error("TaskLine save error:", error);
       setMessage("Could not save TaskLine row.");
@@ -937,7 +809,6 @@ export function TaskLineRegister() {
 
       setRows((current) => current.filter((item) => item.__id !== row.__id));
       addAuditLog({ action: "taskline.delete_row", entityId: row.__id, oldValue: getAuditRowLabel(row), rowLabel: getRowLabel(row, rows) });
-      await reloadTaskLine();
       setMessage("TaskLine row deleted.");
     } catch (error) {
       console.error("TaskLine delete error:", error);
@@ -992,7 +863,6 @@ export function TaskLineRegister() {
       const deletedIds = new Set(recordIds);
       setRows((current) => current.filter((row) => !deletedIds.has(row.__id)));
       setSelectedRowIds(new Set());
-      await reloadTaskLine();
       setMessage(`${result.deleted ?? recordIds.length} selected TaskLine task${(result.deleted ?? recordIds.length) === 1 ? "" : "s"} deleted.`);
     } catch (error) {
       console.error("TaskLine bulk delete error:", error);
@@ -1164,8 +1034,8 @@ export function TaskLineRegister() {
         setMessage(`Importing ${file.name}: ${processed} of ${importRows.length} rows processed...`);
       }
 
-      await reloadTaskLine();
       setMessage(`Imported ${file.name}: ${summary.added} added, ${summary.updated} updated, ${summary.deleted} deleted.`);
+      await reloadTaskLine();
     } catch (error) {
       console.error("TaskLine import error:", error);
       setMessage(error instanceof Error ? error.message : "Could not import TaskLine rows. Please check the file and try again.");
@@ -1190,8 +1060,8 @@ export function TaskLineRegister() {
           <h2 className="text-lg font-black leading-tight text-slate-950">Task Register</h2>
           <p className="text-xs font-bold text-slate-500">
             {hasActiveDataQuery
-              ? `${totalRowCount.toLocaleString()} matching rows · ${rows.length.toLocaleString()} loaded`
-              : `${totalRowCount.toLocaleString()} rows · ${rows.length.toLocaleString()} loaded`}
+              ? `${filteredRows.length.toLocaleString()} matching · ${rows.length.toLocaleString()} rows`
+              : `${rows.length.toLocaleString()} rows`}
           </p>
         </div>
 
@@ -2687,6 +2557,61 @@ function getSavedTaskLineColumnLayout() {
   } catch {
     return { frozenColumnKeys: [], hiddenColumnKeys: [], order: defaultTaskLineColumnOrder };
   }
+}
+
+type TaskLineFilterInput = {
+  columnFilters: Record<string, string>;
+  dueColorFilter: string[];
+  search: string;
+  sortState: { dir: "asc" | "desc"; key: string } | null;
+  statusFilter: string;
+  valueFilters: Record<string, string[]>;
+};
+
+function applyTaskLineFilters(sourceRows: TaskLineRow[], filters: TaskLineFilterInput) {
+  const query = filters.search.trim().toLowerCase();
+  const result = sourceRows.filter((row) => {
+    const matchesSearch = !query || taskLineColumns.some((column) => text(row[column.key]).toLowerCase().includes(query));
+    const matchesStatus = !filters.statusFilter || text(row.status_open_close) === filters.statusFilter;
+    const matchesColumns = Object.entries(filters.columnFilters).every(([key, value]) => {
+      const needle = text(value).trim().toLowerCase();
+      return !needle || text(row[key]).toLowerCase().includes(needle);
+    });
+    const matchesValues = Object.entries(filters.valueFilters).every(([key, values]) => !values.length || values.includes(text(row[key])));
+    const matchesDueColor = !filters.dueColorFilter.length || filters.dueColorFilter.includes(dueDateCategory(text(row.due_date)));
+    return matchesSearch && matchesStatus && matchesColumns && matchesValues && matchesDueColor;
+  });
+
+  if (!filters.sortState) {
+    return result;
+  }
+
+  const factor = filters.sortState.dir === "asc" ? 1 : -1;
+  const sortKey = filters.sortState.key;
+  const column = taskLineColumnByKey.get(sortKey);
+  return [...result].sort((first, second) => {
+    const rawA = text(first[sortKey]);
+    const rawB = text(second[sortKey]);
+    if (column?.type === "date") {
+      const dateA = parseTaskLineDueDate(rawA);
+      const dateB = parseTaskLineDueDate(rawB);
+      if (!dateA && !dateB) return 0;
+      if (!dateA) return 1;
+      if (!dateB) return -1;
+      return factor * (dateA.getTime() - dateB.getTime());
+    }
+    if (column?.type === "number" || column?.type === "money") {
+      const numA = rawA === "" ? Number.NaN : Number(rawA.replace(/[^0-9.-]/g, ""));
+      const numB = rawB === "" ? Number.NaN : Number(rawB.replace(/[^0-9.-]/g, ""));
+      const validA = !Number.isNaN(numA);
+      const validB = !Number.isNaN(numB);
+      if (!validA && !validB) return 0;
+      if (!validA) return 1;
+      if (!validB) return -1;
+      return factor * (numA - numB);
+    }
+    return factor * rawA.localeCompare(rawB, undefined, { numeric: true });
+  });
 }
 
 function text(value: unknown) {
