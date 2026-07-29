@@ -35,6 +35,13 @@ const taskLineImportConcurrency = 3;
 const bulkDeleteLimit = 10;
 const taskLinePageSize = 200;
 const taskLineRowsCacheKey = "taskline:rows:v4";
+const taskLineColumnGroups: { columns: string[] | null; key: string; label: string }[] = [
+  { key: "core", label: "Core", columns: ["team", "serial_no", "name", "resource", "entity_group", "entity", "state_name", "task", "due_date", "stage", "status_open_close", "remarks"] },
+  { key: "legal", label: "Legal / Order", columns: ["serial_no", "name", "entity", "task", "ref_date", "ref_no", "period", "section", "issue", "refer_other_task", "appeal_no", "order_type", "court_location", "engaged_counsel", "printing", "due_date", "stage"] },
+  { key: "billing", label: "Billing / Fees", columns: ["serial_no", "name", "entity", "task", "billing_status", "el_reference", "tax_invoice_no", "total_agreed_fee", "amount_raised", "amount_realised", "counsel_fee", "referral_fee", "fee_comments", "document_link"] },
+  { key: "reminders", label: "Reminders / Status", columns: ["serial_no", "name", "entity", "task", "realisation_status", "reminder_days", "reminder_email", "remaining_days", "status", "entry_date", "completion_date", "poc", "pending_from"] },
+  { key: "all", label: "All", columns: null }
+];
 const taskLineColumnLayoutStorageKey = "workline:taskline-column-layout:v2";
 const selectionColumnWidth = 40;
 const actionColumnWidth = 112;
@@ -146,6 +153,7 @@ export function TaskLineRegister() {
   const [message, setMessage] = useState("");
   const [editingRowId, setEditingRowId] = useState<string | null>(null);
   const [rows, setRows] = useState<TaskLineRow[]>([]);
+  const [activeColumnGroup, setActiveColumnGroup] = useState("core");
   const [selectedRowIds, setSelectedRowIds] = useState<Set<string>>(new Set());
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
   const [search, setSearch] = useState("");
@@ -232,9 +240,13 @@ export function TaskLineRegister() {
     () => columnOrder.map((key) => taskLineColumnByKey.get(key)).filter((column): column is TaskLineColumn => Boolean(column)),
     [columnOrder]
   );
+  const activeGroupColumnSet = useMemo(() => {
+    const group = taskLineColumnGroups.find((item) => item.key === activeColumnGroup);
+    return group?.columns ? new Set(group.columns) : null;
+  }, [activeColumnGroup]);
   const visibleColumns = useMemo(
-    () => orderedColumns.filter((column) => !hiddenColumnKeys.has(column.key)),
-    [hiddenColumnKeys, orderedColumns]
+    () => orderedColumns.filter((column) => !hiddenColumnKeys.has(column.key) && (!activeGroupColumnSet || activeGroupColumnSet.has(column.key))),
+    [activeGroupColumnSet, hiddenColumnKeys, orderedColumns]
   );
   const actionColumnHidden = hiddenColumnKeys.has(actionColumnKey);
   const actionColumnFrozen = frozenColumnKeys.has(actionColumnKey);
@@ -1167,6 +1179,22 @@ export function TaskLineRegister() {
 
       {viewMode === "register" ? (
       <div className="mt-3">
+        <div className="mb-2 flex flex-wrap gap-1.5">
+          {taskLineColumnGroups.map((group) => (
+            <button
+              className={`inline-flex h-8 items-center rounded-md border px-3 text-xs font-black transition ${
+                activeColumnGroup === group.key
+                  ? "border-navy-700 bg-navy-700 text-white"
+                  : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+              }`}
+              key={group.key}
+              onClick={() => setActiveColumnGroup(group.key)}
+              type="button"
+            >
+              {group.label}
+            </button>
+          ))}
+        </div>
         <div className="mb-1.5 flex items-center justify-end gap-1.5">
           {isLoading ? <span className="mr-auto text-xs font-bold text-slate-500">Loading TaskLine rows...</span> : null}
           <button
