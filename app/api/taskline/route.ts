@@ -405,7 +405,8 @@ async function handlePost(request: Request) {
     return NextResponse.json({ error: "TaskLine record is required." }, { status: 400 });
   }
 
-  const existingId = text(record.__id);
+  const rawId = text(record.__id);
+  const existingId = isUuid(rawId) ? rawId : "";
   const cleaned = applyTeamAccess(cleanRecord(record), access);
   const values = toTaskValues(cleaned);
 
@@ -1144,6 +1145,10 @@ function canAccessTaskLineRow(row: TaskLineRow, access: AccessScope) {
   }
 
   return normalizeTeam(row.team) === normalizeTeam(access.team);
+}
+
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 }
 
 function isTaskLineRecord(record: TaskRecord | null): record is TaskRecord {
