@@ -136,6 +136,23 @@ export async function GET(request: Request) {
     return NextResponse.json({ auditLogs: await loadAuditLogs(admin, organisation.organisationId, access) });
   }
 
+  if (view === "codes") {
+    const records = await loadTaskLineRecords(admin, organisation.organisationId, access);
+    if (records.error) {
+      return NextResponse.json({ error: records.error.message }, { status: 500 });
+    }
+    const codes = (records.data ?? [])
+      .map(formatRecord)
+      .filter((row) => text(row.task_code))
+      .map((row) => ({
+        code: text(row.task_code),
+        entity: text(row.entity || row.entity_group),
+        task: text(row.task),
+        team: text(row.team)
+      }));
+    return NextResponse.json({ codes });
+  }
+
   if (view === "filter-options") {
     const column = text(searchParams.get("column"));
 

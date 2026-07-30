@@ -10,6 +10,8 @@ type EditorState = { row: RegisterRow; rowId?: string };
 
 const displayColumns = [
   "S.No.",
+  "Task Code",
+  "EL No.",
   "Client / Entity",
   "Service / Scope",
   "Period",
@@ -22,7 +24,9 @@ const displayColumns = [
   "Remarks"
 ];
 
-const editableFields: { key: string; type: "date" | "number" | "select" | "text" | "textarea" | "url"; options?: string[]; wide?: boolean }[] = [
+const editableFields: { key: string; type: "date" | "number" | "select" | "taskcode" | "text" | "textarea" | "url"; options?: string[]; wide?: boolean }[] = [
+  { key: "Task Code", type: "taskcode" },
+  { key: "EL No.", type: "text" },
   { key: "Client / Entity", type: "text" },
   { key: "Service / Scope", type: "text" },
   { key: "Period", type: "text" },
@@ -43,9 +47,14 @@ export function EngagementLettersRegister() {
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const hydratedRef = useRef(false);
+  const [codeOptions, setCodeOptions] = useState<{ code: string; entity: string; task: string }[]>([]);
 
   useEffect(() => {
     void loadRows();
+    fetch("/api/taskline?view=codes", { cache: "no-store" })
+      .then((response) => (response.ok ? response.json() : { codes: [] }))
+      .then((result: { codes?: { code: string; entity: string; task: string }[] }) => setCodeOptions(result.codes ?? []))
+      .catch(() => undefined);
   }, []);
 
   async function loadRows() {
@@ -278,7 +287,23 @@ export function EngagementLettersRegister() {
                 {editableFields.map((field) => (
                   <label className={field.wide ? "md:col-span-2" : ""} key={field.key}>
                     <span className="text-[10px] font-black uppercase text-slate-500">{field.key}</span>
-                    {field.type === "select" ? (
+                    {field.type === "taskcode" ? (
+                      <select
+                        className="mt-1 h-10 w-full rounded-md border border-slate-200 bg-white px-2 text-sm font-semibold outline-none focus:border-navy-400"
+                        onChange={(event) => setEditor((current) => (current ? { ...current, row: { ...current.row, [field.key]: event.target.value } } : current))}
+                        value={String(editor.row[field.key] ?? "")}
+                      >
+                        <option value="">Select task code</option>
+                        {codeOptions.map((option) => (
+                          <option key={option.code} value={option.code}>
+                            {option.code}{option.entity ? ` — ${option.entity}` : option.task ? ` — ${option.task}` : ""}
+                          </option>
+                        ))}
+                        {editor.row[field.key] && !codeOptions.some((option) => option.code === editor.row[field.key]) ? (
+                          <option value={String(editor.row[field.key])}>{String(editor.row[field.key])}</option>
+                        ) : null}
+                      </select>
+                    ) : field.type === "select" ? (
                       <select
                         className="mt-1 h-10 w-full rounded-md border border-slate-200 bg-white px-2 text-sm font-semibold outline-none focus:border-navy-400"
                         onChange={(event) => setEditor((current) => (current ? { ...current, row: { ...current.row, [field.key]: event.target.value } } : current))}

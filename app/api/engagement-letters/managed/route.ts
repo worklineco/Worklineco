@@ -19,6 +19,8 @@ const defaultOrganisationCode = "DCO1433";
 const fetchBatchSize = 1000;
 const columns = [
   "S.No.",
+  "Task Code",
+  "EL No.",
   "Client / Entity",
   "Service / Scope",
   "Period",

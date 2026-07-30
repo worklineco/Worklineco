@@ -22,6 +22,7 @@ type BillingRecord = {
   include_ope_in_fees: string;
   income_head: string;
   is_retainer: string;
+  task_code: string;
   invoice_date: string | null;
   invoice_no: string;
   memo_date: string | null;
@@ -109,6 +110,7 @@ const emptyRecord: BillingRecord = {
   include_ope_in_fees: "No",
   income_head: "",
   is_retainer: "",
+  task_code: "",
   invoice_date: "",
   invoice_no: "",
   memo_date: "",
@@ -185,6 +187,7 @@ const gstStateByCode: Record<string, string> = {
 const billingColumns: BillingColumn[] = [
   { field: "serial_no", label: "S.No.", type: "text", width: 90 },
   { field: "owner_team", label: "Team", type: "text", width: 128 },
+  { field: "task_code", label: "Task Code", type: "select", width: 140 },
   { field: "source_module", label: "Source", type: "select", width: 110 },
   { field: "voucher_type", label: "Voucher", type: "select", width: 145 },
   { field: "is_retainer", label: "Retainer Bill", type: "select", width: 130 },
@@ -225,6 +228,7 @@ const importHeaders: Array<{ field: BillingField; label: string }> = [
   { field: "id", label: "Billing ID" },
   { field: "serial_no", label: "S.No." },
   { field: "owner_team", label: "Team" },
+  { field: "task_code", label: "Task Code" },
   { field: "voucher_type", label: "Voucher Type" },
   { field: "is_retainer", label: "Retainer Bill" },
   { field: "group_name", label: "Group" },
@@ -304,18 +308,22 @@ export function BillingRegister() {
   const [trashRecords, setTrashRecords] = useState<TrashRecord[]>([]);
   const [viewMode, setViewMode] = useState<BillingView>("register");
   const [isSummaryOpen, setIsSummaryOpen] = useState(false);
+  const [taskCodes, setTaskCodes] = useState<string[]>([]);
   const [isToolbarMenuOpen, setIsToolbarMenuOpen] = useState(false);
   const [filters, setFilters] = useState({ search: "", status: "", receiptStatus: "", team: "", source: "" });
   const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
   const [masters, setMasters] = useState(defaultMasters);
 
   const mergedMasters = useMemo(
-    () =>
-      Object.entries(defaultMasters).reduce<Record<string, string[]>>((result, [key, defaults]) => {
+    () => {
+      const merged = Object.entries(defaultMasters).reduce<Record<string, string[]>>((result, [key, defaults]) => {
         result[key] = Array.from(new Set([...defaults, ...(masters[key] ?? [])].filter(Boolean)));
         return result;
-      }, {}),
-    [masters]
+      }, {});
+      merged.task_code = taskCodes;
+      return merged;
+    },
+    [masters, taskCodes]
   );
   const orderedBillingColumns = useMemo(
     () =>
@@ -387,6 +395,10 @@ export function BillingRegister() {
   useEffect(() => {
     void loadBilling();
     void loadBillingActivity();
+    fetch("/api/taskline?view=codes", { cache: "no-store" })
+      .then((response) => (response.ok ? response.json() : { codes: [] }))
+      .then((result: { codes?: { code: string }[] }) => setTaskCodes((result.codes ?? []).map((item) => item.code).filter(Boolean)))
+      .catch(() => undefined);
     const savedLayout = getSavedBillingColumnLayout();
     setColumnOrder(savedLayout.order);
     setHiddenColumnKeys(new Set(savedLayout.hiddenColumnKeys));
@@ -1424,6 +1436,22 @@ function BillingAddForm({
 
         <div className="max-h-[68vh] overflow-auto p-5">
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <label>
+              <span className="text-[10px] font-black uppercase text-slate-500">Task Code</span>
+              <select
+                className={formControlClass}
+                onChange={(event) => onChange("task_code", event.target.value)}
+                value={draft.task_code || ""}
+              >
+                <option value="">Select task code</option>
+                {selectOptions("task_code", masters).filter(Boolean).map((option) => (
+                  <option key={option} value={option}>{option}</option>
+                ))}
+                {draft.task_code && !selectOptions("task_code", masters).includes(draft.task_code) ? (
+                  <option value={draft.task_code}>{draft.task_code}</option>
+                ) : null}
+              </select>
+            </label>
             <label>
               <span className="text-[10px] font-black uppercase text-slate-500">Voucher Type</span>
               <select
