@@ -38,7 +38,7 @@ const taskLineRowsCacheKey = "taskline:rows:v4";
 const taskLineColumnGroups: { columns: string[] | null; key: string; label: string }[] = [
   { key: "core", label: "Core", columns: ["team", "serial_no", "task_code", "name", "resource", "entity_group", "entity", "state_name", "task", "due_date", "stage", "status_open_close", "remarks"] },
   { key: "legal", label: "Legal / Order", columns: ["serial_no", "name", "entity", "task", "ref_date", "ref_no", "period", "section", "issue", "refer_other_task", "appeal_no", "order_type", "court_location", "engaged_counsel", "printing", "due_date", "stage"] },
-  { key: "billing", label: "Billing / Fees", columns: ["serial_no", "name", "entity", "task", "billing_status", "el_reference", "tax_invoice_no", "total_agreed_fee", "amount_raised", "amount_realised", "counsel_fee", "referral_fee", "fee_comments", "document_link"] },
+  { key: "billing", label: "Billing / Fees", columns: ["serial_no", "name", "entity", "task", "billable", "billing_status", "el_reference", "tax_invoice_no", "total_agreed_fee", "amount_raised", "amount_realised", "counsel_fee", "referral_fee", "fee_comments", "document_link"] },
   { key: "reminders", label: "Reminders / Status", columns: ["serial_no", "name", "entity", "task", "realisation_status", "reminder_days", "reminder_email", "remaining_days", "status", "entry_date", "completion_date", "poc", "pending_from"] },
   { key: "all", label: "All", columns: null }
 ];
@@ -59,6 +59,7 @@ const taskLineColumns: TaskLineColumn[] = [
   { key: "due_date", label: "Due Date", type: "date", width: 128 },
   { key: "stage", label: "Stage", width: 132 },
   { key: "status_open_close", label: "Status Open/Close", type: "select", width: 155 },
+  { key: "billable", label: "Billable", type: "select", width: 108 },
   { key: "remarks", label: "Remarks", width: 200 },
   { key: "ref_date", label: "Order/SCN,etc. Ref. Date", type: "date", width: 180 },
   { key: "ref_no", label: "Order/SCN,etc. Ref. No", width: 180 },
@@ -97,6 +98,7 @@ const taskLineColumns: TaskLineColumn[] = [
 const taskLineColumnByKey = new Map(taskLineColumns.map((column) => [column.key, column]));
 const defaultTaskLineColumnOrder = taskLineColumns.map((column) => column.key);
 const statusOptions = ["Open", "Close"];
+const billableOptions = ["Yes", "No"];
 type TeamMemberLite = { designation: string; name: string; team: string };
 type EntityMasterOption = { entity: string; group: string };
 const emptyOptions: string[] = [];
@@ -1716,6 +1718,14 @@ const TaskLineCell = memo(function TaskLineCell({
     );
   }
 
+  if (column.key === "billable") {
+    return (
+      <td className={`border-r border-slate-100 px-3 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
+        <LazyTaskLineSelect current={row[column.key] ?? ""} onChange={onChange} options={billableOptions} placeholder="Select" />
+      </td>
+    );
+  }
+
   if (column.type === "select") {
     return (
       <td className={`border-r border-slate-100 px-3 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
@@ -1919,6 +1929,17 @@ function TaskLineForm({
                     {draft[column.key] && !stageMasterNames.includes(draft[column.key]) ? (
                       <option value={draft[column.key]}>{draft[column.key]} (not in master)</option>
                     ) : null}
+                  </select>
+                ) : column.key === "billable" ? (
+                  <select
+                    className={formSelectControlClass}
+                    onChange={(event) => onChange(column.key, event.target.value)}
+                    value={draft[column.key] ?? ""}
+                  >
+                    <option value="">Select</option>
+                    {billableOptions.map((option) => (
+                      <option key={option} value={option}>{option}</option>
+                    ))}
                   </select>
                 ) : column.type === "select" ? (
                   <select

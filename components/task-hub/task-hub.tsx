@@ -159,13 +159,14 @@ export function TaskHub() {
               <th className="px-3 py-2">Work Status</th>
               <th className="px-3 py-2">Open/Close</th>
               <th className="px-3 py-2">EL No.</th>
+              <th className="px-3 py-2">Billable</th>
               <th className="px-3 py-2">Billing</th>
               <th className="px-3 py-2">Chat</th>
             </tr>
           </thead>
           <tbody>
             {isLoading ? (
-              <tr><td className="px-4 py-8 font-bold text-slate-500" colSpan={9}>Loading...</td></tr>
+              <tr><td className="px-4 py-8 font-bold text-slate-500" colSpan={10}>Loading...</td></tr>
             ) : codedTasks.length ? codedTasks.map((row) => {
               const code = String(row.task_code ?? "").trim();
               const el = elByCode.get(code);
@@ -191,8 +192,17 @@ export function TaskHub() {
                     ) : <span className="text-xs font-bold text-slate-400">Not generated</span>}
                   </td>
                   <td className="px-3 py-2">
+                    {String(row.billable ?? "") ? (
+                      <span className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-black uppercase ${String(row.billable).toLowerCase() === "no" ? "bg-slate-200 text-slate-600" : "bg-navy-100 text-navy-700"}`}>
+                        {row.billable}
+                      </span>
+                    ) : <span className="text-slate-300">—</span>}
+                  </td>
+                  <td className="px-3 py-2">
                     {billingStatus ? (
                       <span className="font-bold text-slate-800">{billingStatus}</span>
+                    ) : String(row.billable ?? "").toLowerCase() === "no" ? (
+                      <span className="text-xs font-bold text-slate-400">Non-billable</span>
                     ) : <span className="text-slate-300">—</span>}
                   </td>
                   <td className="px-3 py-2">
@@ -203,7 +213,7 @@ export function TaskHub() {
                 </tr>
               );
             }) : (
-              <tr><td className="px-4 py-8 font-bold text-slate-500" colSpan={9}>No coded tasks yet. New tasks added in TaskLine will appear here with their Task Code.</td></tr>
+              <tr><td className="px-4 py-8 font-bold text-slate-500" colSpan={10}>No coded tasks yet. New tasks added in TaskLine will appear here with their Task Code.</td></tr>
             )}
           </tbody>
         </table>

@@ -71,6 +71,7 @@ const taskLineColumns = [
   "due_date",
   "stage",
   "status_open_close",
+  "billable",
   "remarks",
   "ref_date",
   "ref_no",
