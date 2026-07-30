@@ -60,6 +60,7 @@ const taskLineDateColumns = new Set(["due_date", "ref_date", "entry_date", "comp
 const taskLineMoneyColumns = new Set(["total_agreed_fee", "amount_raised", "amount_realised", "counsel_fee", "referral_fee"]);
 const taskLineNumberColumns = new Set(["reminder_days"]);
 const taskLineColumns = [
+  "task_code",
   "team",
   "name",
   "resource",
@@ -452,10 +453,25 @@ async function handlePost(request: Request) {
     }
   }
 
+  let taskCode = "";
+  try {
+    const fyMonth = taskLineFyMonth(new Date());
+    const { data: seq, error: seqError } = await admin.rpc("next_taskline_code_seq", {
+      p_fy_month: fyMonth,
+      p_org: organisation.organisationId
+    });
+    if (!seqError && typeof seq === "number") {
+      taskCode = `W${fyMonth}-${String(seq).padStart(3, "0")}`;
+    }
+  } catch {
+    // Task code is optional until database/016_taskline_task_code.sql is applied.
+  }
+
+  const insertValues = taskCode ? toTaskValues({ ...cleaned, task_code: taskCode }) : values;
   const saved = await admin
     .from("tasks")
     .insert({
-      ...values,
+      ...insertValues,
       created_by: null,
       organisation_id: organisation.organisationId,
       priority: "normal"
@@ -1064,6 +1080,15 @@ async function writeAuditLog(
     old_value: oldValue,
     organisation_id: organisationId
   });
+}
+
+function taskLineFyMonth(date: Date) {
+  const year = date.getFullYear();
+  const month = date.getMonth() + 1;
+  const fyStart = month >= 4 ? year : year - 1;
+  const fyEnd = fyStart + 1;
+  const fyCode = `${String(fyStart).slice(2)}${String(fyEnd).slice(2)}`;
+  return `${fyCode}-${String(month).padStart(2, "0")}`;
 }
 
 function toTaskValues(row: TaskLineRow) {

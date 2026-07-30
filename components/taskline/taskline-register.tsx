@@ -36,7 +36,7 @@ const bulkDeleteLimit = 10;
 const taskLinePageSize = 200;
 const taskLineRowsCacheKey = "taskline:rows:v4";
 const taskLineColumnGroups: { columns: string[] | null; key: string; label: string }[] = [
-  { key: "core", label: "Core", columns: ["team", "serial_no", "name", "resource", "entity_group", "entity", "state_name", "task", "due_date", "stage", "status_open_close", "remarks"] },
+  { key: "core", label: "Core", columns: ["team", "serial_no", "task_code", "name", "resource", "entity_group", "entity", "state_name", "task", "due_date", "stage", "status_open_close", "remarks"] },
   { key: "legal", label: "Legal / Order", columns: ["serial_no", "name", "entity", "task", "ref_date", "ref_no", "period", "section", "issue", "refer_other_task", "appeal_no", "order_type", "court_location", "engaged_counsel", "printing", "due_date", "stage"] },
   { key: "billing", label: "Billing / Fees", columns: ["serial_no", "name", "entity", "task", "billing_status", "el_reference", "tax_invoice_no", "total_agreed_fee", "amount_raised", "amount_realised", "counsel_fee", "referral_fee", "fee_comments", "document_link"] },
   { key: "reminders", label: "Reminders / Status", columns: ["serial_no", "name", "entity", "task", "realisation_status", "reminder_days", "reminder_email", "remaining_days", "status", "entry_date", "completion_date", "poc", "pending_from"] },
@@ -49,6 +49,7 @@ const actionColumnKey = "__actions";
 const taskLineColumns: TaskLineColumn[] = [
   { key: "team", label: "Team", width: 132 },
   { key: "serial_no", label: "S. No.", width: 84 },
+  { key: "task_code", label: "Task Code", width: 132 },
   { key: "name", label: "Name", width: 150 },
   { key: "resource", label: "Resource", width: 140 },
   { key: "entity_group", label: "Entity Group", width: 150 },
@@ -1625,6 +1626,14 @@ const TaskLineCell = memo(function TaskLineCell({
     );
   }
 
+  if (column.key === "task_code") {
+    return (
+      <td className={`border-r border-slate-100 px-3 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
+        <span className="block h-7 truncate px-1.5 py-1 font-bold text-navy-700">{row[column.key] || "\u2014"}</span>
+      </td>
+    );
+  }
+
   if (column.key === "team") {
     const current = row[column.key] ?? "";
     return (
@@ -1827,7 +1836,7 @@ function TaskLineForm({
 
         <div className="max-h-[68vh] overflow-auto p-5">
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-            {taskLineColumns.filter((column) => column.key !== "serial_no").map((column) => (
+            {taskLineColumns.filter((column) => column.key !== "serial_no" && column.key !== "task_code").map((column) => (
               <label className={["remarks", "issue", "document_link", "el_reference", "fee_comments"].includes(column.key) ? "xl:col-span-2" : ""} key={column.key}>
                 <span className="text-[10px] font-black uppercase text-slate-500">{column.label}</span>
                 {column.key === "team" ? (
