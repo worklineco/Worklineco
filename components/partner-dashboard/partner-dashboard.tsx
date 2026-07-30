@@ -89,6 +89,16 @@ export function PartnerDashboard() {
     });
   }
 
+  function editCalendarNote(dateKey: string, index: number, textValue: string) {
+    setState((current) => ({
+      ...current,
+      calendarNotes: {
+        ...current.calendarNotes,
+        [dateKey]: (current.calendarNotes[dateKey] ?? []).map((note, i) => (i === index ? textValue : note))
+      }
+    }));
+  }
+
   function createNote() {
     const note = { content: useNumberedNotes ? "1. " : "", id: crypto.randomUUID(), title: `Note ${state.notes.length + 1}`, updatedAt: new Date().toISOString() };
     setState((current) => ({ ...current, notes: [note, ...current.notes] }));
@@ -187,8 +197,6 @@ export function PartnerDashboard() {
         <h2 className="text-2xl font-black text-slate-950">{profileName}&rsquo;s Dashboard</h2>
         <p className="mt-1 text-sm font-semibold text-slate-500">{profileEmail}</p>
       </section>
-
-      <MonthCalendar events={events} notes={state.calendarNotes} onAddNote={addCalendarNote} onDeleteNote={deleteCalendarNote} />
 
       <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="flex items-center gap-2">
@@ -296,6 +304,14 @@ export function PartnerDashboard() {
           </div>
         </div>
       </section>
+
+      <MonthCalendar
+        events={events}
+        notes={state.calendarNotes}
+        onAddNote={addCalendarNote}
+        onDeleteNote={deleteCalendarNote}
+        onEditNote={editCalendarNote}
+      />
     </div>
   );
 }

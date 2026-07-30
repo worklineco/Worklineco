@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronLeft, ChevronRight, Plus, Trash2, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Pencil, Plus, Trash2, X } from "lucide-react";
 import { useMemo, useState } from "react";
 
 const weekDays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -17,12 +17,14 @@ export function MonthCalendar({
   events = [],
   notes = {},
   onAddNote,
-  onDeleteNote
+  onDeleteNote,
+  onEditNote
 }: {
   events?: CalendarEvent[];
   notes?: Record<string, string[]>;
   onAddNote?: (dateKey: string, text: string) => void;
   onDeleteNote?: (dateKey: string, index: number) => void;
+  onEditNote?: (dateKey: string, index: number, text: string) => void;
 }) {
   const today = new Date();
   const [monthDate, setMonthDate] = useState(() => new Date(today.getFullYear(), today.getMonth(), 1));
@@ -146,6 +148,21 @@ export function MonthCalendar({
                 selectedNotes.map((note, i) => (
                   <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2" key={`sn-${i}`}>
                     <p className="min-w-0 flex-1 text-sm font-semibold text-amber-900">{note}</p>
+                    {onEditNote ? (
+                      <button
+                        className="shrink-0 text-amber-700 hover:text-navy-700"
+                        onClick={() => {
+                          const value = window.prompt("Edit note", note)?.trim();
+                          if (value) {
+                            onEditNote(selected.dateKey, i, value);
+                          }
+                        }}
+                        title="Edit note"
+                        type="button"
+                      >
+                        <Pencil className="size-3.5" />
+                      </button>
+                    ) : null}
                     {onDeleteNote ? (
                       <button className="shrink-0 text-amber-700 hover:text-rose-600" onClick={() => onDeleteNote(selected.dateKey, i)} title="Delete note" type="button">
                         <Trash2 className="size-3.5" />
