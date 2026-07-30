@@ -6,7 +6,6 @@ import type { ComponentType, ReactNode } from "react";
 import { useEffect, useState } from "react";
 import {
   BookOpenCheck,
-  BriefcaseBusiness,
   Building2,
   FileSignature,
   CalendarClock,
@@ -39,9 +38,8 @@ type NavItem = {
 };
 
 const navItems: NavItem[] = [
-  { href: "/", icon: LayoutDashboard, label: "Dashboard" },
+  { href: "/partner-dashboard", icon: LayoutDashboard, label: "Dashboard" },
   { href: "/calendar", icon: CalendarClock, label: "Calendar" },
-  { href: "/partner-dashboard", icon: BriefcaseBusiness, label: "Partner Dashboard" },
   { href: "/gst", icon: ClipboardCheck, label: "GST Tracker" },
   { href: "/gstat", icon: Scale, label: "GSTAT" },
   { href: "/billing", icon: ReceiptText, label: "Billing" },
