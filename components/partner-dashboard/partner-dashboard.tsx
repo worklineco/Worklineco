@@ -1,26 +1,23 @@
 "use client";
 
 import { getCurrentUser } from "@/lib/supabase/session";
-import { CalendarClock, NotebookPen, Plus, Trash2, UserRound } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { CalendarClock, NotebookPen, Pencil, Plus, Trash2, UserRound } from "lucide-react";
+import { MonthCalendar, type CalendarEvent } from "@/components/home/month-calendar";
+import { getCached, setCached } from "@/lib/data-cache";
+import { useEffect, useState } from "react";
 
 type NoteFile = { content: string; id: string; title: string; updatedAt: string };
 type FollowUp = { dueDate: string; id: string; item: string; owner: string; status: "Open" | "Done"; type: string };
 type Meeting = { agenda: string; id: string; prepNotes: string; time: string; title: string };
-type DashboardState = { followUps: FollowUp[]; meetings: Meeting[]; notes: NoteFile[] };
+type DashboardState = { calendarNotes: Record<string, string[]>; followUps: FollowUp[]; meetings: Meeting[]; notes: NoteFile[] };
 
 const storageKey = "workline-partner-dashboard";
 const today = new Date().toISOString().slice(0, 10);
 const defaultState: DashboardState = {
-  followUps: [
-    { dueDate: today, id: "followup-1", item: "Send pending update promised to client", owner: "Partner", status: "Open", type: "Email" }
-  ],
-  meetings: [
-    { agenda: "Review urgent matters, open filings, and delegation points.", id: "meeting-1", prepNotes: "Carry forward agenda notes here before the meeting.", time: "10:30", title: "Daily partner review" }
-  ],
-  notes: [
-    { content: "1. ", id: "note-1", title: "Daily Scratchpad", updatedAt: new Date().toISOString() }
-  ]
+  calendarNotes: {},
+  followUps: [],
+  meetings: [],
+  notes: [{ content: "1. ", id: "note-1", title: "Daily Scratchpad", updatedAt: new Date().toISOString() }]
 };
 
 export function PartnerDashboard() {
@@ -31,18 +28,33 @@ export function PartnerDashboard() {
   const [useNumberedNotes, setUseNumberedNotes] = useState(true);
   const [followUpDraft, setFollowUpDraft] = useState({ dueDate: "", item: "", owner: "", type: "Callback" });
   const [meetingDraft, setMeetingDraft] = useState({ agenda: "", prepNotes: "", time: "", title: "" });
+  const [events, setEvents] = useState<CalendarEvent[]>([]);
 
   useEffect(() => {
     const saved = window.localStorage.getItem(storageKey);
     if (saved) {
       const parsed = JSON.parse(saved) as Partial<DashboardState>;
       setState({
-        followUps: parsed.followUps ?? defaultState.followUps,
-        meetings: parsed.meetings ?? defaultState.meetings,
+        calendarNotes: parsed.calendarNotes ?? {},
+        followUps: parsed.followUps ?? [],
+        meetings: parsed.meetings ?? [],
         notes: parsed.notes?.length ? parsed.notes : defaultState.notes
       });
       setActiveNoteId(parsed.notes?.[0]?.id ?? defaultState.notes[0]?.id ?? "");
     }
+
+    const cachedEvents = getCached<CalendarEvent[]>("dashboard_calendar");
+    if (cachedEvents) {
+      setEvents(cachedEvents);
+    }
+    fetch("/api/taskline?view=calendar", { credentials: "include" })
+      .then((response) => (response.ok ? response.json() : { events: [] }))
+      .then((data) => {
+        const next = Array.isArray(data?.events) ? (data.events as CalendarEvent[]) : [];
+        setEvents(next);
+        setCached("dashboard_calendar", next);
+      })
+      .catch(() => undefined);
 
     getCurrentUser().then((user) => {
       const metadata = user?.user_metadata ?? {};
@@ -55,9 +67,27 @@ export function PartnerDashboard() {
     window.localStorage.setItem(storageKey, JSON.stringify(state));
   }, [state]);
 
-  const firstName = useMemo(() => profileName.split(" ")[0] || "Partner", [profileName]);
   const activeNote = state.notes.find((note) => note.id === activeNoteId) ?? state.notes[0];
-  const openFollowUps = state.followUps.filter((followUp) => followUp.status === "Open").length;
+
+  function addCalendarNote(dateKey: string, textValue: string) {
+    setState((current) => ({
+      ...current,
+      calendarNotes: { ...current.calendarNotes, [dateKey]: [...(current.calendarNotes[dateKey] ?? []), textValue] }
+    }));
+  }
+
+  function deleteCalendarNote(dateKey: string, index: number) {
+    setState((current) => {
+      const remaining = (current.calendarNotes[dateKey] ?? []).filter((_, i) => i !== index);
+      const nextNotes = { ...current.calendarNotes };
+      if (remaining.length) {
+        nextNotes[dateKey] = remaining;
+      } else {
+        delete nextNotes[dateKey];
+      }
+      return { ...current, calendarNotes: nextNotes };
+    });
+  }
 
   function createNote() {
     const note = { content: useNumberedNotes ? "1. " : "", id: crypto.randomUUID(), title: `Note ${state.notes.length + 1}`, updatedAt: new Date().toISOString() };
@@ -154,18 +184,11 @@ export function PartnerDashboard() {
   return (
     <div className="mt-4 grid gap-4">
       <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <h2 className="text-2xl font-black text-slate-950">{firstName}&rsquo;s Dashboard</h2>
-            <p className="mt-1 text-sm font-semibold text-slate-500">{profileEmail || profileName}</p>
-          </div>
-          <div className="grid gap-3 sm:grid-cols-3">
-            <Metric label="Open Follow-ups" value={String(openFollowUps)} />
-            <Metric label="Notes" value={String(state.notes.length)} />
-            <Metric label="Meetings" value={String(state.meetings.length)} />
-          </div>
-        </div>
+        <h2 className="text-2xl font-black text-slate-950">{profileName}&rsquo;s Dashboard</h2>
+        <p className="mt-1 text-sm font-semibold text-slate-500">{profileEmail}</p>
       </section>
+
+      <MonthCalendar events={events} notes={state.calendarNotes} onAddNote={addCalendarNote} onDeleteNote={deleteCalendarNote} />
 
       <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="flex items-center gap-2">
@@ -183,6 +206,9 @@ export function PartnerDashboard() {
                 <div className={`flex items-center gap-1 rounded-xl px-2 py-1.5 ${activeNote?.id === note.id ? "bg-navy-100 text-navy-800" : "bg-slate-50 text-slate-700"}`} key={note.id}>
                   <button className="min-w-0 flex-1 truncate px-1 text-left text-sm font-black" onClick={() => setActiveNoteId(note.id)} onDoubleClick={() => renameNote(note)} title="Double click to rename" type="button">
                     {note.title}
+                  </button>
+                  <button className="flex size-7 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-white hover:text-navy-700" onClick={() => renameNote(note)} title="Rename note" type="button">
+                    <Pencil className="size-3.5" />
                   </button>
                   <button className="flex size-7 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-white hover:text-rose-600" onClick={() => deleteNote(note.id)} title="Delete note" type="button">
                     <Trash2 className="size-3.5" />
@@ -274,11 +300,4 @@ export function PartnerDashboard() {
   );
 }
 
-function Metric({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-xl bg-slate-50 px-4 py-3">
-      <p className="text-xs font-black uppercase text-slate-500">{label}</p>
-      <p className="mt-1 text-2xl font-black text-slate-950">{value}</p>
-    </div>
-  );
-}
+

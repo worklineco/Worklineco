@@ -8,7 +8,6 @@ import {
   BookOpenCheck,
   Building2,
   FileSignature,
-  CalendarClock,
   CalendarDays,
   ClipboardCheck,
   LayoutDashboard,
@@ -39,7 +38,6 @@ type NavItem = {
 
 const navItems: NavItem[] = [
   { href: "/partner-dashboard", icon: LayoutDashboard, label: "Dashboard" },
-  { href: "/calendar", icon: CalendarClock, label: "Calendar" },
   { href: "/gst", icon: ClipboardCheck, label: "GST Tracker" },
   { href: "/gstat", icon: Scale, label: "GSTAT" },
   { href: "/billing", icon: ReceiptText, label: "Billing" },
