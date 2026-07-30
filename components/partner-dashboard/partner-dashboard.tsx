@@ -542,11 +542,11 @@ export function PartnerDashboard() {
   }
 
   return (
-    <div className="mt-5 grid gap-5">
-      <section className="rounded-[28px] border border-white/80 bg-white/90 p-5 shadow-[0_24px_80px_rgba(15,23,42,0.10)]">
+    <div className="mt-4 grid gap-4">
+      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <p className="text-xs font-black uppercase text-violet-700">Logged in partner</p>
+            <p className="text-xs font-black uppercase text-navy-700">Logged in partner</p>
             <h2 className="mt-1 text-3xl font-black text-slate-950">{firstName}'s Dashboard</h2>
             <p className="mt-2 text-sm font-semibold text-slate-500">{profileEmail || profileName}</p>
           </div>
@@ -559,19 +559,19 @@ export function PartnerDashboard() {
         </div>
       </section>
 
-      <section className="grid gap-5 xl:grid-cols-3">
+      <section className="grid gap-4 xl:grid-cols-3">
         {taskCategories.map((category) => (
-          <div className="rounded-[24px] border border-white/80 bg-white/90 p-4 shadow-[0_18px_60px_rgba(15,23,42,0.08)]" key={category}>
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm" key={category}>
             <div className="flex items-center gap-2">
-              <CheckCircle2 className="size-5 text-violet-700" />
+              <CheckCircle2 className="size-5 text-navy-700" />
               <h3 className="text-base font-black text-slate-950">To-do list ({category})</h3>
             </div>
 
-            <div className="mt-4 rounded-2xl bg-violet-50 p-3">
+            <div className="mt-4 rounded-2xl bg-navy-50 p-3">
               <label className="block">
-                <span className="text-xs font-black uppercase text-violet-700">Date</span>
+                <span className="text-xs font-black uppercase text-navy-700">Date</span>
                 <input
-                  className="mt-2 h-10 w-full rounded-xl border border-violet-100 bg-white px-3 text-sm font-black text-slate-950 outline-none focus:border-violet-500"
+                  className="mt-2 h-10 w-full rounded-xl border border-navy-100 bg-white px-3 text-sm font-black text-slate-950 outline-none focus:border-navy-400"
                   onChange={(event) =>
                     setActiveTaskDates((current) => ({ ...current, [category]: event.target.value }))
                   }
@@ -584,7 +584,7 @@ export function PartnerDashboard() {
             <div className="mt-4 grid gap-2">
               <div className="grid grid-cols-[1fr_auto] items-center gap-2">
                 <input
-                  className="h-10 rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-semibold outline-none focus:border-violet-500"
+                  className="h-10 rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-semibold outline-none focus:border-navy-400"
                   onChange={(event) =>
                     setTaskDrafts((current) => ({ ...current, [category]: { ...current[category], title: event.target.value } }))
                   }
@@ -632,7 +632,7 @@ export function PartnerDashboard() {
                         <span className="w-6 shrink-0 text-xs font-black text-slate-400">{index + 1}.</span>
                         <span className="min-w-0 flex-1 truncate text-sm font-black text-slate-950">{task.title}</span>
                         <span className={`size-3 shrink-0 rounded-full ${priorityDotClass(task.priority)}`} title={`${task.priority} priority`} />
-                        <button className="flex size-7 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-white hover:text-violet-700" onClick={() => editTask(task)} title="Edit task" type="button">
+                        <button className="flex size-7 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-white hover:text-navy-700" onClick={() => editTask(task)} title="Edit task" type="button">
                           <Pencil className="size-3.5" />
                         </button>
                         <button className="flex size-7 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-white hover:text-rose-600" onClick={() => deleteTask(task.id)} title="Delete task" type="button">
@@ -642,7 +642,7 @@ export function PartnerDashboard() {
                     ))}
                     {dateTasks.length > 5 ? (
                       <button
-                        className="mt-1 text-xs font-black text-violet-700 hover:text-violet-900"
+                        className="mt-1 text-xs font-black text-navy-700 hover:text-navy-800"
                         onClick={() => setExpandedTaskLists((current) => ({ ...current, [listKey]: !isExpanded }))}
                         type="button"
                       >
@@ -653,7 +653,7 @@ export function PartnerDashboard() {
                 );
               })()}
               {state.tasks.filter((task) => task.category === category && task.dueDate === activeTaskDates[category]).length === 0 ? (
-                <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-4 text-sm font-semibold text-slate-500">
+                <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-4 text-sm font-semibold text-slate-500">
                   No tasks added for this date.
                 </div>
               ) : null}
@@ -662,10 +662,10 @@ export function PartnerDashboard() {
         ))}
       </section>
 
-      <section className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(420px,0.8fr)]">
-        <div className="rounded-[24px] border border-white/80 bg-white/90 p-4 shadow-[0_18px_60px_rgba(15,23,42,0.08)]">
+      <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(420px,0.8fr)]">
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
           <div className="flex items-center gap-2">
-            <NotebookPen className="size-5 text-violet-700" />
+            <NotebookPen className="size-5 text-navy-700" />
             <h3 className="text-base font-black text-slate-950">Quick notes / scratchpad</h3>
           </div>
           <div className="mt-4 grid gap-3 lg:grid-cols-[240px_minmax(0,1fr)]">
@@ -676,7 +676,7 @@ export function PartnerDashboard() {
               </button>
               <div className="mt-3 space-y-2">
                 {state.notes.map((note) => (
-                  <div className={`flex items-center gap-1 rounded-xl px-2 py-1.5 ${activeNote?.id === note.id ? "bg-violet-100 text-violet-900" : "bg-slate-50 text-slate-700"}`} key={note.id}>
+                  <div className={`flex items-center gap-1 rounded-xl px-2 py-1.5 ${activeNote?.id === note.id ? "bg-navy-100 text-navy-800" : "bg-slate-50 text-slate-700"}`} key={note.id}>
                     <button className="min-w-0 flex-1 truncate px-1 text-left text-sm font-black" onClick={() => setActiveNoteId(note.id)} onDoubleClick={() => renameNote(note)} title="Double click to rename" type="button">
                       {note.title}
                     </button>
@@ -697,7 +697,7 @@ export function PartnerDashboard() {
                 Numbered bullets
               </label>
               <textarea
-                className="min-h-[26rem] w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm font-semibold leading-6 outline-none focus:border-violet-500 focus:bg-white"
+                className="min-h-[14rem] w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm font-semibold leading-6 outline-none focus:border-navy-400 focus:bg-white"
                 onChange={(event) => updateActiveNote(useNumberedNotes ? numberNoteLines(event.target.value) : event.target.value)}
                 placeholder="Write notes here"
                 value={activeNote?.content ?? ""}
@@ -706,18 +706,18 @@ export function PartnerDashboard() {
           </div>
         </div>
 
-        <div className="rounded-[24px] border border-white/80 bg-white/90 p-4 shadow-[0_18px_60px_rgba(15,23,42,0.08)]">
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
           <div className="flex items-center gap-2">
-            <MessageSquareText className="size-5 text-violet-700" />
+            <MessageSquareText className="size-5 text-navy-700" />
             <h3 className="text-base font-black text-slate-950">Threads</h3>
           </div>
           <div className="mt-4 grid gap-2">
-            <input className="h-10 rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-semibold outline-none focus:border-violet-500" onChange={(event) => setThreadDraft((current) => ({ ...current, title: event.target.value }))} placeholder="Thread title" value={threadDraft.title} />
+            <input className="h-10 rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-semibold outline-none focus:border-navy-400" onChange={(event) => setThreadDraft((current) => ({ ...current, title: event.target.value }))} placeholder="Thread title" value={threadDraft.title} />
             <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
               <p className="text-xs font-black uppercase text-slate-500">Members</p>
               <div className="mt-2 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
                 <select
-                  className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm font-black text-slate-700 outline-none focus:border-violet-500"
+                  className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm font-black text-slate-700 outline-none focus:border-navy-400"
                   onChange={(event) => setThreadMemberSelect(event.target.value)}
                   value={threadMemberSelect}
                 >
@@ -730,7 +730,7 @@ export function PartnerDashboard() {
                       </option>
                     ))}
                 </select>
-                <button className="flex h-10 items-center justify-center rounded-xl bg-violet-700 px-3 text-sm font-black text-white" onClick={addSelectedThreadMember} type="button">
+                <button className="flex h-10 items-center justify-center rounded-xl bg-navy-700 px-3 text-sm font-black text-white" onClick={addSelectedThreadMember} type="button">
                   Add
                 </button>
               </div>
@@ -739,7 +739,7 @@ export function PartnerDashboard() {
                   .filter((member) => selectedThreadMemberIds.includes(member.id))
                   .map((member) => (
                     <button
-                      className="rounded-full bg-white px-3 py-1.5 text-xs font-black text-violet-900"
+                      className="rounded-full bg-white px-3 py-1.5 text-xs font-black text-navy-800"
                       key={member.id}
                       onClick={() => setSelectedThreadMemberIds((current) => current.filter((id) => id !== member.id))}
                       title="Remove member"
@@ -766,12 +766,12 @@ export function PartnerDashboard() {
           <div className="mt-4 grid gap-3 lg:grid-cols-[180px_minmax(0,1fr)]">
             <div className="space-y-2">
               {state.threads.map((thread) => (
-                <button className={`w-full rounded-xl px-3 py-2 text-left text-sm font-black ${activeThread?.id === thread.id ? "bg-violet-100 text-violet-900" : "bg-slate-50 text-slate-700"}`} key={thread.id} onClick={() => setActiveThreadId(thread.id)} onDoubleClick={() => renameThread(thread)} title="Double click to rename" type="button">
+                <button className={`w-full rounded-xl px-3 py-2 text-left text-sm font-black ${activeThread?.id === thread.id ? "bg-navy-100 text-navy-800" : "bg-slate-50 text-slate-700"}`} key={thread.id} onClick={() => setActiveThreadId(thread.id)} onDoubleClick={() => renameThread(thread)} title="Double click to rename" type="button">
                   {thread.title}
                 </button>
               ))}
             </div>
-            <div className="rounded-2xl bg-slate-50 p-3">
+            <div className="rounded-xl bg-slate-50 p-3">
               <p className="text-xs font-black uppercase text-slate-500">{activeThread?.members ?? "No members"}</p>
               <div className="mt-3 max-h-72 space-y-2 overflow-auto">
                 {activeThread?.messages.map((message) => (
@@ -782,8 +782,8 @@ export function PartnerDashboard() {
                 ))}
               </div>
               <div className="mt-3 flex gap-2">
-                <input className="h-10 min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold outline-none focus:border-violet-500" onChange={(event) => setMessageDraft(event.target.value)} onKeyDown={(event) => event.key === "Enter" && sendMessage()} placeholder="Write a message" value={messageDraft} />
-                <button className="flex size-10 items-center justify-center rounded-xl bg-violet-700 text-white" onClick={sendMessage} type="button">
+                <input className="h-10 min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold outline-none focus:border-navy-400" onChange={(event) => setMessageDraft(event.target.value)} onKeyDown={(event) => event.key === "Enter" && sendMessage()} placeholder="Write a message" value={messageDraft} />
+                <button className="flex size-10 items-center justify-center rounded-xl bg-navy-700 text-white" onClick={sendMessage} type="button">
                   <Send className="size-4" />
                 </button>
               </div>
@@ -792,16 +792,16 @@ export function PartnerDashboard() {
         </div>
       </section>
 
-      <section className="grid gap-5 xl:grid-cols-2">
-        <div className="rounded-[24px] border border-white/80 bg-white/90 p-4 shadow-[0_18px_60px_rgba(15,23,42,0.08)]">
+      <section className="grid gap-4 xl:grid-cols-2">
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
           <div className="flex items-center gap-2">
-            <UserRound className="size-5 text-violet-700" />
+            <UserRound className="size-5 text-navy-700" />
             <h3 className="text-base font-black text-slate-950">Follow-ups & reminders</h3>
           </div>
           <div className="mt-4 grid gap-2 md:grid-cols-[1fr_130px_130px_auto]">
-            <input className="h-10 rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-semibold outline-none focus:border-violet-500" onChange={(event) => setFollowUpDraft((current) => ({ ...current, item: event.target.value }))} placeholder="Callback, email, promise made" value={followUpDraft.item} />
-            <input className="h-10 rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-semibold outline-none focus:border-violet-500" onChange={(event) => setFollowUpDraft((current) => ({ ...current, dueDate: event.target.value }))} type="date" value={followUpDraft.dueDate} />
-            <select className="h-10 rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-black outline-none focus:border-violet-500" onChange={(event) => setFollowUpDraft((current) => ({ ...current, type: event.target.value }))} value={followUpDraft.type}>
+            <input className="h-10 rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-semibold outline-none focus:border-navy-400" onChange={(event) => setFollowUpDraft((current) => ({ ...current, item: event.target.value }))} placeholder="Callback, email, promise made" value={followUpDraft.item} />
+            <input className="h-10 rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-semibold outline-none focus:border-navy-400" onChange={(event) => setFollowUpDraft((current) => ({ ...current, dueDate: event.target.value }))} type="date" value={followUpDraft.dueDate} />
+            <select className="h-10 rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-black outline-none focus:border-navy-400" onChange={(event) => setFollowUpDraft((current) => ({ ...current, type: event.target.value }))} value={followUpDraft.type}>
               <option>Callback</option>
               <option>Email</option>
               <option>Client promise</option>
@@ -813,7 +813,7 @@ export function PartnerDashboard() {
           </div>
           <div className="mt-4 space-y-2">
             {state.followUps.map((followUp) => (
-              <div className="flex flex-wrap items-center gap-3 rounded-2xl bg-slate-50 p-3" key={followUp.id}>
+              <div className="flex flex-wrap items-center gap-3 rounded-xl bg-slate-50 p-3" key={followUp.id}>
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-black text-slate-950">{followUp.item}</p>
                   <p className="mt-1 text-xs font-bold text-slate-500">{followUp.type} {followUp.dueDate ? `| ${followUp.dueDate}` : ""}</p>
@@ -827,25 +827,25 @@ export function PartnerDashboard() {
           </div>
         </div>
 
-        <div className="rounded-[24px] border border-white/80 bg-white/90 p-4 shadow-[0_18px_60px_rgba(15,23,42,0.08)]">
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
           <div className="flex items-center gap-2">
-            <CalendarClock className="size-5 text-violet-700" />
+            <CalendarClock className="size-5 text-navy-700" />
             <h3 className="text-base font-black text-slate-950">Meetings & appointments today</h3>
           </div>
           <div className="mt-4 grid gap-2 md:grid-cols-[120px_1fr_auto]">
-            <input className="h-10 rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-semibold outline-none focus:border-violet-500" onChange={(event) => setMeetingDraft((current) => ({ ...current, time: event.target.value }))} type="time" value={meetingDraft.time} />
-            <input className="h-10 rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-semibold outline-none focus:border-violet-500" onChange={(event) => setMeetingDraft((current) => ({ ...current, title: event.target.value }))} placeholder="Meeting title" value={meetingDraft.title} />
+            <input className="h-10 rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-semibold outline-none focus:border-navy-400" onChange={(event) => setMeetingDraft((current) => ({ ...current, time: event.target.value }))} type="time" value={meetingDraft.time} />
+            <input className="h-10 rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-semibold outline-none focus:border-navy-400" onChange={(event) => setMeetingDraft((current) => ({ ...current, title: event.target.value }))} placeholder="Meeting title" value={meetingDraft.title} />
             <button className="flex size-10 items-center justify-center rounded-xl bg-navy-700 text-white" onClick={addMeeting} type="button">
               <Plus className="size-4" />
             </button>
           </div>
           <div className="mt-2 grid gap-2 md:grid-cols-2">
-            <textarea className="min-h-20 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm font-semibold outline-none focus:border-violet-500" onChange={(event) => setMeetingDraft((current) => ({ ...current, prepNotes: event.target.value }))} placeholder="Linked prep notes" value={meetingDraft.prepNotes} />
-            <textarea className="min-h-20 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm font-semibold outline-none focus:border-violet-500" onChange={(event) => setMeetingDraft((current) => ({ ...current, agenda: event.target.value }))} placeholder="Agenda" value={meetingDraft.agenda} />
+            <textarea className="min-h-20 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm font-semibold outline-none focus:border-navy-400" onChange={(event) => setMeetingDraft((current) => ({ ...current, prepNotes: event.target.value }))} placeholder="Linked prep notes" value={meetingDraft.prepNotes} />
+            <textarea className="min-h-20 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm font-semibold outline-none focus:border-navy-400" onChange={(event) => setMeetingDraft((current) => ({ ...current, agenda: event.target.value }))} placeholder="Agenda" value={meetingDraft.agenda} />
           </div>
           <div className="mt-4 space-y-2">
             {state.meetings.map((meeting) => (
-              <div className="rounded-2xl bg-slate-50 p-3" key={meeting.id}>
+              <div className="rounded-xl bg-slate-50 p-3" key={meeting.id}>
                 <p className="text-sm font-black text-slate-950">{meeting.time ? `${meeting.time} | ` : ""}{meeting.title}</p>
                 <p className="mt-2 text-xs font-black uppercase text-slate-500">Prep notes</p>
                 <p className="mt-1 text-sm font-semibold leading-6 text-slate-600">{meeting.prepNotes || "-"}</p>
@@ -862,7 +862,7 @@ export function PartnerDashboard() {
 
 function Metric({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-2xl bg-slate-50 px-4 py-3">
+    <div className="rounded-xl bg-slate-50 px-4 py-3">
       <p className="text-xs font-black uppercase text-slate-500">{label}</p>
       <p className="mt-1 text-2xl font-black text-slate-950">{value}</p>
     </div>
