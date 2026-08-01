@@ -2,7 +2,7 @@
 
 import { supabase } from "@/lib/supabase/client";
 import { AlertCircle, ArrowRight, CheckCircle2, Eye, EyeOff, Loader2 } from "lucide-react";
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 
 const organisationId = "DCO1433";
 const roleOptions = ["Article Assistant", "Associate", "Manager", "Senior Manager", "Partner", "Accounts", "Others"];
@@ -38,10 +38,11 @@ const partnerOptions = [
   "Mrs. Shuchi Sethi"
 ];
 const inputClass =
-  "mt-2 h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm font-semibold outline-none transition focus:border-navy-400 focus:ring-4 focus:ring-navy-100";
+  "mt-1.5 h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold outline-none transition focus:border-navy-400 focus:ring-4 focus:ring-navy-100";
+type AuthMode = "reset" | "signin" | "signup" | "updatePassword";
 
 export function LoginForm() {
-  const [mode, setMode] = useState<"signin" | "signup">("signin");
+  const [mode, setMode] = useState<AuthMode>("signin");
   const [name, setName] = useState("");
   const [orgId, setOrgId] = useState("");
   const [role, setRole] = useState("");
@@ -51,6 +52,7 @@ export function LoginForm() {
   const [emailOtp, setEmailOtp] = useState("");
   const [teamOtp, setTeamOtp] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [signupStep, setSignupStep] = useState<"details" | "emailOtp" | "teamOtp">("details");
   const [message, setMessage] = useState("");
@@ -68,13 +70,35 @@ export function LoginForm() {
       : "";
   const approvalLabel = needsAccountsApproval ? "Accounts access" : team;
 
-  function changeMode(nextMode: "signin" | "signup") {
+  useEffect(() => {
+    const searchParams = new URLSearchParams(window.location.search);
+
+    if (searchParams.get("recovery") === "1") {
+      setMode("updatePassword");
+    }
+
+    const {
+      data: { subscription }
+    } = supabase.auth.onAuthStateChange((event) => {
+      if (event === "PASSWORD_RECOVERY") {
+        setMode("updatePassword");
+        setMessage("");
+        setMessageType("info");
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  function changeMode(nextMode: AuthMode) {
     setMode(nextMode);
     setMessage("");
     setMessageType("info");
     setSignupStep("details");
     setEmailOtp("");
     setTeamOtp("");
+    setPassword("");
+    setConfirmPassword("");
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -82,6 +106,58 @@ export function LoginForm() {
     setIsLoading(true);
     setMessage("");
     setMessageType("info");
+
+    if (mode === "reset") {
+      const result = await supabase.auth.resetPasswordForEmail(email.trim(), {
+        redirectTo: `${window.location.origin}/login?recovery=1`
+      });
+
+      if (result.error) {
+        setMessage(formatAuthMessage(result.error.message));
+        setMessageType("error");
+      } else {
+        setMessage("If this email is registered, a secure password-reset link has been sent.");
+        setMessageType("success");
+      }
+
+      setIsLoading(false);
+      return;
+    }
+
+    if (mode === "updatePassword") {
+      if (password.length < 6) {
+        setMessage("Password must contain at least 6 characters.");
+        setMessageType("error");
+        setIsLoading(false);
+        return;
+      }
+
+      if (password !== confirmPassword) {
+        setMessage("The new passwords do not match.");
+        setMessageType("error");
+        setIsLoading(false);
+        return;
+      }
+
+      const result = await supabase.auth.updateUser({ password });
+
+      if (result.error) {
+        setMessage(formatAuthMessage(result.error.message));
+        setMessageType("error");
+        setIsLoading(false);
+        return;
+      }
+
+      await supabase.auth.signOut();
+      window.history.replaceState({}, "", "/login");
+      setMode("signin");
+      setPassword("");
+      setConfirmPassword("");
+      setMessage("Password updated. Sign in with your new password.");
+      setMessageType("success");
+      setIsLoading(false);
+      return;
+    }
 
     if (mode === "signin") {
       const result = await supabase.auth.signInWithPassword({ email, password });
@@ -216,31 +292,41 @@ export function LoginForm() {
   }
 
   return (
-    <section className="workline-frame rounded-[28px] p-5 sm:p-6">
-      <div className="rounded-3xl border border-white/15  p-5 text-white shadow-[0_18px_50px_rgba(15,23,42,0.20)]">
+    <section className="workline-frame max-h-full self-center overflow-y-auto rounded-[24px] p-4 sm:p-5">
+      <div className="rounded-2xl border border-white/15 p-4 text-white shadow-[0_14px_38px_rgba(15,23,42,0.18)]">
         <div className="flex items-center justify-between gap-4">
           <div>
             <p className="text-xs font-black uppercase tracking-[0.16em] text-navy-100">
               WorkLine secure access
             </p>
-            <h2 className="mt-2 text-2xl font-black">
-              {mode === "signin" ? "Welcome back" : "Join your workspace"}
+            <h2 className="mt-1 text-xl font-black">
+              {mode === "signin"
+                ? "Welcome back"
+                : mode === "signup"
+                  ? "Join your workspace"
+                  : mode === "reset"
+                    ? "Reset password"
+                    : "Choose a new password"}
             </h2>
-            <p className="mt-2 text-xs font-semibold leading-5 text-white/75">
+            <p className="mt-1 text-xs font-semibold leading-5 text-white/75">
               {mode === "signin"
                 ? "Continue to your firm dashboard."
-                : "Verified access for approved firm members."}
+                : mode === "signup"
+                  ? "Verified access for approved firm members."
+                  : mode === "reset"
+                    ? "We will email you a secure reset link."
+                    : "Enter and confirm your new password."}
             </p>
           </div>
-          <div className="flex size-12 items-center justify-center rounded-2xl bg-white text-sm font-black text-slate-950 shadow-lg shadow-slate-950/20">
+          <div className="flex size-10 items-center justify-center rounded-xl bg-white text-sm font-black text-slate-950 shadow-lg shadow-slate-950/20">
             WL
           </div>
         </div>
       </div>
 
-      <div className="mt-5 grid grid-cols-2 rounded-2xl bg-slate-100 p-1 shadow-inner">
+      <div className="mt-4 grid grid-cols-2 rounded-xl bg-slate-100 p-1 shadow-inner">
         <button
-          className={`rounded-xl px-3 py-2.5 text-sm font-black transition ${
+          className={`rounded-lg px-3 py-2 text-sm font-black transition ${
             mode === "signin" ? "bg-white text-slate-950 shadow-sm" : "text-slate-500 hover:text-slate-700"
           }`}
           onClick={() => changeMode("signin")}
@@ -249,7 +335,7 @@ export function LoginForm() {
           Sign in
         </button>
         <button
-          className={`rounded-xl px-3 py-2.5 text-sm font-black transition ${
+          className={`rounded-lg px-3 py-2 text-sm font-black transition ${
             mode === "signup" ? "bg-white text-slate-950 shadow-sm" : "text-slate-500 hover:text-slate-700"
           }`}
           onClick={() => changeMode("signup")}
@@ -259,7 +345,7 @@ export function LoginForm() {
         </button>
       </div>
 
-      <form className="mt-5 space-y-4" onSubmit={handleSubmit}>
+      <form className="mt-4 space-y-3" onSubmit={handleSubmit}>
         {mode === "signup" ? (
           <>
             <label className="block">
@@ -353,42 +439,74 @@ export function LoginForm() {
           </>
         ) : null}
 
-        <label className="block">
-          <span className="text-xs font-black uppercase text-slate-500">Email ID</span>
-          <input
-            className={inputClass}
-            disabled={signupStep === "emailOtp"}
-            onChange={(event) => setEmail(event.target.value)}
-            placeholder="you@firm.com"
-            required
-            type="email"
-            value={email}
-          />
-        </label>
-
-        <label className="block">
-          <span className="text-xs font-black uppercase text-slate-500">Password</span>
-          <div className="mt-2 flex h-12 items-center rounded-2xl border border-slate-200 bg-white pr-2 transition focus-within:border-navy-400 focus-within:ring-4 focus-within:ring-navy-100">
+        {mode !== "updatePassword" ? (
+          <label className="block">
+            <span className="text-xs font-black uppercase text-slate-500">Email ID</span>
             <input
-              className="h-full min-w-0 flex-1 rounded-2xl border-0 bg-transparent px-4 text-sm font-semibold outline-none"
+              className={inputClass}
               disabled={signupStep === "emailOtp"}
-              minLength={6}
-              onChange={(event) => setPassword(event.target.value)}
-              placeholder="Minimum 6 characters"
+              onChange={(event) => setEmail(event.target.value)}
+              placeholder="you@firm.com"
               required
-              type={showPassword ? "text" : "password"}
-              value={password}
+              type="email"
+              value={email}
             />
-            <button
-              aria-label={showPassword ? "Hide password" : "Show password"}
-              className="flex size-9 items-center justify-center rounded-xl text-slate-500 transition hover:bg-slate-100"
-              onClick={() => setShowPassword((current) => !current)}
-              type="button"
-            >
-              {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-            </button>
-          </div>
-        </label>
+          </label>
+        ) : null}
+
+        {mode !== "reset" ? (
+          <label className="block">
+            <span className="flex items-center justify-between gap-3">
+              <span className="text-xs font-black uppercase text-slate-500">
+                {mode === "updatePassword" ? "New Password" : "Password"}
+              </span>
+              {mode === "signin" ? (
+                <button
+                  className="text-xs font-black text-navy-700 transition hover:text-navy-900 hover:underline"
+                  onClick={() => changeMode("reset")}
+                  type="button"
+                >
+                  Forgot password?
+                </button>
+              ) : null}
+            </span>
+            <div className="mt-1.5 flex h-11 items-center rounded-xl border border-slate-200 bg-white pr-2 transition focus-within:border-navy-400 focus-within:ring-4 focus-within:ring-navy-100">
+              <input
+                className="h-full min-w-0 flex-1 rounded-xl border-0 bg-transparent px-3 text-sm font-semibold outline-none"
+                disabled={signupStep === "emailOtp"}
+                minLength={6}
+                onChange={(event) => setPassword(event.target.value)}
+                placeholder="Minimum 6 characters"
+                required
+                type={showPassword ? "text" : "password"}
+                value={password}
+              />
+              <button
+                aria-label={showPassword ? "Hide password" : "Show password"}
+                className="flex size-8 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100"
+                onClick={() => setShowPassword((current) => !current)}
+                type="button"
+              >
+                {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+              </button>
+            </div>
+          </label>
+        ) : null}
+
+        {mode === "updatePassword" ? (
+          <label className="block">
+            <span className="text-xs font-black uppercase text-slate-500">Confirm New Password</span>
+            <input
+              className={inputClass}
+              minLength={6}
+              onChange={(event) => setConfirmPassword(event.target.value)}
+              placeholder="Re-enter your new password"
+              required
+              type="password"
+              value={confirmPassword}
+            />
+          </label>
+        ) : null}
 
         {mode === "signup" && signupStep === "emailOtp" ? (
           <label className="block">
@@ -419,18 +537,26 @@ export function LoginForm() {
         ) : null}
 
         <button
-          className="flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-navy-700 text-sm font-black text-white shadow-[0_18px_45px_rgba(15,23,42,0.28)] transition hover:-translate-y-0.5 hover:bg-navy-800 disabled:cursor-not-allowed disabled:bg-slate-500"
-          disabled={isLoading || (mode === "signup" && Boolean(orgId) && !isValidOrg)}
+          className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-navy-700 text-sm font-black text-white shadow-[0_14px_34px_rgba(15,23,42,0.24)] transition hover:-translate-y-0.5 hover:bg-navy-800 disabled:cursor-not-allowed disabled:bg-slate-500"
+          disabled={
+            isLoading ||
+            (mode === "signup" && Boolean(orgId) && !isValidOrg) ||
+            (mode === "updatePassword" && password !== confirmPassword)
+          }
           type="submit"
         >
           {isLoading ? <Loader2 className="size-4 animate-spin" /> : null}
           {mode === "signin"
             ? "Sign in"
-            : signupStep === "details"
-              ? "Send email OTP"
-              : signupStep === "emailOtp"
-                ? "Verify email OTP"
-                : "Verify approval OTP and create account"}
+            : mode === "reset"
+              ? "Send reset link"
+              : mode === "updatePassword"
+                ? "Update password"
+                : signupStep === "details"
+                  ? "Send email OTP"
+                  : signupStep === "emailOtp"
+                    ? "Verify email OTP"
+                    : "Verify approval OTP and create account"}
           {!isLoading ? <ArrowRight className="size-4" /> : null}
         </button>
 
