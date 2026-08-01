@@ -10,7 +10,7 @@ const accessHighlights = [
 export default function LoginPage() {
   return (
     <main
-      className="min-h-screen overflow-hidden bg-[#f4f6fa] px-4 py-6 text-slate-950 sm:px-6 lg:px-8"
+      className="min-h-screen overflow-x-hidden bg-[#f4f6fa] px-3 py-3 text-slate-950 sm:px-4 lg:h-screen lg:min-h-0 lg:overflow-hidden"
       data-ui="border-refresh"
     >
       <div className="pointer-events-none fixed inset-0 -z-10">
@@ -18,42 +18,42 @@ export default function LoginPage() {
         <div className="absolute inset-0  bg-[size:48px_48px]" />
       </div>
 
-      <div className="mx-auto grid min-h-[calc(100vh-3rem)] max-w-6xl items-center gap-8 rounded-[34px] border border-slate-950/10 bg-white/20 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.75)] ring-1 ring-white/65 backdrop-blur-sm lg:grid-cols-[1fr_455px] lg:p-5">
-        <section className="py-6">
+      <div className="mx-auto grid min-h-[calc(100vh-1.5rem)] max-w-7xl items-center gap-5 rounded-[28px] border border-slate-950/10 bg-white/20 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.75)] ring-1 ring-white/65 backdrop-blur-sm lg:h-[calc(100vh-1.5rem)] lg:min-h-0 lg:grid-cols-[minmax(0,1fr)_420px] lg:p-4">
+        <section className="py-3 lg:min-h-0">
           <div className="inline-flex items-center gap-2 rounded-full border border-white/80 bg-white/80 px-3 py-1.5 text-xs font-black uppercase text-navy-800 shadow-sm backdrop-blur">
             <Sparkles className="size-3.5 text-fuchsia-600" />
             WorkLine Co
           </div>
 
-          <h1 className="mt-5 max-w-3xl text-4xl font-black leading-tight text-slate-950 sm:text-5xl">
+          <h1 className="mt-4 max-w-3xl text-4xl font-black leading-[1.05] text-slate-950 xl:text-5xl">
             Your firm's command center, ready when the workday starts.
           </h1>
-          <p className="mt-5 max-w-2xl text-base font-semibold leading-7 text-slate-600">
+          <p className="mt-3 max-w-2xl text-sm font-semibold leading-6 text-slate-600 xl:text-base">
             A focused workspace for compliance, client records, team ownership,
             and deadline visibility, built for professional firms that move with
             discipline and detail.
           </p>
 
-          <div className="mt-8 grid gap-3 sm:grid-cols-3">
+          <div className="mt-5 grid gap-3 sm:grid-cols-3">
             {accessHighlights.map((item) => {
               const Icon = item.icon;
               return (
                 <div
-                  className="workline-panel rounded-2xl p-4"
+                  className="workline-panel rounded-2xl p-3"
                   key={item.label}
                 >
-                  <div className="flex size-10 items-center justify-center rounded-xl bg-navy-700 text-white">
+                  <div className="flex size-9 items-center justify-center rounded-xl bg-navy-700 text-white">
                     <Icon className="size-4" />
                   </div>
-                  <p className="mt-4 text-sm font-black text-slate-950">{item.label}</p>
+                  <p className="mt-3 text-sm font-black text-slate-950">{item.label}</p>
                   <p className="mt-1 text-xs font-bold leading-5 text-slate-500">{item.value}</p>
                 </div>
               );
             })}
           </div>
 
-          <div className="mt-8 grid max-w-2xl gap-3 rounded-[28px] border border-slate-950 bg-navy-700 p-4 text-white shadow-[0_28px_80px_rgba(15,23,42,0.24)] ring-1 ring-white/20 sm:grid-cols-[auto_1fr] sm:p-5">
-            <div className="flex size-14 items-center justify-center rounded-2xl bg-navy-700 text-white">
+          <div className="mt-5 grid max-w-2xl gap-3 rounded-[22px] border border-slate-950 bg-navy-700 p-3 text-white shadow-[0_20px_55px_rgba(15,23,42,0.22)] ring-1 ring-white/20 sm:grid-cols-[auto_1fr] sm:p-4">
+            <div className="flex size-11 items-center justify-center rounded-xl bg-navy-700 text-white">
               <Building2 className="size-6" />
             </div>
             <div>
@@ -66,7 +66,7 @@ export default function LoginPage() {
                   Verified access
                 </span>
               </div>
-              <p className="mt-3 text-sm font-semibold leading-6 text-slate-200">
+              <p className="mt-2 text-sm font-semibold leading-5 text-slate-200">
                 Sign in to continue work, or create a verified team account with
                 organisation and team approval.
               </p>
