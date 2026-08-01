@@ -41,15 +41,21 @@ export async function POST(request: Request) {
     purpose
   });
 
-  const isValidLegacyOtp = safeEqual(saved.hash, expectedHash);
+  const isValidSignedOtp = safeEqual(saved.hash, expectedHash);
   const isValidCookieOtp = saved.otp ? safeEqual(saved.otp, normalizedOtp) : false;
+  const isValidOtp =
+    purpose === "password-reset" ? isValidSignedOtp : isValidSignedOtp || isValidCookieOtp;
 
-  if (!isValidLegacyOtp && !isValidCookieOtp) {
+  if (!isValidOtp) {
     return NextResponse.json({ error: "Invalid OTP." }, { status: 400 });
   }
 
   cookieStore.delete(cookieName);
-  cookieStore.set(verifiedCookieName(purpose), normalizedEmail, {
+  const verifiedValue =
+    purpose === "password-reset"
+      ? createVerifiedProof({ email: normalizedEmail, purpose })
+      : normalizedEmail;
+  cookieStore.set(verifiedCookieName(purpose), verifiedValue, {
     httpOnly: true,
     maxAge: 10 * 60,
     path: "/",
@@ -82,6 +88,18 @@ function signOtp({
   return createHmac("sha256", process.env.OTP_SECRET ?? process.env.SUPABASE_SERVICE_ROLE_KEY ?? "workline-otp")
     .update(`${email}|${purpose}|${otp}|${expiresAt}`)
     .digest("hex");
+}
+
+function createVerifiedProof({ email, purpose }: { email: string; purpose: string }) {
+  const expiresAt = Date.now() + 10 * 60 * 1000;
+  const signature = createHmac(
+    "sha256",
+    process.env.OTP_SECRET ?? process.env.SUPABASE_SERVICE_ROLE_KEY ?? "workline-otp"
+  )
+    .update(`${email}|${purpose}|${expiresAt}`)
+    .digest("hex");
+
+  return Buffer.from(JSON.stringify({ email, expiresAt, signature })).toString("base64url");
 }
 
 function safeEqual(left: string, right: string) {
