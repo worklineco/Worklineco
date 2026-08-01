@@ -5,19 +5,6 @@ const publicRoutes = ["/login", "/auth/callback", "/api/auth"];
 type CookieToSet = { name: string; options: CookieOptions; value: string };
 
 export async function middleware(request: NextRequest) {
-  const { pathname, search, searchParams } = request.nextUrl;
-  const recoveryCode = searchParams.get("code");
-  const recoveryWasRequested = request.cookies.get("workline-recovery")?.value === "1";
-
-  if (recoveryCode && recoveryWasRequested && (pathname === "/" || pathname === "/login")) {
-    const callbackUrl = request.nextUrl.clone();
-    callbackUrl.pathname = "/auth/callback";
-    callbackUrl.search = "";
-    callbackUrl.searchParams.set("code", recoveryCode);
-    callbackUrl.searchParams.set("next", "/login?recovery=1");
-    return NextResponse.redirect(callbackUrl);
-  }
-
   let response = NextResponse.next({
     request
   });
@@ -47,6 +34,7 @@ export async function middleware(request: NextRequest) {
     data: { user }
   } = await supabase.auth.getUser();
 
+  const { pathname, search } = request.nextUrl;
   const isPublicRoute = publicRoutes.some(
     (route) => pathname === route || pathname.startsWith(`${route}/`)
   );
