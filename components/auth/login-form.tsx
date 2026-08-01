@@ -176,7 +176,7 @@ export function LoginForm() {
       }
 
       if (result.data.session) {
-        const defaultPath = getDefaultSignedInPath(result.data.user.user_metadata?.role);
+        const defaultPath = getDefaultSignedInPath(result.data.user?.user_metadata?.role);
         window.location.href = getRedirectPath(defaultPath);
         return;
       }
