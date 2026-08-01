@@ -176,7 +176,8 @@ export function LoginForm() {
       }
 
       if (result.data.session) {
-        window.location.href = getRedirectPath();
+        const defaultPath = getDefaultSignedInPath(result.data.user.user_metadata?.role);
+        window.location.href = getRedirectPath(defaultPath);
         return;
       }
 
@@ -639,11 +640,15 @@ async function completeSignup({
     return { error: formatAuthMessage(signin.error.message), ok: false as const };
   }
 
-  window.location.href = getRedirectPath();
+  window.location.href = getRedirectPath("/onboarding");
   return { ok: true as const };
 }
 
-function getRedirectPath() {
+function getDefaultSignedInPath(role: unknown) {
+  return String(role ?? "").trim().toLowerCase() === "partner" ? "/partner-dashboard" : "/";
+}
+
+function getRedirectPath(defaultPath: string) {
   const params = new URLSearchParams(window.location.search);
   const nextPath = params.get("next");
 
@@ -651,7 +656,7 @@ function getRedirectPath() {
     return nextPath;
   }
 
-  return "/onboarding";
+  return defaultPath;
 }
 
 async function resetPassword({ email, password }: { email: string; password: string }) {
