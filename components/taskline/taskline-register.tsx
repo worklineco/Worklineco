@@ -363,13 +363,43 @@ export function TaskLineRegister() {
     setIsFilterOptionsLoading(false);
   }
 
-  function closeColumnFilter() {
+  const closeColumnFilter = useCallback(() => {
     filterOptionsRequestIdRef.current += 1;
     setOpenFilterKey(null);
     setOpenColumnOptions([]);
     setIsFilterOptionsLoading(false);
     setFilterMenuPos(null);
-  }
+  }, []);
+
+  useEffect(() => {
+    if (!openFilterKey) {
+      return;
+    }
+
+    function handleFilterKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        closeColumnFilter();
+      }
+    }
+
+    function handleFilterPointerDown(event: PointerEvent) {
+      const target = event.target;
+
+      if (target instanceof Element && target.closest('[data-taskline-filter-menu="true"]')) {
+        return;
+      }
+
+      closeColumnFilter();
+    }
+
+    document.addEventListener("keydown", handleFilterKeyDown);
+    document.addEventListener("pointerdown", handleFilterPointerDown);
+
+    return () => {
+      document.removeEventListener("keydown", handleFilterKeyDown);
+      document.removeEventListener("pointerdown", handleFilterPointerDown);
+    };
+  }, [closeColumnFilter, openFilterKey]);
 
   function applyColumnFilter(key: string) {
     setValueFilters((current) => {
@@ -2785,6 +2815,7 @@ function TaskLineFilterMenu({
   return createPortal(
     <div
       className="fixed z-[1000] flex w-72 flex-col overflow-hidden rounded-lg border border-slate-300 bg-white p-2 text-left text-slate-900 shadow-2xl"
+      data-taskline-filter-menu="true"
       style={{ left: menuPos.left, maxHeight: menuPos.maxHeight, top: menuPos.top }}
     >
       <div className="shrink-0 space-y-1 border-b border-slate-200 pb-2">
