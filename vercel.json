@@ -1,6 +1,12 @@
 {
   "framework": "nextjs",
   "buildCommand": "npm run build",
-  "devCommand": "npm run dev",
-  "installCommand": "npm install"
+  "devCommand": "next dev",
+  "installCommand": "npm install",
+  "crons": [
+    {
+      "path": "/api/cron/task-due-reminders",
+      "schedule": "30 18 * * *"
+    }
+  ]
 }
