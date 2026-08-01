@@ -353,7 +353,7 @@ export function TaskLineRegister() {
     const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
     const top = rect.bottom + 4;
     const maxHeight = Math.max(240, window.innerHeight - top - 16);
-    const options = uniqueSortedValues(rowsRef.current.map((row) => text(row[key])));
+    const options = uniqueSortedValues(rowsRef.current.map((row) => text(row[key])), true);
 
     setOpenFilterKey(key);
     setFilterSearch("");
@@ -2680,13 +2680,26 @@ function normalizeOptionKey(value: unknown) {
   return text(value).toLocaleLowerCase().replace(/\s+/g, " ");
 }
 
-function uniqueSortedValues(values: unknown[]) {
+function uniqueSortedValues(values: unknown[], includeBlank = false) {
   const unique = new Map<string, string>();
+  let hasBlank = false;
+
   for (const value of values) {
     const display = text(value);
-    if (display) unique.set(normalizeOptionKey(display), unique.get(normalizeOptionKey(display)) ?? display);
+
+    if (!display) {
+      hasBlank = true;
+      continue;
+    }
+
+    unique.set(normalizeOptionKey(display), unique.get(normalizeOptionKey(display)) ?? display);
   }
-  return Array.from(unique.values()).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+
+  const sortedValues = Array.from(unique.values()).sort((a, b) =>
+    a.localeCompare(b, undefined, { numeric: true })
+  );
+
+  return includeBlank && hasBlank ? ["", ...sortedValues] : sortedValues;
 }
 
 function getFinancialPeriodOptions(now = new Date()) {
