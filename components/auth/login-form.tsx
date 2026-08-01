@@ -72,9 +72,25 @@ export function LoginForm() {
 
   useEffect(() => {
     const searchParams = new URLSearchParams(window.location.search);
+    const isRecovery = searchParams.get("recovery") === "1";
+    const recoveryError = searchParams.get("recoveryError");
 
-    if (searchParams.get("recovery") === "1") {
-      setMode("updatePassword");
+    if (recoveryError) {
+      setMessage("This password-reset link is invalid or expired. Request a new link.");
+      setMessageType("error");
+    }
+
+    if (isRecovery) {
+      void supabase.auth.getSession().then(({ data: { session } }) => {
+        if (session) {
+          setMode("updatePassword");
+          return;
+        }
+
+        setMode("signin");
+        setMessage("This password-reset link is invalid or expired. Request a new link.");
+        setMessageType("error");
+      });
     }
 
     const {
@@ -109,13 +125,14 @@ export function LoginForm() {
 
     if (mode === "reset") {
       const result = await supabase.auth.resetPasswordForEmail(email.trim(), {
-        redirectTo: `${window.location.origin}/login?recovery=1`
+        redirectTo: getRecoveryRedirectUrl()
       });
 
       if (result.error) {
         setMessage(formatAuthMessage(result.error.message));
         setMessageType("error");
       } else {
+        rememberRecoveryRequest();
         setMessage("If this email is registered, a secure password-reset link has been sent.");
         setMessageType("success");
       }
@@ -615,6 +632,27 @@ async function completeSignup({
 
   window.location.href = getRedirectPath();
   return { ok: true as const };
+}
+
+function getRecoveryRedirectUrl() {
+  const callbackUrl = new URL("/auth/callback", window.location.origin);
+  callbackUrl.searchParams.set("next", "/login?recovery=1");
+  return callbackUrl.toString();
+}
+
+function rememberRecoveryRequest() {
+  const isProductionHost =
+    window.location.hostname === "worklineco.com" || window.location.hostname === "www.worklineco.com";
+  const cookieParts = [
+    "workline-recovery=1",
+    "Path=/",
+    "Max-Age=3600",
+    "SameSite=Lax",
+    window.location.protocol === "https:" ? "Secure" : "",
+    isProductionHost ? "Domain=.worklineco.com" : ""
+  ].filter(Boolean);
+
+  document.cookie = cookieParts.join("; ");
 }
 
 function getRedirectPath() {
