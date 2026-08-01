@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
+import { createHmac, timingSafeEqual } from "node:crypto";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -28,9 +29,10 @@ export async function POST(request: Request) {
 
   const normalizedEmail = email.trim().toLowerCase();
   const cookieStore = await cookies();
-  const verifiedEmail = cookieStore.get("wl_password-reset_verified")?.value;
+  const verifiedProof = cookieStore.get("wl_password-reset_verified")?.value;
 
-  if (verifiedEmail !== normalizedEmail) {
+  if (!verifiedProof || !isVerifiedResetProof(verifiedProof, normalizedEmail)) {
+    cookieStore.delete("wl_password-reset_verified");
     return NextResponse.json({ error: "Please verify the password-reset OTP first." }, { status: 400 });
   }
 
@@ -60,6 +62,42 @@ export async function POST(request: Request) {
 
   cookieStore.delete("wl_password-reset_verified");
   return NextResponse.json({ ok: true });
+}
+
+function isVerifiedResetProof(value: string, email: string) {
+  try {
+    const proof = JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as {
+      email: string;
+      expiresAt: number;
+      signature: string;
+    };
+
+    if (proof.email !== email || proof.expiresAt < Date.now()) {
+      return false;
+    }
+
+    const expectedSignature = createHmac(
+      "sha256",
+      process.env.OTP_SECRET ?? process.env.SUPABASE_SERVICE_ROLE_KEY ?? "workline-otp"
+    )
+      .update(`${proof.email}|password-reset|${proof.expiresAt}`)
+      .digest("hex");
+
+    return safeEqual(proof.signature, expectedSignature);
+  } catch {
+    return false;
+  }
+}
+
+function safeEqual(left: string, right: string) {
+  const leftBuffer = Buffer.from(left);
+  const rightBuffer = Buffer.from(right);
+
+  if (leftBuffer.length !== rightBuffer.length) {
+    return false;
+  }
+
+  return timingSafeEqual(leftBuffer, rightBuffer);
 }
 
 async function findUserByEmail(
