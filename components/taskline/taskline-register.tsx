@@ -354,7 +354,7 @@ export function TaskLineRegister() {
     const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
     const top = rect.bottom + 4;
     const maxHeight = Math.max(240, window.innerHeight - top - 16);
-    const options = uniqueSortedValues(rowsRef.current.map((row) => text(row[key])));
+    const options = uniqueSortedValues(rowsRef.current.map((row) => text(row[key])), true);
 
     setOpenFilterKey(key);
     setFilterSearch("");
@@ -364,13 +364,43 @@ export function TaskLineRegister() {
     setIsFilterOptionsLoading(false);
   }
 
-  function closeColumnFilter() {
+  const closeColumnFilter = useCallback(() => {
     filterOptionsRequestIdRef.current += 1;
     setOpenFilterKey(null);
     setOpenColumnOptions([]);
     setIsFilterOptionsLoading(false);
     setFilterMenuPos(null);
-  }
+  }, []);
+
+  useEffect(() => {
+    if (!openFilterKey) {
+      return;
+    }
+
+    function handleFilterKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        closeColumnFilter();
+      }
+    }
+
+    function handleFilterPointerDown(event: PointerEvent) {
+      const target = event.target;
+
+      if (target instanceof Element && target.closest('[data-taskline-filter-menu="true"]')) {
+        return;
+      }
+
+      closeColumnFilter();
+    }
+
+    document.addEventListener("keydown", handleFilterKeyDown);
+    document.addEventListener("pointerdown", handleFilterPointerDown);
+
+    return () => {
+      document.removeEventListener("keydown", handleFilterKeyDown);
+      document.removeEventListener("pointerdown", handleFilterPointerDown);
+    };
+  }, [closeColumnFilter, openFilterKey]);
 
   function applyColumnFilter(key: string) {
     setValueFilters((current) => {
@@ -1121,7 +1151,6 @@ export function TaskLineRegister() {
             <>
               <div className="fixed inset-0 z-30" onClick={() => { setIsToolbarMenuOpen(false); setIsMasterSubmenuOpen(false); }} />
               <div className="absolute right-0 top-12 z-40 w-52 overflow-hidden rounded-md border border-slate-200 bg-white py-1 shadow-2xl">
-                <ToolbarMenuItem icon={Plus} label="Add row" onClick={() => { setIsToolbarMenuOpen(false); addRow(); }} />
                 <button
                   className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
                   onClick={() => setIsMasterSubmenuOpen((current) => !current)}
@@ -1206,6 +1235,16 @@ export function TaskLineRegister() {
         </div>
         <div className="mb-1.5 flex items-center justify-end gap-1.5">
           {isLoading ? <span className="mr-auto text-xs font-bold text-slate-500">Loading TaskLine rows...</span> : null}
+          <button
+            className="inline-flex h-8 items-center gap-1 rounded-md border border-navy-700 bg-navy-700 px-3 text-xs font-bold text-white transition hover:bg-navy-800 disabled:cursor-not-allowed disabled:opacity-40"
+            disabled={isLoading}
+            onClick={addRow}
+            title="Add a new TaskLine task"
+            type="button"
+          >
+            <Plus className="size-3.5" />
+            Add Task
+          </button>
           <button
             className="inline-flex h-8 items-center gap-1 rounded-md border border-rose-200 bg-white px-3 text-xs font-bold text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40"
             disabled={!selectedRowIds.size || selectedRowIds.size > bulkDeleteLimit || isBulkDeleting || isLoading}
@@ -2686,13 +2725,26 @@ function normalizeOptionKey(value: unknown) {
   return text(value).toLocaleLowerCase().replace(/\s+/g, " ");
 }
 
-function uniqueSortedValues(values: unknown[]) {
+function uniqueSortedValues(values: unknown[], includeBlank = false) {
   const unique = new Map<string, string>();
+  let hasBlank = false;
+
   for (const value of values) {
     const display = text(value);
-    if (display) unique.set(normalizeOptionKey(display), unique.get(normalizeOptionKey(display)) ?? display);
+
+    if (!display) {
+      hasBlank = true;
+      continue;
+    }
+
+    unique.set(normalizeOptionKey(display), unique.get(normalizeOptionKey(display)) ?? display);
   }
-  return Array.from(unique.values()).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+
+  const sortedValues = Array.from(unique.values()).sort((a, b) =>
+    a.localeCompare(b, undefined, { numeric: true })
+  );
+
+  return includeBlank && hasBlank ? ["", ...sortedValues] : sortedValues;
 }
 
 function getFinancialPeriodOptions(now = new Date()) {
@@ -2778,6 +2830,7 @@ function TaskLineFilterMenu({
   return createPortal(
     <div
       className="fixed z-[1000] flex w-72 flex-col overflow-hidden rounded-lg border border-slate-300 bg-white p-2 text-left text-slate-900 shadow-2xl"
+      data-taskline-filter-menu="true"
       style={{ left: menuPos.left, maxHeight: menuPos.maxHeight, top: menuPos.top }}
     >
       <div className="shrink-0 space-y-1 border-b border-slate-200 pb-2">

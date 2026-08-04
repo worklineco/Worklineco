@@ -5,6 +5,7 @@ import { Buffer } from "node:buffer";
 import tls from "node:tls";
 
 const otpTtlMs = 10 * 60 * 1000;
+const allowedPurposes = new Set(["password-reset", "signup-email", "team"]);
 
 export async function POST(request: Request) {
   const { email, label, purpose } = (await request.json()) as {
@@ -15,6 +16,10 @@ export async function POST(request: Request) {
 
   if (!email || !purpose) {
     return NextResponse.json({ error: "Email and purpose are required." }, { status: 400 });
+  }
+
+  if (!allowedPurposes.has(purpose)) {
+    return NextResponse.json({ error: "Invalid OTP purpose." }, { status: 400 });
   }
 
   const smtpHost = process.env.SMTP_HOST;
@@ -49,11 +54,18 @@ export async function POST(request: Request) {
     }
   );
 
-  const subject = purpose === "team" ? "WorkLine team approval OTP" : "WorkLine signup OTP";
+  const subject =
+    purpose === "team"
+      ? "WorkLine team approval OTP"
+      : purpose === "password-reset"
+        ? "WorkLine password reset OTP"
+        : "WorkLine signup OTP";
   const description =
     purpose === "team"
       ? `Approval OTP for ${label ?? "this team"}`
-      : "Email verification OTP for your WorkLine signup";
+      : purpose === "password-reset"
+        ? "Password reset OTP for your WorkLine account"
+        : "Email verification OTP for your WorkLine signup";
 
   try {
     await sendSmtpMail({
