@@ -1,6 +1,7 @@
 "use client";
 
-import { ArrowDown, ArrowUp, CalendarDays, ChevronDown, CircleDot, Download, Filter, History, ListChecks, Menu, Pencil, Pin, Plus, Search, Settings2, Trash2, Upload, X } from "lucide-react";
+import { ArrowDown, ArrowUp, CalendarDays, ChevronDown, CircleDot, Download, Filter, History, ListChecks, Menu, Pencil, Pin, Plus, Search, Settings2, Trash2, Upload, Workflow, X } from "lucide-react";
+import Link from "next/link";
 import type { ComponentType } from "react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -42,7 +43,7 @@ const taskLineColumnGroups: { columns: string[] | null; key: string; label: stri
   { key: "reminders", label: "Reminders / Status", columns: ["serial_no", "name", "entity", "task", "realisation_status", "reminder_days", "reminder_email", "remaining_days", "status", "entry_date", "completion_date", "poc", "pending_from"] },
   { key: "all", label: "All", columns: null }
 ];
-const taskLineColumnLayoutStorageKey = "workline:taskline-column-layout:v2";
+const taskLineColumnLayoutStorageKey = "workline:taskline-column-layout:v3";
 const selectionColumnWidth = 40;
 const actionColumnWidth = 112;
 const actionColumnKey = "__actions";
@@ -1101,6 +1102,11 @@ export function TaskLineRegister() {
           <option value="Close">Close</option>
         </select>
 
+        <Link className={`${buttonClass("light")} shrink-0`} href="/task-hub">
+          <Workflow className="size-4" />
+          Task Hub
+        </Link>
+
         <div className="relative shrink-0">
           <button
             aria-label="Actions menu"
@@ -1631,7 +1637,7 @@ const TaskLineCell = memo(function TaskLineCell({
   if (column.key === "task_code") {
     return (
       <td className={`border-r border-slate-100 px-3 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
-        <span className="block h-7 truncate px-1.5 py-1 font-bold text-navy-700">{row[column.key] || "\u2014"}</span>
+        <span className="block h-7 truncate px-1.5 py-1 font-bold text-navy-700">{row[column.key] || serialNumber}</span>
       </td>
     );
   }
@@ -2586,7 +2592,7 @@ function normalizeTaskLineColumnLayout(layout: Partial<TaskLineColumnLayout>): T
   const order = [...savedOrder, ...defaultTaskLineColumnOrder.filter((key) => !savedOrder.includes(key))];
   const hiddenColumnKeys = Array.isArray(layout.hiddenColumnKeys)
     ? layout.hiddenColumnKeys.filter((key) => toggleableKeys.has(key))
-    : ["team"];
+    : ["team", "serial_no"];
   const frozenColumnKeys = Array.isArray(layout.frozenColumnKeys)
     ? layout.frozenColumnKeys.filter((key) => toggleableKeys.has(key))
     : [];

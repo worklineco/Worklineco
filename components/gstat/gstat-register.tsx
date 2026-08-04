@@ -98,7 +98,7 @@ const baseColumns: Column[] = [
   "GSTAT Login Password",
   "Appellant",
   "Bill raised"
-].map((label) => ({ key: label, label }));
+].map((label) => ({ key: label, label: label === "Sno" ? "Task Code" : label }));
 
 const groupedColumns = [
   { columns: ["IGST", "CGST", "SGST"], label: "Tax Demand" },

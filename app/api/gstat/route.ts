@@ -17,6 +17,15 @@ type AccessScope = {
 };
 
 const organisationCode = "DCO1433";
+
+function gstatFyMonth(date: Date) {
+  const year = date.getFullYear();
+  const month = date.getMonth() + 1;
+  const fyStart = month >= 4 ? year : year - 1;
+  const fyEnd = fyStart + 1;
+  const fyCode = `${String(fyStart).slice(2)}${String(fyEnd).slice(2)}`;
+  return `${fyCode}-${String(month).padStart(2, "0")}`;
+}
 const maxBulkDeleteRows = 5;
 
 export async function GET() {
@@ -453,13 +462,26 @@ export async function PATCH(request: Request) {
 
   if (!id) {
     const nextRowNumber = await getNextRowNumber(admin);
+    let taskCode = "";
+    try {
+      const organisation = await admin.from("organisations").select("id").eq("slug", organisationCode.toLowerCase()).maybeSingle();
+      if (organisation.data?.id) {
+        const fyMonth = gstatFyMonth(new Date());
+        const { data: seq, error: seqError } = await admin.rpc("next_taskline_code_seq", { p_fy_month: fyMonth, p_org: organisation.data.id });
+        if (!seqError && typeof seq === "number") {
+          taskCode = `W${fyMonth}-${String(seq).padStart(3, "0")}`;
+        }
+      }
+    } catch {
+      // Task code is optional until database/016_taskline_task_code.sql is applied.
+    }
     const inserted = await admin
       .from("gstat_appeals")
       .insert({
         created_by: auth.user.id,
         data: {
           ...(scopedRowData ?? applyAccessToRowData({ ...row.data, [field!]: value ?? "" }, access)),
-          Sno: nextRowNumber
+          Sno: taskCode || nextRowNumber
         },
         organisation_code: organisationCode,
         row_number: nextRowNumber,

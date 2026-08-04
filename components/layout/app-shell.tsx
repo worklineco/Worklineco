@@ -21,7 +21,6 @@ import {
   Scale,
   Trash2,
   UsersRound,
-  Workflow,
   Wrench,
   X
 } from "lucide-react";
@@ -43,7 +42,6 @@ const navItems: NavItem[] = [
   { href: "/billing", icon: ReceiptText, label: "Billing" },
   { href: "/meeting-room", icon: CalendarDays, label: "Meeting Room" },
   { href: "/taskline", icon: ListChecks, label: "TaskLine" },
-  { href: "/task-hub", icon: Workflow, label: "Task Hub" },
   { href: "/tools", icon: Wrench, label: "Tools" },
   { href: "/dco-policies", icon: BookOpenCheck, label: "DCo Policies" },
   { href: "/applause-board", icon: Megaphone, label: "Applause Board" },
