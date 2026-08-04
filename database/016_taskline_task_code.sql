@@ -6,6 +6,10 @@ create table if not exists public.taskline_code_counters (
   primary key (organisation_id, fy_month)
 );
 
+-- Server-only table (accessed via service role, which bypasses RLS).
+-- Enable RLS with no policies so browser clients cannot read/write it directly.
+alter table public.taskline_code_counters enable row level security;
+
 create or replace function public.next_taskline_code_seq(p_org uuid, p_fy_month text)
 returns integer
 language plpgsql

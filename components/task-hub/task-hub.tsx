@@ -1,6 +1,7 @@
 "use client";
 
-import { MessagesSquare, Search, Send, X } from "lucide-react";
+import { ArrowLeft, MessagesSquare, Search, Send, X } from "lucide-react";
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { getCached, setCached } from "@/lib/data-cache";
 
@@ -131,11 +132,17 @@ export function TaskHub() {
   return (
     <section className="w-full rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
       <div className="flex flex-wrap items-center gap-3">
-        <div className="shrink-0">
-          <h2 className="text-xl font-black text-slate-950">Task Hub</h2>
-          <p className="text-xs font-bold text-slate-500">
-            {isLoading ? "Loading..." : `${codedTasks.length} coded tasks`}
-          </p>
+        <div className="flex shrink-0 items-center gap-3">
+          <Link className="inline-flex h-9 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 transition hover:bg-slate-50" href="/taskline">
+            <ArrowLeft className="size-4" />
+            TaskLine
+          </Link>
+          <div>
+            <h2 className="text-xl font-black text-slate-950">Task Hub</h2>
+            <p className="text-xs font-bold text-slate-500">
+              {isLoading ? "Loading..." : `${codedTasks.length} coded tasks`}
+            </p>
+          </div>
         </div>
         <label className="flex h-10 min-w-[220px] flex-1 items-center gap-2 rounded-md border border-slate-200 bg-white px-3">
           <Search className="size-4 text-slate-400" />

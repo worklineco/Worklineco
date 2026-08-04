@@ -33,23 +33,20 @@ const importActionColumn = "Import Action";
 const importActionOptions = ["Add", "Update", "Delete"];
 const taskLineImportBatchSize = 250;
 const taskLineImportConcurrency = 3;
-const bulkDeleteLimit = 10;
 const taskLinePageSize = 200;
 const taskLineRowsCacheKey = "taskline:rows:v4";
 const taskLineColumnGroups: { columns: string[] | null; key: string; label: string }[] = [
-  { key: "core", label: "Core", columns: ["team", "serial_no", "task_code", "name", "resource", "entity_group", "entity", "state_name", "task", "due_date", "stage", "status_open_close", "remarks"] },
-  { key: "legal", label: "Legal / Order", columns: ["serial_no", "name", "entity", "task", "ref_date", "ref_no", "period", "section", "issue", "refer_other_task", "appeal_no", "order_type", "court_location", "engaged_counsel", "printing", "due_date", "stage"] },
-  { key: "billing", label: "Billing / Fees", columns: ["serial_no", "name", "entity", "task", "billable", "billing_status", "el_reference", "tax_invoice_no", "total_agreed_fee", "amount_raised", "amount_realised", "counsel_fee", "referral_fee", "fee_comments", "document_link"] },
-  { key: "reminders", label: "Reminders / Status", columns: ["serial_no", "name", "entity", "task", "realisation_status", "reminder_days", "reminder_email", "remaining_days", "status", "entry_date", "completion_date", "poc", "pending_from"] },
+  { key: "core", label: "Core", columns: ["team", "task_code", "name", "resource", "entity_group", "entity", "state_name", "task", "due_date", "stage", "status_open_close", "remarks"] },
+  { key: "legal", label: "Legal / Order", columns: ["task_code", "name", "entity", "task", "ref_date", "ref_no", "period", "section", "issue", "refer_other_task", "appeal_no", "order_type", "court_location", "engaged_counsel", "printing", "due_date", "stage"] },
+  { key: "billing", label: "Billing / Fees", columns: ["task_code", "name", "entity", "task", "billable", "billing_status", "el_reference", "tax_invoice_no", "total_agreed_fee", "amount_raised", "amount_realised", "counsel_fee", "referral_fee", "fee_comments", "document_link"] },
+  { key: "reminders", label: "Reminders / Status", columns: ["task_code", "name", "entity", "task", "realisation_status", "reminder_days", "reminder_email", "remaining_days", "status", "entry_date", "completion_date", "poc", "pending_from"] },
   { key: "all", label: "All", columns: null }
 ];
 const taskLineColumnLayoutStorageKey = "workline:taskline-column-layout:v3";
-const selectionColumnWidth = 40;
 const actionColumnWidth = 112;
 const actionColumnKey = "__actions";
 const taskLineColumns: TaskLineColumn[] = [
   { key: "team", label: "Team", width: 132 },
-  { key: "serial_no", label: "S. No.", width: 84 },
   { key: "task_code", label: "Task Code", width: 132 },
   { key: "name", label: "Name", width: 150 },
   { key: "resource", label: "Resource", width: 140 },
@@ -158,10 +155,10 @@ export function TaskLineRegister() {
   const [editingRowId, setEditingRowId] = useState<string | null>(null);
   const [rows, setRows] = useState<TaskLineRow[]>([]);
   const [activeColumnGroup, setActiveColumnGroup] = useState("core");
-  const [selectedRowIds, setSelectedRowIds] = useState<Set<string>>(new Set());
-  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  const [dueRange, setDueRange] = useState<{ end: string; preset: string; start: string }>({ end: "", preset: "", start: "" });
+  const [isDateRangeOpen, setIsDateRangeOpen] = useState(false);
   const [tablePage, setTablePage] = useState(1);
   const [viewMode, setViewMode] = useState<TaskLineView>("register");
   const [taskMasters, setTaskMasters] = useState<{ id: string; name: string }[]>([]);
@@ -254,7 +251,7 @@ export function TaskLineRegister() {
   );
   const actionColumnHidden = hiddenColumnKeys.has(actionColumnKey);
   const actionColumnFrozen = frozenColumnKeys.has(actionColumnKey);
-  const tableWidth = useMemo(() => selectionColumnWidth + (actionColumnHidden ? 0 : actionColumnWidth) + visibleColumns.reduce((total, column) => total + column.width, 0), [actionColumnHidden, visibleColumns]);
+  const tableWidth = useMemo(() => (actionColumnHidden ? 0 : actionColumnWidth) + visibleColumns.reduce((total, column) => total + column.width, 0), [actionColumnHidden, visibleColumns]);
   const frozenLefts = useMemo(() => {
     const lefts = new Map<string, number>();
     let acc = actionColumnFrozen && !actionColumnHidden ? actionColumnWidth : 0;
@@ -271,8 +268,8 @@ export function TaskLineRegister() {
     return { isFrozen: frozenColumnKeys.has(key), left: frozenLefts.get(key) ?? 0 };
   }
   const filteredRows = useMemo(
-    () => applyTaskLineFilters(rows, { columnFilters, dueColorFilter, search, sortState, statusFilter, valueFilters }),
-    [rows, columnFilters, dueColorFilter, search, sortState, statusFilter, valueFilters]
+    () => applyTaskLineFilters(rows, { columnFilters, dueColorFilter, dueRange, search, sortState, statusFilter, valueFilters }),
+    [rows, columnFilters, dueColorFilter, dueRange, search, sortState, statusFilter, valueFilters]
   );
   const hasActiveColumnFilters = Object.values(columnFilters).some((value) => value.trim());
   const hasActiveDataQuery = Boolean(
@@ -281,6 +278,7 @@ export function TaskLineRegister() {
     sortState ||
     hasActiveColumnFilters ||
     dueColorFilter.length ||
+    dueRange.preset ||
     Object.values(valueFilters).some((values) => values.length)
   );
   const taskLineQueryString = useMemo(
@@ -291,16 +289,14 @@ export function TaskLineRegister() {
       sortState,
       statusFilter,
       valueFilters
-    }),
-    [columnFilters, dueColorFilter, search, sortState, statusFilter, valueFilters, visibleColumns]
+    }) + "|due:" + JSON.stringify(dueRange),
+    [columnFilters, dueColorFilter, dueRange, search, sortState, statusFilter, valueFilters, visibleColumns]
   );
   const pageCount = Math.max(1, Math.ceil(filteredRows.length / taskLinePageSize));
   const pagedRows = useMemo(() => {
     const startIndex = (tablePage - 1) * taskLinePageSize;
     return filteredRows.slice(startIndex, startIndex + taskLinePageSize);
   }, [filteredRows, tablePage]);
-  const selectedPageCount = pagedRows.filter((row) => selectedRowIds.has(row.__id)).length;
-  const allPageRowsSelected = pagedRows.length > 0 && selectedPageCount === pagedRows.length;
 
   useEffect(() => {
     void loadAllTaskLine();
@@ -313,7 +309,6 @@ export function TaskLineRegister() {
     }
 
     setTablePage(1);
-    setSelectedRowIds(new Set());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [taskLineQueryString]);
 
@@ -837,86 +832,6 @@ export function TaskLineRegister() {
     }
   }
 
-  async function deleteRow(row: TaskLineRow) {
-    if (!window.confirm(`Delete ${getRowLabel(row, rows) || "this TaskLine row"}?`)) {
-      return;
-    }
-
-    setMessage("Deleting TaskLine row...");
-
-    try {
-      const response = await fetch(`/api/taskline?id=${encodeURIComponent(row.__id)}`, { method: "DELETE" });
-      const result = (await response.json().catch(() => ({}))) as { error?: string };
-
-      if (!response.ok) {
-        setMessage(result.error ?? "Could not delete TaskLine row.");
-        return;
-      }
-
-      setRows((current) => current.filter((item) => item.__id !== row.__id));
-      addAuditLog({ action: "taskline.delete_row", entityId: row.__id, oldValue: getAuditRowLabel(row), rowLabel: getRowLabel(row, rows) });
-      setMessage("TaskLine row deleted.");
-    } catch (error) {
-      console.error("TaskLine delete error:", error);
-      setMessage("Could not delete TaskLine row.");
-    }
-  }
-
-  function toggleRowSelection(rowId: string) {
-    setSelectedRowIds((current) => {
-      const next = new Set(current);
-      if (next.has(rowId)) {
-        next.delete(rowId);
-        return next;
-      }
-      next.add(rowId);
-      return next;
-    });
-  }
-
-  function togglePageSelection() {
-    setSelectedRowIds((current) => {
-      const next = new Set(current);
-      if (allPageRowsSelected) pagedRows.forEach((row) => next.delete(row.__id));
-      else pagedRows.forEach((row) => next.add(row.__id));
-      return next;
-    });
-  }
-
-  async function deleteSelectedRows() {
-    const recordIds = Array.from(selectedRowIds);
-    if (!recordIds.length || recordIds.length > bulkDeleteLimit || isBulkDeleting) {
-      return;
-    }
-    if (!window.confirm(`Delete ${recordIds.length} selected TaskLine task${recordIds.length === 1 ? "" : "s"}?`)) {
-      return;
-    }
-
-    setIsBulkDeleting(true);
-    setMessage(`Deleting ${recordIds.length} selected TaskLine task${recordIds.length === 1 ? "" : "s"}...`);
-    try {
-      const response = await fetch("/api/taskline", {
-        body: JSON.stringify({ action: "bulk_delete", recordIds }),
-        headers: { "Content-Type": "application/json" },
-        method: "POST"
-      });
-      const result = (await response.json().catch(() => ({}))) as { deleted?: number; error?: string };
-      if (!response.ok) {
-        setMessage(result.error ?? "Could not delete the selected TaskLine tasks.");
-        return;
-      }
-
-      const deletedIds = new Set(recordIds);
-      setRows((current) => current.filter((row) => !deletedIds.has(row.__id)));
-      setSelectedRowIds(new Set());
-      setMessage(`${result.deleted ?? recordIds.length} selected TaskLine task${(result.deleted ?? recordIds.length) === 1 ? "" : "s"} deleted.`);
-    } catch (error) {
-      console.error("TaskLine bulk delete error:", error);
-      setMessage("Could not delete the selected TaskLine tasks.");
-    } finally {
-      setIsBulkDeleting(false);
-    }
-  }
 
   function viewRowHistory(row: TaskLineRow) {
     void showAuditTrail(row);
@@ -1132,6 +1047,56 @@ export function TaskLineRegister() {
           <option value="Close">Close</option>
         </select>
 
+        <div className="relative shrink-0">
+          <button
+            className={`${buttonClass("light")} ${dueRange.preset ? "border-navy-300 text-navy-800" : ""}`}
+            onClick={() => setIsDateRangeOpen((current) => !current)}
+            type="button"
+          >
+            <CalendarDays className="size-4" />
+            {dueRangeLabel(dueRange) || "Date range"}
+            <ChevronDown className="size-3.5" />
+          </button>
+          {isDateRangeOpen ? (
+            <>
+              <div className="fixed inset-0 z-[70]" onClick={() => setIsDateRangeOpen(false)} />
+              <div className="absolute right-0 z-[75] mt-1 w-64 rounded-xl border border-slate-200 bg-white p-2 shadow-xl">
+                <p className="px-2 pb-1 text-[10px] font-black uppercase tracking-wide text-slate-400">Due date range</p>
+                {dueRangePresets.map((preset) => (
+                  <button
+                    className={`flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs font-bold ${dueRange.preset === preset.key ? "bg-navy-50 text-navy-800" : "text-slate-700 hover:bg-slate-50"}`}
+                    key={preset.key}
+                    onClick={() => { setDueRange({ end: "", preset: preset.key, start: "" }); if (preset.key !== "custom") setIsDateRangeOpen(false); }}
+                    type="button"
+                  >
+                    {preset.label}
+                    {dueRange.preset === preset.key ? <CircleDot className="size-3.5" /> : null}
+                  </button>
+                ))}
+                {dueRange.preset === "custom" ? (
+                  <div className="mt-2 space-y-2 border-t border-slate-100 pt-2">
+                    <label className="block text-[10px] font-black uppercase text-slate-400">From
+                      <input className="mt-1 h-8 w-full rounded-md border border-slate-200 px-2 text-xs font-semibold outline-none focus:border-navy-400" onChange={(event) => setDueRange((current) => ({ ...current, start: event.target.value }))} type="date" value={dueRange.start} />
+                    </label>
+                    <label className="block text-[10px] font-black uppercase text-slate-400">To
+                      <input className="mt-1 h-8 w-full rounded-md border border-slate-200 px-2 text-xs font-semibold outline-none focus:border-navy-400" onChange={(event) => setDueRange((current) => ({ ...current, end: event.target.value }))} type="date" value={dueRange.end} />
+                    </label>
+                  </div>
+                ) : null}
+                {dueRange.preset ? (
+                  <button
+                    className="mt-2 flex w-full items-center justify-center gap-1 rounded-md border border-slate-200 px-2 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-50"
+                    onClick={() => { setDueRange({ end: "", preset: "", start: "" }); setIsDateRangeOpen(false); }}
+                    type="button"
+                  >
+                    <X className="size-3.5" /> Clear date range
+                  </button>
+                ) : null}
+              </div>
+            </>
+          ) : null}
+        </div>
+
         <Link className={`${buttonClass("light")} shrink-0`} href="/task-hub">
           <Workflow className="size-4" />
           Task Hub
@@ -1246,16 +1211,6 @@ export function TaskLineRegister() {
             Add Task
           </button>
           <button
-            className="inline-flex h-8 items-center gap-1 rounded-md border border-rose-200 bg-white px-3 text-xs font-bold text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40"
-            disabled={!selectedRowIds.size || selectedRowIds.size > bulkDeleteLimit || isBulkDeleting || isLoading}
-            onClick={() => void deleteSelectedRows()}
-            title={`Delete up to ${bulkDeleteLimit} selected tasks`}
-            type="button"
-          >
-            <Trash2 className="size-3.5" />
-            {isBulkDeleting ? "Deleting..." : `Delete selected (${selectedRowIds.size}/${bulkDeleteLimit})`}
-          </button>
-          <button
             className="inline-flex h-8 items-center rounded-md border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 transition hover:bg-slate-50 disabled:opacity-40"
             disabled={tablePage <= 1 || isLoading}
             onClick={() => goToPage(tablePage - 1)}
@@ -1278,7 +1233,6 @@ export function TaskLineRegister() {
         <div className="max-h-[calc(100vh-135px)] overflow-auto rounded-md border border-slate-200 bg-white">
           <table className="table-fixed border-separate border-spacing-0 text-left text-sm" style={{ minWidth: tableWidth, width: tableWidth }}>
             <colgroup>
-              <col style={{ width: selectionColumnWidth }} />
               {actionColumnHidden ? null : <col style={{ width: actionColumnWidth }} />}
               {visibleColumns.map((column) => (
                 <col key={column.key} style={{ width: column.width }} />
@@ -1286,16 +1240,6 @@ export function TaskLineRegister() {
             </colgroup>
             <thead className="sticky top-0 z-10 bg-slate-100 text-[11px] font-semibold uppercase tracking-wide text-slate-600 [&_th]:border-b [&_th]:border-slate-200">
             <tr>
-              <th className="border-r border-white/10 px-2 py-2 text-center" style={{ width: selectionColumnWidth }}>
-                <input
-                  aria-label="Select all tasks on this page"
-                  checked={allPageRowsSelected}
-                  className="size-3.5 cursor-pointer accent-rose-700"
-                  onChange={togglePageSelection}
-                  ref={(input) => { if (input) input.indeterminate = selectedPageCount > 0 && !allPageRowsSelected; }}
-                  type="checkbox"
-                />
-              </th>
               {actionColumnHidden ? null : (
                 <th
                   className={`border-r border-white/10 px-3 py-2 ${actionColumnFrozen ? "sticky left-0 z-20 bg-slate-100" : ""}`}
@@ -1380,7 +1324,6 @@ export function TaskLineRegister() {
               })}
             </tr>
             <tr className="bg-slate-50">
-              <th className="border-r border-slate-200 px-2 py-1" />
               {actionColumnHidden ? null : (
                 <th
                   className={`border-r border-slate-200 px-2 py-1 ${actionColumnFrozen ? "sticky left-0 z-20 bg-slate-50" : ""}`}
@@ -1411,22 +1354,12 @@ export function TaskLineRegister() {
             </thead>
             <tbody>
               {isLoading ? (
-                <tr><td className="px-4 py-8 font-bold text-slate-500" colSpan={visibleColumns.length + (actionColumnHidden ? 1 : 2)}>Loading TaskLine rows...</td></tr>
+                <tr><td className="px-4 py-8 font-bold text-slate-500" colSpan={visibleColumns.length + (actionColumnHidden ? 0 : 1)}>Loading TaskLine rows...</td></tr>
               ) : pagedRows.length ? pagedRows.map((row, rowIndex) => {
                 const rowNameOptions = nameOptionsForTeam(text(row.team));
                 const rowResourceOptions = resourceOptionsForTeam(text(row.team));
                 return (
                 <tr className="border-b border-slate-100 last:border-b-0" key={row.__id}>
-                  <td className="border-r border-slate-100 px-2 py-1 text-center">
-                    <input
-                      aria-label={`Select ${getRowLabel(row, rows) || "TaskLine row"}`}
-                      checked={selectedRowIds.has(row.__id)}
-                      className="size-3.5 cursor-pointer accent-rose-700"
-                      onChange={() => toggleRowSelection(row.__id)}
-                      title={selectedRowIds.has(row.__id) ? "Remove from bulk selection" : "Select for bulk delete"}
-                      type="checkbox"
-                    />
-                  </td>
                   {actionColumnHidden ? null : (
                   <td className={`border-r border-slate-100 px-2 py-1 ${actionColumnFrozen ? "sticky left-0 z-[5] bg-white" : ""}`} style={actionColumnFrozen ? { left: 0 } : undefined}>
                     <div className="flex items-center gap-1">
@@ -1435,9 +1368,6 @@ export function TaskLineRegister() {
                       </button>
                       <button className="inline-flex size-7 items-center justify-center rounded border border-navy-200 text-navy-700 hover:bg-navy-50" onClick={() => viewRowHistory(row)} title="View history" type="button">
                         <History className="size-3.5" />
-                      </button>
-                      <button className="inline-flex size-7 items-center justify-center rounded border border-rose-200 text-rose-700 hover:bg-rose-50" onClick={() => deleteRow(row)} title="Delete row" type="button">
-                        <Trash2 className="size-3.5" />
                       </button>
                     </div>
                   </td>
@@ -1466,7 +1396,7 @@ export function TaskLineRegister() {
                 </tr>
                 );
               }) : (
-                <tr><td className="px-4 py-8 font-bold text-slate-500" colSpan={visibleColumns.length + (actionColumnHidden ? 1 : 2)}>No TaskLine rows match the current filters.</td></tr>
+                <tr><td className="px-4 py-8 font-bold text-slate-500" colSpan={visibleColumns.length + (actionColumnHidden ? 0 : 1)}>No TaskLine rows match the current filters.</td></tr>
               )}
             </tbody>
           </table>
@@ -1830,6 +1760,8 @@ function LazyTaskLineSelect({
     <select
       className={compactSelectClass}
       onBlur={() => setIsActive(false)}
+      onMouseEnter={activate}
+      onPointerDown={activate}
       onChange={(event) => {
         onChange(event.target.value);
         setIsActive(false);
@@ -2665,6 +2597,7 @@ function getSavedTaskLineColumnLayout() {
 type TaskLineFilterInput = {
   columnFilters: Record<string, string>;
   dueColorFilter: string[];
+  dueRange: { end: string; preset: string; start: string };
   search: string;
   sortState: { dir: "asc" | "desc"; key: string } | null;
   statusFilter: string;
@@ -2673,6 +2606,9 @@ type TaskLineFilterInput = {
 
 function applyTaskLineFilters(sourceRows: TaskLineRow[], filters: TaskLineFilterInput) {
   const query = filters.search.trim().toLowerCase();
+  const dueBounds = filters.dueRange.preset
+    ? computeDueRangeBounds(filters.dueRange.preset, filters.dueRange.start, filters.dueRange.end)
+    : null;
   const result = sourceRows.filter((row) => {
     const matchesSearch = !query || taskLineColumns.some((column) => text(row[column.key]).toLowerCase().includes(query));
     const matchesStatus = !filters.statusFilter || text(row.status_open_close) === filters.statusFilter;
@@ -2682,7 +2618,12 @@ function applyTaskLineFilters(sourceRows: TaskLineRow[], filters: TaskLineFilter
     });
     const matchesValues = Object.entries(filters.valueFilters).every(([key, values]) => !values.length || values.includes(text(row[key])));
     const matchesDueColor = !filters.dueColorFilter.length || filters.dueColorFilter.includes(dueDateCategory(text(row.due_date)));
-    return matchesSearch && matchesStatus && matchesColumns && matchesValues && matchesDueColor;
+    let matchesDueRange = true;
+    if (dueBounds) {
+      const due = parseTaskLineDueDate(text(row.due_date));
+      matchesDueRange = Boolean(due) && (!dueBounds.from || due! >= dueBounds.from) && (!dueBounds.to || due! <= dueBounds.to);
+    }
+    return matchesSearch && matchesStatus && matchesColumns && matchesValues && matchesDueColor && matchesDueRange;
   });
 
   if (!filters.sortState) {
@@ -2998,6 +2939,46 @@ function dueDateColorClass(value: string): string {
     return "bg-orange-300";
   }
   return "";
+}
+
+const dueRangePresets = [
+  { key: "this_week", label: "This week" },
+  { key: "previous_week", label: "Previous week" },
+  { key: "this_month", label: "This month" },
+  { key: "previous_month", label: "Previous month" },
+  { key: "this_quarter", label: "This quarter" },
+  { key: "this_year", label: "This year" },
+  { key: "previous_year", label: "Previous year" },
+  { key: "custom", label: "Custom range" }
+];
+
+function dueRangeLabel(range: { end: string; preset: string; start: string }) {
+  if (!range.preset) return "";
+  if (range.preset === "custom") {
+    if (range.start && range.end) return `${range.start} to ${range.end}`;
+    if (range.start) return `From ${range.start}`;
+    if (range.end) return `Until ${range.end}`;
+    return "Custom range";
+  }
+  return dueRangePresets.find((preset) => preset.key === range.preset)?.label ?? "";
+}
+
+function computeDueRangeBounds(preset: string, start: string, end: string): { from: Date | null; to: Date | null } {
+  const now = new Date();
+  const atStart = (date: Date) => { const value = new Date(date); value.setHours(0, 0, 0, 0); return value; };
+  const atEnd = (date: Date) => { const value = new Date(date); value.setHours(23, 59, 59, 999); return value; };
+  const weekStart = (date: Date) => { const value = atStart(date); value.setDate(value.getDate() - ((value.getDay() + 6) % 7)); return value; };
+  switch (preset) {
+    case "this_week": { const from = weekStart(now); const to = new Date(from); to.setDate(from.getDate() + 6); return { from, to: atEnd(to) }; }
+    case "previous_week": { const from = weekStart(now); from.setDate(from.getDate() - 7); const to = new Date(from); to.setDate(from.getDate() + 6); return { from, to: atEnd(to) }; }
+    case "this_month": return { from: atStart(new Date(now.getFullYear(), now.getMonth(), 1)), to: atEnd(new Date(now.getFullYear(), now.getMonth() + 1, 0)) };
+    case "previous_month": return { from: atStart(new Date(now.getFullYear(), now.getMonth() - 1, 1)), to: atEnd(new Date(now.getFullYear(), now.getMonth(), 0)) };
+    case "this_quarter": { const quarter = Math.floor(now.getMonth() / 3); return { from: atStart(new Date(now.getFullYear(), quarter * 3, 1)), to: atEnd(new Date(now.getFullYear(), quarter * 3 + 3, 0)) }; }
+    case "this_year": return { from: atStart(new Date(now.getFullYear(), 0, 1)), to: atEnd(new Date(now.getFullYear(), 11, 31)) };
+    case "previous_year": return { from: atStart(new Date(now.getFullYear() - 1, 0, 1)), to: atEnd(new Date(now.getFullYear() - 1, 11, 31)) };
+    case "custom": { const from = start ? parseTaskLineDueDate(start) : null; const to = end ? parseTaskLineDueDate(end) : null; return { from: from ? atStart(from) : null, to: to ? atEnd(to) : null }; }
+    default: return { from: null, to: null };
+  }
 }
 
 function parseTaskLineDueDate(value: string): Date | null {
