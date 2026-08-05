@@ -3,7 +3,7 @@
 import { downloadGstatPoa } from "@/lib/gstat/poa-document";
 import { getCurrentUser } from "@/lib/supabase/session";
 import { getCached, setCached } from "@/lib/data-cache";
-import { ArrowDown, ArrowLeft, ArrowUp, ChevronDown, Pin, ChevronUp, Download, Expand, ExternalLink, FileSpreadsheet, FileText, Filter, History, Pencil, Plus, ReceiptText, Search, Settings2, Trash2, Upload, X } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowUp, Check, ChevronDown, Pin, ChevronUp, Download, Expand, ExternalLink, FileSpreadsheet, FileText, Filter, History, Menu, Pencil, Plus, ReceiptText, Search, Settings2, Trash2, Upload, X } from "lucide-react";
 import Link from "next/link";
 import { ChangeEvent, memo, useDeferredValue, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { createPortal } from "react-dom";
@@ -121,7 +121,7 @@ const defaultColumnOrder = columns.map((column) => column.key);
 const columnByKey = new Map(columns.map((column) => [column.key, column]));
 const defaultColumnWidth = 92;
 const columnWidths: Record<string, number> = {
-  "Sno": 52,
+  "Sno": 120,
   "Person handling": 92,
   "Status": 96,
   "NTBD Reason": 170,
@@ -317,6 +317,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
   const [frozenColumnKeys, setFrozenColumnKeys] = useState<Set<string>>(() => new Set());
   const [hasLoadedColumnLayout, setHasLoadedColumnLayout] = useState(false);
   const [isColumnOptionsOpen, setIsColumnOptionsOpen] = useState(false);
+  const [isActionsMenuOpen, setIsActionsMenuOpen] = useState(false);
   const [openFilterColumnKey, setOpenFilterColumnKey] = useState<string | null>(null);
   const [filterMenuPosition, setFilterMenuPosition] = useState<FilterMenuPosition | null>(null);
   const [filterSearch, setFilterSearch] = useState("");
@@ -1543,7 +1544,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                 </p>
               )}
             </div>
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               {isMaximized && (
                 <div className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-950/10 bg-white px-3 text-xs font-black uppercase text-slate-800 shadow-sm">
                   <FileSpreadsheet className="size-4" />
@@ -1557,23 +1558,42 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                 ref={fileInputRef}
                 type="file"
               />
-              <button
-                className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-950/10 bg-white px-3 text-xs font-black uppercase text-slate-800 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
-                onClick={() => fileInputRef.current?.click()}
-                type="button"
-              >
-                <Upload className="size-4" />
-                Import Excel
-              </button>
               <div className="relative">
                 <button
-                  className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-950/10 bg-white px-3 text-xs font-black uppercase text-slate-800 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
-                  onClick={() => setIsColumnOptionsOpen((current) => !current)}
+                  aria-label="Actions menu"
+                  className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-navy-700 px-4 text-xs font-black uppercase text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-navy-800 hover:shadow-md"
+                  onClick={() => setIsActionsMenuOpen((current) => !current)}
                   type="button"
                 >
-                  <Settings2 className="size-4" />
-                  Column Options
+                  <Menu className="size-4" />
+                  Actions
                 </button>
+                {isActionsMenuOpen ? (
+                  <>
+                    <div className="fixed inset-0 z-30" onClick={() => setIsActionsMenuOpen(false)} />
+                    <div className="absolute right-0 top-12 z-40 w-64 overflow-hidden rounded-xl border border-slate-200 bg-white py-1 shadow-2xl">
+                      <GstatMenuItem icon={Upload} label="Import Excel" onClick={() => { setIsActionsMenuOpen(false); fileInputRef.current?.click(); }} />
+                      <GstatMenuItem icon={Settings2} label="Column Options" onClick={() => { setIsActionsMenuOpen(false); setIsColumnOptionsOpen(true); }} />
+                      {!isMaximized ? (
+                        <GstatMenuItem icon={History} label="Audit Trail" onClick={() => { setIsActionsMenuOpen(false); window.open("/gstat/audit", "_blank", "noopener,noreferrer"); }} />
+                      ) : null}
+                      <GstatMenuItem
+                        disabled={!selectedPoaRow}
+                        icon={FileText}
+                        label="Generate POA"
+                        onClick={() => { setIsActionsMenuOpen(false); if (selectedPoaRow) downloadGstatPoa(selectedPoaRow.data); }}
+                      />
+                      <GstatMenuItem icon={ExternalLink} label="Use GPT for drafting POA" onClick={() => { setIsActionsMenuOpen(false); window.open(poaGptUrl, "_blank", "noopener,noreferrer"); }} />
+                      <GstatMenuItem checked={showNtbdRows} icon={Filter} label="Show NTBD rows" onClick={() => setShowNtbdRows((current) => !current)} />
+                      {!isMaximized ? (
+                        <GstatMenuItem icon={Expand} label="Maximise View" onClick={() => { setIsActionsMenuOpen(false); window.open("/gstat/max", "_blank", "noopener,noreferrer"); }} />
+                      ) : null}
+                      <div className="my-1 border-t border-slate-100" />
+                      <GstatMenuItem icon={Download} label="Export full table" onClick={() => { setIsActionsMenuOpen(false); exportExcel("all"); }} />
+                      <GstatMenuItem disabled={!filteredRows.length} icon={Filter} label="Export current view" onClick={() => { setIsActionsMenuOpen(false); exportExcel("current"); }} />
+                    </div>
+                  </>
+                ) : null}
                 {isColumnOptionsOpen ? (
                   <ColumnOptionsPanel
                     frozenColumnKeys={frozenColumnKeys}
@@ -1583,89 +1603,6 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                     orderedColumns={orderedColumns}
                   />
                 ) : null}
-              </div>
-              {!isMaximized ? (
-                <Link
-                  className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-950/10 bg-white px-3 text-xs font-black uppercase text-slate-800 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
-                  href="/gstat/audit"
-                  rel="noreferrer"
-                  target="_blank"
-                >
-                  <History className="size-4" />
-                  Audit Trail
-                </Link>
-              ) : null}
-              <button
-                className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 text-xs font-black uppercase text-emerald-800 shadow-sm transition hover:-translate-y-0.5 hover:bg-emerald-100 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:translate-y-0 disabled:hover:bg-emerald-50 disabled:hover:shadow-sm"
-                disabled={!selectedPoaRow}
-                onClick={() => {
-                  if (!selectedPoaRow) {
-                    return;
-                  }
-
-                  downloadGstatPoa(selectedPoaRow.data);
-                }}
-                title={
-                  selectedRowIndexes.length === 0
-                    ? "Select one GSTAT row to generate POA"
-                    : selectedRowIndexes.length > 1
-                      ? "Select only one row to generate POA"
-                      : "Generate POA / Vakalatnama from the selected row"
-                }
-                type="button"
-              >
-                <FileText className="size-4" />
-                Generate POA
-              </button>
-              <a
-                className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-navy-200 bg-navy-50 px-3 text-xs font-black uppercase text-navy-800 shadow-sm transition hover:-translate-y-0.5 hover:bg-navy-100 hover:shadow-md"
-                href={poaGptUrl}
-                rel="noreferrer"
-                target="_blank"
-              >
-                <ExternalLink className="size-4" />
-                Use GPT for drafting POA
-              </a>
-              <label className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-950/10 bg-white px-3 text-xs font-black uppercase text-slate-800 shadow-sm">
-                <input
-                  checked={showNtbdRows}
-                  className="size-4 rounded border-slate-300 accent-navy-600"
-                  onChange={(event) => setShowNtbdRows(event.target.checked)}
-                  type="checkbox"
-                />
-                Show NTBD
-              </label>
-              {!isMaximized ? (
-                <Link
-                  className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-950/10 bg-white px-3 text-xs font-black uppercase text-slate-800 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
-                  href="/gstat/max"
-                  rel="noreferrer"
-                  target="_blank"
-                >
-                  <Expand className="size-4" />
-                  Maximise View
-                </Link>
-              ) : null}
-              <div className="flex overflow-hidden rounded-xl shadow-sm">
-                <button
-                  className="inline-flex h-10 items-center justify-center gap-2 bg-navy-700 px-3 text-xs font-black uppercase text-white transition hover:bg-navy-800"
-                  onClick={() => exportExcel("all")}
-                  title="Export every GSTAT row"
-                  type="button"
-                >
-                  <Download className="size-4" />
-                  Full Table
-                </button>
-                <button
-                  className="inline-flex h-10 items-center justify-center gap-2 border-l border-white/15 bg-navy-800 px-3 text-xs font-black uppercase text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-45"
-                  disabled={!filteredRows.length}
-                  onClick={() => exportExcel("current")}
-                  title="Export the currently filtered and sorted GSTAT rows"
-                  type="button"
-                >
-                  <Filter className="size-4" />
-                  Current View
-                </button>
               </div>
             </div>
           </div>
@@ -3571,6 +3508,35 @@ const ColumnOptionsRow = memo(function ColumnOptionsRow({
     </div>
   );
 });
+
+function GstatMenuItem({
+  checked,
+  disabled,
+  icon: Icon,
+  label,
+  onClick
+}: {
+  checked?: boolean;
+  disabled?: boolean;
+  icon: typeof FileSpreadsheet;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-45"
+      disabled={disabled}
+      onClick={onClick}
+      type="button"
+    >
+      <span className="flex items-center gap-2">
+        <Icon className="size-4 shrink-0 text-slate-500" />
+        {label}
+      </span>
+      {checked ? <Check className="size-4 shrink-0 text-navy-600" /> : null}
+    </button>
+  );
+}
 
 function findHeaderRow(rawRows: Array<Array<string | number>>) {
   const headerIndex = rawRows.findIndex((row) =>
