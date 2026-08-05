@@ -1498,42 +1498,25 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
       </div>
 
       <section className="mx-auto w-full max-w-none">
-        {!isMaximized ? (
-        <header className="workline-frame flex flex-wrap items-center justify-between gap-3 rounded-[20px] px-4 py-3 md:px-5">
-          <div className="flex items-center gap-3">
-            <Link
-              className="inline-flex items-center gap-1.5 rounded-full border border-slate-950/10 bg-white px-2.5 py-1.5 text-xs font-black uppercase text-slate-700 shadow-sm transition hover:bg-slate-50"
-              href="/"
-            >
-              <ArrowLeft className="size-3.5" />
-              Workspace
-            </Link>
-            <div>
-              <h1 className="text-lg font-black leading-tight text-slate-950">GSTAT</h1>
-              <p className="text-xs font-bold text-slate-500">
-                Tribunal appeals register · {hasActiveFilters ? `${filteredUniqueAppeals} / ${uniqueAppeals}` : uniqueAppeals} unique appeals
-              </p>
-            </div>
-          </div>
-        </header>
-        ) : null}
-
-        <section className={`workline-frame rounded-[20px] p-1.5 md:p-2 ${isMaximized ? "" : "mt-4"}`}>
+        <section className="workline-frame rounded-[20px] p-1.5 md:p-2">
           <div className="mb-3 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
-              <div className="flex flex-wrap items-center gap-2">
-                {isMaximized ? (
-                  <Link
-                    className="inline-flex h-9 items-center gap-2 rounded-xl border border-slate-950/10 bg-white px-3 text-xs font-black uppercase text-slate-700 shadow-sm"
-                    href="/gstat"
-                  >
-                    <ArrowLeft className="size-3.5" />
-                    Back
-                  </Link>
-                ) : null}
+              <div className="flex flex-wrap items-center gap-2.5">
+                <Link
+                  className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-slate-950/10 bg-white px-3 text-xs font-black uppercase text-slate-700 shadow-sm transition hover:bg-slate-50"
+                  href={isMaximized ? "/gstat" : "/"}
+                >
+                  <ArrowLeft className="size-3.5" />
+                  {isMaximized ? "Back" : "Workspace"}
+                </Link>
                 <h2 className="text-xl font-black text-slate-950">
-                  {isMaximized ? "GSTAT Register" : "Appeals Register"}
+                  {isMaximized ? "GSTAT Register" : "GSTAT"}
                 </h2>
+                {!isMaximized ? (
+                  <span className="text-xs font-bold text-slate-500">
+                    Tribunal appeals register · {hasActiveFilters ? `${filteredUniqueAppeals} / ${uniqueAppeals}` : uniqueAppeals} unique appeals
+                  </span>
+                ) : null}
               </div>
               {message ? <p className="mt-1 text-sm font-bold text-emerald-700">{message}</p> : null}
               {isLoading ? <p className="mt-1 text-sm font-bold text-slate-500">Loading saved GSTAT data...</p> : null}
