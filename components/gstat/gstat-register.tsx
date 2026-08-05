@@ -3,7 +3,7 @@
 import { downloadGstatPoa } from "@/lib/gstat/poa-document";
 import { getCurrentUser } from "@/lib/supabase/session";
 import { getCached, setCached } from "@/lib/data-cache";
-import { ArrowDown, ArrowLeft, ArrowUp, ChevronDown, Pin, ChevronUp, Download, Expand, ExternalLink, FileSpreadsheet, FileText, Filter, History, Pencil, Plus, ReceiptText, Scale, Search, Settings2, ShieldCheck, Trash2, Upload, X } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowUp, ChevronDown, Pin, ChevronUp, Download, Expand, ExternalLink, FileSpreadsheet, FileText, Filter, History, Pencil, Plus, ReceiptText, Search, Settings2, Trash2, Upload, X } from "lucide-react";
 import Link from "next/link";
 import { ChangeEvent, memo, useDeferredValue, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { createPortal } from "react-dom";
@@ -1498,40 +1498,20 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
 
       <section className="mx-auto w-full max-w-none">
         {!isMaximized ? (
-        <header className="workline-frame rounded-[20px] p-4 md:p-5">
-          <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+        <header className="workline-frame flex flex-wrap items-center justify-between gap-3 rounded-[20px] px-4 py-3 md:px-5">
+          <div className="flex items-center gap-3">
+            <Link
+              className="inline-flex items-center gap-1.5 rounded-full border border-slate-950/10 bg-white px-2.5 py-1.5 text-xs font-black uppercase text-slate-700 shadow-sm transition hover:bg-slate-50"
+              href="/"
+            >
+              <ArrowLeft className="size-3.5" />
+              Workspace
+            </Link>
             <div>
-              <Link
-                className="inline-flex items-center gap-2 rounded-full border border-slate-950/10 bg-white px-3 py-1.5 text-xs font-black uppercase text-slate-700 shadow-sm"
-                href="/"
-              >
-                <ArrowLeft className="size-3.5" />
-                Workspace
-              </Link>
-              <div className="mt-5 flex flex-wrap items-center gap-3">
-                <span className="flex size-14 items-center justify-center rounded-2xl bg-navy-700 text-white">
-                  <Scale className="size-7" />
-                </span>
-                <div>
-                  <p className="text-xs font-black uppercase tracking-[0.16em] text-navy-700">
-                    Tribunal appeals register
-                  </p>
-                  <h1 className="mt-1 text-4xl font-black leading-tight text-slate-950">GSTAT</h1>
-                </div>
-              </div>
-              <p className="mt-4 max-w-3xl text-sm font-semibold leading-6 text-slate-600">
-                Track appeal status, demand exposure, deposits, credentials,
-                documents, and handling responsibility in one structured register.
+              <h1 className="text-lg font-black leading-tight text-slate-950">GSTAT</h1>
+              <p className="text-xs font-bold text-slate-500">
+                Tribunal appeals register · {hasActiveFilters ? `${filteredUniqueAppeals} / ${uniqueAppeals}` : uniqueAppeals} unique appeals
               </p>
-            </div>
-
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Metric 
-                icon={FileSpreadsheet} 
-                label="Unique Appeals" 
-                value={hasActiveFilters ? `${filteredUniqueAppeals} / ${uniqueAppeals}` : String(uniqueAppeals)} 
-              />
-              <Metric icon={ShieldCheck} label="Workspace" value="Protected" />
             </div>
           </div>
         </header>
@@ -3591,30 +3571,6 @@ const ColumnOptionsRow = memo(function ColumnOptionsRow({
     </div>
   );
 });
-
-function Metric({
-  icon: Icon,
-  label,
-  value
-}: {
-  icon: typeof FileSpreadsheet;
-  label: string;
-  value: string;
-}) {
-  return (
-    <div className="rounded-2xl border border-slate-950/10 bg-white p-4 shadow-sm ring-1 ring-white/70">
-      <div className="flex items-center gap-3">
-        <span className="flex size-10 items-center justify-center rounded-xl bg-navy-700 text-white">
-          <Icon className="size-4" />
-        </span>
-        <div>
-          <p className="text-xs font-black uppercase text-slate-500">{label}</p>
-          <p className="mt-1 text-2xl font-black text-slate-950">{value}</p>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 function findHeaderRow(rawRows: Array<Array<string | number>>) {
   const headerIndex = rawRows.findIndex((row) =>
