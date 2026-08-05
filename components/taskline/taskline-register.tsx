@@ -54,8 +54,8 @@ const taskLineColumnGroups: { columns: string[] | null; key: string; label: stri
   { key: "reminders", label: "Reminders / Status", columns: ["task_code", "name", "entity", "task", "realisation_status", "reminder_days", "reminder_email", "remaining_days", "status", "entry_date", "completion_date", "poc", "pending_from"] },
   { key: "all", label: "All", columns: null }
 ];
-const taskLineColumnLayoutStorageKey = "workline:taskline-column-layout:v3";
-const actionColumnWidth = 112;
+const taskLineColumnLayoutStorageKey = "workline:taskline-column-layout:v4";
+const actionColumnWidth = 84;
 const actionColumnKey = "__actions";
 const taskLineColumns: TaskLineColumn[] = [
   { key: "team", label: "Team", width: 132 },
@@ -68,7 +68,7 @@ const taskLineColumns: TaskLineColumn[] = [
   { key: "task", label: "Task", width: 210 },
   { key: "due_date", label: "Due Date", type: "date", width: 128 },
   { key: "stage", label: "Stage", width: 132 },
-  { key: "status_open_close", label: "Status Open/Close", type: "select", width: 155 },
+  { key: "status_open_close", label: "Status Open/Close", type: "select", width: 112 },
   { key: "billable", label: "Billable", type: "select", width: 108 },
   { key: "remarks", label: "Remarks", width: 200 },
   { key: "ref_date", label: "Order/SCN,etc. Ref. Date", type: "date", width: 180 },
@@ -109,7 +109,7 @@ const taskLineColumnByKey = new Map(taskLineColumns.map((column) => [column.key,
 const defaultTaskLineColumnOrder = taskLineColumns.map((column) => column.key);
 const statusOptions = ["Open", "Close"];
 const billableOptions = ["Yes", "No"];
-type TeamMemberLite = { designation: string; name: string; team: string };
+type TeamMemberLite = { designation: string; joining_date: string; name: string; team: string };
 type EntityMasterOption = { entity: string; group: string };
 const emptyOptions: string[] = [];
 const teamOptions = ["Team-02", "Team-03", "Team-04", "Team-05", "Team-06", "Team-08"];
@@ -136,6 +136,29 @@ function teamMatchKey(value: string) {
 
 function isArticleDesignation(value: string) {
   return String(value ?? "").toLowerCase().includes("article");
+}
+
+function taskLineMemberLeavingDate(designation: string, joiningDate: string): string {
+  if (designation.trim().toLowerCase() !== "article assistant" || !joiningDate) {
+    return "";
+  }
+  const start = new Date(joiningDate);
+  if (Number.isNaN(start.getTime())) {
+    return "";
+  }
+  const leaving = new Date(start);
+  leaving.setUTCDate(leaving.getUTCDate() + 730);
+  return leaving.toISOString();
+}
+
+function isTaskLineMemberActive(member: { designation: string; joining_date: string }): boolean {
+  const leaving = taskLineMemberLeavingDate(member.designation, member.joining_date);
+  if (!leaving) {
+    return true;
+  }
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return new Date(leaving).getTime() >= today.getTime();
 }
 
 function isPartnerDesignation(value: string) {
@@ -190,6 +213,7 @@ export function TaskLineRegister() {
   const [stageMastersFetched, setStageMastersFetched] = useState(false);
   const stageSeedDoneRef = useRef(false);
   const [teamMembers, setTeamMembers] = useState<TeamMemberLite[]>([]);
+  const [currentUserTeam, setCurrentUserTeam] = useState("");
   const [entityMasters, setEntityMasters] = useState<EntityMasterOption[]>([]);
   const rowsRef = useRef<TaskLineRow[]>([]);
   const auditLoadedRef = useRef(false);
@@ -209,12 +233,12 @@ export function TaskLineRegister() {
   const sectionOptions = useMemo(() => uniqueSortedValues(rows.map((row) => row.section)), [rows]);
   const teamNameOptions = useMemo(() => {
     const partners = teamMembers
-      .filter((member) => isPartnerDesignation(member.designation))
+      .filter((member) => isPartnerDesignation(member.designation) && isTaskLineMemberActive(member))
       .map((member) => member.name.trim())
       .filter(Boolean);
     const byTeam = new Map<string, string[]>();
     for (const member of teamMembers) {
-      if (isArticleDesignation(member.designation)) {
+      if (isArticleDesignation(member.designation) || !isTaskLineMemberActive(member)) {
         continue;
       }
       const key = teamMatchKey(member.team);
@@ -231,7 +255,7 @@ export function TaskLineRegister() {
   const teamResourceOptions = useMemo(() => {
     const map = new Map<string, string[]>();
     for (const member of teamMembers) {
-      if (!isArticleDesignation(member.designation)) {
+      if (!isArticleDesignation(member.designation) || !isTaskLineMemberActive(member)) {
         continue;
       }
       const key = teamMatchKey(member.team);
@@ -592,14 +616,19 @@ export function TaskLineRegister() {
     teamMembersRequestedRef.current = true;
     try {
       const response = await fetch("/api/teams", { cache: "no-store" });
-      const result = (await response.json()) as { members?: { designation?: string; name?: string; team?: string }[] };
+      const result = (await response.json()) as {
+        members?: { designation?: string; joining_date?: string; name?: string; team?: string }[];
+        me?: { team?: string };
+      };
       if (!response.ok) {
         teamMembersRequestedRef.current = false;
         return;
       }
+      setCurrentUserTeam(text(result.me?.team));
       setTeamMembers(
         (result.members ?? []).map((member) => ({
           designation: text(member.designation),
+          joining_date: text(member.joining_date),
           name: text(member.name),
           team: text(member.team)
         }))
@@ -882,7 +911,11 @@ export function TaskLineRegister() {
   function addRow() {
     loadEditorOptions();
     setEditingRowId(null);
-    setFormDraft(createEmptyRow(`draft-${crypto.randomUUID()}`));
+    const draft = createEmptyRow(`draft-${crypto.randomUUID()}`);
+    if (currentUserTeam) {
+      draft.team = currentUserTeam;
+    }
+    setFormDraft(draft);
   }
 
   function openEditForm(row: TaskLineRow) {
@@ -2810,10 +2843,10 @@ function normalizeTaskLineColumnLayout(layout: Partial<TaskLineColumnLayout>): T
   const order = [...savedOrder, ...defaultTaskLineColumnOrder.filter((key) => !savedOrder.includes(key))];
   const hiddenColumnKeys = Array.isArray(layout.hiddenColumnKeys)
     ? layout.hiddenColumnKeys.filter((key) => toggleableKeys.has(key))
-    : ["team", "serial_no"];
+    : ["serial_no"];
   const frozenColumnKeys = Array.isArray(layout.frozenColumnKeys)
     ? layout.frozenColumnKeys.filter((key) => toggleableKeys.has(key))
-    : [];
+    : [actionColumnKey, "team"];
 
   return { frozenColumnKeys, hiddenColumnKeys, order };
 }

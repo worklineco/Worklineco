@@ -78,7 +78,14 @@ export async function GET() {
 
   members.sort((first, second) => first.name.localeCompare(second.name));
 
-  return NextResponse.json({ members });
+  const meMetadata = auth.user.user_metadata ?? {};
+  const me = {
+    id: auth.user.id,
+    name: String(meMetadata.full_name ?? meMetadata.name ?? "").trim(),
+    team: String(meMetadata.team ?? "").trim()
+  };
+
+  return NextResponse.json({ members, me });
 }
 
 async function requireUser() {
