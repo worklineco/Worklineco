@@ -3,7 +3,7 @@
 import { downloadGstatPoa } from "@/lib/gstat/poa-document";
 import { getCurrentUser } from "@/lib/supabase/session";
 import { getCached, setCached } from "@/lib/data-cache";
-import { ArrowDown, ArrowLeft, ArrowUp, ChevronDown, ChevronUp, Download, Expand, ExternalLink, FileSpreadsheet, FileText, Filter, History, Pencil, Plus, ReceiptText, Scale, Search, Settings2, ShieldCheck, Trash2, Upload, X } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowUp, ChevronDown, Pin, ChevronUp, Download, Expand, ExternalLink, FileSpreadsheet, FileText, Filter, History, Pencil, Plus, ReceiptText, Scale, Search, Settings2, ShieldCheck, Trash2, Upload, X } from "lucide-react";
 import Link from "next/link";
 import { ChangeEvent, memo, useDeferredValue, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { createPortal } from "react-dom";
@@ -46,7 +46,7 @@ type ColumnTextFilters = Record<string, string>;
 type ColumnFilterOption = { key: string; label: string };
 type FilterMenuPosition = { left: number; listMaxHeight: number; top: number };
 type InlineEditorState = { columnKey: string; rowIndex: number; value: string };
-type ColumnLayout = { hiddenColumnKeys: string[]; order: string[] };
+type ColumnLayout = { frozenColumnKeys: string[]; hiddenColumnKeys: string[]; order: string[] };
 type StatusSummaryItem = { color: string; count: number; key: string; label: string; percentage: number };
 
 const actionColumnWidth = 152;
@@ -314,6 +314,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
   const [columnTextFilters, setColumnTextFilters] = useState<ColumnTextFilters>({});
   const [columnOrder, setColumnOrder] = useState<string[]>(defaultColumnOrder);
   const [hiddenColumnKeys, setHiddenColumnKeys] = useState<Set<string>>(() => new Set());
+  const [frozenColumnKeys, setFrozenColumnKeys] = useState<Set<string>>(() => new Set());
   const [hasLoadedColumnLayout, setHasLoadedColumnLayout] = useState(false);
   const [isColumnOptionsOpen, setIsColumnOptionsOpen] = useState(false);
   const [openFilterColumnKey, setOpenFilterColumnKey] = useState<string | null>(null);
@@ -345,15 +346,6 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
   );
   const duplicateDrc07Numbers = useMemo(() => findDuplicateValues(rows, "DRC 07 No"), [rows]);
   const duplicateOiaNumbers = useMemo(() => findDuplicateValues(rows, "OIA No"), [rows]);
-  const blankRequiredCellCount = useMemo(
-    () =>
-      rows.reduce(
-        (count, row) =>
-          count + requiredBlankCheckColumns.filter((column) => isBlankCell(row.data[column.key])).length,
-        0
-      ),
-    [rows]
-  );
   const orderedColumns = useMemo(
     () =>
       columnOrder
@@ -365,6 +357,20 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
     () => orderedColumns.filter((column) => !hiddenColumnKeys.has(column.key)),
     [hiddenColumnKeys, orderedColumns]
   );
+  const frozenLefts = useMemo(() => {
+    const lefts = new Map<string, number>();
+    let acc = actionColumnWidth;
+    for (const column of visibleColumns) {
+      if (column.key === "Sno" || frozenColumnKeys.has(column.key)) {
+        lefts.set(column.key, acc);
+        acc += getColumnWidth(column);
+      }
+    }
+    return lefts;
+  }, [frozenColumnKeys, visibleColumns]);
+  function frozenInfo(key: string) {
+    return { isFrozen: key === "Sno" || frozenColumnKeys.has(key), left: frozenLefts.get(key) ?? 0 };
+  }
   const visibleTableWidth = useMemo(
     () => actionColumnWidth + visibleColumns.reduce((total, column) => total + getColumnWidth(column), 0),
     [visibleColumns]
@@ -704,6 +710,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
     const normalizedLayout = normalizeColumnLayout(layout);
     setColumnOrder(normalizedLayout.order);
     setHiddenColumnKeys(new Set(normalizedLayout.hiddenColumnKeys));
+    setFrozenColumnKeys(new Set(normalizedLayout.frozenColumnKeys));
     setIsColumnOptionsOpen(false);
   }
 
@@ -713,6 +720,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
     const savedColumnLayout = getSavedColumnLayout();
     setColumnOrder(savedColumnLayout.order);
     setHiddenColumnKeys(new Set(savedColumnLayout.hiddenColumnKeys));
+    setFrozenColumnKeys(new Set(savedColumnLayout.frozenColumnKeys));
     setHasLoadedColumnLayout(true);
   }, []);
 
@@ -722,10 +730,11 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
     }
 
     saveColumnLayout({
+      frozenColumnKeys: Array.from(frozenColumnKeys),
       hiddenColumnKeys: Array.from(hiddenColumnKeys),
       order: columnOrder
     });
-  }, [columnOrder, hasLoadedColumnLayout, hiddenColumnKeys]);
+  }, [columnOrder, frozenColumnKeys, hasLoadedColumnLayout, hiddenColumnKeys]);
 
   async function loadUserAccess() {
     const user = await getCurrentUser();
@@ -1553,21 +1562,6 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                   ({filteredUniqueAppeals} unique appeals) of <span className="font-black text-slate-700">{rows.length}</span> total
                 </p>
               )}
-              {duplicateDrc07Numbers.size ? (
-                <p className="mt-1 text-sm font-bold text-amber-700">
-                  {duplicateDrc07Numbers.size} duplicate DRC 07 No. value{duplicateDrc07Numbers.size === 1 ? "" : "s"} highlighted.
-                </p>
-              ) : null}
-              {duplicateOiaNumbers.size ? (
-                <p className="mt-1 text-sm font-bold text-sky-700">
-                  {duplicateOiaNumbers.size} grouped OIA No. value{duplicateOiaNumbers.size === 1 ? "" : "s"} highlighted.
-                </p>
-              ) : null}
-              {blankRequiredCellCount ? (
-                <p className="mt-1 text-sm font-bold text-rose-700">
-                  {blankRequiredCellCount} blank cell{blankRequiredCellCount === 1 ? "" : "s"} highlighted.
-                </p>
-              ) : null}
             </div>
             <div className="flex flex-wrap gap-2">
               {isMaximized && (
@@ -1602,6 +1596,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                 </button>
                 {isColumnOptionsOpen ? (
                   <ColumnOptionsPanel
+                    frozenColumnKeys={frozenColumnKeys}
                     hiddenColumnKeys={hiddenColumnKeys}
                     onApply={applyColumnLayout}
                     onClose={() => setIsColumnOptionsOpen(false)}
@@ -1901,15 +1896,15 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                       </div>
                     </th>
                     {visibleColumns.map((column) => {
-                      const isSnoColumn = column.key === "Sno";
+                      const frozen = frozenInfo(column.key);
 
                       return (
                         <th
                           className={`relative border-b border-r border-slate-200 px-2 py-2 align-bottom font-semibold ${
-                            isSnoColumn ? "sticky z-40 bg-slate-100" : ""
+                            frozen.isFrozen ? "sticky z-40 bg-slate-100" : ""
                           }`}
                           key={column.key}
-                          style={isSnoColumn ? { left: actionColumnWidth } : undefined}
+                          style={frozen.isFrozen ? { left: frozen.left } : undefined}
                         >
                           <ExcelColumnHeader
                             column={column}
@@ -1937,15 +1932,15 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                   </tr>
                   <tr>
                     {visibleColumns.map((column) => {
-                      const isSnoColumn = column.key === "Sno";
+                      const frozen = frozenInfo(column.key);
 
                       return (
                         <th
                           className={`border-b border-r border-slate-200 bg-slate-50 px-1.5 py-1.5 ${
-                            isSnoColumn ? "sticky z-40" : ""
+                            frozen.isFrozen ? "sticky z-40 bg-slate-50" : ""
                           }`}
                           key={`filter-${column.key}`}
-                          style={isSnoColumn ? { left: actionColumnWidth } : undefined}
+                          style={frozen.isFrozen ? { left: frozen.left } : undefined}
                         >
                           <ExcelColumnTextFilter
                             column={column}
@@ -2026,7 +2021,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                           const cellValue = row.data[column.key];
                           const displayValue = dateFields.has(column.key) ? formatDateForDisplay(cellValue) : cellValue;
                           const isBillingInlineColumn = billingInlineColumnKeys.has(column.key);
-                          const isSnoColumn = column.key === "Sno";
+                          const frozen = frozenInfo(column.key);
                           const isInlineEditable = canInlineEdit(column.key, userAccess);
                           const isInlineEditing =
                             inlineEditor?.rowIndex === originalIndex && inlineEditor.columnKey === column.key;
@@ -2046,7 +2041,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                           return (
                             <td
                               className={`h-8 border-b border-r px-1.5 py-1 font-semibold ${
-                                isSnoColumn ? "sticky z-10 bg-inherit" : ""
+                                frozen.isFrozen ? "sticky z-10 bg-inherit" : ""
                               } ${
                                 isDuplicateDrc07
                                   ? "border-amber-300 bg-amber-100 text-amber-950"
@@ -2061,7 +2056,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                                     : "border-slate-200 text-slate-700"
                               }`}
                               key={`${originalIndex}-${column.key}`}
-                              style={isSnoColumn ? { left: actionColumnWidth } : undefined}
+                              style={frozen.isFrozen ? { left: frozen.left } : undefined}
                             >
                               {column.key === "Sno" ? (
                                 row.row_number || row.data.Sno || originalIndex + 1
@@ -2547,19 +2542,19 @@ function getColumnWidth(column: Column) {
 
 function getSavedColumnLayout(): ColumnLayout {
   if (typeof window === "undefined") {
-    return { hiddenColumnKeys: [], order: defaultColumnOrder };
+    return { frozenColumnKeys: [], hiddenColumnKeys: [], order: defaultColumnOrder };
   }
 
   try {
     const savedLayout = window.localStorage.getItem(columnLayoutStorageKey);
 
     if (!savedLayout) {
-      return { hiddenColumnKeys: [], order: defaultColumnOrder };
+      return { frozenColumnKeys: [], hiddenColumnKeys: [], order: defaultColumnOrder };
     }
 
     return normalizeColumnLayout(JSON.parse(savedLayout) as Partial<ColumnLayout>);
   } catch {
-    return { hiddenColumnKeys: [], order: defaultColumnOrder };
+    return { frozenColumnKeys: [], hiddenColumnKeys: [], order: defaultColumnOrder };
   }
 }
 
@@ -2600,8 +2595,11 @@ function normalizeColumnLayout(layout: Partial<ColumnLayout>): ColumnLayout {
   const hiddenColumnKeys = Array.isArray(layout.hiddenColumnKeys)
     ? layout.hiddenColumnKeys.filter((key) => knownColumnKeys.has(key))
     : [];
+  const frozenColumnKeys = Array.isArray(layout.frozenColumnKeys)
+    ? layout.frozenColumnKeys.filter((key) => knownColumnKeys.has(key))
+    : [];
 
-  return { hiddenColumnKeys, order };
+  return { frozenColumnKeys, hiddenColumnKeys, order };
 }
 
 function compareRowsForColumn(
@@ -3365,11 +3363,13 @@ function getRegistrationType(row: ClientRegisterRow | null) {
 }
 
 function ColumnOptionsPanel({
+  frozenColumnKeys,
   hiddenColumnKeys,
   onApply,
   onClose,
   orderedColumns
 }: {
+  frozenColumnKeys: Set<string>;
   hiddenColumnKeys: Set<string>;
   onApply: (layout: ColumnLayout) => void;
   onClose: () => void;
@@ -3377,6 +3377,7 @@ function ColumnOptionsPanel({
 }) {
   const [draftOrder, setDraftOrder] = useState<string[]>(() => orderedColumns.map((column) => column.key));
   const [draftHiddenColumnKeys, setDraftHiddenColumnKeys] = useState<Set<string>>(() => new Set(hiddenColumnKeys));
+  const [draftFrozenColumnKeys, setDraftFrozenColumnKeys] = useState<Set<string>>(() => new Set(frozenColumnKeys));
   const draftColumns = useMemo(
     () =>
       draftOrder
@@ -3399,6 +3400,18 @@ function ColumnOptionsPanel({
         nextKeys.add(column.key);
       }
 
+      return nextKeys;
+    });
+  }
+
+  function toggleDraftFreeze(column: Column) {
+    setDraftFrozenColumnKeys((currentKeys) => {
+      const nextKeys = new Set(currentKeys);
+      if (nextKeys.has(column.key)) {
+        nextKeys.delete(column.key);
+      } else {
+        nextKeys.add(column.key);
+      }
       return nextKeys;
     });
   }
@@ -3426,10 +3439,12 @@ function ColumnOptionsPanel({
   function resetDraftLayout() {
     setDraftOrder(defaultColumnOrder);
     setDraftHiddenColumnKeys(new Set());
+    setDraftFrozenColumnKeys(new Set());
   }
 
   function saveDraftLayout() {
     onApply({
+      frozenColumnKeys: Array.from(draftFrozenColumnKeys),
       hiddenColumnKeys: Array.from(draftHiddenColumnKeys),
       order: draftOrder
     });
@@ -3469,10 +3484,13 @@ function ColumnOptionsPanel({
             <ColumnOptionsRow
               column={column}
               index={index}
+              isFrozen={column.key === "Sno" || draftFrozenColumnKeys.has(column.key)}
               isHidden={isHidden}
+              isPinLocked={column.key === "Sno"}
               key={column.key}
               onMove={moveDraftColumn}
               onToggle={toggleDraftColumn}
+              onToggleFreeze={toggleDraftFreeze}
               totalColumns={draftColumns.length}
             />
           );
@@ -3501,16 +3519,22 @@ function ColumnOptionsPanel({
 const ColumnOptionsRow = memo(function ColumnOptionsRow({
   column,
   index,
+  isFrozen,
   isHidden,
+  isPinLocked,
   onMove,
   onToggle,
+  onToggleFreeze,
   totalColumns
 }: {
   column: Column;
   index: number;
+  isFrozen: boolean;
   isHidden: boolean;
+  isPinLocked: boolean;
   onMove: (column: Column, direction: "up" | "down") => void;
   onToggle: (column: Column) => void;
+  onToggleFreeze: (column: Column) => void;
   totalColumns: number;
 }) {
   const label = column.group ? `${column.group} - ${column.label}` : column.label;
@@ -3533,6 +3557,18 @@ const ColumnOptionsRow = memo(function ColumnOptionsRow({
         </span>
       </label>
       <div className="flex items-center gap-1">
+        <button
+          aria-label={isFrozen ? `Unpin ${label}` : `Pin ${label}`}
+          className={`inline-flex size-7 items-center justify-center rounded-md border transition disabled:cursor-not-allowed disabled:opacity-60 ${
+            isFrozen ? "border-navy-300 bg-navy-50 text-navy-700" : "border-slate-200 bg-white text-slate-400 hover:bg-slate-50"
+          }`}
+          disabled={isPinLocked}
+          onClick={() => onToggleFreeze(column)}
+          title={isPinLocked ? "Always pinned" : isFrozen ? "Unpin column" : "Pin column (freeze on left)"}
+          type="button"
+        >
+          <Pin className={`size-3.5 ${isFrozen ? "fill-navy-200" : ""}`} />
+        </button>
         <button
           aria-label={`Move ${label} up`}
           className="inline-flex size-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-35"
