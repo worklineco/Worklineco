@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowDown, ArrowUp, Bookmark, CalendarDays, Check, ChevronDown, CircleDot, Download, Filter, History, ListChecks, Menu, Pencil, Pin, Plus, Search, Settings2, Trash2, Upload, Workflow, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Bookmark, CalendarDays, Check, ChevronDown, CircleDot, Star, Download, Filter, History, ListChecks, Menu, Pencil, Pin, Plus, Search, Settings2, Trash2, Upload, Workflow, X } from "lucide-react";
 import Link from "next/link";
 import type { ComponentType } from "react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -27,7 +27,7 @@ type TaskLineViewConfig = {
   statusFilter?: string;
   valueFilters?: Record<string, string[]>;
 };
-type TaskLineSavedView = { config: TaskLineViewConfig; id: string; name: string };
+type TaskLineSavedView = { config: TaskLineViewConfig; id: string; is_default?: boolean; name: string };
 type TaskLineAuditLog = {
   action: string;
   actorName?: string;
@@ -316,7 +316,7 @@ export function TaskLineRegister() {
 
   useEffect(() => {
     void loadAllTaskLine();
-    void loadViews();
+    void loadViews(true);
   }, []);
 
   useEffect(() => {
@@ -655,7 +655,7 @@ export function TaskLineRegister() {
     void Promise.all([loadMasters(), loadStageMasters(), loadTeamMembers(), loadEntityMasters()]);
   }
 
-  async function loadViews() {
+  async function loadViews(applyDefault = false) {
     try {
       const response = await fetch("/api/taskline/views");
       const result = (await response.json().catch(() => ({}))) as { error?: string; views?: TaskLineSavedView[] };
@@ -663,9 +663,37 @@ export function TaskLineRegister() {
         if (result.error) setMessage(result.error);
         return;
       }
-      setSavedViews(result.views ?? []);
+      const views = result.views ?? [];
+      setSavedViews(views);
+      if (applyDefault) {
+        const preferred = views.find((view) => view.is_default);
+        if (preferred) {
+          applyViewConfig(preferred.config ?? {});
+          setActiveViewId(preferred.id);
+        }
+      }
     } catch {
       // saved views are non-critical; ignore load failures
+    }
+  }
+
+  async function setDefaultView(view: TaskLineSavedView) {
+    const makeDefault = !view.is_default;
+    try {
+      const response = await fetch("/api/taskline/views", {
+        body: JSON.stringify({ action: makeDefault ? "set_default" : "clear_default", id: view.id }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST"
+      });
+      const result = (await response.json().catch(() => ({}))) as { error?: string; views?: TaskLineSavedView[] };
+      if (!response.ok) {
+        setMessage(result.error ?? "Could not update the default view.");
+        return;
+      }
+      setSavedViews(result.views ?? []);
+      setMessage(makeDefault ? `"${view.name}" will open by default.` : "Default view cleared.");
+    } catch {
+      setMessage("Could not update the default view.");
     }
   }
 
@@ -1261,6 +1289,14 @@ export function TaskLineRegister() {
                         >
                           {activeViewId === view.id ? <Check className="size-3.5 shrink-0" /> : <span className="size-3.5 shrink-0" />}
                           <span className="truncate">{view.name}</span>
+                        </button>
+                        <button
+                          className={`shrink-0 rounded p-1 ${view.is_default ? "text-amber-500" : "text-slate-300 hover:text-amber-500"}`}
+                          onClick={() => void setDefaultView(view)}
+                          title={view.is_default ? "Default view (opens on load) — click to unset" : "Set as default view"}
+                          type="button"
+                        >
+                          <Star className={`size-3 ${view.is_default ? "fill-amber-500" : ""}`} />
                         </button>
                         <button className="shrink-0 rounded p-1 text-slate-400 hover:text-navy-700" onClick={() => void renameView(view)} title="Rename view" type="button">
                           <Pencil className="size-3" />

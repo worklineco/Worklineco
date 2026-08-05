@@ -15,6 +15,10 @@ create table if not exists public.taskline_views (
   unique (organisation_id, user_id, name)
 );
 
+-- One optional default view per user (auto-applied when TaskLine opens).
+alter table public.taskline_views
+  add column if not exists is_default boolean not null default false;
+
 create index if not exists taskline_views_org_user_idx
   on public.taskline_views (organisation_id, user_id);
 

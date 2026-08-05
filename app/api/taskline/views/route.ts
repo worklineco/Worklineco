@@ -4,7 +4,7 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
 type CookieToSet = { name: string; options: CookieOptions; value: string };
-type SavedView = { config: Record<string, unknown>; id: string; name: string };
+type SavedView = { config: Record<string, unknown>; id: string; is_default: boolean; name: string };
 
 const defaultOrganisationCode = "DCO1433";
 const viewsSqlFile = "database/019_taskline_views.sql";
@@ -31,10 +31,44 @@ export async function POST(request: Request) {
   }
 
   const payload = (await request.json().catch(() => ({}))) as {
+    action?: string;
     config?: Record<string, unknown>;
     id?: string;
     name?: string;
   };
+
+  const action = text(payload.action);
+  if (action === "set_default" || action === "clear_default") {
+    const admin = createAdminClient();
+    const organisation = await getOrganisationId(admin, auth.user);
+    if ("error" in organisation) {
+      return organisation.error;
+    }
+    const cleared = await admin
+      .from("taskline_views")
+      .update({ is_default: false })
+      .eq("organisation_id", organisation.organisationId)
+      .eq("user_id", auth.user.id);
+    if (cleared.error) {
+      return errorResponse(cleared.error);
+    }
+    if (action === "set_default") {
+      const id = text(payload.id);
+      if (!id) {
+        return NextResponse.json({ error: "View id is required." }, { status: 400 });
+      }
+      const marked = await admin
+        .from("taskline_views")
+        .update({ is_default: true })
+        .eq("id", id)
+        .eq("organisation_id", organisation.organisationId)
+        .eq("user_id", auth.user.id);
+      if (marked.error) {
+        return errorResponse(marked.error);
+      }
+    }
+    return listViews(admin, organisation.organisationId, auth.user.id);
+  }
 
   const name = text(payload.name);
   if (!name) {
@@ -110,7 +144,7 @@ export async function DELETE(request: Request) {
 async function listViews(admin: ReturnType<typeof createAdminClient>, organisationId: string, userId: string) {
   const { data, error } = await admin
     .from("taskline_views")
-    .select("id,name,config")
+    .select("id,name,config,is_default")
     .eq("organisation_id", organisationId)
     .eq("user_id", userId)
     .order("name", { ascending: true });
