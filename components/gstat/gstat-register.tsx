@@ -1868,7 +1868,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                             ? "bg-amber-50"
                             : hasDuplicateOia
                               ? "bg-sky-50"
-                              : "odd:bg-white even:bg-slate-50/80"
+                              : "odd:bg-white even:bg-slate-50"
                         }
                         key={row.id ?? originalIndex}
                       >
