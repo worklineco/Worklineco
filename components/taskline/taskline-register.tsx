@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowDown, ArrowUp, CalendarDays, ChevronDown, CircleDot, Download, Filter, History, ListChecks, Menu, Pencil, Pin, Plus, Search, Settings2, Trash2, Upload, Workflow, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Bookmark, CalendarDays, Check, ChevronDown, CircleDot, Download, Filter, History, ListChecks, Menu, Pencil, Pin, Plus, Search, Settings2, Trash2, Upload, Workflow, X } from "lucide-react";
 import Link from "next/link";
 import type { ComponentType } from "react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -16,6 +16,18 @@ type TaskLineColumn = {
 };
 type TaskLineRow = Record<string, string>;
 type TaskLineColumnLayout = { frozenColumnKeys: string[]; hiddenColumnKeys: string[]; order: string[] };
+type TaskLineViewConfig = {
+  activeColumnGroup?: string;
+  columnFilters?: Record<string, string>;
+  dueColorFilter?: string[];
+  dueRange?: { end: string; preset: string; start: string };
+  layout?: Partial<TaskLineColumnLayout>;
+  search?: string;
+  sortState?: { dir: "asc" | "desc"; key: string } | null;
+  statusFilter?: string;
+  valueFilters?: Record<string, string[]>;
+};
+type TaskLineSavedView = { config: TaskLineViewConfig; id: string; name: string };
 type TaskLineAuditLog = {
   action: string;
   actorName?: string;
@@ -159,6 +171,10 @@ export function TaskLineRegister() {
   const [statusFilter, setStatusFilter] = useState("");
   const [dueRange, setDueRange] = useState<{ end: string; preset: string; start: string }>({ end: "", preset: "", start: "" });
   const [isDateRangeOpen, setIsDateRangeOpen] = useState(false);
+  const [savedViews, setSavedViews] = useState<TaskLineSavedView[]>([]);
+  const [isViewsOpen, setIsViewsOpen] = useState(false);
+  const [viewNameDraft, setViewNameDraft] = useState("");
+  const [activeViewId, setActiveViewId] = useState<string | null>(null);
   const [tablePage, setTablePage] = useState(1);
   const [viewMode, setViewMode] = useState<TaskLineView>("register");
   const [taskMasters, setTaskMasters] = useState<{ id: string; name: string }[]>([]);
@@ -300,6 +316,7 @@ export function TaskLineRegister() {
 
   useEffect(() => {
     void loadAllTaskLine();
+    void loadViews();
   }, []);
 
   useEffect(() => {
@@ -636,6 +653,124 @@ export function TaskLineRegister() {
 
   function loadEditorOptions() {
     void Promise.all([loadMasters(), loadStageMasters(), loadTeamMembers(), loadEntityMasters()]);
+  }
+
+  async function loadViews() {
+    try {
+      const response = await fetch("/api/taskline/views");
+      const result = (await response.json().catch(() => ({}))) as { error?: string; views?: TaskLineSavedView[] };
+      if (!response.ok) {
+        if (result.error) setMessage(result.error);
+        return;
+      }
+      setSavedViews(result.views ?? []);
+    } catch {
+      // saved views are non-critical; ignore load failures
+    }
+  }
+
+  function captureViewConfig(): TaskLineViewConfig {
+    return {
+      activeColumnGroup,
+      columnFilters,
+      dueColorFilter,
+      dueRange,
+      layout: { frozenColumnKeys: [...frozenColumnKeys], hiddenColumnKeys: [...hiddenColumnKeys], order: columnOrder },
+      search,
+      sortState,
+      statusFilter,
+      valueFilters
+    };
+  }
+
+  function applyViewConfig(config: TaskLineViewConfig) {
+    setColumnFilters(config.columnFilters ?? {});
+    setValueFilters(config.valueFilters ?? {});
+    setDueColorFilter(config.dueColorFilter ?? []);
+    setDueRange(config.dueRange ?? { end: "", preset: "", start: "" });
+    setStatusFilter(config.statusFilter ?? "");
+    setSearch(config.search ?? "");
+    setSortState(config.sortState ?? null);
+    if (config.activeColumnGroup) setActiveColumnGroup(config.activeColumnGroup);
+    if (config.layout) {
+      const normalized = normalizeTaskLineColumnLayout(config.layout);
+      setColumnOrder(normalized.order);
+      setHiddenColumnKeys(new Set(normalized.hiddenColumnKeys));
+      setFrozenColumnKeys(new Set(normalized.frozenColumnKeys));
+      saveTaskLineColumnLayout(normalized);
+    }
+    setTablePage(1);
+  }
+
+  async function saveView(name: string, id?: string) {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    setMessage(id ? "Updating view..." : "Saving view...");
+    try {
+      const response = await fetch("/api/taskline/views", {
+        body: JSON.stringify({ config: captureViewConfig(), id: id ?? undefined, name: trimmed }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST"
+      });
+      const result = (await response.json().catch(() => ({}))) as { error?: string; views?: TaskLineSavedView[] };
+      if (!response.ok) {
+        setMessage(result.error ?? "Could not save the view.");
+        return;
+      }
+      setSavedViews(result.views ?? []);
+      const saved = (result.views ?? []).find((view) => view.name === trimmed);
+      if (saved) setActiveViewId(saved.id);
+      setViewNameDraft("");
+      setMessage(id ? "View updated." : `View "${trimmed}" saved.`);
+    } catch {
+      setMessage("Could not save the view.");
+    }
+  }
+
+  function applyView(view: TaskLineSavedView) {
+    applyViewConfig(view.config ?? {});
+    setActiveViewId(view.id);
+    setIsViewsOpen(false);
+    setMessage(`Showing view "${view.name}".`);
+  }
+
+  async function deleteView(view: TaskLineSavedView) {
+    if (!window.confirm(`Delete the view "${view.name}"?`)) return;
+    try {
+      const response = await fetch(`/api/taskline/views?id=${encodeURIComponent(view.id)}`, { method: "DELETE" });
+      const result = (await response.json().catch(() => ({}))) as { error?: string; views?: TaskLineSavedView[] };
+      if (!response.ok) {
+        setMessage(result.error ?? "Could not delete the view.");
+        return;
+      }
+      setSavedViews(result.views ?? []);
+      if (activeViewId === view.id) setActiveViewId(null);
+      setMessage(`View "${view.name}" deleted.`);
+    } catch {
+      setMessage("Could not delete the view.");
+    }
+  }
+
+  async function renameView(view: TaskLineSavedView) {
+    const next = window.prompt("Rename view", view.name)?.trim();
+    if (!next || next === view.name) return;
+    setMessage("Renaming view...");
+    try {
+      const response = await fetch("/api/taskline/views", {
+        body: JSON.stringify({ config: view.config ?? {}, id: view.id, name: next }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST"
+      });
+      const result = (await response.json().catch(() => ({}))) as { error?: string; views?: TaskLineSavedView[] };
+      if (!response.ok) {
+        setMessage(result.error ?? "Could not rename the view.");
+        return;
+      }
+      setSavedViews(result.views ?? []);
+      setMessage("View renamed.");
+    } catch {
+      setMessage("Could not rename the view.");
+    }
   }
 
   async function loadAllTaskLine(useCache = true) {
@@ -1092,6 +1227,82 @@ export function TaskLineRegister() {
                     <X className="size-3.5" /> Clear date range
                   </button>
                 ) : null}
+              </div>
+            </>
+          ) : null}
+        </div>
+
+        <div className="relative shrink-0">
+          <button
+            className={`${buttonClass("light")} ${activeViewId ? "border-navy-300 text-navy-800" : ""}`}
+            onClick={() => setIsViewsOpen((current) => !current)}
+            type="button"
+          >
+            <Bookmark className="size-4" />
+            {savedViews.find((view) => view.id === activeViewId)?.name ?? "My Views"}
+            <ChevronDown className="size-3.5" />
+          </button>
+          {isViewsOpen ? (
+            <>
+              <div className="fixed inset-0 z-[70]" onClick={() => setIsViewsOpen(false)} />
+              <div className="absolute right-0 z-[75] mt-1 w-72 rounded-xl border border-slate-200 bg-white p-2 shadow-xl">
+                <p className="px-2 pb-1 text-[10px] font-black uppercase tracking-wide text-slate-400">Saved views</p>
+                <div className="max-h-56 overflow-y-auto">
+                  {savedViews.length ? (
+                    savedViews.map((view) => (
+                      <div
+                        className={`group flex items-center gap-1 rounded-md px-1 ${activeViewId === view.id ? "bg-navy-50" : "hover:bg-slate-50"}`}
+                        key={view.id}
+                      >
+                        <button
+                          className={`flex min-w-0 flex-1 items-center gap-1.5 px-1 py-1.5 text-left text-xs font-bold ${activeViewId === view.id ? "text-navy-800" : "text-slate-700"}`}
+                          onClick={() => applyView(view)}
+                          type="button"
+                        >
+                          {activeViewId === view.id ? <Check className="size-3.5 shrink-0" /> : <span className="size-3.5 shrink-0" />}
+                          <span className="truncate">{view.name}</span>
+                        </button>
+                        <button className="shrink-0 rounded p-1 text-slate-400 hover:text-navy-700" onClick={() => void renameView(view)} title="Rename view" type="button">
+                          <Pencil className="size-3" />
+                        </button>
+                        <button className="shrink-0 rounded p-1 text-slate-400 hover:text-rose-600" onClick={() => void deleteView(view)} title="Delete view" type="button">
+                          <Trash2 className="size-3" />
+                        </button>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="px-2 py-2 text-xs font-semibold text-slate-400">No saved views yet.</p>
+                  )}
+                </div>
+                {activeViewId ? (
+                  <button
+                    className="mt-1 flex w-full items-center justify-center gap-1 rounded-md border border-slate-200 px-2 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-50"
+                    onClick={() => { const active = savedViews.find((view) => view.id === activeViewId); if (active) void saveView(active.name, active.id); }}
+                    type="button"
+                  >
+                    Update this view with current filters
+                  </button>
+                ) : null}
+                <div className="mt-2 space-y-2 border-t border-slate-100 pt-2">
+                  <p className="px-1 text-[10px] font-black uppercase tracking-wide text-slate-400">Save current as new view</p>
+                  <div className="flex gap-1.5">
+                    <input
+                      className="h-8 min-w-0 flex-1 rounded-md border border-slate-200 px-2 text-xs font-semibold outline-none focus:border-navy-400"
+                      onChange={(event) => setViewNameDraft(event.target.value)}
+                      onKeyDown={(event) => { if (event.key === "Enter" && viewNameDraft.trim()) void saveView(viewNameDraft); }}
+                      placeholder="View name"
+                      value={viewNameDraft}
+                    />
+                    <button
+                      className="inline-flex h-8 items-center gap-1 rounded-md bg-navy-700 px-2.5 text-xs font-bold text-white transition hover:bg-navy-800 disabled:opacity-40"
+                      disabled={!viewNameDraft.trim()}
+                      onClick={() => void saveView(viewNameDraft)}
+                      type="button"
+                    >
+                      <Plus className="size-3.5" /> Save
+                    </button>
+                  </div>
+                </div>
               </div>
             </>
           ) : null}
