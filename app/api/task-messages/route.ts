@@ -27,6 +27,7 @@ export async function GET(request: Request) {
       .select("id,task_code,team,author_name,body,created_at,entity,task,read_at")
       .eq("organisation_id", organisation.organisationId)
       .eq("recipient_id", auth.user.id)
+      .is("read_at", null)
       .order("created_at", { ascending: false })
       .limit(100);
     if (error) {
@@ -69,26 +70,78 @@ export async function POST(request: Request) {
   if ("error" in organisation) {
     return organisation.error;
   }
-  const payload = (await request.json()) as { body?: string; code?: string; entity?: string; task?: string; team?: string };
-  const code = text(payload.code);
+  const payload = (await request.json()) as {
+    action?: string;
+    body?: string;
+    code?: string;
+    entity?: string;
+    id?: string;
+    reply_to_id?: string;
+    task?: string;
+    team?: string;
+  };
+
+  if (text(payload.action) === "mark_read") {
+    const messageId = text(payload.id);
+    if (!messageId) {
+      return NextResponse.json({ error: "Message id is required." }, { status: 400 });
+    }
+    const updated = await admin
+      .from("task_messages")
+      .update({ read_at: new Date().toISOString() })
+      .eq("id", messageId)
+      .eq("organisation_id", organisation.organisationId)
+      .eq("recipient_id", auth.user.id);
+    if (updated.error) {
+      return errorResponse(updated.error);
+    }
+    return NextResponse.json({ ok: true });
+  }
+
   const body = text(payload.body);
+  const metadata = auth.user.user_metadata ?? {};
+  const authorName = text(metadata.full_name ?? metadata.name ?? auth.user.email) || "WorkLine user";
+
+  let code = text(payload.code);
+  let entity = text(payload.entity);
+  let task = text(payload.task);
+  let team = text(payload.team);
+  let recipientEmail = "";
+  let recipientId: string | null = null;
+
+  const replyToId = text(payload.reply_to_id);
+  if (replyToId) {
+    const original = await admin
+      .from("task_messages")
+      .select("task_code,team,entity,task,author_id")
+      .eq("id", replyToId)
+      .eq("organisation_id", organisation.organisationId)
+      .single();
+    if (original.data) {
+      code = code || text(original.data.task_code);
+      entity = entity || text(original.data.entity);
+      task = task || text(original.data.task);
+      team = team || text(original.data.team);
+      recipientId = (original.data.author_id as string | null) ?? null;
+      if (recipientId) {
+        const authorUser = await admin.auth.admin.getUserById(recipientId);
+        recipientEmail = authorUser.data?.user?.email ?? "";
+      }
+    }
+  } else {
+    const mentionEmail = extractMentionEmail(body);
+    if (mentionEmail) {
+      recipientEmail = mentionEmail;
+      const recipient = await findUserByEmail(admin, mentionEmail);
+      recipientId = recipient?.id ?? null;
+    }
+  }
+
   if (!code || !body) {
     return NextResponse.json({ error: "Task code and message are required." }, { status: 400 });
   }
-  const metadata = auth.user.user_metadata ?? {};
-  const authorName = text(metadata.full_name ?? metadata.name ?? auth.user.email) || "WorkLine user";
-  const entity = text(payload.entity);
-  const task = text(payload.task);
 
-  const mentionEmail = extractMentionEmail(body);
-  let recipientEmail = "";
-  let recipientId: string | null = null;
-  if (mentionEmail) {
-    recipientEmail = mentionEmail;
-    const recipient = await findUserByEmail(admin, mentionEmail);
-    recipientId = recipient?.id ?? null;
-  }
-  const isPrivate = Boolean(mentionEmail);
+  const isPrivate = Boolean(recipientEmail || recipientId);
 
   const inserted = await admin.from("task_messages").insert({
     author_id: auth.user.id,
@@ -101,7 +154,7 @@ export async function POST(request: Request) {
     recipient_id: recipientId,
     task: task || null,
     task_code: code,
-    team: text(payload.team)
+    team
   });
   if (inserted.error) {
     return errorResponse(inserted.error);

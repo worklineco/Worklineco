@@ -1,7 +1,7 @@
 "use client";
 
 import { getCurrentUser } from "@/lib/supabase/session";
-import { CalendarClock, MessagesSquare, NotebookPen, Pencil, Plus, Trash2, UserRound } from "lucide-react";
+import { CalendarClock, Check, MessagesSquare, NotebookPen, Pencil, Plus, Send, Trash2, UserRound, X } from "lucide-react";
 import { MonthCalendar, type CalendarEvent } from "@/components/home/month-calendar";
 import { getCached, setCached } from "@/lib/data-cache";
 import { useEffect, useState } from "react";
@@ -31,6 +31,10 @@ export function PartnerDashboard() {
   const [meetingDraft, setMeetingDraft] = useState({ agenda: "", prepNotes: "", time: "", title: "" });
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [mentions, setMentions] = useState<Mention[]>([]);
+  const [replyingId, setReplyingId] = useState<string | null>(null);
+  const [replyDraft, setReplyDraft] = useState("");
+  const [mentionBusy, setMentionBusy] = useState(false);
+  const [threadModal, setThreadModal] = useState<{ code: string; loading: boolean; messages: { author_name?: string; body: string; created_at: string; id: string }[] } | null>(null);
 
   useEffect(() => {
     const saved = window.localStorage.getItem(storageKey);
@@ -198,6 +202,52 @@ export function PartnerDashboard() {
     setMeetingDraft({ agenda: "", prepNotes: "", time: "", title: "" });
   }
 
+  async function markMentionRead(id: string) {
+    setMentions((current) => current.filter((item) => item.id !== id));
+    try {
+      await fetch("/api/task-messages", {
+        body: JSON.stringify({ action: "mark_read", id }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST"
+      });
+    } catch {
+      // best-effort
+    }
+  }
+
+  async function sendMentionReply(mention: Mention) {
+    const bodyText = replyDraft.trim();
+    if (!bodyText) {
+      return;
+    }
+    setMentionBusy(true);
+    try {
+      await fetch("/api/task-messages", {
+        body: JSON.stringify({ body: bodyText, reply_to_id: mention.id }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST"
+      });
+      setReplyDraft("");
+      setReplyingId(null);
+      await markMentionRead(mention.id);
+    } catch {
+      // ignore
+    } finally {
+      setMentionBusy(false);
+    }
+  }
+
+  async function openMentionThread(code: string) {
+    setThreadModal({ code, loading: true, messages: [] });
+    try {
+      const response = await fetch(`/api/task-messages?code=${encodeURIComponent(code)}`, { cache: "no-store" });
+      const result = await response.json();
+      setThreadModal({ code, loading: false, messages: Array.isArray(result?.messages) ? result.messages : [] });
+    } catch {
+      setThreadModal({ code, loading: false, messages: [] });
+    }
+  }
+
   return (
     <div className="mt-4 grid gap-4">
       <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -222,10 +272,70 @@ export function PartnerDashboard() {
                   {mention.task ? <> · <span className="font-semibold text-slate-600">{mention.task}</span></> : null}
                 </p>
                 <p className="mt-1 text-sm font-semibold leading-5 text-slate-800">{mention.body}</p>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <button className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 text-xs font-black uppercase text-slate-700 transition hover:bg-slate-50" onClick={() => void markMentionRead(mention.id)} type="button">
+                    <Check className="size-3.5" /> Mark read
+                  </button>
+                  <button className="inline-flex h-8 items-center gap-1 rounded-md border border-navy-200 bg-navy-50 px-2.5 text-xs font-black uppercase text-navy-800 transition hover:bg-navy-100" onClick={() => { setReplyingId((current) => (current === mention.id ? null : mention.id)); setReplyDraft(""); }} type="button">
+                    <Send className="size-3.5" /> Reply
+                  </button>
+                  <button className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 text-xs font-black uppercase text-slate-700 transition hover:bg-slate-50" onClick={() => void openMentionThread(mention.task_code)} type="button">
+                    <MessagesSquare className="size-3.5" /> View thread
+                  </button>
+                </div>
+                {replyingId === mention.id ? (
+                  <div className="mt-2 flex gap-2">
+                    <input
+                      className="h-9 min-w-0 flex-1 rounded-md border border-slate-200 bg-white px-2 text-sm font-semibold outline-none focus:border-navy-400"
+                      onChange={(event) => setReplyDraft(event.target.value)}
+                      onKeyDown={(event) => { if (event.key === "Enter") void sendMentionReply(mention); }}
+                      placeholder={`Reply to ${mention.author_name || "sender"}…`}
+                      value={replyDraft}
+                    />
+                    <button
+                      className="inline-flex h-9 items-center rounded-md bg-navy-700 px-3 text-xs font-black uppercase text-white transition hover:bg-navy-800 disabled:opacity-50"
+                      disabled={mentionBusy || !replyDraft.trim()}
+                      onClick={() => void sendMentionReply(mention)}
+                      type="button"
+                    >
+                      Send
+                    </button>
+                  </div>
+                ) : null}
               </div>
             ))}
           </div>
         </section>
+      ) : null}
+
+      {threadModal ? (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/50 px-4 py-6" onClick={() => setThreadModal(null)}>
+          <div className="flex max-h-[80vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
+            <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
+              <div>
+                <p className="text-xs font-black uppercase tracking-[0.14em] text-navy-700">Task chat</p>
+                <h3 className="mt-0.5 text-lg font-black text-slate-950">{threadModal.code}</h3>
+              </div>
+              <button className="inline-flex size-9 items-center justify-center rounded-md border border-slate-200 text-slate-700 hover:bg-slate-50" onClick={() => setThreadModal(null)} type="button">
+                <X className="size-4" />
+              </button>
+            </div>
+            <div className="flex-1 space-y-2 overflow-y-auto px-5 py-4">
+              {threadModal.loading ? (
+                <p className="text-sm font-bold text-slate-500">Loading…</p>
+              ) : threadModal.messages.length ? (
+                threadModal.messages.map((message) => (
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2" key={message.id}>
+                    <p className="text-xs font-black text-navy-700">{message.author_name || "User"}</p>
+                    <p className="mt-1 text-sm font-semibold leading-5 text-slate-700">{message.body}</p>
+                  </div>
+                ))
+              ) : (
+                <p className="text-sm font-semibold text-slate-400">No messages in this task yet.</p>
+              )}
+            </div>
+          </div>
+        </div>
       ) : null}
 
       <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
