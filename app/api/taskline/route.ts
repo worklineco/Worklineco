@@ -67,6 +67,7 @@ const taskLineColumns = [
   "entity_group",
   "entity",
   "state_name",
+  "gstin",
   "task",
   "due_date",
   "stage",

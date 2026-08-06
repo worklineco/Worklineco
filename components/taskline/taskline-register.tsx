@@ -48,7 +48,7 @@ const taskLineImportConcurrency = 3;
 const taskLinePageSize = 200;
 const taskLineRowsCacheKey = "taskline:rows:v4";
 const taskLineColumnGroups: { columns: string[] | null; key: string; label: string }[] = [
-  { key: "core", label: "Core", columns: ["team", "task_code", "name", "resource", "entity_group", "entity", "state_name", "task", "due_date", "stage", "status_open_close", "remarks"] },
+  { key: "core", label: "Core", columns: ["team", "task_code", "name", "resource", "entity_group", "entity", "state_name", "gstin", "task", "due_date", "stage", "status_open_close", "remarks"] },
   { key: "legal", label: "Legal / Order", columns: ["task_code", "name", "entity", "task", "ref_date", "ref_no", "period", "section", "issue", "refer_other_task", "appeal_no", "order_type", "court_location", "engaged_counsel", "printing", "due_date", "stage"] },
   { key: "billing", label: "Billing / Fees", columns: ["task_code", "name", "entity", "task", "billable", "billing_status", "el_reference", "tax_invoice_no", "total_agreed_fee", "amount_raised", "amount_realised", "counsel_fee", "referral_fee", "fee_comments", "document_link"] },
   { key: "reminders", label: "Reminders / Status", columns: ["task_code", "name", "entity", "task", "realisation_status", "reminder_days", "reminder_email", "remaining_days", "status", "entry_date", "completion_date", "poc", "pending_from"] },
@@ -56,14 +56,14 @@ const taskLineColumnGroups: { columns: string[] | null; key: string; label: stri
 ];
 
 const taskLineFormSections: { columns: string[]; key: string; label: string }[] = [
-  { key: "core", label: "Core", columns: ["team", "name", "resource", "entity_group", "entity", "state_name", "task", "due_date", "stage", "status_open_close", "billable", "remarks"] },
+  { key: "core", label: "Core", columns: ["team", "name", "resource", "entity_group", "entity", "state_name", "gstin", "task", "due_date", "stage", "status_open_close", "billable", "remarks"] },
   { key: "legal", label: "Legal / Order", columns: ["ref_date", "ref_no", "period", "section", "issue", "refer_other_task", "appeal_no", "order_type", "court_location", "engaged_counsel", "printing"] },
   { key: "billing", label: "Billing / Fees", columns: ["billing_status", "el_reference", "tax_invoice_no", "total_agreed_fee", "amount_raised", "amount_realised", "counsel_fee", "referral_fee", "fee_comments", "document_link"] },
   { key: "reminders", label: "Reminders / Status", columns: ["realisation_status", "reminder_days", "reminder_email", "remaining_days", "status", "entry_date", "completion_date", "poc", "pending_from"] },
   { key: "other", label: "Other", columns: ["any_other", "any_other_1"] }
 ];
 const requiredTaskLineFormKeys = ["team", "name", "resource", "entity_group", "entity", "state_name", "task", "due_date", "stage", "status_open_close", "billable"];
-const taskLineColumnLayoutStorageKey = "workline:taskline-column-layout:v4";
+const taskLineColumnLayoutStorageKey = "workline:taskline-column-layout:v5";
 const actionColumnWidth = 84;
 const actionColumnKey = "__actions";
 const taskLineColumns: TaskLineColumn[] = [
@@ -74,6 +74,7 @@ const taskLineColumns: TaskLineColumn[] = [
   { key: "entity_group", label: "Entity Group", width: 150 },
   { key: "entity", label: "Entity", width: 180 },
   { key: "state_name", label: "State Name", width: 130 },
+  { key: "gstin", label: "GSTIN", width: 170 },
   { key: "task", label: "Task", width: 210 },
   { key: "due_date", label: "Due Date", type: "date", width: 128 },
   { key: "stage", label: "Stage", width: 132 },
@@ -119,7 +120,7 @@ const defaultTaskLineColumnOrder = taskLineColumns.map((column) => column.key);
 const statusOptions = ["Open", "Close"];
 const billableOptions = ["Yes", "No"];
 type TeamMemberLite = { designation: string; joining_date: string; name: string; team: string };
-type EntityMasterOption = { entity: string; group: string };
+type EntityMasterOption = { entity: string; group: string; gstin: string; state: string };
 const emptyOptions: string[] = [];
 const teamOptions = ["Team-02", "Team-03", "Team-04", "Team-05", "Team-06", "Team-08"];
 const gstinStateOptions = [
@@ -238,6 +239,16 @@ export function TaskLineRegister() {
     () => new Map(entityMasters.map((option) => [normalizeOptionKey(option.entity), option.group])),
     [entityMasters]
   );
+  const entityDetailByGstin = useMemo(() => {
+    const map = new Map<string, { entity: string; group: string; state: string }>();
+    for (const option of entityMasters) {
+      const key = text(option.gstin).toUpperCase();
+      if (key) {
+        map.set(key, { entity: option.entity, group: option.group, state: option.state });
+      }
+    }
+    return map;
+  }, [entityMasters]);
   const entityOptions = useMemo(() => entityMasters.map((option) => option.entity), [entityMasters]);
   const sectionOptions = useMemo(() => uniqueSortedValues(rows.map((row) => row.section)), [rows]);
   const teamNameOptions = useMemo(() => {
@@ -677,9 +688,18 @@ export function TaskLineRegister() {
         if (!entity) continue;
         const key = normalizeOptionKey(entity);
         const group = text(row.Group);
+        const state = text(row.State);
+        const gstin = text(row["GSTIN/UIN"]);
         const existing = optionsByName.get(key);
-        if (!existing || (!existing.group && group)) {
-          optionsByName.set(key, { entity: existing?.entity ?? entity, group });
+        if (!existing) {
+          optionsByName.set(key, { entity, group, gstin, state });
+        } else {
+          optionsByName.set(key, {
+            entity: existing.entity,
+            group: existing.group || group,
+            gstin: existing.gstin || gstin,
+            state: existing.state || state
+          });
         }
       }
       setEntityMasters(Array.from(optionsByName.values()).sort((a, b) => a.entity.localeCompare(b.entity, undefined, { numeric: true })));
@@ -950,6 +970,16 @@ export function TaskLineRegister() {
   function updateFormDraft(key: string, value: string) {
     setFormDraft((current) => {
       if (!current) return current;
+
+      if (key === "gstin") {
+        const detail = entityDetailByGstin.get(text(value).toUpperCase());
+        if (detail) {
+          setMessage("");
+          return { ...current, gstin: value, entity: detail.entity, entity_group: detail.group, state_name: detail.state };
+        }
+        return { ...current, gstin: value };
+      }
+
       if (key !== "entity") return { ...current, [key]: value };
 
       const group = entityGroupByName.get(normalizeOptionKey(value)) ?? "";
@@ -2137,7 +2167,7 @@ function TaskLineForm({
               <label className={["remarks", "issue", "document_link", "el_reference", "fee_comments"].includes(column.key) ? "xl:col-span-2" : ""} key={column.key}>
                 <span className="text-[10px] font-black uppercase text-slate-500">{column.label}{requiredTaskLineFormKeys.includes(column.key) ? <span className="text-rose-600"> *</span> : null}</span>
                 {column.key === "team" ? (
-                  <select className={`${formSelectControlClass} cursor-not-allowed bg-slate-50 text-slate-600`} disabled onChange={(event) => onChange(column.key, event.target.value)} title="Set from your logged-in team" value={draft[column.key] ?? ""}>
+                  <select className={`${formSelectControlClass} ${draft[column.key] ? "cursor-not-allowed bg-slate-50 text-slate-600" : ""}`} disabled={Boolean(draft[column.key])} onChange={(event) => onChange(column.key, event.target.value)} title="Set from your logged-in team" value={draft[column.key] ?? ""}>
                     <option value="">Select team</option>
                     {teamOptions.map((team) => <option key={team} value={team}>{team}</option>)}
                     {draft[column.key] && !teamOptions.includes(draft[column.key]) ? <option value={draft[column.key]}>{draft[column.key]}</option> : null}
