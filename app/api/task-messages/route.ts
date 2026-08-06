@@ -2,6 +2,7 @@ import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { createClient, type User } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
+import { createTransport } from "nodemailer";
 
 type CookieToSet = { name: string; options: CookieOptions; value: string };
 
@@ -17,14 +18,31 @@ export async function GET(request: Request) {
   if ("error" in organisation) {
     return organisation.error;
   }
-  const code = text(new URL(request.url).searchParams.get("code"));
+  const url = new URL(request.url);
+  const view = text(url.searchParams.get("view"));
+
+  if (view === "mine") {
+    const { data, error } = await admin
+      .from("task_messages")
+      .select("id,task_code,team,author_name,body,created_at,entity,task,read_at")
+      .eq("organisation_id", organisation.organisationId)
+      .eq("recipient_id", auth.user.id)
+      .order("created_at", { ascending: false })
+      .limit(100);
+    if (error) {
+      return errorResponse(error);
+    }
+    return NextResponse.json({ messages: data ?? [] });
+  }
+
+  const code = text(url.searchParams.get("code"));
   if (!code) {
     return NextResponse.json({ messages: [] });
   }
   const access = getAccess(auth.user);
   let query = admin
     .from("task_messages")
-    .select("id,task_code,team,author_name,body,created_at")
+    .select("id,task_code,team,author_id,author_name,recipient_id,is_private,body,created_at")
     .eq("organisation_id", organisation.organisationId)
     .eq("task_code", code)
     .order("created_at", { ascending: true });
@@ -35,7 +53,10 @@ export async function GET(request: Request) {
   if (error) {
     return errorResponse(error);
   }
-  return NextResponse.json({ messages: data ?? [] });
+  const visible = (data ?? []).filter(
+    (message) => !message.is_private || message.author_id === auth.user.id || message.recipient_id === auth.user.id
+  );
+  return NextResponse.json({ messages: visible });
 }
 
 export async function POST(request: Request) {
@@ -48,7 +69,7 @@ export async function POST(request: Request) {
   if ("error" in organisation) {
     return organisation.error;
   }
-  const payload = (await request.json()) as { body?: string; code?: string; team?: string };
+  const payload = (await request.json()) as { body?: string; code?: string; entity?: string; task?: string; team?: string };
   const code = text(payload.code);
   const body = text(payload.body);
   if (!code || !body) {
@@ -56,18 +77,110 @@ export async function POST(request: Request) {
   }
   const metadata = auth.user.user_metadata ?? {};
   const authorName = text(metadata.full_name ?? metadata.name ?? auth.user.email) || "WorkLine user";
+  const entity = text(payload.entity);
+  const task = text(payload.task);
+
+  const mentionEmail = extractMentionEmail(body);
+  let recipientEmail = "";
+  let recipientId: string | null = null;
+  if (mentionEmail) {
+    recipientEmail = mentionEmail;
+    const recipient = await findUserByEmail(admin, mentionEmail);
+    recipientId = recipient?.id ?? null;
+  }
+  const isPrivate = Boolean(mentionEmail);
+
   const inserted = await admin.from("task_messages").insert({
     author_id: auth.user.id,
     author_name: authorName,
     body,
+    entity: entity || null,
+    is_private: isPrivate,
     organisation_id: organisation.organisationId,
+    recipient_email: recipientEmail || null,
+    recipient_id: recipientId,
+    task: task || null,
     task_code: code,
     team: text(payload.team)
   });
   if (inserted.error) {
     return errorResponse(inserted.error);
   }
-  return NextResponse.json({ ok: true });
+
+  if (recipientEmail) {
+    void sendMentionEmail(recipientEmail, authorName, code, entity, task, body).catch(() => {
+      // email delivery is best-effort; the in-app message is already saved
+    });
+  }
+
+  return NextResponse.json({ ok: true, mentioned: recipientEmail || null });
+}
+
+function extractMentionEmail(body: string): string {
+  const match = body.match(/@([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})/);
+  return match ? match[1].trim().toLowerCase() : "";
+}
+
+async function findUserByEmail(admin: ReturnType<typeof createAdminClient>, email: string) {
+  const target = email.trim().toLowerCase();
+  let page = 1;
+  while (page <= 20) {
+    const { data, error } = await admin.auth.admin.listUsers({ page, perPage: 1000 });
+    if (error) {
+      return null;
+    }
+    const found = data.users.find((user) => (user.email ?? "").trim().toLowerCase() === target);
+    if (found) {
+      return found;
+    }
+    if (data.users.length < 1000) {
+      break;
+    }
+    page += 1;
+  }
+  return null;
+}
+
+function smtpConfiguration() {
+  const host = process.env.SMTP_HOST;
+  const port = Number(process.env.SMTP_PORT ?? 465);
+  const from = process.env.TASK_REMINDER_FROM_EMAIL ?? process.env.OTP_FROM_EMAIL ?? "";
+  const user = process.env.SMTP_USER ?? extractEmailAddress(from);
+  const password = process.env.SMTP_APP_PASSWORD?.replace(/\s+/g, "");
+  if (!host || !user || !password || !Number.isFinite(port)) {
+    return { error: "email-not-configured" as const };
+  }
+  return { from: from || `WorkLine Co <${user}>`, host, password, port, user };
+}
+
+function extractEmailAddress(value: string) {
+  const match = value.match(/<([^>]+)>/);
+  return (match ? match[1] : value).trim();
+}
+
+function escapeHtml(value: string) {
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+async function sendMentionEmail(to: string, authorName: string, code: string, entity: string, task: string, body: string) {
+  const smtp = smtpConfiguration();
+  if ("error" in smtp) {
+    return;
+  }
+  const transporter = createTransport({
+    auth: { pass: smtp.password, user: smtp.user },
+    host: smtp.host,
+    port: smtp.port,
+    secure: smtp.port === 465
+  });
+  const context = [entity, task].filter(Boolean).join(" · ");
+  await transporter.sendMail({
+    from: smtp.from,
+    html: `<p><strong>${escapeHtml(authorName)}</strong> sent you a message on <strong>Task ${escapeHtml(code)}</strong>${context ? ` (${escapeHtml(context)})` : ""}:</p><blockquote style="border-left:3px solid #cbd5e1;padding-left:12px;color:#334155">${escapeHtml(body)}</blockquote><p>Open WorkLine to view and reply.</p>`,
+    subject: `${authorName} messaged you on Task ${code}`,
+    text: `${authorName} sent you a message on Task ${code}${context ? ` (${context})` : ""}:\n\n${body}\n\nOpen WorkLine to view and reply.`,
+    to
+  });
 }
 
 function errorResponse(error: { message: string }) {

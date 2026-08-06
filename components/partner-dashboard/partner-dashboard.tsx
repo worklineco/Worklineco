@@ -1,11 +1,12 @@
 "use client";
 
 import { getCurrentUser } from "@/lib/supabase/session";
-import { CalendarClock, NotebookPen, Pencil, Plus, Trash2, UserRound } from "lucide-react";
+import { CalendarClock, MessagesSquare, NotebookPen, Pencil, Plus, Trash2, UserRound } from "lucide-react";
 import { MonthCalendar, type CalendarEvent } from "@/components/home/month-calendar";
 import { getCached, setCached } from "@/lib/data-cache";
 import { useEffect, useState } from "react";
 
+type Mention = { author_name?: string; body: string; created_at: string; entity?: string; id: string; task?: string; task_code: string };
 type NoteFile = { content: string; id: string; title: string; updatedAt: string };
 type FollowUp = { dueDate: string; id: string; item: string; owner: string; status: "Open" | "Done"; type: string };
 type Meeting = { agenda: string; id: string; prepNotes: string; time: string; title: string };
@@ -29,6 +30,7 @@ export function PartnerDashboard() {
   const [followUpDraft, setFollowUpDraft] = useState({ dueDate: "", item: "", owner: "", type: "Callback" });
   const [meetingDraft, setMeetingDraft] = useState({ agenda: "", prepNotes: "", time: "", title: "" });
   const [events, setEvents] = useState<CalendarEvent[]>([]);
+  const [mentions, setMentions] = useState<Mention[]>([]);
 
   useEffect(() => {
     const saved = window.localStorage.getItem(storageKey);
@@ -61,6 +63,11 @@ export function PartnerDashboard() {
       setProfileName(String(metadata.full_name ?? metadata.name ?? user?.email ?? "Partner").trim() || "Partner");
       setProfileEmail(user?.email ?? "");
     });
+
+    fetch("/api/task-messages?view=mine", { credentials: "include" })
+      .then((response) => (response.ok ? response.json() : { messages: [] }))
+      .then((data) => setMentions(Array.isArray(data?.messages) ? (data.messages as Mention[]) : []))
+      .catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -197,6 +204,29 @@ export function PartnerDashboard() {
         <h2 className="text-2xl font-black text-slate-950">{profileName}&rsquo;s Dashboard</h2>
         <p className="mt-1 text-sm font-semibold text-slate-500">{profileEmail}</p>
       </section>
+
+      {mentions.length ? (
+        <section className="rounded-2xl border border-amber-200 bg-amber-50/60 p-4 shadow-sm">
+          <div className="flex items-center gap-2">
+            <MessagesSquare className="size-5 text-amber-700" />
+            <h3 className="text-base font-black text-slate-950">Messages for you</h3>
+            <span className="rounded-full bg-amber-200 px-2 py-0.5 text-[10px] font-black text-amber-800">{mentions.length}</span>
+          </div>
+          <div className="mt-3 space-y-2">
+            {mentions.map((mention) => (
+              <div className="rounded-xl border border-amber-200 bg-white px-3 py-2" key={mention.id}>
+                <p className="text-xs font-bold text-slate-500">
+                  Message from <span className="font-black text-navy-700">{mention.author_name || "A teammate"}</span> · Task{" "}
+                  <span className="font-black text-slate-800">{mention.task_code}</span>
+                  {mention.entity ? <> · <span className="font-bold text-slate-700">{mention.entity}</span></> : null}
+                  {mention.task ? <> · <span className="font-semibold text-slate-600">{mention.task}</span></> : null}
+                </p>
+                <p className="mt-1 text-sm font-semibold leading-5 text-slate-800">{mention.body}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="flex items-center gap-2">

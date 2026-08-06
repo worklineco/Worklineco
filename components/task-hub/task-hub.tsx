@@ -28,6 +28,12 @@ export function TaskHub() {
     if (cached) {
       setRows(cached);
       setIsLoading(false);
+    } else {
+      const shared = getCached<{ rows?: TaskLineRow[] }>("taskline:rows:v4");
+      if (shared?.rows?.length) {
+        setRows(shared.rows);
+        setIsLoading(false);
+      }
     }
 
     Promise.all([
@@ -109,21 +115,22 @@ export function TaskHub() {
     if (!thread || !messageDraft.trim()) {
       return;
     }
+    const bodyText = messageDraft.trim();
+    const row = rows.find((item) => String(item.task_code ?? "").trim() === thread.code);
+    const entity = row ? String(row.entity ?? "") : "";
+    const task = row ? String(row.task ?? "") : "";
+    const optimistic = { author_name: "You", body: bodyText, created_at: new Date().toISOString(), id: `temp-${Date.now()}` };
+    setMessages((current) => [...current, optimistic]);
+    setMessageDraft("");
     setSending(true);
     try {
-      const response = await fetch("/api/task-messages", {
-        body: JSON.stringify({ body: messageDraft.trim(), code: thread.code, team: thread.team }),
+      await fetch("/api/task-messages", {
+        body: JSON.stringify({ body: bodyText, code: thread.code, entity, task, team: thread.team }),
         headers: { "Content-Type": "application/json" },
         method: "POST"
       });
-      if (response.ok) {
-        setMessageDraft("");
-        const refreshed = await fetch(`/api/task-messages?code=${encodeURIComponent(thread.code)}`, { cache: "no-store" });
-        const result = await refreshed.json();
-        setMessages(Array.isArray(result?.messages) ? result.messages : []);
-      }
     } catch {
-      // ignore
+      // message stays shown optimistically; a refresh will reconcile
     } finally {
       setSending(false);
     }
@@ -260,7 +267,7 @@ export function TaskHub() {
                 className="h-10 min-w-0 flex-1 rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold outline-none focus:border-navy-400"
                 onChange={(event) => setMessageDraft(event.target.value)}
                 onKeyDown={(event) => event.key === "Enter" && sendMessage()}
-                placeholder="Write a message"
+                placeholder="Write a message… (type @email to notify one person privately)"
                 value={messageDraft}
               />
               <button
