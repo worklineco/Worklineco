@@ -88,6 +88,82 @@ export async function GET() {
   return NextResponse.json({ members, me });
 }
 
+export async function PATCH(request: Request) {
+  const auth = await requireUser();
+
+  if ("error" in auth) {
+    return auth.error;
+  }
+
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!supabaseUrl || !serviceRoleKey) {
+    return NextResponse.json({ error: "Team service is not configured." }, { status: 500 });
+  }
+
+  const body = (await request.json().catch(() => ({}))) as {
+    designation?: string;
+    id?: string;
+    joining_date?: string;
+    name?: string;
+    team?: string;
+  };
+
+  const id = String(body.id ?? "").trim();
+  if (!id) {
+    return NextResponse.json({ error: "Member id is required." }, { status: 400 });
+  }
+
+  const admin = createClient(supabaseUrl, serviceRoleKey, {
+    auth: { autoRefreshToken: false, persistSession: false }
+  });
+
+  const { data: target, error: fetchError } = await admin.auth.admin.getUserById(id);
+  if (fetchError || !target?.user) {
+    return NextResponse.json({ error: "Member not found." }, { status: 404 });
+  }
+
+  const requesterOrg =
+    String(auth.user.user_metadata?.organisation_id ?? "").trim() || fallbackOrganisationId;
+  const targetOrg =
+    String(target.user.user_metadata?.organisation_id ?? "").trim() || fallbackOrganisationId;
+
+  if (requesterOrg !== targetOrg) {
+    return NextResponse.json(
+      { error: "You can only edit members in your organisation." },
+      { status: 403 }
+    );
+  }
+
+  const nextMetadata: Record<string, unknown> = { ...(target.user.user_metadata ?? {}) };
+
+  if (body.name !== undefined) {
+    nextMetadata.full_name = String(body.name).trim();
+  }
+  if (body.team !== undefined) {
+    nextMetadata.team = String(body.team).trim();
+  }
+  if (body.designation !== undefined) {
+    const designation = String(body.designation).trim();
+    nextMetadata.role = designation;
+    nextMetadata.designation = designation;
+  }
+  if (body.joining_date !== undefined) {
+    nextMetadata.joining_date = String(body.joining_date).trim();
+  }
+
+  const { error: updateError } = await admin.auth.admin.updateUserById(id, {
+    user_metadata: nextMetadata
+  });
+
+  if (updateError) {
+    return NextResponse.json({ error: updateError.message }, { status: 400 });
+  }
+
+  return NextResponse.json({ ok: true });
+}
+
 async function requireUser() {
   const cookieStore = await cookies();
   const supabase = createServerClient(
