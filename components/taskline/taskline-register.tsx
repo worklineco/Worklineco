@@ -54,6 +54,14 @@ const taskLineColumnGroups: { columns: string[] | null; key: string; label: stri
   { key: "reminders", label: "Reminders / Status", columns: ["task_code", "name", "entity", "task", "realisation_status", "reminder_days", "reminder_email", "remaining_days", "status", "entry_date", "completion_date", "poc", "pending_from"] },
   { key: "all", label: "All", columns: null }
 ];
+
+const taskLineFormSections: { columns: string[]; key: string; label: string }[] = [
+  { key: "core", label: "Core", columns: ["team", "name", "resource", "entity_group", "entity", "state_name", "task", "due_date", "stage", "status_open_close", "billable", "remarks"] },
+  { key: "legal", label: "Legal / Order", columns: ["ref_date", "ref_no", "period", "section", "issue", "refer_other_task", "appeal_no", "order_type", "court_location", "engaged_counsel", "printing"] },
+  { key: "billing", label: "Billing / Fees", columns: ["billing_status", "el_reference", "tax_invoice_no", "total_agreed_fee", "amount_raised", "amount_realised", "counsel_fee", "referral_fee", "fee_comments", "document_link"] },
+  { key: "reminders", label: "Reminders / Status", columns: ["realisation_status", "reminder_days", "reminder_email", "remaining_days", "status", "entry_date", "completion_date", "poc", "pending_from"] },
+  { key: "other", label: "Other", columns: ["any_other", "any_other_1"] }
+];
 const taskLineColumnLayoutStorageKey = "workline:taskline-column-layout:v4";
 const actionColumnWidth = 84;
 const actionColumnKey = "__actions";
@@ -2088,22 +2096,22 @@ function TaskLineForm({
   stageMasterNames: string[];
   taskMasterNames: string[];
 }) {
-  return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-navy-700/45 px-4 py-6">
-      <section className="max-h-[90vh] w-full max-w-6xl overflow-hidden rounded-lg border border-slate-200 bg-white shadow-[0_24px_90px_rgba(15,23,42,0.30)]">
-        <header className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
-          <div>
-            <p className="text-xs font-black uppercase tracking-[0.14em] text-rose-700">{isEdit ? "Edit TaskLine row" : "New TaskLine row"}</p>
-            <h3 className="mt-1 text-2xl font-black text-slate-950">{isEdit ? "Update task entry" : "Create task entry"}</h3>
-          </div>
-          <button className="inline-flex size-9 items-center justify-center rounded-md border border-slate-200 text-slate-700 hover:bg-slate-50" onClick={onClose} title="Close form" type="button">
-            <X className="size-4" />
-          </button>
-        </header>
+  const [openSections, setOpenSections] = useState<Set<string>>(() => new Set(["core"]));
 
-        <div className="max-h-[68vh] overflow-auto p-5">
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-            {taskLineColumns.filter((column) => column.key !== "serial_no" && column.key !== "task_code").map((column) => (
+  function toggleSection(key: string) {
+    setOpenSections((current) => {
+      const next = new Set(current);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  }
+
+  function renderField(column: TaskLineColumn) {
+    return (
               <label className={["remarks", "issue", "document_link", "el_reference", "fee_comments"].includes(column.key) ? "xl:col-span-2" : ""} key={column.key}>
                 <span className="text-[10px] font-black uppercase text-slate-500">{column.label}</span>
                 {column.key === "team" ? (
@@ -2219,8 +2227,52 @@ function TaskLineForm({
                   />
                 )}
               </label>
-            ))}
+    );
+  }
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-navy-700/45 px-4 py-6">
+      <section className="max-h-[90vh] w-full max-w-6xl overflow-hidden rounded-lg border border-slate-200 bg-white shadow-[0_24px_90px_rgba(15,23,42,0.30)]">
+        <header className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
+          <div>
+            <p className="text-xs font-black uppercase tracking-[0.14em] text-rose-700">{isEdit ? "Edit TaskLine row" : "New TaskLine row"}</p>
+            <h3 className="mt-1 text-2xl font-black text-slate-950">{isEdit ? "Update task entry" : "Create task entry"}</h3>
           </div>
+          <button className="inline-flex size-9 items-center justify-center rounded-md border border-slate-200 text-slate-700 hover:bg-slate-50" onClick={onClose} title="Close form" type="button">
+            <X className="size-4" />
+          </button>
+        </header>
+
+        <div className="max-h-[68vh] space-y-3 overflow-auto p-5">
+          {taskLineFormSections.map((section) => {
+            const sectionColumns = section.columns
+              .map((key) => taskLineColumnByKey.get(key))
+              .filter((column): column is TaskLineColumn => Boolean(column));
+            if (!sectionColumns.length) {
+              return null;
+            }
+            const isOpen = openSections.has(section.key);
+            return (
+              <div className="overflow-hidden rounded-xl border border-slate-200" key={section.key}>
+                <button
+                  className="flex w-full items-center justify-between gap-2 bg-slate-50 px-4 py-2.5 text-left transition hover:bg-slate-100"
+                  onClick={() => toggleSection(section.key)}
+                  type="button"
+                >
+                  <span className="flex items-center gap-2 text-xs font-black uppercase tracking-wide text-slate-700">
+                    {section.label}
+                    <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-black text-slate-600">{sectionColumns.length}</span>
+                  </span>
+                  <ChevronDown className={`size-4 text-slate-500 transition ${isOpen ? "rotate-180" : ""}`} />
+                </button>
+                {isOpen ? (
+                  <div className="grid gap-3 border-t border-slate-200 p-4 md:grid-cols-2 xl:grid-cols-4">
+                    {sectionColumns.map((column) => renderField(column))}
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
         </div>
 
         <footer className="flex justify-end gap-2 border-t border-slate-200 px-5 py-4">
