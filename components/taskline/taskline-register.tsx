@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowDown, ArrowUp, Bookmark, CalendarDays, Check, ChevronDown, CircleDot, Star, Download, Filter, History, ListChecks, Menu, Pencil, Pin, Plus, Search, Settings2, Trash2, Upload, Workflow, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Bookmark, CalendarDays, Check, ChevronDown, CircleDot, Star, Download, Filter, History, ListChecks, Menu, Pencil, Pin, Plus, ReceiptText, Search, Settings2, Trash2, Upload, Workflow, X } from "lucide-react";
 import Link from "next/link";
 import type { ComponentType } from "react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -15,6 +15,25 @@ type TaskLineColumn = {
   width: number;
 };
 type TaskLineRow = Record<string, string>;
+type BillingDraft = {
+  client: string;
+  group_name: string;
+  gstin: string;
+  include_ope_in_fees: string;
+  matter_description: string;
+  ope: string;
+  ope_remarks: string;
+  owner_team: string;
+  place_of_supply: string;
+  professional_fee: string;
+  registration_type: string;
+  remarks: string;
+  rowId: string;
+  rowLabel: string;
+  task_code: string;
+  voucher_type: string;
+};
+type ClientRegisterRow = Record<string, string | number>;
 type TaskLineColumnLayout = { frozenColumnKeys: string[]; hiddenColumnKeys: string[]; order: string[] };
 type TaskLineViewConfig = {
   activeColumnGroup?: string;
@@ -64,7 +83,7 @@ const taskLineFormSections: { columns: string[]; key: string; label: string }[] 
 ];
 const requiredTaskLineFormKeys = ["team", "entity_group", "entity", "state_name", "task", "due_date", "stage", "status_open_close", "billable"];
 const taskLineColumnLayoutStorageKey = "workline:taskline-column-layout:v5";
-const actionColumnWidth = 84;
+const actionColumnWidth = 116;
 const actionColumnKey = "__actions";
 const taskLineColumns: TaskLineColumn[] = [
   { key: "team", label: "Team", width: 132 },
@@ -135,6 +154,7 @@ const gstinStateOptions = [
   ["97", "Other Territory"]
 ] as const;
 const financialPeriodOptions = getFinancialPeriodOptions();
+const billingVoucherOptions = ["Proforma Invoice", "Tax Invoice", "Debit Note", "Credit Note"];
 
 function teamMatchKey(value: string) {
   const digits = String(value ?? "").match(/\d+/);
@@ -197,6 +217,9 @@ export function TaskLineRegister() {
   const [isColumnOptionsOpen, setIsColumnOptionsOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [message, setMessage] = useState("");
+  const [billingDraft, setBillingDraft] = useState<BillingDraft | null>(null);
+  const [billingMessage, setBillingMessage] = useState("");
+  const [isSavingBilling, setIsSavingBilling] = useState(false);
   const [editingRowId, setEditingRowId] = useState<string | null>(null);
   const [rows, setRows] = useState<TaskLineRow[]>([]);
   const [activeColumnGroup, setActiveColumnGroup] = useState("core");
@@ -1105,6 +1128,186 @@ export function TaskLineRegister() {
     void showAuditTrail(row);
   }
 
+  async function openBillingDraft(row: TaskLineRow) {
+    const rowId = text(row.__id);
+
+    if (!rowId || rowId.startsWith("draft-") || rowId.startsWith("initial-")) {
+      setMessage("Save this TaskLine row before creating a bill.");
+      return;
+    }
+
+    const gstin = text(row.gstin);
+    const taskCode = text(row.task_code);
+    const taskName = text(row.task);
+    const description = `Professional Fees for ${taskName || "TaskLine task"}${taskCode ? ` bearing Task Code ${taskCode}` : ""}`;
+
+    setBillingMessage("");
+    setBillingDraft({
+      client: text(row.entity),
+      group_name: text(row.entity_group),
+      gstin,
+      include_ope_in_fees: "No",
+      matter_description: description,
+      ope: "",
+      ope_remarks: "",
+      owner_team: text(row.team),
+      place_of_supply: text(row.state_name) || stateFromGstin(gstin),
+      professional_fee: text(row.total_agreed_fee),
+      registration_type: "",
+      remarks: text(row.fee_comments),
+      rowId,
+      rowLabel: getRowLabel(row, rowsRef.current) || taskCode || "TaskLine row",
+      task_code: taskCode,
+      voucher_type: "Proforma Invoice"
+    });
+
+    if (!gstin) {
+      return;
+    }
+
+    const matchedClient = await findClientByGstin(gstin);
+
+    if (matchedClient) {
+      setBillingDraft((currentDraft) =>
+        currentDraft && currentDraft.rowId === rowId
+          ? {
+              ...currentDraft,
+              client: getClientName(matchedClient) || currentDraft.client,
+              registration_type: getRegistrationType(matchedClient) || currentDraft.registration_type
+            }
+          : currentDraft
+      );
+    }
+  }
+
+  async function saveBillingDraft({ openBilling }: { openBilling: boolean }) {
+    if (!billingDraft || isSavingBilling) {
+      return;
+    }
+
+    setIsSavingBilling(true);
+    setBillingMessage("Creating billing record...");
+    setMessage(`Creating billing record for ${billingDraft.rowLabel}...`);
+
+    try {
+      const response = await fetch("/api/billing", {
+        body: JSON.stringify({
+          record: {
+            amount: billingDraft.professional_fee,
+            billing_status: "Draft",
+            cgst: 0,
+            client: billingDraft.client,
+            description: billingDraft.matter_description,
+            group_name: billingDraft.group_name,
+            gstin: billingDraft.gstin,
+            igst: 0,
+            include_ope_in_fees: billingDraft.include_ope_in_fees,
+            ope: billingDraft.ope,
+            ope_remarks: billingDraft.ope_remarks,
+            owner_team: billingDraft.owner_team,
+            place_of_supply: billingDraft.place_of_supply,
+            registration_type: billingDraft.registration_type,
+            remarks: billingDraft.remarks,
+            sgst: 0,
+            source_module: "taskline",
+            task_code: billingDraft.task_code,
+            voucher_type: billingDraft.voucher_type
+          }
+        }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST"
+      });
+      const result = (await response.json().catch(() => ({}))) as { error?: string; record?: { id?: string } };
+
+      if (!response.ok || !result.record?.id) {
+        const errorMessage = result.error ?? "Could not create billing record.";
+        setBillingMessage(errorMessage);
+        setMessage(errorMessage);
+        setIsSavingBilling(false);
+        return;
+      }
+
+      const currentRow = rowsRef.current.find((row) => row.__id === billingDraft.rowId);
+      if (currentRow) {
+        const nextRow = { ...currentRow, billing_status: text(currentRow.billing_status) || "Draft" };
+        setRows((currentRows) => currentRows.map((row) => (row.__id === billingDraft.rowId ? nextRow : row)));
+        void saveInlineRow(nextRow);
+      }
+
+      setMessage(openBilling ? "Billing record created. Opening Billing..." : "Billing record created.");
+      setBillingDraft(null);
+      setIsSavingBilling(false);
+
+      if (openBilling) {
+        window.location.assign("/billing");
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Could not create billing record.";
+      setBillingMessage(errorMessage);
+      setMessage(errorMessage);
+      setIsSavingBilling(false);
+    }
+  }
+
+  async function findClientByGstin(gstin: string) {
+    const normalizedGstin = normalizeGstin(gstin);
+
+    if (!normalizedGstin) {
+      return null;
+    }
+
+    try {
+      const response = await fetch("/api/client-records/managed", { cache: "no-store" });
+      const result = (await response.json().catch(() => ({}))) as { rows?: ClientRegisterRow[] };
+
+      if (!response.ok || !Array.isArray(result.rows)) {
+        return null;
+      }
+
+      return result.rows.find((row) => normalizeGstin(row["GSTIN/UIN"]) === normalizedGstin) ?? null;
+    } catch (error) {
+      console.error("Client lookup for billing failed:", error);
+      return null;
+    }
+  }
+
+  function updateBillingDraft(field: keyof BillingDraft, value: string) {
+    setBillingDraft((currentDraft) =>
+      currentDraft
+        ? {
+            ...currentDraft,
+            [field]: value
+          }
+        : currentDraft
+    );
+  }
+
+  async function updateBillingGstin(value: string) {
+    setBillingDraft((currentDraft) =>
+      currentDraft
+        ? {
+            ...currentDraft,
+            gstin: value,
+            place_of_supply: stateFromGstin(value) || currentDraft.place_of_supply
+          }
+        : currentDraft
+    );
+
+    const matchedClient = await findClientByGstin(value);
+
+    if (matchedClient) {
+      setBillingDraft((currentDraft) =>
+        currentDraft
+          ? {
+              ...currentDraft,
+              client: getClientName(matchedClient) || currentDraft.client,
+              registration_type: getRegistrationType(matchedClient) || currentDraft.registration_type
+            }
+          : currentDraft
+      );
+    }
+  }
+
   function downloadTemplate() {
     const templateRow = taskLineColumns.reduce<Record<string, string>>(
       (row, column) => {
@@ -1721,6 +1924,16 @@ export function TaskLineRegister() {
                       <button className="inline-flex size-7 items-center justify-center rounded border border-navy-200 text-navy-700 hover:bg-navy-50" onClick={() => viewRowHistory(row)} title="View history" type="button">
                         <History className="size-3.5" />
                       </button>
+                      <button
+                        aria-label={`Create bill for ${getRowLabel(row, rowsRef.current) || "TaskLine row"}`}
+                        className="inline-flex size-7 items-center justify-center rounded border border-lime-200 text-lime-700 transition hover:bg-lime-50 disabled:cursor-not-allowed disabled:opacity-50"
+                        disabled={hasTaskLineBillingRecord(row.billing_status)}
+                        onClick={() => void openBillingDraft(row)}
+                        title={hasTaskLineBillingRecord(row.billing_status) ? "Billing record already created" : "Create billing record"}
+                        type="button"
+                      >
+                        <ReceiptText className="size-3.5" />
+                      </button>
                     </div>
                   </td>
                   )}
@@ -1781,6 +1994,148 @@ export function TaskLineRegister() {
         />
       ) : null}
 
+      {billingDraft ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-navy-700/40 p-4">
+          <button
+            aria-label="Close billing form"
+            className="absolute inset-0 cursor-default"
+            onClick={() => setBillingDraft(null)}
+            type="button"
+          />
+          <form
+            className="relative w-full max-w-4xl rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl"
+            onSubmit={(event) => event.preventDefault()}
+          >
+            <div className="flex flex-col gap-3 border-b border-slate-200 pb-4 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <p className="text-xs font-black uppercase tracking-[0.14em] text-lime-700">Create billing record</p>
+                <h3 className="mt-1 text-xl font-black text-slate-950">TaskLine row {billingDraft.rowLabel}</h3>
+                <p className="mt-1 text-sm font-semibold text-slate-500">
+                  Review the billing details picked from TaskLine and client records before creating the bill.
+                </p>
+              </div>
+              <button
+                className="inline-flex size-10 items-center justify-center rounded-xl border border-slate-200 text-slate-700 transition hover:bg-slate-50"
+                onClick={() => setBillingDraft(null)}
+                type="button"
+              >
+                <X className="size-4" />
+              </button>
+            </div>
+
+            <div className="mt-4 grid gap-3 md:grid-cols-2 lg:grid-cols-4">
+              <label>
+                <span className="text-[10px] font-black uppercase text-slate-500">Voucher Type</span>
+                <select
+                  className="mt-1 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-900 outline-none focus:border-navy-300 focus:ring-2 focus:ring-navy-100"
+                  onChange={(event) => updateBillingDraft("voucher_type", event.target.value)}
+                  value={billingDraft.voucher_type}
+                >
+                  {billingVoucherOptions.map((option) => (
+                    <option key={option}>{option}</option>
+                  ))}
+                </select>
+              </label>
+              <BillingDraftInput
+                label="GSTIN"
+                onChange={(value) => void updateBillingGstin(value)}
+                value={billingDraft.gstin}
+              />
+              <label className="lg:col-span-2">
+                <span className="text-[10px] font-black uppercase text-slate-500">Client</span>
+                <input
+                  className="mt-1 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-900 outline-none focus:border-navy-300 focus:ring-2 focus:ring-navy-100"
+                  onChange={(event) => updateBillingDraft("client", event.target.value)}
+                  value={billingDraft.client}
+                />
+              </label>
+              <label className="lg:col-span-2">
+                <span className="text-[10px] font-black uppercase text-slate-500">Matter description</span>
+                <input
+                  className="mt-1 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-900 outline-none focus:border-navy-300 focus:ring-2 focus:ring-navy-100"
+                  onChange={(event) => updateBillingDraft("matter_description", event.target.value)}
+                  value={billingDraft.matter_description}
+                />
+              </label>
+              <BillingDraftInput
+                label="Place of Supply"
+                onChange={(value) => updateBillingDraft("place_of_supply", value)}
+                value={billingDraft.place_of_supply}
+              />
+              <BillingDraftInput
+                label="Registration Type"
+                onChange={(value) => updateBillingDraft("registration_type", value)}
+                value={billingDraft.registration_type}
+              />
+              <BillingDraftInput
+                label="Professional fee"
+                onChange={(value) => updateBillingDraft("professional_fee", value)}
+                type="number"
+                value={billingDraft.professional_fee}
+              />
+              <BillingDraftInput
+                label="OPE"
+                onChange={(value) => updateBillingDraft("ope", value)}
+                type="number"
+                value={billingDraft.ope}
+              />
+              <label>
+                <span className="text-[10px] font-black uppercase text-slate-500">Include OPE in Fee</span>
+                <select
+                  className="mt-1 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-900 outline-none focus:border-navy-300 focus:ring-2 focus:ring-navy-100"
+                  onChange={(event) => updateBillingDraft("include_ope_in_fees", event.target.value)}
+                  value={billingDraft.include_ope_in_fees}
+                >
+                  <option>No</option>
+                  <option>Yes</option>
+                </select>
+              </label>
+              <BillingDraftInput
+                label="OPE Remarks"
+                onChange={(value) => updateBillingDraft("ope_remarks", value)}
+                value={billingDraft.ope_remarks}
+              />
+              <BillingDraftInput
+                label="Remarks"
+                onChange={(value) => updateBillingDraft("remarks", value)}
+                value={billingDraft.remarks}
+              />
+            </div>
+
+            {billingMessage ? (
+              <p className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-900">
+                {billingMessage}
+              </p>
+            ) : null}
+
+            <div className="mt-5 flex justify-end gap-2 border-t border-slate-200 pt-4">
+              <button
+                className="inline-flex h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-xs font-black uppercase text-slate-700"
+                onClick={() => setBillingDraft(null)}
+                type="button"
+              >
+                Cancel
+              </button>
+              <button
+                className="inline-flex h-10 items-center justify-center rounded-xl border border-lime-200 bg-white px-4 text-xs font-black uppercase text-lime-800 transition hover:bg-lime-50 disabled:opacity-50"
+                disabled={isSavingBilling}
+                onClick={() => void saveBillingDraft({ openBilling: false })}
+                type="button"
+              >
+                {isSavingBilling ? "Creating..." : "Create"}
+              </button>
+              <button
+                className="inline-flex h-10 items-center justify-center rounded-xl bg-lime-700 px-4 text-xs font-black uppercase text-white transition hover:bg-lime-800 disabled:opacity-50"
+                disabled={isSavingBilling}
+                onClick={() => void saveBillingDraft({ openBilling: true })}
+                type="button"
+              >
+                {isSavingBilling ? "Creating..." : "Create and open Billing"}
+              </button>
+            </div>
+          </form>
+        </div>
+      ) : null}
       {isMasterOpen ? (
         masterKind === "stage" ? (
           <TaskLineMasterPanel
@@ -2696,6 +3051,54 @@ function rowFromImport(rawRow: Record<string, unknown>) {
     },
     { __id: `import-${crypto.randomUUID()}` }
   );
+}
+
+
+function BillingDraftInput({
+  label,
+  onChange,
+  type = "text",
+  value
+}: {
+  label: string;
+  onChange: (value: string) => void;
+  type?: "date" | "number" | "text";
+  value: string;
+}) {
+  return (
+    <label>
+      <span className="text-[10px] font-black uppercase text-slate-500">{label}</span>
+      <input
+        className="mt-1 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-900 outline-none focus:border-navy-300 focus:ring-2 focus:ring-navy-100"
+        min={type === "number" ? "0" : undefined}
+        onChange={(event) => onChange(event.target.value)}
+        type={type}
+        value={value}
+      />
+    </label>
+  );
+}
+
+function normalizeGstin(value: unknown) {
+  return String(value ?? "").replace(/[^0-9a-z]/gi, "").toUpperCase();
+}
+
+function stateFromGstin(value: unknown) {
+  const code = String(value ?? "").trim().slice(0, 2);
+  return gstinStateOptions.find(([stateCode]) => stateCode === code)?.[1] ?? "";
+}
+
+function getClientName(row: ClientRegisterRow | null) {
+  return String(row?.Particulars ?? row?.name ?? "").trim();
+}
+
+function getRegistrationType(row: ClientRegisterRow | null) {
+  return String(row?.["Registration Type"] ?? "").trim();
+}
+
+function hasTaskLineBillingRecord(value: unknown) {
+  const status = text(value).toLowerCase();
+  return ["draft", "raised", "invoiced", "billed", "tax invoice", "proforma invoice"].includes(status);
 }
 
 function normalizeTaskLineDateInput(value: unknown) {
