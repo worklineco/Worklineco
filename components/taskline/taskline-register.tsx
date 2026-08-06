@@ -62,7 +62,7 @@ const taskLineFormSections: { columns: string[]; key: string; label: string }[] 
   { key: "reminders", label: "Reminders / Status", columns: ["realisation_status", "reminder_days", "reminder_email", "remaining_days", "status", "entry_date", "completion_date", "poc", "pending_from"] },
   { key: "other", label: "Other", columns: ["any_other", "any_other_1"] }
 ];
-const requiredTaskLineFormKeys = ["team", "name", "resource", "entity_group", "entity", "state_name", "task", "due_date", "stage", "status_open_close", "billable"];
+const requiredTaskLineFormKeys = ["team", "entity_group", "entity", "state_name", "task", "due_date", "stage", "status_open_close", "billable"];
 const taskLineColumnLayoutStorageKey = "workline:taskline-column-layout:v5";
 const actionColumnWidth = 84;
 const actionColumnKey = "__actions";
@@ -374,6 +374,25 @@ export function TaskLineRegister() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [formDraft?.entity, entityGroupByName]);
+
+  useEffect(() => {
+    const gstin = text(formDraft?.gstin).toUpperCase();
+    if (!gstin) {
+      return;
+    }
+    const detail = entityDetailByGstin.get(gstin);
+    if (!detail) {
+      return;
+    }
+    setFormDraft((current) => {
+      if (!current) return current;
+      if (current.entity === detail.entity && current.entity_group === detail.group && current.state_name === detail.state) {
+        return current;
+      }
+      return { ...current, entity: detail.entity, entity_group: detail.group, state_name: detail.state };
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formDraft?.gstin, entityDetailByGstin]);
 
   useEffect(() => {
     if (!queryEffectReadyRef.current) {
@@ -990,13 +1009,6 @@ export function TaskLineRegister() {
 
   async function saveFormDraft() {
     if (!formDraft) {
-      return;
-    }
-
-    const missingRequired = requiredTaskLineFormKeys.filter((key) => !text(formDraft[key]));
-    if (missingRequired.length) {
-      const labels = missingRequired.map((key) => taskLineColumnByKey.get(key)?.label ?? key);
-      setMessage(`Please fill the required field${labels.length === 1 ? "" : "s"}: ${labels.join(", ")}.`);
       return;
     }
 
@@ -2149,6 +2161,18 @@ function TaskLineForm({
   taskMasterNames: string[];
 }) {
   const [openSections, setOpenSections] = useState<Set<string>>(() => new Set(["core"]));
+  const [formError, setFormError] = useState("");
+
+  function handleFormSubmit() {
+    const missing = requiredTaskLineFormKeys.filter((key) => !text(draft[key]));
+    if (missing.length) {
+      const labels = missing.map((key) => taskLineColumnByKey.get(key)?.label ?? key);
+      setFormError(`Please fill the required field${labels.length === 1 ? "" : "s"}: ${labels.join(", ")}.`);
+      return;
+    }
+    setFormError("");
+    onSubmit();
+  }
 
   function toggleSection(key: string) {
     setOpenSections((current) => {
@@ -2296,6 +2320,10 @@ function TaskLineForm({
           </button>
         </header>
 
+        {formError ? (
+          <div className="border-b border-rose-200 bg-rose-50 px-5 py-2.5 text-sm font-bold text-rose-700">{formError}</div>
+        ) : null}
+
         <div className="max-h-[68vh] space-y-3 overflow-auto p-5">
           {taskLineFormSections.map((section) => {
             const sectionColumns = section.columns
@@ -2330,7 +2358,7 @@ function TaskLineForm({
 
         <footer className="flex justify-end gap-2 border-t border-slate-200 px-5 py-4">
           <button className={buttonClass("light")} onClick={onClose} type="button">Cancel</button>
-          <button className={buttonClass("primary")} onClick={onSubmit} type="button">
+          <button className={buttonClass("primary")} onClick={handleFormSubmit} type="button">
             {isEdit ? <Pencil className="size-4" /> : <Plus className="size-4" />}
             {isEdit ? "Save Changes" : "Create"}
           </button>
