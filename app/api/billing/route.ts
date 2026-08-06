@@ -252,7 +252,7 @@ export async function GET(request: Request) {
     access,
     masters,
     matters: ((matters.data ?? []) as GstatMatter[]).map(formatMatter),
-    records: records.data ?? []
+    records: await attachCreatorNames(admin, records.data ?? [])
   });
 }
 
@@ -560,7 +560,8 @@ export async function POST(request: Request) {
     }
 
     await writeAuditLog(admin, organisation.organisationId, auth.user.id, "billing.update", existing.data, saved.data);
-    return NextResponse.json({ record: saved.data });
+    const [savedRecord] = await attachCreatorNames(admin, [saved.data]);
+    return NextResponse.json({ record: savedRecord ?? saved.data });
   }
 
   const [createRecord] = await assignSerialNumbers(admin, organisation.organisationId, [cleaned]);
@@ -575,7 +576,8 @@ export async function POST(request: Request) {
   }
 
   await writeAuditLog(admin, organisation.organisationId, auth.user.id, "billing.create", null, saved.data);
-  return NextResponse.json({ record: saved.data });
+  const [savedRecord] = await attachCreatorNames(admin, [saved.data]);
+  return NextResponse.json({ record: savedRecord ?? saved.data });
 }
 
 export async function DELETE(request: Request) {
@@ -654,7 +656,7 @@ async function loadResponse(
     auditLogs,
     masters,
     matters: ((matters.data ?? []) as GstatMatter[]).map(formatMatter),
-    records: records.data ?? [],
+    records: await attachCreatorNames(admin, records.data ?? []),
     trashRecords
   });
 }
@@ -784,6 +786,46 @@ async function loadAuditLogs(
     const oldTeam = readTeam(log.old_value);
     const newTeam = readTeam(log.new_value);
     return oldTeam === access.team || newTeam === access.team;
+  });
+}
+
+async function attachCreatorNames(
+  admin: ReturnType<typeof createAdminClient>,
+  records: unknown[]
+) {
+  const creatorIds = Array.from(
+    new Set(
+      records
+        .map((record) => (isRecord(record) ? text(record.created_by) : ""))
+        .filter(Boolean)
+    )
+  );
+
+  if (!creatorIds.length) {
+    return records.map((record) => (isRecord(record) ? { ...record, pushed_by: "" } : record));
+  }
+
+  const { data } = await admin
+    .from("users")
+    .select("id,full_name,email")
+    .in("id", creatorIds);
+  const namesById = new Map(
+    (data ?? []).map((user) => [
+      String(user.id),
+      text(user.full_name) || text(user.email) || "Unknown user"
+    ])
+  );
+
+  return records.map((record) => {
+    if (!isRecord(record)) {
+      return record;
+    }
+
+    const creatorId = text(record.created_by);
+    return {
+      ...record,
+      pushed_by: creatorId ? namesById.get(creatorId) ?? "Unknown user" : ""
+    };
   });
 }
 
