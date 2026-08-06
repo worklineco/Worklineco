@@ -62,6 +62,7 @@ const taskLineFormSections: { columns: string[]; key: string; label: string }[] 
   { key: "reminders", label: "Reminders / Status", columns: ["realisation_status", "reminder_days", "reminder_email", "remaining_days", "status", "entry_date", "completion_date", "poc", "pending_from"] },
   { key: "other", label: "Other", columns: ["any_other", "any_other_1"] }
 ];
+const requiredTaskLineFormKeys = ["team", "name", "resource", "entity_group", "entity", "state_name", "task", "due_date", "stage", "status_open_close", "billable"];
 const taskLineColumnLayoutStorageKey = "workline:taskline-column-layout:v4";
 const actionColumnWidth = 84;
 const actionColumnKey = "__actions";
@@ -350,6 +351,18 @@ export function TaskLineRegister() {
     void loadAllTaskLine();
     void loadViews(true);
   }, []);
+
+  useEffect(() => {
+    const entity = text(formDraft?.entity);
+    if (!entity || text(formDraft?.entity_group)) {
+      return;
+    }
+    const group = entityGroupByName.get(normalizeOptionKey(entity));
+    if (group) {
+      setFormDraft((current) => (current ? { ...current, entity_group: group } : current));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formDraft?.entity, entityGroupByName]);
 
   useEffect(() => {
     if (!queryEffectReadyRef.current) {
@@ -923,6 +936,8 @@ export function TaskLineRegister() {
     if (currentUserTeam) {
       draft.team = currentUserTeam;
     }
+    draft.status_open_close = "Open";
+    draft.stage = "Open";
     setFormDraft(draft);
   }
 
@@ -945,6 +960,13 @@ export function TaskLineRegister() {
 
   async function saveFormDraft() {
     if (!formDraft) {
+      return;
+    }
+
+    const missingRequired = requiredTaskLineFormKeys.filter((key) => !text(formDraft[key]));
+    if (missingRequired.length) {
+      const labels = missingRequired.map((key) => taskLineColumnByKey.get(key)?.label ?? key);
+      setMessage(`Please fill the required field${labels.length === 1 ? "" : "s"}: ${labels.join(", ")}.`);
       return;
     }
 
@@ -2113,12 +2135,12 @@ function TaskLineForm({
   function renderField(column: TaskLineColumn) {
     return (
               <label className={["remarks", "issue", "document_link", "el_reference", "fee_comments"].includes(column.key) ? "xl:col-span-2" : ""} key={column.key}>
-                <span className="text-[10px] font-black uppercase text-slate-500">{column.label}</span>
+                <span className="text-[10px] font-black uppercase text-slate-500">{column.label}{requiredTaskLineFormKeys.includes(column.key) ? <span className="text-rose-600"> *</span> : null}</span>
                 {column.key === "team" ? (
-                  <select className={formSelectControlClass} onChange={(event) => onChange(column.key, event.target.value)} value={draft[column.key] ?? ""}>
+                  <select className={`${formSelectControlClass} cursor-not-allowed bg-slate-50 text-slate-600`} disabled onChange={(event) => onChange(column.key, event.target.value)} title="Set from your logged-in team" value={draft[column.key] ?? ""}>
                     <option value="">Select team</option>
                     {teamOptions.map((team) => <option key={team} value={team}>{team}</option>)}
-                    {draft[column.key] && !teamOptions.includes(draft[column.key]) ? <option hidden value={draft[column.key]}>{draft[column.key]}</option> : null}
+                    {draft[column.key] && !teamOptions.includes(draft[column.key]) ? <option value={draft[column.key]}>{draft[column.key]}</option> : null}
                   </select>
                 ) : ["entity", "state_name", "section"].includes(column.key) ? (
                   <select className={formSelectControlClass} onChange={(event) => onChange(column.key, event.target.value)} value={draft[column.key] ?? ""}>
@@ -2188,10 +2210,11 @@ function TaskLineForm({
                     value={draft[column.key] ?? ""}
                   >
                     <option value="">Select stage</option>
-                    {stageMasterNames.map((name) => (
+                    <option value="Open">Open</option>
+                    {stageMasterNames.filter((name) => name !== "Open").map((name) => (
                       <option key={name} value={name}>{name}</option>
                     ))}
-                    {draft[column.key] && !stageMasterNames.includes(draft[column.key]) ? (
+                    {draft[column.key] && draft[column.key] !== "Open" && !stageMasterNames.includes(draft[column.key]) ? (
                       <option value={draft[column.key]}>{draft[column.key]} (not in master)</option>
                     ) : null}
                   </select>
