@@ -8,13 +8,16 @@ type TeamMember = {
   email: string;
   id: string;
   joining_date: string;
+  leaving_date: string;
   name: string;
   team: string;
 };
 
+const editorRoles = ["partner", "others"];
+
 type SortKey = "serial" | "name" | "team" | "email" | "designation" | "joining_date" | "leaving_date";
 type SortDirection = "asc" | "desc";
-type EditDraft = { designation: string; joining_date: string; name: string; team: string };
+type EditDraft = { designation: string; joining_date: string; leaving_date: string; name: string; team: string };
 
 const ARTICLE_ASSISTANT_TENURE_DAYS = 730;
 const gridTemplate = "grid-cols-[0.4fr_1.1fr_0.7fr_1.3fr_1fr_0.9fr_0.9fr_0.8fr]";
@@ -29,6 +32,7 @@ export function TeamsPanel() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<EditDraft>({ designation: "", joining_date: "", name: "", team: "" });
   const [isSaving, setIsSaving] = useState(false);
+  const [myRole, setMyRole] = useState("");
 
   async function loadMembers() {
     setIsLoading(true);
@@ -36,7 +40,7 @@ export function TeamsPanel() {
 
     try {
       const response = await fetch("/api/teams", { cache: "no-store" });
-      const result = (await response.json()) as { error?: string; members?: TeamMember[] };
+      const result = (await response.json()) as { error?: string; me?: { role?: string }; members?: TeamMember[] };
 
       if (!response.ok) {
         setMessage(result.error ?? "Could not load team members.");
@@ -44,6 +48,7 @@ export function TeamsPanel() {
         return;
       }
 
+      setMyRole(String(result.me?.role ?? "").trim());
       setMembers(result.members ?? []);
     } catch (error) {
       console.error("Team members load error:", error);
@@ -85,6 +90,7 @@ export function TeamsPanel() {
     setDraft({
       designation: member.designation === "-" ? "" : member.designation,
       joining_date: toDateInputValue(member.joining_date),
+      leaving_date: toDateInputValue(member.leaving_date || getLeavingDate(member)),
       name: member.name,
       team: member.team
     });
@@ -106,6 +112,7 @@ export function TeamsPanel() {
           designation: draft.designation,
           id,
           joining_date: draft.joining_date,
+          leaving_date: draft.leaving_date,
           name: draft.name,
           team: draft.team
         }),
@@ -128,6 +135,8 @@ export function TeamsPanel() {
       setIsSaving(false);
     }
   }
+
+  const canEdit = editorRoles.includes(myRole.toLowerCase());
 
   return (
     <section className="workline-frame mt-5 rounded-[26px] p-5 md:p-6" id="teams">
@@ -170,9 +179,6 @@ export function TeamsPanel() {
 
           {!isLoading && sortedMembers.map(({ member, originalIndex }) => {
             const isEditing = editingId === member.id;
-            const leavingSource = isEditing
-              ? { designation: draft.designation, joining_date: draft.joining_date }
-              : { designation: member.designation, joining_date: member.joining_date };
 
             return (
               <div
@@ -226,7 +232,11 @@ export function TeamsPanel() {
                   )}
                 </div>
 
-                <p className="truncate font-bold text-slate-600">{formatDate(getLeavingDate(leavingSource))}</p>
+                {isEditing ? (
+                  <input className={editInputClass} onChange={(event) => setDraft((current) => ({ ...current, leaving_date: event.target.value }))} type="date" value={draft.leaving_date} />
+                ) : (
+                  <p className="truncate font-bold text-slate-600">{formatDate(member.leaving_date || getLeavingDate(member))}</p>
+                )}
 
                 <div className="flex items-center gap-1.5">
                   {isEditing ? (
@@ -250,7 +260,7 @@ export function TeamsPanel() {
                         <X className="size-4" />
                       </button>
                     </>
-                  ) : (
+                  ) : canEdit ? (
                     <button
                       className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-black uppercase text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
                       disabled={Boolean(editingId)}
@@ -260,6 +270,8 @@ export function TeamsPanel() {
                       <Pencil className="size-3.5" />
                       Edit
                     </button>
+                  ) : (
+                    <span className="text-xs font-bold text-slate-300">—</span>
                   )}
                 </div>
               </div>

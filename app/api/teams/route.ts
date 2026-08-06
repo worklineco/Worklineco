@@ -9,9 +9,12 @@ type TeamMember = {
   email: string;
   id: string;
   joining_date: string;
+  leaving_date: string;
   name: string;
   team: string;
 };
+
+const editorRoles = ["partner", "others"];
 
 const fallbackOrganisationId = "DCO1433";
 
@@ -63,6 +66,7 @@ export async function GET() {
             email: user.email ?? "-",
             id: user.id,
             joining_date: String(metadata.joining_date ?? "").trim(),
+            leaving_date: String(metadata.leaving_date ?? "").trim(),
             name: name || "WorkLine User",
             team: String(metadata.team ?? "").trim()
           };
@@ -82,6 +86,7 @@ export async function GET() {
   const me = {
     id: auth.user.id,
     name: String(meMetadata.full_name ?? meMetadata.name ?? "").trim(),
+    role: String(meMetadata.role ?? meMetadata.designation ?? "").trim(),
     team: String(meMetadata.team ?? "").trim()
   };
 
@@ -106,6 +111,7 @@ export async function PATCH(request: Request) {
     designation?: string;
     id?: string;
     joining_date?: string;
+    leaving_date?: string;
     name?: string;
     team?: string;
   };
@@ -113,6 +119,16 @@ export async function PATCH(request: Request) {
   const id = String(body.id ?? "").trim();
   if (!id) {
     return NextResponse.json({ error: "Member id is required." }, { status: 400 });
+  }
+
+  const requesterRole = String(auth.user.user_metadata?.role ?? auth.user.user_metadata?.designation ?? "")
+    .trim()
+    .toLowerCase();
+  if (!editorRoles.includes(requesterRole)) {
+    return NextResponse.json(
+      { error: "Only Partner or Others roles can edit team members." },
+      { status: 403 }
+    );
   }
 
   const admin = createClient(supabaseUrl, serviceRoleKey, {
@@ -151,6 +167,9 @@ export async function PATCH(request: Request) {
   }
   if (body.joining_date !== undefined) {
     nextMetadata.joining_date = String(body.joining_date).trim();
+  }
+  if (body.leaving_date !== undefined) {
+    nextMetadata.leaving_date = String(body.leaving_date).trim();
   }
 
   const { error: updateError } = await admin.auth.admin.updateUserById(id, {
