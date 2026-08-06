@@ -19,7 +19,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import type { ComponentType } from "react";
-import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { getCached, setCached } from "@/lib/data-cache";
 import * as XLSX from "xlsx-js-style";
@@ -351,10 +351,40 @@ export function ClientRecordsRegister() {
     setFilterMenuPos({ left, maxHeight: Math.max(240, window.innerHeight - top - 16), top });
   }
 
-  function closeColumnFilter() {
+  const closeColumnFilter = useCallback(() => {
     setOpenFilterColumn(null);
     setFilterMenuPos(null);
-  }
+  }, []);
+
+  useEffect(() => {
+    if (!openFilterColumn) {
+      return;
+    }
+
+    function handleFilterKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        closeColumnFilter();
+      }
+    }
+
+    function handleFilterPointerDown(event: PointerEvent) {
+      const target = event.target;
+
+      if (target instanceof Element && target.closest('[data-client-filter-menu="true"]')) {
+        return;
+      }
+
+      closeColumnFilter();
+    }
+
+    document.addEventListener("keydown", handleFilterKeyDown);
+    document.addEventListener("pointerdown", handleFilterPointerDown);
+
+    return () => {
+      document.removeEventListener("keydown", handleFilterKeyDown);
+      document.removeEventListener("pointerdown", handleFilterPointerDown);
+    };
+  }, [closeColumnFilter, openFilterColumn]);
 
   function applyColumnFilter(column: string) {
     const options = uniqueValuesForColumn(column);
@@ -788,7 +818,7 @@ function ClientFilterMenu({
   const someVisibleSelected = visibleOptions.some((value) => draft.includes(value)) && !allVisibleSelected;
 
   return createPortal(
-    <div className="fixed z-[1000] flex w-72 flex-col overflow-hidden rounded-lg border border-slate-300 bg-white p-2 text-left text-slate-900 shadow-2xl" style={{ left: menuPos.left, maxHeight: menuPos.maxHeight, top: menuPos.top }}>
+    <div className="fixed z-[1000] flex w-72 flex-col overflow-hidden rounded-lg border border-slate-300 bg-white p-2 text-left text-slate-900 shadow-2xl" data-client-filter-menu="true" style={{ left: menuPos.left, maxHeight: menuPos.maxHeight, top: menuPos.top }}>
       <div className="shrink-0 space-y-1 border-b border-slate-200 pb-2">
         <button className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm font-semibold hover:bg-slate-100" onClick={onSortAsc} type="button"><span className="w-8 text-xs font-black text-navy-700">A-Z</span>Sort A to Z</button>
         <button className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm font-semibold hover:bg-slate-100" onClick={onSortDesc} type="button"><span className="w-8 text-xs font-black text-navy-700">Z-A</span>Sort Z to A</button>
