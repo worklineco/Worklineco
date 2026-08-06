@@ -44,6 +44,7 @@ type BillingRecord = {
   serial_no?: number;
   sgst: number;
   source_module: string;
+  pushed_by?: string;
   total: number;
   version_no: number;
   voucher_type: string;
@@ -132,6 +133,7 @@ const emptyRecord: BillingRecord = {
   serial_no: undefined,
   sgst: 0,
   source_module: "manual",
+  pushed_by: "",
   total: 0,
   version_no: 1,
   voucher_type: "Proforma Invoice"
@@ -188,7 +190,8 @@ const billingColumns: BillingColumn[] = [
   { field: "serial_no", label: "S.No.", type: "text", width: 90 },
   { field: "owner_team", label: "Team", type: "text", width: 128 },
   { field: "task_code", label: "Task Code", type: "select", width: 140 },
-  { field: "source_module", label: "Source", type: "select", width: 110 },
+  { field: "source_module", label: "Pushed From Sheet", type: "select", width: 160 },
+  { field: "pushed_by", label: "Pushed By", type: "text", width: 170 },
   { field: "voucher_type", label: "Voucher", type: "select", width: 145 },
   { field: "is_retainer", label: "Retainer Bill", type: "select", width: 130 },
   { field: "group_name", label: "Group", type: "select", width: 145 },
@@ -353,6 +356,8 @@ export function BillingRegister() {
           record.invoice_no,
           record.memo_no,
           record.owner_team,
+          record.source_module,
+          record.pushed_by,
           record.billing_status,
           record.receiving_status,
           getMatterLabel(record, matters)
@@ -857,7 +862,8 @@ export function BillingRegister() {
       "Billing ID": record.id ?? "",
       "S.No.": index + 1,
       Team: record.owner_team,
-      Source: record.source_module,
+      "Pushed From Sheet": formatSourceModule(record.source_module),
+      "Pushed By": record.pushed_by ?? "",
       "Voucher Type": record.voucher_type,
       Group: record.group_name,
       GSTIN: record.gstin,
@@ -1266,6 +1272,8 @@ function BillingCell({
   const isAccountsOnly = accountsOnlyFields.has(field);
   const isReadOnly =
     column.field === "serial_no" ||
+    column.field === "source_module" ||
+    column.field === "pushed_by" ||
     column.field === "total" ||
     (!access.canViewAll && column.field === "owner_team") ||
     (isAccountsOnly && !access.canEditAccountsFields);
@@ -2006,6 +2014,10 @@ function getDisplayValue(record: BillingRecord, column: BillingColumn, matters: 
 
   const value = record[column.field];
 
+  if (column.field === "source_module") {
+    return formatSourceModule(value);
+  }
+
   if (column.type === "money" || column.field === "total") {
     return formatMoney(value as number);
   }
@@ -2015,6 +2027,28 @@ function getDisplayValue(record: BillingRecord, column: BillingColumn, matters: 
   }
 
   return String(value ?? "");
+}
+
+function formatSourceModule(value: unknown) {
+  const source = String(value ?? "").trim().toLowerCase();
+
+  if (source === "gstat") {
+    return "GSTAT";
+  }
+
+  if (source === "taskline") {
+    return "TaskLine";
+  }
+
+  if (source === "import") {
+    return "Billing Import";
+  }
+
+  if (source === "manual") {
+    return "Manual Billing";
+  }
+
+  return String(value ?? "").trim();
 }
 
 function getBillingSummary(records: BillingRecord[]) {
