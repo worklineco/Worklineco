@@ -30,7 +30,7 @@ export function TeamsPanel() {
   const [sortKey, setSortKey] = useState<SortKey>("serial");
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [draft, setDraft] = useState<EditDraft>({ designation: "", joining_date: "", name: "", team: "" });
+  const [draft, setDraft] = useState<EditDraft>({ designation: "", joining_date: "", leaving_date: "", name: "", team: "" });
   const [isSaving, setIsSaving] = useState(false);
   const [myRole, setMyRole] = useState("");
 
