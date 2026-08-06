@@ -2063,7 +2063,7 @@ function isDateField(field: BillingField) {
 
 function selectOptions(field: BillingField, masters: Record<string, string[]>) {
   if (field === "source_module") {
-    return ["manual", "gstat", "import"];
+    return ["manual", "gstat", "taskline", "import"];
   }
 
   if (field === "include_ope_in_fees") {
