@@ -56,6 +56,7 @@ const defaultOrganisationCode = "DCO1433";
 const fetchBatchSize = 1000;
 const maxTaskLineWindowSize = 400;
 const moduleKey = "taskline";
+const organisationIdCache = new Map<string, string>();
 const taskLineDateColumns = new Set(["due_date", "ref_date", "entry_date", "completion_date"]);
 const taskLineMoneyColumns = new Set(["total_agreed_fee", "amount_raised", "amount_realised", "counsel_fee", "referral_fee"]);
 const taskLineNumberColumns = new Set(["reminder_days"]);
@@ -1328,6 +1329,11 @@ function getAccess(user: User): AccessScope {
 }
 
 async function getOrganisationId(admin: ReturnType<typeof createAdminClient>, user: User) {
+  const cached = organisationIdCache.get(user.id);
+  if (cached) {
+    return { organisationId: cached };
+  }
+
   const { data, error } = await admin
     .from("users")
     .select("organisation_id")
@@ -1335,6 +1341,7 @@ async function getOrganisationId(admin: ReturnType<typeof createAdminClient>, us
     .single();
 
   if (!error && data?.organisation_id) {
+    organisationIdCache.set(user.id, data.organisation_id as string);
     return { organisationId: data.organisation_id as string };
   }
 
@@ -1360,6 +1367,7 @@ async function getOrganisationId(admin: ReturnType<typeof createAdminClient>, us
     status: "active"
   });
 
+  organisationIdCache.set(user.id, organisationId);
   return { organisationId };
 }
 
