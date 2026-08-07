@@ -68,7 +68,13 @@ export async function GET(request: Request) {
       if (message.team) current.team = String(message.team);
       byCode.set(key, current);
     }
-    const threads = Array.from(byCode.values()).sort((a, b) => (a.last_at < b.last_at ? 1 : -1));
+    const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
+    const threads = Array.from(byCode.values())
+      .filter((thread) => {
+        const lastAt = new Date(thread.last_at).getTime();
+        return Number.isNaN(lastAt) || lastAt >= cutoff;
+      })
+      .sort((a, b) => (a.last_at < b.last_at ? 1 : -1));
     return NextResponse.json({ threads });
   }
 
