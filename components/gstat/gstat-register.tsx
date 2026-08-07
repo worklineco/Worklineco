@@ -53,7 +53,7 @@ const actionColumnWidth = 152;
 const columnFilterOptionLimit = 1000;
 const blankColumnFilterValue = "__workline_column_blank__";
 const maxBulkDeleteRows = 5;
-const columnLayoutStorageKey = "workline:gstat-column-layout:v1";
+const columnLayoutStorageKey = "workline:gstat-column-layout:v2";
 const poaGptUrl = "https://chatgpt.com/g/g-6a1f3abf8d008191985119e155f67c5f-poa-vakalatnama-helper";
 const statusSummaryColors = ["#14b8a6", "#0ea5e9", "#a855f7", "#f59e0b", "#ef4444", "#22c55e", "#64748b", "#ec4899"];
 
@@ -79,10 +79,8 @@ const baseColumns: Column[] = [
   "OIA Date",
   "APL 04 No",
   "APL 04 Date",
-  "Favourable/Against",
+  "Appeal By",
   "Additional 10% compliances",
-  "Pre Deposit/Court Fees Mail",
-  "Undertaking Requirement",
   "Matter pending at high court",
   "Issue in brief",
   "Determined Tax Amount",
@@ -96,7 +94,6 @@ const baseColumns: Column[] = [
   "EL status",
   "GSTAT Login ID",
   "GSTAT Login Password",
-  "Appellant",
   "Bill raised"
 ].map((label) => ({ key: label, label: label === "Sno" ? "Task Code" : label }));
 
@@ -142,10 +139,8 @@ const columnWidths: Record<string, number> = {
   "OIA Date": 98,
   "APL 04 No": 156,
   "APL 04 Date": 106,
-  "Favourable/Against": 126,
+  "Appeal By": 130,
   "Additional 10% compliances": 142,
-  "Pre Deposit/Court Fees Mail": 156,
-  "Undertaking Requirement": 142,
   "Matter pending at high court": 146,
   "Issue in brief": 218,
   "Determined Tax Amount": 128,
@@ -159,7 +154,6 @@ const columnWidths: Record<string, number> = {
   "EL status": 92,
   "GSTAT Login ID": 132,
   "GSTAT Login Password": 142,
-  "Appellant": 150,
   "Bill raised": 88,
   "Billing amount": 112,
   "Billing remarks": 174
@@ -193,6 +187,7 @@ const statusOptions = [
   "Pending for upload",
   "Filed"
 ];
+const appealByOptions = ["Dept", "Assessee"];
 const billingInlineColumnKeys = new Set(["Billing amount", "Billing remarks"]);
 const billingVoucherOptions = ["Proforma Invoice", "Tax Invoice", "Debit Note", "Credit Note"];
 const gstStateByCode: Record<string, string> = {
@@ -251,8 +246,7 @@ const editorSections = [
       "State Name",
       "Due Date",
       "FY",
-      "State/Centre",
-      "Appellant"
+      "State/Centre"
     ],
     title: "Basic details"
   },
@@ -266,6 +260,7 @@ const editorSections = [
       "OIA Date",
       "APL 04 No",
       "APL 04 Date",
+      "Appeal By",
       "ARN of First Appeal",
       "EL status"
     ],
@@ -273,10 +268,7 @@ const editorSections = [
   },
   {
     fields: [
-      "Favourable/Against",
       "Additional 10% compliances",
-      "Pre Deposit/Court Fees Mail",
-      "Undertaking Requirement",
       "Matter pending at high court",
       "Issue in brief",
       "Section No.",
@@ -1991,6 +1983,19 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                                   onSave={saveInlineEditor}
                                   value={inlineEditor.value}
                                 />
+                              ) : isInlineEditing && column.key === "Appeal By" ? (
+                                <select
+                                  autoFocus
+                                  className="h-7 w-full rounded-md border border-navy-300 bg-white px-1 text-[11px] font-bold text-slate-950 outline-none ring-2 ring-navy-100"
+                                  onBlur={() => saveInlineEditor()}
+                                  onChange={(event) => void saveInlineEditor(event.target.value)}
+                                  value={inlineEditor.value}
+                                >
+                                  <option value="">Select</option>
+                                  {appealByOptions.map((option) => (
+                                    <option key={option} value={option}>{option}</option>
+                                  ))}
+                                </select>
                               ) : isInlineEditing ? (
                                 <input
                                   autoFocus
@@ -2131,6 +2136,19 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                               onChange={(value) => updateDraft(field, value)}
                               value={String(editor.draft[field] ?? "")}
                             />
+                          ) : field === "Appeal By" ? (
+                            <select
+                              className="mt-0.5 h-8 w-full rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-900 outline-none transition focus:border-navy-300 focus:ring-2 focus:ring-navy-100"
+                              onChange={(event) => updateDraft(field, event.target.value)}
+                              value={String(editor.draft[field] ?? "")}
+                            >
+                              <option value="">Select</option>
+                              {appealByOptions.map((option) => (
+                                <option key={option} value={option}>
+                                  {option}
+                                </option>
+                              ))}
+                            </select>
                           ) : field === "NTBD Reason" ? (
                             <input
                               className="mt-0.5 h-8 w-full rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-900 outline-none transition disabled:bg-slate-100 disabled:text-slate-500 focus:border-navy-300 focus:ring-2 focus:ring-navy-100"
