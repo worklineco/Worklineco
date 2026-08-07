@@ -360,7 +360,7 @@ export default function PdfIndexingPage() {
     const files = Array.from(event.target.files ?? []);
     const documentFiles = files.filter(isSupportedMergeFile);
 
-    selectedFilesRef.current = documentFiles;
+    selectedFilesRef.current = [...selectedFilesRef.current, ...documentFiles];
     await loadDocumentFiles(documentFiles, "folder");
     event.target.value = "";
   }
@@ -368,7 +368,7 @@ export default function PdfIndexingPage() {
   async function selectFiles(event: ChangeEvent<HTMLInputElement>) {
     const documentFiles = Array.from(event.target.files ?? []).filter(isSupportedMergeFile);
 
-    selectedFilesRef.current = documentFiles;
+    selectedFilesRef.current = [...selectedFilesRef.current, ...documentFiles];
     await loadDocumentFiles(documentFiles, "files");
     event.target.value = "";
   }
@@ -380,23 +380,22 @@ export default function PdfIndexingPage() {
   async function loadDocumentFiles(documentFiles: File[], source: "files" | "folder") {
     setIsReading(true);
     setMessage(documentFiles.length ? `Reading ${documentFiles.length} file${documentFiles.length === 1 ? "" : "s"}...` : "");
-    setPdfRows([]);
-    setSelectedRowIds(new Set());
+
+    const wasEmpty = pdfFileMapRef.current.size === 0;
 
     try {
-      const rows: PdfFileRow[] = [];
-      const fileMap = new Map<string, File>();
+      const newRows: PdfFileRow[] = [];
 
       for (const file of documentFiles) {
         const id = `${file.webkitRelativePath || file.name}-${file.size}-${file.lastModified}`;
         const fileKind = getSupportedFileKind(file);
 
-        if (!fileKind) {
+        if (!fileKind || pdfFileMapRef.current.has(id)) {
           continue;
         }
 
-        fileMap.set(id, file);
-        rows.push({
+        pdfFileMapRef.current.set(id, file);
+        newRows.push({
           annexureLabel: "",
           documentType: "",
           fileKind,
@@ -408,28 +407,41 @@ export default function PdfIndexingPage() {
         });
       }
 
-      rows.sort((left, right) =>
-        left.path.localeCompare(right.path, undefined, {
-          numeric: true,
-          sensitivity: "base"
-        })
-      );
+      setPdfRows((current) => {
+        const byId = new Map(current.map((existing) => [existing.id, existing]));
+        for (const row of newRows) {
+          byId.set(row.id, row);
+        }
+        return Array.from(byId.values()).sort((left, right) =>
+          left.path.localeCompare(right.path, undefined, { numeric: true, sensitivity: "base" })
+        );
+      });
 
-      setFolderName(source === "files" ? "Selected files" : getSelectedFolderName(rows));
-      pdfFileMapRef.current = fileMap;
-      setPdfRows(rows);
+      setFolderName(wasEmpty ? (source === "files" ? "Selected files" : getSelectedFolderName(newRows)) : "Selected files");
+      const totalCount = pdfFileMapRef.current.size;
       setMessage(
-        rows.length
-          ? `Loaded ${rows.length} file${rows.length === 1 ? "" : "s"} for PDF tools and merge.`
-          : source === "files"
-            ? "No supported files selected. Choose PDF, JPG, JPEG, PNG, or WebP files."
-            : "No supported files found in the selected folder."
+        newRows.length
+          ? `Added ${newRows.length} file${newRows.length === 1 ? "" : "s"} — ${totalCount} file${totalCount === 1 ? "" : "s"} ready. Select more from any folder to keep adding.`
+          : documentFiles.length
+            ? "Those files are already added, or not supported (PDF, JPG, JPEG, PNG, WebP)."
+            : source === "files"
+              ? "No supported files selected. Choose PDF, JPG, JPEG, PNG, or WebP files."
+              : "No supported files found in the selected folder."
       );
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Could not read the selected files.");
     } finally {
       setIsReading(false);
     }
+  }
+
+  function clearAllFiles() {
+    pdfFileMapRef.current = new Map();
+    selectedFilesRef.current = [];
+    setPdfRows([]);
+    setSelectedRowIds(new Set());
+    setFolderName("");
+    setMessage("Cleared all files.");
   }
 
   function toggleRowSelection(rowId: string) {
@@ -548,13 +560,19 @@ export default function PdfIndexingPage() {
         }
 
         await appendFileToMergedPdf(mergedPdf, file);
+        // give the browser a tick to reclaim the source file's memory before the next one
+        await new Promise((resolve) => setTimeout(resolve, 0));
       }
 
       const bytes = await mergedPdf.save();
       downloadBlob(createPdfBlob(bytes), "workline-merged.pdf");
       setMessage(`Merged ${rows.length} files into one PDF.`);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Could not merge selected files.");
+      setMessage(
+        isAllocationError(error)
+          ? "These files are too large to merge into a single PDF in the browser (ran out of memory). Use ‘Smart Merge’ to split them into smaller parts, or merge fewer files at a time."
+          : error instanceof Error ? error.message : "Could not merge selected files."
+      );
     } finally {
       setIsProcessing(false);
     }
@@ -1355,6 +1373,15 @@ export default function PdfIndexingPage() {
               >
                 <FileImage className="size-4" />
                 Select Files
+              </button>
+              <button
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-xs font-black uppercase text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                disabled={pdfRows.length === 0}
+                onClick={clearAllFiles}
+                type="button"
+              >
+                <X className="size-4" />
+                Clear
               </button>
             </div>
           </div>
@@ -2997,6 +3024,11 @@ function createIndexCell(
     margins: { bottom: 120, left: 120, right: 120, top: 120 },
     width: { size: options.width, type: WidthType.DXA }
   });
+}
+
+function isAllocationError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return error instanceof RangeError || /allocation failed|array ?buffer|out of memory|invalid array length|maximum call stack/i.test(message);
 }
 
 function parsePageRanges(input: string, pageCount: number, filename: string): PageRange[] {
