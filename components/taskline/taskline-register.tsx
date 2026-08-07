@@ -69,16 +69,14 @@ const taskLineRowsCacheKey = "taskline:rows:v4";
 const taskLineColumnGroups: { columns: string[] | null; key: string; label: string }[] = [
   { key: "core", label: "Core", columns: ["team", "task_code", "name", "resource", "entity_group", "entity", "state_name", "gstin", "task", "due_date", "stage", "status_open_close", "remarks"] },
   { key: "legal", label: "Legal / Order", columns: ["task_code", "name", "entity", "task", "ref_date", "ref_no", "period", "section", "issue", "refer_other_task", "appeal_no", "order_type", "court_location", "engaged_counsel", "printing", "due_date", "stage"] },
-  { key: "billing", label: "Billing / Fees", columns: ["task_code", "name", "entity", "task", "billable", "billing_status", "el_reference", "tax_invoice_no", "total_agreed_fee", "amount_raised", "amount_realised", "counsel_fee", "referral_fee", "fee_comments"] },
-  { key: "reminders", label: "Reminders / Status", columns: ["task_code", "name", "entity", "task", "reminder_days", "completion_date"] },
+  { key: "billing", label: "Billing / Fees", columns: ["task_code", "name", "entity", "task", "billable", "billing_status", "total_agreed_fee", "amount_raised", "amount_realised", "counsel_fee", "referral_fee", "fee_comments"] },
   { key: "all", label: "All", columns: null }
 ];
 
 const taskLineFormSections: { columns: string[]; key: string; label: string }[] = [
   { key: "core", label: "Core", columns: ["team", "name", "resource", "entity_group", "entity", "state_name", "gstin", "task", "due_date", "stage", "status_open_close", "billable", "remarks"] },
   { key: "legal", label: "Legal / Order", columns: ["ref_date", "ref_no", "period", "section", "issue", "refer_other_task", "appeal_no", "order_type", "court_location", "engaged_counsel", "printing"] },
-  { key: "billing", label: "Billing / Fees", columns: ["billing_status", "el_reference", "tax_invoice_no", "total_agreed_fee", "amount_raised", "amount_realised", "counsel_fee", "referral_fee", "fee_comments"] },
-  { key: "reminders", label: "Reminders / Status", columns: ["reminder_days", "completion_date"] },
+  { key: "billing", label: "Billing / Fees", columns: ["billing_status", "total_agreed_fee", "amount_raised", "amount_realised", "counsel_fee", "referral_fee", "fee_comments"] },
   { key: "other", label: "Other", columns: ["any_other", "any_other_1"] }
 ];
 const requiredTaskLineFormKeys = ["team", "entity_group", "entity", "state_name", "task", "due_date", "stage", "status_open_close", "billable"];
@@ -112,10 +110,6 @@ const taskLineColumns: TaskLineColumn[] = [
   { key: "engaged_counsel", label: "Engaged Counsel", width: 180 },
   { key: "printing", label: "Printing", width: 120 },
   { key: "billing_status", label: "Billing Status", width: 160 },
-  { key: "el_reference", label: "EL Reference No. and Document Link", width: 270 },
-  { key: "tax_invoice_no", label: "Tax Invoice No.", width: 165 },
-  { key: "reminder_days", label: "Reminder Days", type: "number", width: 150 },
-  { key: "completion_date", label: "Completion Date", type: "date", width: 160 },
   { key: "total_agreed_fee", label: "Total Agreed Fee", type: "money", width: 165 },
   { key: "amount_raised", label: "Amount Raised", type: "money", width: 150 },
   { key: "amount_realised", label: "Amount Realised", type: "money", width: 165 },
@@ -1012,6 +1006,10 @@ export function TaskLineRegister() {
           return { ...current, gstin: value, entity: detail.entity, entity_group: detail.group, state_name: detail.state };
         }
         return { ...current, gstin: value };
+      }
+
+      if (key === "billable") {
+        return { ...current, billable: value, billing_status: value === "Yes" ? "No" : "NA" };
       }
 
       if (key !== "entity") return { ...current, [key]: value };
@@ -2637,6 +2635,15 @@ function TaskLineForm({
                       <option key={option} value={option}>{option}</option>
                     ))}
                   </select>
+                ) : column.key === "billing_status" ? (
+                  draft.billable === "Yes" ? (
+                    <select className={formSelectControlClass} onChange={(event) => onChange(column.key, event.target.value)} value={draft[column.key] || "No"}>
+                      <option value="No">No</option>
+                      <option value="Yes">Yes</option>
+                    </select>
+                  ) : (
+                    <input className={`${formControlClass} cursor-not-allowed bg-slate-50 text-slate-600`} readOnly title="NA for non-billable / retainership tasks" value="NA" />
+                  )
                 ) : column.type === "select" ? (
                   <select
                     className={formSelectControlClass}
@@ -2703,6 +2710,18 @@ function TaskLineForm({
                 {isOpen ? (
                   <div className="grid gap-3 border-t border-slate-200 p-4 md:grid-cols-2 xl:grid-cols-4">
                     {sectionColumns.map((column) => renderField(column))}
+                    {section.key === "billing" ? (
+                      <div className="flex items-end">
+                        <button
+                          className={`${buttonClass("light")} w-full`}
+                          onClick={() => window.open("/engagement-letter", "_blank", "noopener,noreferrer")}
+                          type="button"
+                        >
+                          <ReceiptText className="size-4" />
+                          Create EL
+                        </button>
+                      </div>
+                    ) : null}
                   </div>
                 ) : null}
               </div>
