@@ -5,7 +5,7 @@ import { getCurrentUser } from "@/lib/supabase/session";
 import { getCached, setCached } from "@/lib/data-cache";
 import { ArrowDown, ArrowLeft, ArrowUp, Check, ChevronDown, Pin, ChevronUp, Download, Expand, ExternalLink, FileSpreadsheet, FileText, Filter, History, Menu, Pencil, Plus, ReceiptText, Search, Settings2, Trash2, Upload, X } from "lucide-react";
 import Link from "next/link";
-import { ChangeEvent, memo, useDeferredValue, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { ChangeEvent, memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { createPortal } from "react-dom";
 import * as XLSX from "xlsx-js-style";
 
@@ -590,16 +590,32 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
     setDraftFilterValues(appliedValues?.length ? appliedValues : options.map((option) => option.key));
   }
 
-  function closeColumnFilter() {
+  const closeColumnFilter = useCallback(() => {
     setOpenFilterColumnKey(null);
     setFilterMenuPosition(null);
     setFilterSearch("");
     setDraftFilterValues([]);
-  }
+  }, []);
 
   useEffect(() => {
     if (!openFilterColumnKey) {
       return;
+    }
+
+    function handleFilterKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        closeColumnFilter();
+      }
+    }
+
+    function handleFilterPointerDown(event: PointerEvent) {
+      const target = event.target;
+
+      if (target instanceof Element && target.closest("[data-gstat-filter-menu]")) {
+        return;
+      }
+
+      closeColumnFilter();
     }
 
     function closeOnViewportChange(event: Event) {
@@ -610,14 +626,18 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
       closeColumnFilter();
     }
 
+    document.addEventListener("keydown", handleFilterKeyDown);
+    document.addEventListener("pointerdown", handleFilterPointerDown);
     window.addEventListener("resize", closeOnViewportChange);
     window.addEventListener("scroll", closeOnViewportChange, true);
 
     return () => {
+      document.removeEventListener("keydown", handleFilterKeyDown);
+      document.removeEventListener("pointerdown", handleFilterPointerDown);
       window.removeEventListener("resize", closeOnViewportChange);
       window.removeEventListener("scroll", closeOnViewportChange, true);
     };
-  }, [openFilterColumnKey]);
+  }, [closeColumnFilter, openFilterColumnKey]);
 
   function toggleDraftFilterValue(value: string) {
     setDraftFilterValues((currentValues) =>
