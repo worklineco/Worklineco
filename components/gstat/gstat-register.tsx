@@ -1749,7 +1749,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
           </section>
 
           <div className="overflow-hidden rounded-2xl border border-slate-950/10 bg-white">
-            <div className={`${isMaximized ? "max-h-[calc(100vh-82px)]" : "max-h-[calc(100vh-285px)]"} overflow-auto`}>
+            <div className={`${isMaximized ? "max-h-[calc(100vh-82px)]" : "max-h-[calc(100vh-200px)]"} overflow-auto`}>
               <table
                 className="table-fixed border-separate border-spacing-0 text-left text-[11px]"
                 style={{ minWidth: visibleTableWidth, width: visibleTableWidth }}
