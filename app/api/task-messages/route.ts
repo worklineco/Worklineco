@@ -7,6 +7,7 @@ import { createTransport } from "nodemailer";
 type CookieToSet = { name: string; options: CookieOptions; value: string };
 
 const defaultOrganisationCode = "DCO1433";
+const organisationIdCache = new Map<string, string>();
 
 export async function GET(request: Request) {
   const auth = await requireUser();
@@ -38,10 +39,12 @@ export async function GET(request: Request) {
 
   if (view === "threads") {
     const access = getAccess(auth.user);
+    const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
     let query = admin
       .from("task_messages")
       .select("task_code,team,entity,task,author_id,recipient_id,is_private,body,created_at")
       .eq("organisation_id", organisation.organisationId)
+      .gte("created_at", since)
       .order("created_at", { ascending: true });
     if (!access.canViewAll && access.team) {
       query = query.eq("team", access.team);
@@ -317,8 +320,13 @@ function createAdminClient() {
 }
 
 async function getOrganisationId(admin: ReturnType<typeof createAdminClient>, user: User) {
+  const cached = organisationIdCache.get(user.id);
+  if (cached) {
+    return { organisationId: cached };
+  }
   const { data, error } = await admin.from("users").select("organisation_id").eq("id", user.id).single();
   if (!error && data?.organisation_id) {
+    organisationIdCache.set(user.id, data.organisation_id as string);
     return { organisationId: data.organisation_id as string };
   }
   const organisationCode = text(user.user_metadata?.organisation_id) || defaultOrganisationCode;
@@ -334,6 +342,7 @@ async function getOrganisationId(admin: ReturnType<typeof createAdminClient>, us
   if (!organisationId) {
     return { error: NextResponse.json({ error: "Could not resolve organisation." }, { status: 500 }) };
   }
+  organisationIdCache.set(user.id, organisationId as string);
   return { organisationId };
 }
 

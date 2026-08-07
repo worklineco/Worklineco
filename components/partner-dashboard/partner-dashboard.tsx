@@ -32,6 +32,7 @@ export function PartnerDashboard() {
   const [openChat, setOpenChat] = useState<{ code: string; count: number; entity: string; label: string; loading: boolean; messages: ChatMessage[]; task: string; team: string } | null>(null);
   const [chatDraft, setChatDraft] = useState("");
   const [chatSending, setChatSending] = useState(false);
+  const [teamEmails, setTeamEmails] = useState<{ email: string; name: string }[]>([]);
 
   useEffect(() => {
     const saved = window.localStorage.getItem(storageKey);
@@ -189,6 +190,28 @@ export function PartnerDashboard() {
     }
   }
 
+  async function loadTeamEmails() {
+    if (teamEmails.length) {
+      return;
+    }
+    try {
+      const response = await fetch("/api/teams", { cache: "no-store" });
+      const result = await response.json();
+      const members = Array.isArray(result?.members) ? (result.members as { email?: string; name?: string }[]) : [];
+      setTeamEmails(
+        members
+          .map((member) => ({ email: String(member.email ?? "").trim(), name: String(member.name ?? "").trim() }))
+          .filter((member) => member.email && member.email !== "-")
+      );
+    } catch {
+      // ignore
+    }
+  }
+
+  function pickChatEmail(email: string) {
+    setChatDraft((current) => current.replace(/@([\w.+-]*)$/, `@${email} `));
+  }
+
   async function loadChats() {
     try {
       const response = await fetch("/api/task-messages?view=threads", { cache: "no-store" });
@@ -208,6 +231,7 @@ export function PartnerDashboard() {
   }
 
   async function openChatThread(thread: Thread) {
+    void loadTeamEmails();
     setOpenChat({ code: thread.task_code, count: thread.count, entity: thread.entity, label: chatLabel(thread), loading: true, messages: [], task: thread.task, team: thread.team });
     setChatDraft("");
     setChatReads((current) => ({ ...current, [thread.task_code]: thread.count }));
@@ -248,6 +272,12 @@ export function PartnerDashboard() {
   function hideChat(thread: Thread) {
     setChatHidden((current) => ({ ...current, [thread.task_code]: thread.count }));
   }
+
+  const mentionMatch = chatDraft.match(/@([\w.+-]*)$/);
+  const mentionQuery = mentionMatch ? mentionMatch[1].toLowerCase() : null;
+  const emailSuggestions = mentionQuery !== null
+    ? teamEmails.filter((member) => member.email.toLowerCase().includes(mentionQuery) || member.name.toLowerCase().includes(mentionQuery)).slice(0, 6)
+    : [];
 
   const visibleChats = chats.filter((thread) => {
     const hiddenAt = chatHidden[thread.task_code];
@@ -327,22 +357,48 @@ export function PartnerDashboard() {
                 <p className="text-sm font-semibold text-slate-400">No messages in this task yet.</p>
               )}
             </div>
-            <div className="flex gap-2 border-t border-slate-200 px-4 py-3">
-              <input
-                className="h-10 min-w-0 flex-1 rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold outline-none focus:border-navy-400"
-                onChange={(event) => setChatDraft(event.target.value)}
-                onKeyDown={(event) => { if (event.key === "Enter") void sendChatMessage(); }}
-                placeholder="Write a message… (type @email to notify one person privately)"
-                value={chatDraft}
-              />
-              <button
-                className="inline-flex size-10 items-center justify-center rounded-md bg-navy-700 text-white transition hover:bg-navy-800 disabled:opacity-50"
-                disabled={chatSending || !chatDraft.trim()}
-                onClick={() => void sendChatMessage()}
-                type="button"
-              >
-                <Send className="size-4" />
-              </button>
+            <div className="relative border-t border-slate-200 px-4 py-3">
+              {emailSuggestions.length ? (
+                <div className="absolute bottom-full left-4 right-4 mb-1 max-h-48 overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-xl">
+                  {emailSuggestions.map((member) => (
+                    <button
+                      className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left transition hover:bg-slate-50"
+                      key={member.email}
+                      onClick={() => pickChatEmail(member.email)}
+                      type="button"
+                    >
+                      <span className="truncate text-sm font-black text-slate-800">{member.name || member.email}</span>
+                      <span className="shrink-0 text-xs font-semibold text-slate-500">{member.email}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+              <div className="flex gap-2">
+                <input
+                  className="h-10 min-w-0 flex-1 rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold outline-none focus:border-navy-400"
+                  onChange={(event) => setChatDraft(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      if (emailSuggestions.length) {
+                        event.preventDefault();
+                        pickChatEmail(emailSuggestions[0].email);
+                        return;
+                      }
+                      void sendChatMessage();
+                    }
+                  }}
+                  placeholder="Write a message… (type @ to tag a teammate)"
+                  value={chatDraft}
+                />
+                <button
+                  className="inline-flex size-10 items-center justify-center rounded-md bg-navy-700 text-white transition hover:bg-navy-800 disabled:opacity-50"
+                  disabled={chatSending || !chatDraft.trim()}
+                  onClick={() => void sendChatMessage()}
+                  type="button"
+                >
+                  <Send className="size-4" />
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -364,7 +420,7 @@ export function PartnerDashboard() {
                 <div className={`flex items-center gap-1 rounded-xl px-2 py-1.5 ${activeNote?.id === note.id ? "bg-navy-100 text-navy-800" : "bg-slate-50 text-slate-700"}`} key={note.id}>
                   <button className="min-w-0 flex-1 truncate px-1 text-left text-sm font-black" onClick={() => setActiveNoteId(note.id)} onDoubleClick={() => renameNote(note)} title="Double click to rename" type="button">
                     {note.title}
-                    {note.date ? <span className="ml-1 text-[10px] font-bold text-slate-400">{note.date}</span> : null}
+                    {note.date ? <span className="ml-1 text-[10px] font-bold text-slate-400">{formatNoteDate(note.date)}</span> : null}
                   </button>
                   <button className="flex size-7 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-white hover:text-navy-700" onClick={() => renameNote(note)} title="Rename note" type="button">
                     <Pencil className="size-3.5" />
@@ -411,6 +467,14 @@ export function PartnerDashboard() {
       />
     </div>
   );
+}
+
+function formatNoteDate(value: string) {
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (match) {
+    return `${match[3]}-${match[2]}-${match[1]}`;
+  }
+  return value;
 }
 
 function formatChatTime(value: string) {
