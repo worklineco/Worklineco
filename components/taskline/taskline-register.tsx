@@ -69,16 +69,16 @@ const taskLineRowsCacheKey = "taskline:rows:v4";
 const taskLineColumnGroups: { columns: string[] | null; key: string; label: string }[] = [
   { key: "core", label: "Core", columns: ["team", "task_code", "name", "resource", "entity_group", "entity", "state_name", "gstin", "task", "due_date", "stage", "status_open_close", "remarks"] },
   { key: "legal", label: "Legal / Order", columns: ["task_code", "name", "entity", "task", "ref_date", "ref_no", "period", "section", "issue", "refer_other_task", "appeal_no", "order_type", "court_location", "engaged_counsel", "printing", "due_date", "stage"] },
-  { key: "billing", label: "Billing / Fees", columns: ["task_code", "name", "entity", "task", "billable", "billing_status", "el_reference", "tax_invoice_no", "total_agreed_fee", "amount_raised", "amount_realised", "counsel_fee", "referral_fee", "fee_comments", "document_link"] },
-  { key: "reminders", label: "Reminders / Status", columns: ["task_code", "name", "entity", "task", "realisation_status", "reminder_days", "reminder_email", "remaining_days", "status", "entry_date", "completion_date", "poc", "pending_from"] },
+  { key: "billing", label: "Billing / Fees", columns: ["task_code", "name", "entity", "task", "billable", "billing_status", "el_reference", "tax_invoice_no", "total_agreed_fee", "amount_raised", "amount_realised", "counsel_fee", "referral_fee", "fee_comments"] },
+  { key: "reminders", label: "Reminders / Status", columns: ["task_code", "name", "entity", "task", "reminder_days", "completion_date"] },
   { key: "all", label: "All", columns: null }
 ];
 
 const taskLineFormSections: { columns: string[]; key: string; label: string }[] = [
   { key: "core", label: "Core", columns: ["team", "name", "resource", "entity_group", "entity", "state_name", "gstin", "task", "due_date", "stage", "status_open_close", "billable", "remarks"] },
   { key: "legal", label: "Legal / Order", columns: ["ref_date", "ref_no", "period", "section", "issue", "refer_other_task", "appeal_no", "order_type", "court_location", "engaged_counsel", "printing"] },
-  { key: "billing", label: "Billing / Fees", columns: ["billing_status", "el_reference", "tax_invoice_no", "total_agreed_fee", "amount_raised", "amount_realised", "counsel_fee", "referral_fee", "fee_comments", "document_link"] },
-  { key: "reminders", label: "Reminders / Status", columns: ["realisation_status", "reminder_days", "reminder_email", "remaining_days", "status", "entry_date", "completion_date", "poc", "pending_from"] },
+  { key: "billing", label: "Billing / Fees", columns: ["billing_status", "el_reference", "tax_invoice_no", "total_agreed_fee", "amount_raised", "amount_realised", "counsel_fee", "referral_fee", "fee_comments"] },
+  { key: "reminders", label: "Reminders / Status", columns: ["reminder_days", "completion_date"] },
   { key: "other", label: "Other", columns: ["any_other", "any_other_1"] }
 ];
 const requiredTaskLineFormKeys = ["team", "entity_group", "entity", "state_name", "task", "due_date", "stage", "status_open_close", "billable"];
@@ -105,7 +105,7 @@ const taskLineColumns: TaskLineColumn[] = [
   { key: "period", label: "Period", width: 140 },
   { key: "section", label: "Section (73/74/75)", width: 145 },
   { key: "issue", label: "Issue", width: 200 },
-  { key: "refer_other_task", label: "Refer other Task", width: 170 },
+  { key: "refer_other_task", label: "Case ID", width: 170 },
   { key: "appeal_no", label: "Appeal No.", width: 150 },
   { key: "order_type", label: "Order Type", width: 150 },
   { key: "court_location", label: "Court Location", width: 170 },
@@ -114,16 +114,8 @@ const taskLineColumns: TaskLineColumn[] = [
   { key: "billing_status", label: "Billing Status", width: 160 },
   { key: "el_reference", label: "EL Reference No. and Document Link", width: 270 },
   { key: "tax_invoice_no", label: "Tax Invoice No.", width: 165 },
-  { key: "realisation_status", label: "Realisation Status", width: 170 },
   { key: "reminder_days", label: "Reminder Days", type: "number", width: 150 },
-  { key: "reminder_email", label: "Reminder Email", width: 210 },
-  { key: "remaining_days", label: "Remaining Days", width: 150 },
-  { key: "status", label: "Status", width: 130 },
-  { key: "entry_date", label: "Entry Date", type: "date", width: 135 },
   { key: "completion_date", label: "Completion Date", type: "date", width: 160 },
-  { key: "poc", label: "POC", width: 150 },
-  { key: "pending_from", label: "Pending From", width: 160 },
-  { key: "document_link", label: "Document Link", width: 220 },
   { key: "total_agreed_fee", label: "Total Agreed Fee", type: "money", width: 165 },
   { key: "amount_raised", label: "Amount Raised", type: "money", width: 150 },
   { key: "amount_realised", label: "Amount Realised", type: "money", width: 165 },
@@ -137,7 +129,7 @@ const taskLineColumns: TaskLineColumn[] = [
 const taskLineColumnByKey = new Map(taskLineColumns.map((column) => [column.key, column]));
 const defaultTaskLineColumnOrder = taskLineColumns.map((column) => column.key);
 const statusOptions = ["Open", "Close"];
-const billableOptions = ["Yes", "No"];
+const billableOptions = ["Yes", "No", "Retainership"];
 type TeamMemberLite = { designation: string; joining_date: string; name: string; team: string };
 type EntityMasterOption = { entity: string; group: string; gstin: string; state: string };
 const emptyOptions: string[] = [];
@@ -2563,11 +2555,18 @@ function TaskLineForm({
                 ) : column.key === "entity_group" ? (
                   <input className={`${formControlClass} cursor-not-allowed bg-slate-50 text-slate-600`} readOnly title="Filled automatically from Entity" value={draft[column.key] ?? ""} />
                 ) : column.key === "period" ? (
-                  <select className={formSelectControlClass} onChange={(event) => onChange(column.key, event.target.value)} value={draft[column.key] ?? ""}>
-                    <option value="">Select period</option>
-                    {financialPeriodOptions.map((period) => <option key={period} value={period}>{period}</option>)}
-                    {draft[column.key] && !financialPeriodOptions.includes(draft[column.key]) ? <option hidden value={draft[column.key]}>{draft[column.key]}</option> : null}
-                  </select>
+                  <>
+                    <input
+                      className={formControlClass}
+                      list="taskline-period-options"
+                      onChange={(event) => onChange(column.key, event.target.value)}
+                      placeholder="Select or type a period"
+                      value={draft[column.key] ?? ""}
+                    />
+                    <datalist id="taskline-period-options">
+                      {financialPeriodOptions.map((period) => <option key={period} value={period} />)}
+                    </datalist>
+                  </>
                 ) : column.key === "due_date" || column.key === "ref_date" ? (
                   <TaskLineDateInput onChange={(value) => onChange(column.key, value)} value={draft[column.key] ?? ""} />
                 ) : column.key === "name" ? (
