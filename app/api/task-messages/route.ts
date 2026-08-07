@@ -36,6 +36,42 @@ export async function GET(request: Request) {
     return NextResponse.json({ messages: data ?? [] });
   }
 
+  if (view === "threads") {
+    const access = getAccess(auth.user);
+    let query = admin
+      .from("task_messages")
+      .select("task_code,team,entity,task,author_id,recipient_id,is_private,body,created_at")
+      .eq("organisation_id", organisation.organisationId)
+      .order("created_at", { ascending: true });
+    if (!access.canViewAll && access.team) {
+      query = query.eq("team", access.team);
+    }
+    const { data, error } = await query;
+    if (error) {
+      return errorResponse(error);
+    }
+    const byCode = new Map<string, { count: number; entity: string; last_at: string; last_body: string; task: string; task_code: string; team: string }>();
+    for (const message of data ?? []) {
+      if (message.is_private && message.author_id !== auth.user.id && message.recipient_id !== auth.user.id) {
+        continue;
+      }
+      const key = String(message.task_code ?? "");
+      if (!key) {
+        continue;
+      }
+      const current = byCode.get(key) ?? { count: 0, entity: "", last_at: "", last_body: "", task: "", task_code: key, team: "" };
+      current.count += 1;
+      current.last_body = String(message.body ?? "");
+      current.last_at = String(message.created_at ?? "");
+      if (message.entity) current.entity = String(message.entity);
+      if (message.task) current.task = String(message.task);
+      if (message.team) current.team = String(message.team);
+      byCode.set(key, current);
+    }
+    const threads = Array.from(byCode.values()).sort((a, b) => (a.last_at < b.last_at ? 1 : -1));
+    return NextResponse.json({ threads });
+  }
+
   const code = text(url.searchParams.get("code"));
   if (!code) {
     return NextResponse.json({ messages: [] });

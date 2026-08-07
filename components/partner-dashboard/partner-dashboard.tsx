@@ -1,23 +1,22 @@
 "use client";
 
 import { getCurrentUser } from "@/lib/supabase/session";
-import { CalendarClock, Check, MessagesSquare, NotebookPen, Pencil, Plus, Send, Trash2, UserRound, X } from "lucide-react";
+import { Check, MessagesSquare, NotebookPen, Pencil, Plus, Send, Trash2, X } from "lucide-react";
 import { MonthCalendar, type CalendarEvent } from "@/components/home/month-calendar";
 import { getCached, setCached } from "@/lib/data-cache";
 import { useEffect, useState } from "react";
 
 type Mention = { author_name?: string; body: string; created_at: string; entity?: string; id: string; task?: string; task_code: string };
-type NoteFile = { content: string; id: string; title: string; updatedAt: string };
-type FollowUp = { dueDate: string; id: string; item: string; owner: string; status: "Open" | "Done"; type: string };
-type Meeting = { agenda: string; id: string; prepNotes: string; time: string; title: string };
-type DashboardState = { calendarNotes: Record<string, string[]>; followUps: FollowUp[]; meetings: Meeting[]; notes: NoteFile[] };
+type NoteFile = { content: string; date?: string; id: string; title: string; updatedAt: string };
+type DashboardState = { calendarNotes: Record<string, string[]>; notes: NoteFile[] };
+type Thread = { count: number; entity: string; last_at: string; last_body: string; task: string; task_code: string; team: string };
+type ChatMessage = { author_name?: string; body: string; created_at: string; id: string };
 
 const storageKey = "workline-partner-dashboard";
-const today = new Date().toISOString().slice(0, 10);
+const chatReadsKey = "wl_dashboard_chat_reads";
+const chatHiddenKey = "wl_dashboard_chat_hidden";
 const defaultState: DashboardState = {
   calendarNotes: {},
-  followUps: [],
-  meetings: [],
   notes: [{ content: "1. ", id: "note-1", title: "Daily Scratchpad", updatedAt: new Date().toISOString() }]
 };
 
@@ -27,14 +26,18 @@ export function PartnerDashboard() {
   const [state, setState] = useState<DashboardState>(defaultState);
   const [activeNoteId, setActiveNoteId] = useState(defaultState.notes[0]?.id ?? "");
   const [useNumberedNotes, setUseNumberedNotes] = useState(true);
-  const [followUpDraft, setFollowUpDraft] = useState({ dueDate: "", item: "", owner: "", type: "Callback" });
-  const [meetingDraft, setMeetingDraft] = useState({ agenda: "", prepNotes: "", time: "", title: "" });
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [mentions, setMentions] = useState<Mention[]>([]);
   const [replyingId, setReplyingId] = useState<string | null>(null);
   const [replyDraft, setReplyDraft] = useState("");
   const [mentionBusy, setMentionBusy] = useState(false);
-  const [threadModal, setThreadModal] = useState<{ code: string; loading: boolean; messages: { author_name?: string; body: string; created_at: string; id: string }[] } | null>(null);
+  const [threadModal, setThreadModal] = useState<{ code: string; loading: boolean; messages: ChatMessage[] } | null>(null);
+  const [chats, setChats] = useState<Thread[]>([]);
+  const [chatReads, setChatReads] = useState<Record<string, number>>({});
+  const [chatHidden, setChatHidden] = useState<Record<string, number>>({});
+  const [openChat, setOpenChat] = useState<{ code: string; count: number; entity: string; label: string; loading: boolean; messages: ChatMessage[]; task: string; team: string } | null>(null);
+  const [chatDraft, setChatDraft] = useState("");
+  const [chatSending, setChatSending] = useState(false);
 
   useEffect(() => {
     const saved = window.localStorage.getItem(storageKey);
@@ -42,11 +45,18 @@ export function PartnerDashboard() {
       const parsed = JSON.parse(saved) as Partial<DashboardState>;
       setState({
         calendarNotes: parsed.calendarNotes ?? {},
-        followUps: parsed.followUps ?? [],
-        meetings: parsed.meetings ?? [],
         notes: parsed.notes?.length ? parsed.notes : defaultState.notes
       });
       setActiveNoteId(parsed.notes?.[0]?.id ?? defaultState.notes[0]?.id ?? "");
+    }
+
+    try {
+      const savedReads = window.localStorage.getItem(chatReadsKey);
+      if (savedReads) setChatReads(JSON.parse(savedReads) as Record<string, number>);
+      const savedHidden = window.localStorage.getItem(chatHiddenKey);
+      if (savedHidden) setChatHidden(JSON.parse(savedHidden) as Record<string, number>);
+    } catch {
+      // ignore corrupted local state
     }
 
     const cachedEvents = getCached<CalendarEvent[]>("dashboard_calendar");
@@ -72,11 +82,21 @@ export function PartnerDashboard() {
       .then((response) => (response.ok ? response.json() : { messages: [] }))
       .then((data) => setMentions(Array.isArray(data?.messages) ? (data.messages as Mention[]) : []))
       .catch(() => undefined);
+
+    void loadChats();
   }, []);
 
   useEffect(() => {
     window.localStorage.setItem(storageKey, JSON.stringify(state));
   }, [state]);
+
+  useEffect(() => {
+    window.localStorage.setItem(chatReadsKey, JSON.stringify(chatReads));
+  }, [chatReads]);
+
+  useEffect(() => {
+    window.localStorage.setItem(chatHiddenKey, JSON.stringify(chatHidden));
+  }, [chatHidden]);
 
   const activeNote = state.notes.find((note) => note.id === activeNoteId) ?? state.notes[0];
 
@@ -126,6 +146,16 @@ export function PartnerDashboard() {
     }));
   }
 
+  function updateActiveNoteDate(date: string) {
+    if (!activeNote) {
+      return;
+    }
+    setState((current) => ({
+      ...current,
+      notes: current.notes.map((note) => (note.id === activeNote.id ? { ...note, date, updatedAt: new Date().toISOString() } : note))
+    }));
+  }
+
   function renameNote(note: NoteFile) {
     const title = window.prompt("Rename note", note.title)?.trim();
     if (!title) {
@@ -168,38 +198,6 @@ export function PartnerDashboard() {
     if (checked && activeNote) {
       updateActiveNote(activeNote.content.trim() ? numberNoteLines(activeNote.content) : "1. ");
     }
-  }
-
-  function addFollowUp() {
-    if (!followUpDraft.item.trim()) {
-      return;
-    }
-    setState((current) => ({
-      ...current,
-      followUps: [
-        { dueDate: followUpDraft.dueDate, id: crypto.randomUUID(), item: followUpDraft.item.trim(), owner: followUpDraft.owner.trim() || profileName, status: "Open", type: followUpDraft.type },
-        ...current.followUps
-      ]
-    }));
-    setFollowUpDraft({ dueDate: "", item: "", owner: "", type: "Callback" });
-  }
-
-  function updateFollowUp(id: string, status: FollowUp["status"]) {
-    setState((current) => ({
-      ...current,
-      followUps: current.followUps.map((followUp) => (followUp.id === id ? { ...followUp, status } : followUp))
-    }));
-  }
-
-  function addMeeting() {
-    if (!meetingDraft.title.trim()) {
-      return;
-    }
-    setState((current) => ({
-      ...current,
-      meetings: [{ ...meetingDraft, id: crypto.randomUUID(), title: meetingDraft.title.trim() }, ...current.meetings]
-    }));
-    setMeetingDraft({ agenda: "", prepNotes: "", time: "", title: "" });
   }
 
   async function markMentionRead(id: string) {
@@ -248,11 +246,116 @@ export function PartnerDashboard() {
     }
   }
 
+  async function loadChats() {
+    try {
+      const response = await fetch("/api/task-messages?view=threads", { cache: "no-store" });
+      const result = await response.json();
+      setChats(Array.isArray(result?.threads) ? (result.threads as Thread[]) : []);
+    } catch {
+      // ignore
+    }
+  }
+
+  function chatLabel(thread: Thread) {
+    return [thread.task_code, thread.entity, thread.task].filter(Boolean).join(" · ") || thread.task_code;
+  }
+
+  function unreadCount(thread: Thread) {
+    return Math.max(0, thread.count - (chatReads[thread.task_code] ?? 0));
+  }
+
+  async function openChatThread(thread: Thread) {
+    setOpenChat({ code: thread.task_code, count: thread.count, entity: thread.entity, label: chatLabel(thread), loading: true, messages: [], task: thread.task, team: thread.team });
+    setChatDraft("");
+    setChatReads((current) => ({ ...current, [thread.task_code]: thread.count }));
+    try {
+      const response = await fetch(`/api/task-messages?code=${encodeURIComponent(thread.task_code)}`, { cache: "no-store" });
+      const result = await response.json();
+      setOpenChat((current) => (current && current.code === thread.task_code ? { ...current, loading: false, messages: Array.isArray(result?.messages) ? result.messages : [] } : current));
+    } catch {
+      setOpenChat((current) => (current ? { ...current, loading: false } : current));
+    }
+  }
+
+  async function sendChatMessage() {
+    if (!openChat || !chatDraft.trim()) {
+      return;
+    }
+    const bodyText = chatDraft.trim();
+    const target = openChat;
+    const optimistic = { author_name: "You", body: bodyText, created_at: new Date().toISOString(), id: `temp-${Date.now()}` };
+    setOpenChat((current) => (current ? { ...current, count: current.count + 1, messages: [...current.messages, optimistic] } : current));
+    setChatDraft("");
+    setChatSending(true);
+    setChatReads((current) => ({ ...current, [target.code]: (current[target.code] ?? 0) + 1 }));
+    try {
+      await fetch("/api/task-messages", {
+        body: JSON.stringify({ body: bodyText, code: target.code, entity: target.entity, task: target.task, team: target.team }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST"
+      });
+      void loadChats();
+    } catch {
+      // optimistic message stays
+    } finally {
+      setChatSending(false);
+    }
+  }
+
+  function hideChat(thread: Thread) {
+    setChatHidden((current) => ({ ...current, [thread.task_code]: thread.count }));
+  }
+
+  const visibleChats = chats.filter((thread) => {
+    const hiddenAt = chatHidden[thread.task_code];
+    return hiddenAt === undefined || thread.count > hiddenAt;
+  });
+  const totalUnread = visibleChats.reduce((sum, thread) => sum + unreadCount(thread), 0);
+
   return (
     <div className="mt-4 grid gap-4">
       <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <h2 className="text-2xl font-black text-slate-950">{profileName}&rsquo;s Dashboard</h2>
         <p className="mt-1 text-sm font-semibold text-slate-500">{profileEmail}</p>
+      </section>
+
+      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex items-center gap-2">
+          <MessagesSquare className="size-5 text-navy-700" />
+          <h3 className="text-base font-black text-slate-950">Task chats</h3>
+          {totalUnread > 0 ? <span className="rounded-full bg-emerald-500 px-2 py-0.5 text-[10px] font-black text-white">{totalUnread}</span> : null}
+        </div>
+        <div className="mt-3 divide-y divide-slate-100">
+          {visibleChats.length ? (
+            visibleChats.map((thread) => {
+              const unread = unreadCount(thread);
+              return (
+                <div className="flex items-center gap-3 py-2.5" key={thread.task_code}>
+                  <button className="flex min-w-0 flex-1 items-center gap-3 text-left" onClick={() => void openChatThread(thread)} type="button">
+                    <span className={`flex size-10 shrink-0 items-center justify-center rounded-full ${unread > 0 ? "bg-emerald-100 text-emerald-700" : "bg-navy-100 text-navy-700"}`}>
+                      <MessagesSquare className="size-5" />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className={`block truncate text-sm ${unread > 0 ? "font-black text-slate-950" : "font-bold text-slate-800"}`}>{chatLabel(thread)}</span>
+                      <span className="block truncate text-xs font-semibold text-slate-500">{thread.last_body}</span>
+                    </span>
+                  </button>
+                  <div className="flex shrink-0 flex-col items-end gap-1">
+                    <span className="text-[10px] font-bold text-slate-400">{formatChatTime(thread.last_at)}</span>
+                    {unread > 0 ? (
+                      <span className="inline-flex min-w-5 items-center justify-center rounded-full bg-emerald-500 px-1.5 text-[11px] font-black text-white">{unread}</span>
+                    ) : null}
+                  </div>
+                  <button className="shrink-0 rounded-md p-1.5 text-slate-400 transition hover:bg-slate-50 hover:text-rose-600" onClick={() => hideChat(thread)} title="Delete chat (hides it from your list until a new message arrives)" type="button">
+                    <Trash2 className="size-4" />
+                  </button>
+                </div>
+              );
+            })
+          ) : (
+            <p className="py-4 text-sm font-semibold text-slate-400">No task chats yet. Start one from Task Hub or by @mentioning a teammate.</p>
+          )}
+        </div>
       </section>
 
       {mentions.length ? (
@@ -338,6 +441,53 @@ export function PartnerDashboard() {
         </div>
       ) : null}
 
+      {openChat ? (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/50 px-4 py-6" onClick={() => setOpenChat(null)}>
+          <div className="flex max-h-[80vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
+            <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
+              <div className="min-w-0">
+                <p className="text-xs font-black uppercase tracking-[0.14em] text-navy-700">Task chat</p>
+                <h3 className="mt-0.5 truncate text-base font-black text-slate-950">{openChat.label}</h3>
+              </div>
+              <button className="inline-flex size-9 shrink-0 items-center justify-center rounded-md border border-slate-200 text-slate-700 hover:bg-slate-50" onClick={() => setOpenChat(null)} type="button">
+                <X className="size-4" />
+              </button>
+            </div>
+            <div className="flex-1 space-y-2 overflow-y-auto px-5 py-4">
+              {openChat.loading ? (
+                <p className="text-sm font-bold text-slate-500">Loading…</p>
+              ) : openChat.messages.length ? (
+                openChat.messages.map((message) => (
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2" key={message.id}>
+                    <p className="text-xs font-black text-navy-700">{message.author_name || "User"}</p>
+                    <p className="mt-1 text-sm font-semibold leading-5 text-slate-700">{message.body}</p>
+                  </div>
+                ))
+              ) : (
+                <p className="text-sm font-semibold text-slate-400">No messages in this task yet.</p>
+              )}
+            </div>
+            <div className="flex gap-2 border-t border-slate-200 px-4 py-3">
+              <input
+                className="h-10 min-w-0 flex-1 rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold outline-none focus:border-navy-400"
+                onChange={(event) => setChatDraft(event.target.value)}
+                onKeyDown={(event) => { if (event.key === "Enter") void sendChatMessage(); }}
+                placeholder="Write a message… (type @email to notify one person privately)"
+                value={chatDraft}
+              />
+              <button
+                className="inline-flex size-10 items-center justify-center rounded-md bg-navy-700 text-white transition hover:bg-navy-800 disabled:opacity-50"
+                disabled={chatSending || !chatDraft.trim()}
+                onClick={() => void sendChatMessage()}
+                type="button"
+              >
+                <Send className="size-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="flex items-center gap-2">
           <NotebookPen className="size-5 text-navy-700" />
@@ -354,6 +504,7 @@ export function PartnerDashboard() {
                 <div className={`flex items-center gap-1 rounded-xl px-2 py-1.5 ${activeNote?.id === note.id ? "bg-navy-100 text-navy-800" : "bg-slate-50 text-slate-700"}`} key={note.id}>
                   <button className="min-w-0 flex-1 truncate px-1 text-left text-sm font-black" onClick={() => setActiveNoteId(note.id)} onDoubleClick={() => renameNote(note)} title="Double click to rename" type="button">
                     {note.title}
+                    {note.date ? <span className="ml-1 text-[10px] font-bold text-slate-400">{note.date}</span> : null}
                   </button>
                   <button className="flex size-7 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-white hover:text-navy-700" onClick={() => renameNote(note)} title="Rename note" type="button">
                     <Pencil className="size-3.5" />
@@ -366,81 +517,27 @@ export function PartnerDashboard() {
             </div>
           </div>
           <div>
-            <label className="mb-3 inline-flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-2 text-sm font-black text-slate-700">
-              <input checked={useNumberedNotes} onChange={(event) => toggleNumberedNotes(event.target.checked)} type="checkbox" />
-              Numbered bullets
-            </label>
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              <label className="inline-flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-2 text-sm font-black text-slate-700">
+                <input checked={useNumberedNotes} onChange={(event) => toggleNumberedNotes(event.target.checked)} type="checkbox" />
+                Numbered bullets
+              </label>
+              <label className="inline-flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-2 text-sm font-black text-slate-700">
+                Date
+                <input
+                  className="rounded-md border border-slate-200 bg-white px-2 py-1 text-sm font-semibold outline-none focus:border-navy-400"
+                  onChange={(event) => updateActiveNoteDate(event.target.value)}
+                  type="date"
+                  value={activeNote?.date ?? ""}
+                />
+              </label>
+            </div>
             <textarea
               className="min-h-[14rem] w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm font-semibold leading-6 outline-none focus:border-navy-400 focus:bg-white"
               onChange={(event) => updateActiveNote(useNumberedNotes ? numberNoteLines(event.target.value) : event.target.value)}
               placeholder="Write notes here"
               value={activeNote?.content ?? ""}
             />
-          </div>
-        </div>
-      </section>
-
-      <section className="grid gap-4 xl:grid-cols-2">
-        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="flex items-center gap-2">
-            <UserRound className="size-5 text-navy-700" />
-            <h3 className="text-base font-black text-slate-950">Follow-ups &amp; reminders</h3>
-          </div>
-          <div className="mt-4 grid gap-2 md:grid-cols-[1fr_130px_130px_auto]">
-            <input className="h-10 rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-semibold outline-none focus:border-navy-400" onChange={(event) => setFollowUpDraft((current) => ({ ...current, item: event.target.value }))} placeholder="Callback, email, promise made" value={followUpDraft.item} />
-            <input className="h-10 rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-semibold outline-none focus:border-navy-400" onChange={(event) => setFollowUpDraft((current) => ({ ...current, dueDate: event.target.value }))} type="date" value={followUpDraft.dueDate} />
-            <select className="h-10 rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-black outline-none focus:border-navy-400" onChange={(event) => setFollowUpDraft((current) => ({ ...current, type: event.target.value }))} value={followUpDraft.type}>
-              <option>Callback</option>
-              <option>Email</option>
-              <option>Client promise</option>
-              <option>Team promise</option>
-            </select>
-            <button className="flex size-10 items-center justify-center rounded-xl bg-navy-700 text-white" onClick={addFollowUp} type="button">
-              <Plus className="size-4" />
-            </button>
-          </div>
-          <div className="mt-4 space-y-2">
-            {state.followUps.map((followUp) => (
-              <div className="flex flex-wrap items-center gap-3 rounded-xl bg-slate-50 p-3" key={followUp.id}>
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-black text-slate-950">{followUp.item}</p>
-                  <p className="mt-1 text-xs font-bold text-slate-500">{followUp.type} {followUp.dueDate ? `| ${followUp.dueDate}` : ""}</p>
-                </div>
-                <select className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm font-black outline-none" onChange={(event) => updateFollowUp(followUp.id, event.target.value as FollowUp["status"])} value={followUp.status}>
-                  <option>Open</option>
-                  <option>Done</option>
-                </select>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="flex items-center gap-2">
-            <CalendarClock className="size-5 text-navy-700" />
-            <h3 className="text-base font-black text-slate-950">Meetings &amp; appointments today</h3>
-          </div>
-          <div className="mt-4 grid gap-2 md:grid-cols-[120px_1fr_auto]">
-            <input className="h-10 rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-semibold outline-none focus:border-navy-400" onChange={(event) => setMeetingDraft((current) => ({ ...current, time: event.target.value }))} type="time" value={meetingDraft.time} />
-            <input className="h-10 rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-semibold outline-none focus:border-navy-400" onChange={(event) => setMeetingDraft((current) => ({ ...current, title: event.target.value }))} placeholder="Meeting title" value={meetingDraft.title} />
-            <button className="flex size-10 items-center justify-center rounded-xl bg-navy-700 text-white" onClick={addMeeting} type="button">
-              <Plus className="size-4" />
-            </button>
-          </div>
-          <div className="mt-2 grid gap-2 md:grid-cols-2">
-            <textarea className="min-h-20 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm font-semibold outline-none focus:border-navy-400" onChange={(event) => setMeetingDraft((current) => ({ ...current, prepNotes: event.target.value }))} placeholder="Linked prep notes" value={meetingDraft.prepNotes} />
-            <textarea className="min-h-20 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm font-semibold outline-none focus:border-navy-400" onChange={(event) => setMeetingDraft((current) => ({ ...current, agenda: event.target.value }))} placeholder="Agenda" value={meetingDraft.agenda} />
-          </div>
-          <div className="mt-4 space-y-2">
-            {state.meetings.map((meeting) => (
-              <div className="rounded-xl bg-slate-50 p-3" key={meeting.id}>
-                <p className="text-sm font-black text-slate-950">{meeting.time ? `${meeting.time} | ` : ""}{meeting.title}</p>
-                <p className="mt-2 text-xs font-black uppercase text-slate-500">Prep notes</p>
-                <p className="mt-1 text-sm font-semibold leading-6 text-slate-600">{meeting.prepNotes || "-"}</p>
-                <p className="mt-2 text-xs font-black uppercase text-slate-500">Agenda</p>
-                <p className="mt-1 text-sm font-semibold leading-6 text-slate-600">{meeting.agenda || "-"}</p>
-              </div>
-            ))}
           </div>
         </div>
       </section>
@@ -456,4 +553,10 @@ export function PartnerDashboard() {
   );
 }
 
-
+function formatChatTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+  return date.toLocaleString("en-IN", { dateStyle: "short", timeStyle: "short" });
+}
