@@ -117,12 +117,19 @@ export async function POST(request: Request) {
       .eq("id", replyToId)
       .eq("organisation_id", organisation.organisationId)
       .single();
-    if (original.data) {
-      code = code || text(original.data.task_code);
-      entity = entity || text(original.data.entity);
-      task = task || text(original.data.task);
-      team = team || text(original.data.team);
-      recipientId = (original.data.author_id as string | null) ?? null;
+    const originalRow = original.data as {
+      author_id?: string | null;
+      entity?: string | null;
+      task?: string | null;
+      task_code?: string | null;
+      team?: string | null;
+    } | null;
+    if (originalRow) {
+      code = code || text(originalRow.task_code);
+      entity = entity || text(originalRow.entity);
+      task = task || text(originalRow.task);
+      team = team || text(originalRow.team);
+      recipientId = originalRow.author_id ?? null;
       if (recipientId) {
         const authorUser = await admin.auth.admin.getUserById(recipientId);
         recipientEmail = authorUser.data?.user?.email ?? "";

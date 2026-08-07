@@ -109,14 +109,18 @@ const taskLineColumns = [
 ];
 
 export async function GET(request: Request) {
+  console.time("taskline:requireUser");
   const auth = await requireUser();
+  console.timeEnd("taskline:requireUser");
 
   if ("error" in auth) {
     return auth.error;
   }
 
   const admin = createAdminClient();
+  console.time("taskline:getOrganisationId");
   const organisation = await getOrganisationId(admin, auth.user);
+  console.timeEnd("taskline:getOrganisationId");
 
   if ("error" in organisation) {
     return organisation.error;
@@ -961,28 +965,45 @@ function indiaDateKey(dayOffset: number) {
 }
 
 async function loadTaskLineRecords(admin: ReturnType<typeof createAdminClient>, organisationId: string, access: AccessScope) {
+  console.time("taskline:loadRecords:count");
+  const countResult = await admin
+    .from("tasks")
+    .select("id", { count: "exact", head: true })
+    .eq("organisation_id", organisationId)
+    .eq("custom_values->>workline_module", moduleKey);
+  console.timeEnd("taskline:loadRecords:count");
+
+  if (countResult.error) {
+    return { data: null, error: countResult.error };
+  }
+
+  const total = countResult.count ?? 0;
+  const batchCount = Math.max(1, Math.ceil(total / fetchBatchSize));
+
+  console.time(`taskline:loadRecords:fetch(${total} rows, ${batchCount} batches)`);
+  const batchResults = await Promise.all(
+    Array.from({ length: batchCount }, (_, index) => {
+      const from = index * fetchBatchSize;
+      return admin
+        .from("tasks")
+        .select("id,custom_values")
+        .eq("organisation_id", organisationId)
+        .eq("custom_values->>workline_module", moduleKey)
+        .order("created_at", { ascending: true })
+        .range(from, from + fetchBatchSize - 1);
+    })
+  );
+  console.timeEnd(`taskline:loadRecords:fetch(${total} rows, ${batchCount} batches)`);
+
   const rows: TaskRecord[] = [];
-
-  for (let from = 0; ; from += fetchBatchSize) {
-    const to = from + fetchBatchSize - 1;
-    const { data, error } = await admin
-      .from("tasks")
-      .select("id,organisation_id,title,description,due_at,custom_values,created_by,created_at,updated_at")
-      .eq("organisation_id", organisationId)
-      .eq("custom_values->>workline_module", moduleKey)
-      .order("created_at", { ascending: true })
-      .range(from, to);
-
+  for (const { data, error } of batchResults) {
     if (error) {
       return { data: null, error };
     }
-
     rows.push(...((data ?? []) as TaskRecord[]).filter((record) => isTaskLineRecord(record) && canAccessRecord(record, access)));
-
-    if ((data ?? []).length < fetchBatchSize) {
-      return { data: rows, error: null };
-    }
   }
+
+  return { data: rows, error: null };
 }
 
 async function loadTaskLineRecordWindow(
