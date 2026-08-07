@@ -8,7 +8,7 @@ import { useEffect, useState } from "react";
 
 type NoteFile = { content: string; date?: string; id: string; title: string; updatedAt: string };
 type DashboardState = { calendarNotes: Record<string, string[]>; notes: NoteFile[] };
-type Thread = { count: number; entity: string; last_at: string; last_body: string; task: string; task_code: string; team: string };
+type Thread = { count: number; entity: string; last_at: string; last_body: string; messages: ChatMessage[]; task: string; task_code: string; team: string };
 type ChatMessage = { author_name?: string; body: string; created_at: string; id: string };
 
 const storageKey = "workline-partner-dashboard";
@@ -230,18 +230,20 @@ export function PartnerDashboard() {
     return Math.max(0, thread.count - (chatReads[thread.task_code] ?? 0));
   }
 
-  async function openChatThread(thread: Thread) {
+  function openChatThread(thread: Thread) {
     void loadTeamEmails();
-    setOpenChat({ code: thread.task_code, count: thread.count, entity: thread.entity, label: chatLabel(thread), loading: true, messages: [], task: thread.task, team: thread.team });
+    setOpenChat({
+      code: thread.task_code,
+      count: thread.count,
+      entity: thread.entity,
+      label: chatLabel(thread),
+      loading: false,
+      messages: Array.isArray(thread.messages) ? thread.messages : [],
+      task: thread.task,
+      team: thread.team
+    });
     setChatDraft("");
     setChatReads((current) => ({ ...current, [thread.task_code]: thread.count }));
-    try {
-      const response = await fetch(`/api/task-messages?code=${encodeURIComponent(thread.task_code)}`, { cache: "no-store" });
-      const result = await response.json();
-      setOpenChat((current) => (current && current.code === thread.task_code ? { ...current, loading: false, messages: Array.isArray(result?.messages) ? result.messages : [] } : current));
-    } catch {
-      setOpenChat((current) => (current ? { ...current, loading: false } : current));
-    }
   }
 
   async function sendChatMessage() {
@@ -304,7 +306,7 @@ export function PartnerDashboard() {
               const unread = unreadCount(thread);
               return (
                 <div className="flex items-center gap-3 py-2.5" key={thread.task_code}>
-                  <button className="flex min-w-0 flex-1 items-center gap-3 text-left" onClick={() => void openChatThread(thread)} type="button">
+                  <button className="flex min-w-0 flex-1 items-center gap-3 text-left" onClick={() => openChatThread(thread)} type="button">
                     <span className={`flex size-10 shrink-0 items-center justify-center rounded-full ${unread > 0 ? "bg-emerald-100 text-emerald-700" : "bg-navy-100 text-navy-700"}`}>
                       <MessagesSquare className="size-5" />
                     </span>
@@ -333,7 +335,7 @@ export function PartnerDashboard() {
 
       {openChat ? (
         <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/50 px-4 py-6" onClick={() => setOpenChat(null)}>
-          <div className="flex max-h-[80vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
+          <div className="wl-pop-in flex max-h-[80vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
             <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
               <div className="min-w-0">
                 <p className="text-xs font-black uppercase tracking-[0.14em] text-navy-700">Task chat</p>

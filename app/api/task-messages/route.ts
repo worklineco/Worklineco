@@ -42,7 +42,7 @@ export async function GET(request: Request) {
     const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
     let query = admin
       .from("task_messages")
-      .select("task_code,team,entity,task,author_id,recipient_id,is_private,body,created_at")
+      .select("id,task_code,team,entity,task,author_id,author_name,recipient_id,is_private,body,created_at")
       .eq("organisation_id", organisation.organisationId)
       .gte("created_at", since)
       .order("created_at", { ascending: true });
@@ -53,7 +53,7 @@ export async function GET(request: Request) {
     if (error) {
       return errorResponse(error);
     }
-    const byCode = new Map<string, { count: number; entity: string; last_at: string; last_body: string; task: string; task_code: string; team: string }>();
+    const byCode = new Map<string, { count: number; entity: string; last_at: string; last_body: string; messages: { author_name: string; body: string; created_at: string; id: string }[]; task: string; task_code: string; team: string }>();
     for (const message of data ?? []) {
       if (message.is_private && message.author_id !== auth.user.id && message.recipient_id !== auth.user.id) {
         continue;
@@ -62,10 +62,16 @@ export async function GET(request: Request) {
       if (!key) {
         continue;
       }
-      const current = byCode.get(key) ?? { count: 0, entity: "", last_at: "", last_body: "", task: "", task_code: key, team: "" };
+      const current = byCode.get(key) ?? { count: 0, entity: "", last_at: "", last_body: "", messages: [], task: "", task_code: key, team: "" };
       current.count += 1;
       current.last_body = String(message.body ?? "");
       current.last_at = String(message.created_at ?? "");
+      current.messages.push({
+        author_name: String(message.author_name ?? ""),
+        body: String(message.body ?? ""),
+        created_at: String(message.created_at ?? ""),
+        id: String(message.id ?? "")
+      });
       if (message.entity) current.entity = String(message.entity);
       if (message.task) current.task = String(message.task);
       if (message.team) current.team = String(message.team);
