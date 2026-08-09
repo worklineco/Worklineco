@@ -2,6 +2,7 @@ import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { createClient, type User } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
+import { isViewOnlyRegisterUser, viewOnlyRegisterResponse } from "@/lib/register-access";
 
 type CookieToSet = { name: string; options: CookieOptions; value: string };
 type RegisterRow = Record<string, string | number>;
@@ -57,6 +58,10 @@ export async function POST(request: Request) {
 
   if ("error" in auth) {
     return auth.error;
+  }
+
+  if (isViewOnlyRegisterUser(auth.user)) {
+    return viewOnlyRegisterResponse("Client Records");
   }
 
   const payload = (await request.json()) as {
