@@ -188,7 +188,10 @@ export function ClientRecordsRegister() {
       return;
     }
 
-    setCached("client-records", { auditLogs: result.auditLogs, rows: result.rows, trashRows: result.trashRows });
+    // Cache rows only (no audit logs): audit history blobs regularly pushed
+    // large registers over the localStorage quota, which silently disabled
+    // the instant-render cache. Rows are what the table needs on first paint.
+    setCached("client-records", { rows: result.rows, trashRows: result.trashRows });
     setRows(result.rows ?? []);
     setTrashRows(result.trashRows ?? []);
     setAuditLogs(result.auditLogs ?? []);
