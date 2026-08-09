@@ -176,7 +176,7 @@ export function LoginForm() {
       }
 
       if (result.data.session) {
-        const defaultPath = getDefaultSignedInPath(result.data.user?.user_metadata?.role);
+        const defaultPath = getDefaultSignedInPath();
         window.location.href = getRedirectPath(defaultPath);
         return;
       }
@@ -644,8 +644,8 @@ async function completeSignup({
   return { ok: true as const };
 }
 
-function getDefaultSignedInPath(role: unknown) {
-  return String(role ?? "").trim().toLowerCase() === "partner" ? "/partner-dashboard" : "/";
+function getDefaultSignedInPath() {
+  return "/partner-dashboard";
 }
 
 function getRedirectPath(defaultPath: string) {

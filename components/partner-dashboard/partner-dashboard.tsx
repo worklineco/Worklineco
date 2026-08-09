@@ -3,6 +3,7 @@
 import { getCurrentUser } from "@/lib/supabase/session";
 import { MessagesSquare, NotebookPen, Pencil, Plus, Send, Trash2, X } from "lucide-react";
 import { MonthCalendar, type CalendarEvent } from "@/components/home/month-calendar";
+import { TaskNotificationBell } from "@/components/home/task-notification-bell";
 import { getCached, setCached } from "@/lib/data-cache";
 import { useEffect, useState } from "react";
 
@@ -289,9 +290,12 @@ export function PartnerDashboard() {
 
   return (
     <div className="mt-4 grid gap-4">
-      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-        <h2 className="text-2xl font-black text-slate-950">{profileName}&rsquo;s Dashboard</h2>
-        <p className="mt-1 text-sm font-semibold text-slate-500">{profileEmail}</p>
+      <section className="flex items-start justify-between gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="min-w-0">
+          <h2 className="text-2xl font-black text-slate-950">{profileName}&rsquo;s Dashboard</h2>
+          <p className="mt-1 truncate text-sm font-semibold text-slate-500">{profileEmail}</p>
+        </div>
+        <TaskNotificationBell />
       </section>
 
       <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
