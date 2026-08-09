@@ -1,5 +1,6 @@
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { createClient, type User } from "@supabase/supabase-js";
+import { createTransport } from "nodemailer";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
@@ -471,6 +472,14 @@ async function handlePost(request: Request) {
         auditValue(existing.data as TaskRecord),
         auditValue(saved.data as TaskRecord)
       );
+
+      // Allocation email: when the Resource changes, notify the newly
+      // allocated resource (and only the resource).
+      const previousResource = text((existing.data as TaskRecord).custom_values?.taskline_data?.resource);
+      if (resourceAllocationChanged(previousResource, text(cleaned.resource))) {
+        await sendResourceAllocationMail(admin, organisation.organisationId, saved.data as TaskRecord);
+      }
+
       return NextResponse.json({ record: formatRecord(saved.data as TaskRecord) });
     } else if (existing.data) {
       return NextResponse.json({ error: "You can only update TaskLine rows for your own team." }, { status: 403 });
@@ -508,6 +517,13 @@ async function handlePost(request: Request) {
   }
 
   await writeAuditLog(admin, organisation.organisationId, auth.user.id, "taskline.create", null, auditValue(saved.data as TaskRecord));
+
+  // Allocation email: a brand-new row created with a Resource selected
+  // notifies that resource straight away.
+  if (text(cleaned.resource)) {
+    await sendResourceAllocationMail(admin, organisation.organisationId, saved.data as TaskRecord);
+  }
+
   return NextResponse.json({ record: formatRecord(saved.data as TaskRecord) });
 }
 
@@ -1431,4 +1447,282 @@ function normalizeTeam(value: unknown) {
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Unknown error";
+}
+
+// ---------------------------------------------------------------------------
+// Resource allocation email
+// ---------------------------------------------------------------------------
+
+const allocationAppUrl = (process.env.NEXT_PUBLIC_SITE_URL ?? process.env.NEXT_PUBLIC_APP_URL ?? "https://www.worklineco.com").replace(/\/+$/, "");
+
+function resourceAllocationChanged(previous: string, next: string) {
+  if (!next.trim()) {
+    return false;
+  }
+  return allocationNameList(previous) !== allocationNameList(next);
+}
+
+function allocationNameList(value: string) {
+  return allocationSplitNames(value).sort().join("|");
+}
+
+function allocationSplitNames(value: unknown) {
+  return text(value)
+    .split(/[,;/\n]+/)
+    .map(allocationNormalizeName)
+    .filter(Boolean);
+}
+
+function allocationNormalizeName(value: unknown) {
+  const honorifics = new Set(["ca", "cs", "cma", "adv", "advocate", "mr", "mrs", "ms", "dr", "shri", "smt", "sh"]);
+  const parts = text(value)
+    .toLowerCase()
+    .replace(/[.,]/g, " ")
+    .split(/\s+/)
+    .filter(Boolean);
+
+  while (parts.length > 1 && honorifics.has(parts[0])) {
+    parts.shift();
+  }
+
+  return parts.join(" ");
+}
+
+function allocationIsEmail(value: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+}
+
+function allocationSmtpConfiguration() {
+  const host = process.env.SMTP_HOST;
+  const port = Number(process.env.SMTP_PORT ?? 465);
+  const from = process.env.TASK_REMINDER_FROM_EMAIL ?? process.env.OTP_FROM_EMAIL ?? "";
+  const userMatch = from.match(/<([^>]+)>/);
+  const user = process.env.SMTP_USER ?? userMatch?.[1]?.trim() ?? (from.includes("@") ? from.trim() : undefined);
+  const password = process.env.SMTP_APP_PASSWORD?.replace(/\s+/g, "");
+
+  if (!host || !user || !password || !Number.isFinite(port)) {
+    return { error: "Task allocation email is not configured." as const };
+  }
+
+  return {
+    from: from || `WorkLine Co <${user}>`,
+    host,
+    password,
+    port,
+    user
+  };
+}
+
+function allocationEscapeHtml(value: string) {
+  return value.replace(/[&<>"']/g, (character) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#039;"
+  })[character] ?? character);
+}
+
+async function sendResourceAllocationMail(
+  admin: ReturnType<typeof createAdminClient>,
+  organisationId: string,
+  record: TaskRecord
+) {
+  try {
+    const row = record.custom_values?.taskline_data ?? {};
+    const resourceNames = allocationSplitNames(row.resource);
+
+    if (!resourceNames.length) {
+      return;
+    }
+
+    const smtp = allocationSmtpConfiguration();
+
+    if ("error" in smtp) {
+      console.error("TaskLine allocation email skipped:", smtp.error);
+      return;
+    }
+
+    // Recipient emails come from the Team Members tab data: organisation
+    // members joined with their auth profile (metadata name + login email).
+    const members = await admin
+      .from("users")
+      .select("id,email,full_name,status")
+      .eq("organisation_id", organisationId)
+      .limit(2000);
+
+    if (members.error) {
+      console.error("TaskLine allocation email: could not load members:", members.error.message);
+      return;
+    }
+
+    const authUsersById = new Map<string, User>();
+    for (let page = 1; page <= 20; page += 1) {
+      const listed = await admin.auth.admin.listUsers({ page, perPage: 1000 });
+      if (listed.error) {
+        console.error("TaskLine allocation email: could not list auth users:", listed.error.message);
+        break;
+      }
+      for (const user of listed.data.users) {
+        authUsersById.set(user.id, user);
+      }
+      if (listed.data.users.length < 1000) {
+        break;
+      }
+    }
+
+    const recipients = new Set<string>();
+
+    for (const member of members.data ?? []) {
+      if (text(member.status).toLowerCase() === "inactive") {
+        continue;
+      }
+
+      const user = authUsersById.get(member.id);
+      const name = allocationNormalizeName(
+        user?.user_metadata?.full_name ?? user?.user_metadata?.name ?? member.full_name ?? user?.email
+      );
+
+      if (name && resourceNames.includes(name)) {
+        const email = text(user?.email || member.email).toLowerCase();
+
+        if (allocationIsEmail(email)) {
+          recipients.add(email);
+        }
+      }
+    }
+
+    if (!recipients.size) {
+      console.warn("TaskLine allocation email: no member email found for resource:", text(row.resource));
+      return;
+    }
+
+    const transporter = createTransport({
+      auth: {
+        pass: smtp.password,
+        user: smtp.user
+      },
+      host: smtp.host,
+      port: smtp.port,
+      secure: smtp.port === 465
+    });
+
+    const entity = text(row.entity) || "TaskLine task";
+    const taskName = text(row.task) || "Task";
+    const dueDate = text(row.due_date) || "Not set";
+    const team = text(row.team) || "-";
+    const stage = text(row.stage) || "-";
+    const period = text(row.period) || "-";
+    const allocatedBy = text(row.name) || "-";
+    const subject = `New task allocated: ${entity} — ${taskName}`;
+    const bodyText = [
+      "NEW TASK ALLOCATED TO YOU",
+      "",
+      entity,
+      `Task: ${taskName}`,
+      `Team: ${team}`,
+      `Stage: ${stage}`,
+      `Period: ${period}`,
+      `Manager: ${allocatedBy}`,
+      `Due date: ${dueDate}`,
+      "",
+      `Open TaskLine: ${allocationAppUrl}/taskline`
+    ].join("\n");
+    const safeEntity = allocationEscapeHtml(entity);
+    const safeTask = allocationEscapeHtml(taskName);
+    const safeDueDate = allocationEscapeHtml(dueDate);
+    const safeTeam = allocationEscapeHtml(team);
+    const safeStage = allocationEscapeHtml(stage);
+    const safePeriod = allocationEscapeHtml(period);
+    const safeAllocatedBy = allocationEscapeHtml(allocatedBy);
+    const bodyHtml = `<!doctype html>
+<html>
+  <body style="margin:0;background:#f4f6fa;font-family:Arial,Helvetica,sans-serif;color:#0f172a;">
+    <div style="display:none;max-height:0;overflow:hidden;">${safeEntity} has been allocated to you.</div>
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f4f6fa;padding:28px 12px;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:520px;background:#ffffff;border:1px solid #e2e8f0;border-radius:18px;overflow:hidden;">
+            <tr>
+              <td style="padding:24px;">
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+                  <tr>
+                    <td width="52" valign="top">
+                      <div style="width:44px;height:44px;border-radius:14px;background:#dbeafe;color:#1d4ed8;text-align:center;line-height:44px;font-size:21px;">&#128203;</div>
+                    </td>
+                    <td style="padding-left:14px;">
+                      <div style="font-size:12px;line-height:18px;font-weight:700;letter-spacing:1.2px;color:#1d4ed8;">NEW TASK ALLOCATED TO YOU</div>
+                      <div style="margin-top:6px;font-size:17px;line-height:24px;font-weight:700;color:#172033;">${safeEntity}</div>
+                      <table role="presentation" cellspacing="0" cellpadding="0" style="margin-top:12px;font-size:14px;line-height:22px;">
+                        <tr>
+                          <td style="width:78px;color:#94a3b8;font-weight:600;">Task</td>
+                          <td style="color:#475569;font-weight:600;">${safeTask}</td>
+                        </tr>
+                        <tr>
+                          <td style="color:#94a3b8;font-weight:600;">Team</td>
+                          <td style="color:#475569;font-weight:600;">${safeTeam}</td>
+                        </tr>
+                        <tr>
+                          <td style="color:#94a3b8;font-weight:600;">Stage</td>
+                          <td style="color:#475569;font-weight:600;">${safeStage}</td>
+                        </tr>
+                        <tr>
+                          <td style="color:#94a3b8;font-weight:600;">Period</td>
+                          <td style="color:#475569;font-weight:600;">${safePeriod}</td>
+                        </tr>
+                        <tr>
+                          <td style="color:#94a3b8;font-weight:600;">Manager</td>
+                          <td style="color:#475569;font-weight:600;">${safeAllocatedBy}</td>
+                        </tr>
+                        <tr>
+                          <td style="color:#94a3b8;font-weight:600;">Due date</td>
+                          <td style="color:#475569;font-weight:600;">${safeDueDate}</td>
+                        </tr>
+                      </table>
+                    </td>
+                  </tr>
+                </table>
+                <div style="margin-top:22px;text-align:center;">
+                  <a href="${allocationEscapeHtml(`${allocationAppUrl}/taskline`)}" style="display:inline-block;border-radius:10px;background:#1e3168;color:#ffffff;text-decoration:none;font-size:14px;font-weight:700;padding:12px 22px;">Open TaskLine</a>
+                </div>
+              </td>
+            </tr>
+          </table>
+          <div style="padding-top:12px;font-size:11px;line-height:18px;color:#94a3b8;">Automated notification from WorkLine Co</div>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>`;
+
+    for (const recipient of recipients) {
+      await transporter.sendMail({
+        from: smtp.from,
+        html: bodyHtml,
+        subject,
+        text: bodyText,
+        to: recipient
+      });
+
+      const logged = await admin.from("audit_logs").insert({
+        action: "taskline.allocation_email_sent",
+        actor_user_id: null,
+        entity_id: record.id,
+        entity_type: "taskline_email_allocation",
+        new_value: {
+          recipient,
+          resource: text(row.resource),
+          sent_at: new Date().toISOString()
+        },
+        old_value: null,
+        organisation_id: organisationId
+      });
+
+      if (logged.error) {
+        console.error("Could not record TaskLine allocation email:", logged.error.message);
+      }
+    }
+  } catch (error) {
+    console.error("TaskLine allocation email failed:", error);
+  }
 }
