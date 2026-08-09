@@ -1,19 +1,29 @@
 "use client";
 
-import { ArrowDown, ArrowUp, ArrowUpDown, Check, Mail, Pencil, RefreshCw, UsersRound, X } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, Check, Mail, Pencil, RefreshCw, ShieldCheck, UsersRound, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 type TeamMember = {
   designation: string;
   email: string;
   id: string;
+  is_admin?: boolean;
   joining_date: string;
   leaving_date: string;
   name: string;
   team: string;
 };
+type AdminRoleArticle = {
+  email: string;
+  id: string;
+  isAdmin: boolean;
+  name: string;
+  team: string;
+};
 
 const editorRoles = ["partner", "others"];
+// Only Senior Managers and Partners can open the Admin Role tab.
+const adminRoleGranters = ["senior manager", "partner"];
 
 type SortKey = "serial" | "name" | "team" | "email" | "designation" | "joining_date" | "leaving_date";
 type SortDirection = "asc" | "desc";
@@ -33,6 +43,7 @@ export function TeamsPanel() {
   const [draft, setDraft] = useState<EditDraft>({ designation: "", joining_date: "", leaving_date: "", name: "", team: "" });
   const [isSaving, setIsSaving] = useState(false);
   const [myRole, setMyRole] = useState("");
+  const [isAdminRoleOpen, setIsAdminRoleOpen] = useState(false);
 
   async function loadMembers() {
     setIsLoading(true);
@@ -137,6 +148,7 @@ export function TeamsPanel() {
   }
 
   const canEdit = editorRoles.includes(myRole.toLowerCase());
+  const canManageAdminRole = adminRoleGranters.includes(myRole.toLowerCase());
 
   return (
     <section className="workline-frame mt-5 rounded-[26px] p-5 md:p-6" id="teams">
@@ -148,15 +160,28 @@ export function TeamsPanel() {
           </div>
           <h2 className="mt-3 text-2xl font-black text-slate-950">Team Members</h2>
         </div>
-        <button
-          className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-navy-700 px-4 text-xs font-black uppercase text-white transition hover:bg-navy-800 disabled:bg-slate-500"
-          disabled={isLoading}
-          onClick={loadMembers}
-          type="button"
-        >
-          <RefreshCw className={`size-4 ${isLoading ? "animate-spin" : ""}`} />
-          Refresh
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          {canManageAdminRole ? (
+            <button
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-navy-200 bg-white px-4 text-xs font-black uppercase text-navy-700 transition hover:bg-navy-50 disabled:opacity-50"
+              disabled={isLoading}
+              onClick={() => setIsAdminRoleOpen(true)}
+              type="button"
+            >
+              <ShieldCheck className="size-4" />
+              Admin Role
+            </button>
+          ) : null}
+          <button
+            className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-navy-700 px-4 text-xs font-black uppercase text-white transition hover:bg-navy-800 disabled:bg-slate-500"
+            disabled={isLoading}
+            onClick={loadMembers}
+            type="button"
+          >
+            <RefreshCw className={`size-4 ${isLoading ? "animate-spin" : ""}`} />
+            Refresh
+          </button>
+        </div>
       </div>
 
       {message ? <p className="mt-3 text-sm font-bold text-red-600">{message}</p> : null}
@@ -220,7 +245,15 @@ export function TeamsPanel() {
                       ) : null}
                     </select>
                   ) : (
-                    <p className="truncate font-bold text-slate-700">{member.designation}</p>
+                    <p className="flex min-w-0 items-center gap-1.5 font-bold text-slate-700">
+                      <span className="truncate">{member.designation}</span>
+                      {member.is_admin ? (
+                        <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-navy-100 px-2 py-0.5 text-[10px] font-black uppercase text-navy-800">
+                          <ShieldCheck className="size-3" />
+                          Admin
+                        </span>
+                      ) : null}
+                    </p>
                   )}
                 </div>
 
@@ -279,7 +312,175 @@ export function TeamsPanel() {
           })}
         </div>
       </div>
+
+      {isAdminRoleOpen ? (
+        <AdminRolePanel
+          onClose={() => setIsAdminRoleOpen(false)}
+          onSaved={() => {
+            setIsAdminRoleOpen(false);
+            void loadMembers();
+          }}
+        />
+      ) : null}
     </section>
+  );
+}
+
+function AdminRolePanel({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
+  const [articles, setArticles] = useState<AdminRoleArticle[]>([]);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const [message, setMessage] = useState("");
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const response = await fetch("/api/teams/admin-role", { cache: "no-store" });
+        const result = (await response.json().catch(() => ({}))) as { articles?: AdminRoleArticle[]; error?: string };
+
+        if (cancelled) {
+          return;
+        }
+        if (!response.ok) {
+          setMessage(result.error ?? "Could not load Article Assistants.");
+          return;
+        }
+
+        const list = result.articles ?? [];
+        setArticles(list);
+        setSelectedIds(new Set(list.filter((article) => article.isAdmin).map((article) => article.id)));
+      } catch {
+        if (!cancelled) {
+          setMessage("Could not load Article Assistants.");
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoading(false);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  function toggle(id: string) {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }
+
+  async function save() {
+    setIsSaving(true);
+    setMessage("");
+
+    try {
+      const response = await fetch("/api/teams/admin-role", {
+        body: JSON.stringify({ adminIds: Array.from(selectedIds) }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST"
+      });
+      const result = (await response.json().catch(() => ({}))) as { error?: string; granted?: number; revoked?: number };
+
+      if (!response.ok) {
+        setMessage(result.error ?? "Could not save Admin roles.");
+        return;
+      }
+
+      onSaved();
+    } catch {
+      setMessage("Could not save Admin roles.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-navy-700/50 px-4 py-6">
+      <div className="flex max-h-[85vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+        <div className="flex items-start justify-between gap-3 border-b border-slate-200 px-5 py-4">
+          <div>
+            <p className="inline-flex items-center gap-2 text-xs font-black uppercase tracking-wide text-navy-700">
+              <ShieldCheck className="size-4" />
+              Admin Role
+            </p>
+            <h3 className="mt-1 text-xl font-black text-slate-950">Grant editing rights</h3>
+            <p className="mt-1 text-xs font-bold leading-relaxed text-slate-500">
+              Ticked Article Assistants get the same editing rights as a Manager on TaskLine, GSTAT, and Client Records. Billing stays restricted. Unticking removes the Admin role.
+            </p>
+          </div>
+          <button
+            aria-label="Close Admin Role"
+            className="inline-flex size-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 text-slate-600 transition hover:bg-slate-50"
+            onClick={onClose}
+            type="button"
+          >
+            <X className="size-4" />
+          </button>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+          {message ? <p className="mb-3 text-sm font-bold text-red-600">{message}</p> : null}
+          {isLoading ? <p className="py-6 text-center text-sm font-bold text-slate-500">Loading Article Assistants...</p> : null}
+          {!isLoading && !articles.length && !message ? (
+            <p className="py-6 text-center text-sm font-bold text-slate-500">No Article Assistants found in your organisation.</p>
+          ) : null}
+          <div className="space-y-2">
+            {articles.map((article) => (
+              <label
+                className="flex cursor-pointer items-center gap-3 rounded-xl border border-slate-200 px-3 py-2.5 transition hover:bg-slate-50"
+                key={article.id}
+              >
+                <input
+                  checked={selectedIds.has(article.id)}
+                  className="size-4 accent-navy-700"
+                  onChange={() => toggle(article.id)}
+                  type="checkbox"
+                />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-black text-slate-950">{article.name}</span>
+                  <span className="block truncate text-xs font-bold text-slate-500">
+                    {[article.team || null, article.email || null].filter(Boolean).join(" · ")}
+                  </span>
+                </span>
+                {article.isAdmin ? (
+                  <span className="shrink-0 rounded-full bg-navy-100 px-2 py-0.5 text-[10px] font-black uppercase text-navy-800">Admin</span>
+                ) : null}
+              </label>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex justify-end gap-2 border-t border-slate-200 px-5 py-4">
+          <button
+            className="inline-flex h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-xs font-black uppercase text-slate-700 transition hover:bg-slate-50"
+            onClick={onClose}
+            type="button"
+          >
+            Cancel
+          </button>
+          <button
+            className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-navy-700 px-4 text-xs font-black uppercase text-white transition hover:bg-navy-800 disabled:opacity-50"
+            disabled={isLoading || isSaving}
+            onClick={() => void save()}
+            type="button"
+          >
+            <Check className="size-4" />
+            {isSaving ? "Saving..." : "Save Admin Roles"}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
