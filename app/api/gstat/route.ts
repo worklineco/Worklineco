@@ -2,6 +2,7 @@ import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
+import { isViewOnlyRegisterUser, viewOnlyRegisterResponse } from "@/lib/register-access";
 
 type CookieToSet = { name: string; options: CookieOptions; value: string };
 type AppealRow = {
@@ -57,6 +58,10 @@ export async function POST(request: Request) {
 
   if ("error" in auth) {
     return auth.error;
+  }
+
+  if (isViewOnlyRegisterUser(auth.user)) {
+    return viewOnlyRegisterResponse("GSTAT");
   }
 
   const {
@@ -442,6 +447,10 @@ export async function PATCH(request: Request) {
 
   if ("error" in auth) {
     return auth.error;
+  }
+
+  if (isViewOnlyRegisterUser(auth.user)) {
+    return viewOnlyRegisterResponse("GSTAT");
   }
 
   const { field, id, row, rowData, value } = (await request.json()) as {
