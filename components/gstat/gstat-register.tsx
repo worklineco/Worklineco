@@ -4,6 +4,7 @@ import { downloadGstatPoa } from "@/lib/gstat/poa-document";
 import { getCurrentUser } from "@/lib/supabase/session";
 import { getCached, setCached } from "@/lib/data-cache";
 import { useRegisterEditAccess, viewOnlyRegisterMessage } from "@/lib/use-register-access";
+import { ViewOnlyAccessDialog } from "@/components/shared/view-only-access-dialog";
 import { ArrowDown, ArrowLeft, ArrowUp, Check, ChevronDown, Pin, ChevronUp, Download, Expand, ExternalLink, FileSpreadsheet, FileText, Filter, History, Menu, Pencil, Plus, ReceiptText, Search, Settings2, Trash2, Upload, X } from "lucide-react";
 import Link from "next/link";
 import { ChangeEvent, memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, useTransition } from "react";
@@ -302,7 +303,8 @@ const dateFields = new Set(["Next Hearing Date", "Due Date"]);
 const initialRows = createEmptyRows(12);
 
 export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }) {
-  const { canEditRegister, canEditRegisterRef } = useRegisterEditAccess();
+  const { canEditRegisterRef } = useRegisterEditAccess();
+  const [isViewOnlyDialogOpen, setIsViewOnlyDialogOpen] = useState(false);
   const [rows, setRows] = useState<AppealRow[]>(initialRows);
   const [columnValueFilters, setColumnValueFilters] = useState<ColumnValueFilters>({});
   const [columnTextFilters, setColumnTextFilters] = useState<ColumnTextFilters>({});
@@ -1281,6 +1283,11 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
   }
 
   function openEditor(rowIndex: number, row = rows[rowIndex]) {
+    if (!canEditRegisterRef.current) {
+      setIsViewOnlyDialogOpen(true);
+      return;
+    }
+
     if (!row) {
       return;
     }
@@ -1551,7 +1558,6 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                   </span>
                 ) : null}
               </div>
-              {!canEditRegister ? <p className="mt-1 text-sm font-bold text-amber-700">{viewOnlyRegisterMessage}</p> : null}
               {message ? <p className="mt-1 text-sm font-bold text-emerald-700">{message}</p> : null}
               {isLoading ? <p className="mt-1 text-sm font-bold text-slate-500">Loading saved GSTAT data...</p> : null}
               {hasActiveFilters && (
@@ -2222,6 +2228,11 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
           </aside>
         </div>
       ) : null}
+      <ViewOnlyAccessDialog
+        onClose={() => setIsViewOnlyDialogOpen(false)}
+        open={isViewOnlyDialogOpen}
+      />
+
       {billingDraft ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-navy-700/40 p-4">
           <button

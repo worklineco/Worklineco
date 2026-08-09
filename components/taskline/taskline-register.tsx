@@ -8,6 +8,7 @@ import { createPortal } from "react-dom";
 import * as XLSX from "xlsx-js-style";
 import { clearCached, getCached, setCached } from "@/lib/data-cache";
 import { useRegisterEditAccess, viewOnlyRegisterMessage } from "@/lib/use-register-access";
+import { ViewOnlyAccessDialog } from "@/components/shared/view-only-access-dialog";
 
 type TaskLineColumn = {
   key: string;
@@ -184,7 +185,8 @@ function isPartnerDesignation(value: string) {
 const defaultRows = Array.from({ length: 8 }, (_, index) => createEmptyRow(`initial-${index + 1}`));
 
 export function TaskLineRegister() {
-  const { canEditRegister, canEditRegisterRef } = useRegisterEditAccess();
+  const { canEditRegisterRef } = useRegisterEditAccess();
+  const [isViewOnlyDialogOpen, setIsViewOnlyDialogOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
   const [sortState, setSortState] = useState<{ dir: "asc" | "desc"; key: string } | null>(null);
@@ -997,7 +999,7 @@ export function TaskLineRegister() {
 
   function openEditForm(row: TaskLineRow) {
     if (!canEditRegisterRef.current) {
-      setMessage(viewOnlyRegisterMessage);
+      setIsViewOnlyDialogOpen(true);
       return;
     }
     loadEditorOptions();
@@ -1739,10 +1741,6 @@ export function TaskLineRegister() {
         type="file"
       />
 
-      {!canEditRegister ? (
-        <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-bold text-amber-800">{viewOnlyRegisterMessage}</p>
-      ) : null}
-
       {message ? (
         <p className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-bold text-emerald-900">{message}</p>
       ) : null}
@@ -2148,6 +2146,11 @@ export function TaskLineRegister() {
           </form>
         </div>
       ) : null}
+      <ViewOnlyAccessDialog
+        onClose={() => setIsViewOnlyDialogOpen(false)}
+        open={isViewOnlyDialogOpen}
+      />
+
       {isMasterOpen ? (
         masterKind === "stage" ? (
           <TaskLineMasterPanel
