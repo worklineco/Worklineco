@@ -7,6 +7,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import * as XLSX from "xlsx-js-style";
 import { clearCached, getCached, setCached } from "@/lib/data-cache";
+import { useRegisterEditAccess, viewOnlyRegisterMessage } from "@/lib/use-register-access";
 
 type TaskLineColumn = {
   key: string;
@@ -183,6 +184,7 @@ function isPartnerDesignation(value: string) {
 const defaultRows = Array.from({ length: 8 }, (_, index) => createEmptyRow(`initial-${index + 1}`));
 
 export function TaskLineRegister() {
+  const { canEditRegister, canEditRegisterRef } = useRegisterEditAccess();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
   const [sortState, setSortState] = useState<{ dir: "asc" | "desc"; key: string } | null>(null);
@@ -978,6 +980,10 @@ export function TaskLineRegister() {
   }
 
   function addRow() {
+    if (!canEditRegisterRef.current) {
+      setMessage(viewOnlyRegisterMessage);
+      return;
+    }
     loadEditorOptions();
     setEditingRowId(null);
     const draft = createEmptyRow(`draft-${crypto.randomUUID()}`);
@@ -990,6 +996,10 @@ export function TaskLineRegister() {
   }
 
   function openEditForm(row: TaskLineRow) {
+    if (!canEditRegisterRef.current) {
+      setMessage(viewOnlyRegisterMessage);
+      return;
+    }
     loadEditorOptions();
     setEditingRowId(row.__id);
     setFormDraft({ ...row });
@@ -1071,6 +1081,10 @@ export function TaskLineRegister() {
   }
 
   const updateRow = useCallback((rowId: string, key: string, value: string) => {
+    if (!canEditRegisterRef.current) {
+      setMessage(viewOnlyRegisterMessage);
+      return;
+    }
     const currentRows = rowsRef.current;
     const existing = currentRows.find((item) => item.__id === rowId);
     const oldValue = existing?.[key] ?? "";
@@ -1367,6 +1381,10 @@ export function TaskLineRegister() {
   }
 
   async function importWorkbook(file: File) {
+    if (!canEditRegisterRef.current) {
+      setMessage(viewOnlyRegisterMessage);
+      return;
+    }
     setMessage(`Importing ${file.name}...`);
 
     try {
@@ -1720,6 +1738,10 @@ export function TaskLineRegister() {
         ref={fileInputRef}
         type="file"
       />
+
+      {!canEditRegister ? (
+        <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-bold text-amber-800">{viewOnlyRegisterMessage}</p>
+      ) : null}
 
       {message ? (
         <p className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-bold text-emerald-900">{message}</p>

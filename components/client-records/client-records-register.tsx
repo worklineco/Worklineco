@@ -22,6 +22,7 @@ import type { ComponentType } from "react";
 import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { getCached, setCached } from "@/lib/data-cache";
+import { useRegisterEditAccess, viewOnlyRegisterMessage } from "@/lib/use-register-access";
 import * as XLSX from "xlsx-js-style";
 
 type RegisterRow = Record<string, string | number>;
@@ -83,6 +84,7 @@ const buttonClass =
   "inline-flex h-11 items-center justify-center gap-2 rounded-2xl bg-white px-4 text-sm font-black text-slate-800 ring-1 ring-slate-200 transition hover:bg-slate-50";
 
 export function ClientRecordsRegister() {
+  const { canEditRegister, canEditRegisterRef } = useRegisterEditAccess();
   const [rows, setRows] = useState<RegisterRow[]>([]);
   const [trashRows, setTrashRows] = useState<RegisterRow[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
@@ -201,6 +203,11 @@ export function ClientRecordsRegister() {
   }
 
   async function saveAction(body: Record<string, unknown>, successMessage: string | ((result: SaveActionResult) => string)) {
+    if (!canEditRegisterRef.current) {
+      setMessage(viewOnlyRegisterMessage);
+      return false;
+    }
+
     const response = await fetch("/api/client-records/managed", {
       body: JSON.stringify(body),
       headers: { "Content-Type": "application/json" },
@@ -540,6 +547,12 @@ export function ClientRecordsRegister() {
         </div>
       </div>
 
+
+      {!canEditRegister ? (
+        <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-bold text-amber-800">
+          {viewOnlyRegisterMessage}
+        </p>
+      ) : null}
 
       {message ? (
         <p className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-bold text-emerald-900">
