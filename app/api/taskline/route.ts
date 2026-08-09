@@ -1,6 +1,7 @@
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { createClient, type User } from "@supabase/supabase-js";
 import { createTransport } from "nodemailer";
+import { isViewOnlyRegisterUser, viewOnlyRegisterResponse } from "@/lib/register-access";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
@@ -398,6 +399,10 @@ async function handlePost(request: Request) {
     return auth.error;
   }
 
+  if (isViewOnlyRegisterUser(auth.user)) {
+    return viewOnlyRegisterResponse("TaskLine");
+  }
+
   const payload = (await request.json()) as {
     action?: "bulk_delete" | "import" | "save";
     importRows?: TaskLineImportRow[];
@@ -532,6 +537,10 @@ export async function DELETE(request: Request) {
 
   if ("error" in auth) {
     return auth.error;
+  }
+
+  if (isViewOnlyRegisterUser(auth.user)) {
+    return viewOnlyRegisterResponse("TaskLine");
   }
 
   const id = new URL(request.url).searchParams.get("id");
