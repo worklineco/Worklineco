@@ -1,3 +1,4 @@
+import { getTrustedPartnerApprover } from "@/lib/auth/trusted-partners";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { createHmac, randomInt } from "node:crypto";
@@ -8,18 +9,54 @@ const otpTtlMs = 10 * 60 * 1000;
 const allowedPurposes = new Set(["password-reset", "signup-email", "team"]);
 
 export async function POST(request: Request) {
-  const { email, label, purpose } = (await request.json()) as {
+  const { approverId, email, label, purpose } = (await request.json()) as {
+    approverId?: string;
     email?: string;
     label?: string;
     purpose?: string;
   };
 
-  if (!email || !purpose) {
-    return NextResponse.json({ error: "Email and purpose are required." }, { status: 400 });
+  if (!purpose) {
+    return NextResponse.json({ error: "OTP purpose is required." }, { status: 400 });
   }
 
   if (!allowedPurposes.has(purpose)) {
     return NextResponse.json({ error: "Invalid OTP purpose." }, { status: 400 });
+  }
+
+  let resolvedEmail = email?.trim().toLowerCase() ?? "";
+  let resolvedLabel = label;
+  let verifiedApproverId: string | undefined;
+
+  if (purpose === "team" && approverId) {
+    try {
+      const approver = await getTrustedPartnerApprover(approverId);
+
+      if (!approver) {
+        return NextResponse.json(
+          { error: "The selected partner is not an approved WorkLine partner." },
+          { status: 400 }
+        );
+      }
+
+      resolvedEmail = approver.email;
+      resolvedLabel = approver.name;
+      verifiedApproverId = approver.id;
+    } catch (error) {
+      return NextResponse.json(
+        {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Partner approval service is not available."
+        },
+        { status: 500 }
+      );
+    }
+  }
+
+  if (!resolvedEmail) {
+    return NextResponse.json({ error: "Email is required." }, { status: 400 });
   }
 
   const smtpHost = process.env.SMTP_HOST;
@@ -37,14 +74,22 @@ export async function POST(request: Request) {
 
   const otp = randomInt(100000, 1000000).toString();
   const expiresAt = Date.now() + otpTtlMs;
-  const normalizedEmail = email.trim().toLowerCase();
+  const normalizedEmail = resolvedEmail;
   const cookieName = otpCookieName(purpose);
   const hash = signOtp({ email: normalizedEmail, expiresAt, otp, purpose });
   const cookieStore = await cookies();
 
   cookieStore.set(
     cookieName,
-    Buffer.from(JSON.stringify({ email: normalizedEmail, expiresAt, hash, otp })).toString("base64url"),
+    Buffer.from(
+      JSON.stringify({
+        approverId: verifiedApproverId,
+        email: normalizedEmail,
+        expiresAt,
+        hash,
+        otp
+      })
+    ).toString("base64url"),
     {
       httpOnly: true,
       maxAge: Math.floor(otpTtlMs / 1000),
@@ -62,7 +107,7 @@ export async function POST(request: Request) {
         : "WorkLine signup OTP";
   const description =
     purpose === "team"
-      ? `Approval OTP for ${label ?? "this team"}`
+      ? `Approval OTP for ${resolvedLabel ?? "this team"}`
       : purpose === "password-reset"
         ? "Password reset OTP for your WorkLine account"
         : "Email verification OTP for your WorkLine signup";
