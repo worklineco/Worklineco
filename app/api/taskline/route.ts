@@ -485,6 +485,13 @@ async function handlePost(request: Request) {
         await sendResourceAllocationMail(admin, organisation.organisationId, saved.data as TaskRecord);
       }
 
+      // Name-tag email: when the Name (manager/owner) changes, notify the
+      // newly tagged person the same way a resource allocation does.
+      const previousName = text((existing.data as TaskRecord).custom_values?.taskline_data?.name);
+      if (resourceAllocationChanged(previousName, text(cleaned.name))) {
+        await sendResourceAllocationMail(admin, organisation.organisationId, saved.data as TaskRecord, "name");
+      }
+
       return NextResponse.json({ record: formatRecord(saved.data as TaskRecord) });
     } else if (existing.data) {
       return NextResponse.json({ error: "You can only update TaskLine rows for your own team." }, { status: 403 });
@@ -527,6 +534,10 @@ async function handlePost(request: Request) {
   // notifies that resource straight away.
   if (text(cleaned.resource)) {
     await sendResourceAllocationMail(admin, organisation.organisationId, saved.data as TaskRecord);
+  }
+
+  if (text(cleaned.name)) {
+    await sendResourceAllocationMail(admin, organisation.organisationId, saved.data as TaskRecord, "name");
   }
 
   return NextResponse.json({ record: formatRecord(saved.data as TaskRecord) });
@@ -1535,13 +1546,15 @@ function allocationEscapeHtml(value: string) {
 async function sendResourceAllocationMail(
   admin: ReturnType<typeof createAdminClient>,
   organisationId: string,
-  record: TaskRecord
+  record: TaskRecord,
+  field: "name" | "resource" = "resource"
 ) {
   try {
     const row = record.custom_values?.taskline_data ?? {};
-    const resourceNames = allocationSplitNames(row.resource);
+    const targetValue = field === "name" ? row.name : row.resource;
+    const targetNames = allocationSplitNames(targetValue);
 
-    if (!resourceNames.length) {
+    if (!targetNames.length) {
       return;
     }
 
@@ -1592,7 +1605,7 @@ async function sendResourceAllocationMail(
         user?.user_metadata?.full_name ?? user?.user_metadata?.name ?? member.full_name ?? user?.email
       );
 
-      if (name && resourceNames.includes(name)) {
+      if (name && targetNames.includes(name)) {
         const email = text(user?.email || member.email).toLowerCase();
 
         if (allocationIsEmail(email)) {
@@ -1602,7 +1615,7 @@ async function sendResourceAllocationMail(
     }
 
     if (!recipients.size) {
-      console.warn("TaskLine allocation email: no member email found for resource:", text(row.resource));
+      console.warn(`TaskLine allocation email: no member email found for ${field}:`, text(targetValue));
       return;
     }
 
@@ -1623,9 +1636,10 @@ async function sendResourceAllocationMail(
     const stage = text(row.stage) || "-";
     const period = text(row.period) || "-";
     const allocatedBy = text(row.name) || "-";
-    const subject = `New task allocated: ${entity} — ${taskName}`;
+    const heading = field === "name" ? "YOU HAVE BEEN TAGGED ON A TASK" : "NEW TASK ALLOCATED TO YOU";
+    const subject = field === "name" ? `You have been tagged: ${entity} — ${taskName}` : `New task allocated: ${entity} — ${taskName}`;
     const bodyText = [
-      "NEW TASK ALLOCATED TO YOU",
+      heading,
       "",
       entity,
       `Task: ${taskName}`,
@@ -1647,7 +1661,7 @@ async function sendResourceAllocationMail(
     const bodyHtml = `<!doctype html>
 <html>
   <body style="margin:0;background:#f4f6fa;font-family:Arial,Helvetica,sans-serif;color:#0f172a;">
-    <div style="display:none;max-height:0;overflow:hidden;">${safeEntity} has been allocated to you.</div>
+    <div style="display:none;max-height:0;overflow:hidden;">${safeEntity}${field === "name" ? " — you have been tagged on this task." : " has been allocated to you."}</div>
     <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f4f6fa;padding:28px 12px;">
       <tr>
         <td align="center">
@@ -1660,7 +1674,7 @@ async function sendResourceAllocationMail(
                       <div style="width:44px;height:44px;border-radius:14px;background:#dbeafe;color:#1d4ed8;text-align:center;line-height:44px;font-size:21px;">&#128203;</div>
                     </td>
                     <td style="padding-left:14px;">
-                      <div style="font-size:12px;line-height:18px;font-weight:700;letter-spacing:1.2px;color:#1d4ed8;">NEW TASK ALLOCATED TO YOU</div>
+                      <div style="font-size:12px;line-height:18px;font-weight:700;letter-spacing:1.2px;color:#1d4ed8;">${heading}</div>
                       <div style="margin-top:6px;font-size:17px;line-height:24px;font-weight:700;color:#172033;">${safeEntity}</div>
                       <table role="presentation" cellspacing="0" cellpadding="0" style="margin-top:12px;font-size:14px;line-height:22px;">
                         <tr>
@@ -1719,7 +1733,9 @@ async function sendResourceAllocationMail(
         entity_id: record.id,
         entity_type: "taskline_email_allocation",
         new_value: {
+          field,
           recipient,
+          name: text(row.name),
           resource: text(row.resource),
           sent_at: new Date().toISOString()
         },
