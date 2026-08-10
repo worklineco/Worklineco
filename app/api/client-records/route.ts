@@ -2,6 +2,7 @@ import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { createClient, type User } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
+import { isViewOnlyRegisterUser, viewOnlyRegisterResponse } from "@/lib/register-access";
 
 type CookieToSet = { name: string; options: CookieOptions; value: string };
 type RegisterRow = Record<string, string | number>;
@@ -54,6 +55,10 @@ export async function POST(request: Request) {
 
   if ("error" in auth) {
     return auth.error;
+  }
+
+  if (isViewOnlyRegisterUser(auth.user)) {
+    return viewOnlyRegisterResponse("Client Records");
   }
 
   const { rows } = (await request.json()) as { rows?: RegisterRow[] };
@@ -115,28 +120,46 @@ export async function POST(request: Request) {
 }
 
 async function fetchAllClientRows(admin: ReturnType<typeof createAdminClient>, organisationId: string) {
-  const rows: Array<{ custom_values: RegisterRow | null; name: string }> = [];
+  // Count first, then fetch every 1000-row page in parallel (the previous
+  // sequential loop cost one full round-trip per page).
+  const counted = await admin
+    .from("clients")
+    .select("id", { count: "exact", head: true })
+    .eq("organisation_id", organisationId)
+    .eq("custom_values->>source", sourceKey);
 
-  for (let from = 0; ; from += fetchBatchSize) {
-    const to = from + fetchBatchSize - 1;
-    const { data, error } = await admin
-      .from("clients")
-      .select("id,name,custom_values,created_at")
-      .eq("organisation_id", organisationId)
-      .eq("custom_values->>source", sourceKey)
-      .order("created_at", { ascending: true })
-      .range(from, to);
-
-    if (error) {
-      return { data: null, error };
-    }
-
-    rows.push(...((data ?? []) as Array<{ custom_values: RegisterRow | null; name: string }>));
-
-    if ((data ?? []).length < fetchBatchSize) {
-      return { data: rows, error: null };
-    }
+  if (counted.error) {
+    return { data: null, error: counted.error };
   }
+
+  const total = counted.count ?? 0;
+  if (!total) {
+    return { data: [] as Array<{ custom_values: RegisterRow | null; name: string }>, error: null };
+  }
+
+  const pageCount = Math.ceil(total / fetchBatchSize);
+  const pages = await Promise.all(
+    Array.from({ length: pageCount }, (_, page) =>
+      admin
+        .from("clients")
+        .select("id,name,custom_values,created_at")
+        .eq("organisation_id", organisationId)
+        .eq("custom_values->>source", sourceKey)
+        .order("created_at", { ascending: true })
+        .order("id", { ascending: true }) // stable tiebreaker so parallel pages never overlap
+        .range(page * fetchBatchSize, page * fetchBatchSize + fetchBatchSize - 1)
+    )
+  );
+
+  const rows: Array<{ custom_values: RegisterRow | null; name: string }> = [];
+  for (const pageResult of pages) {
+    if (pageResult.error) {
+      return { data: null, error: pageResult.error };
+    }
+    rows.push(...((pageResult.data ?? []) as Array<{ custom_values: RegisterRow | null; name: string }>));
+  }
+
+  return { data: rows, error: null };
 }
 
 function createAdminClient() {

@@ -3,6 +3,8 @@
 import { downloadGstatPoa } from "@/lib/gstat/poa-document";
 import { getCurrentUser } from "@/lib/supabase/session";
 import { getCached, setCached } from "@/lib/data-cache";
+import { useRegisterEditAccess, viewOnlyRegisterMessage } from "@/lib/use-register-access";
+import { ViewOnlyAccessDialog } from "@/components/shared/view-only-access-dialog";
 import { ArrowDown, ArrowLeft, ArrowUp, Check, ChevronDown, Pin, ChevronUp, Download, Expand, ExternalLink, FileSpreadsheet, FileText, Filter, History, Menu, Pencil, Plus, ReceiptText, Search, Settings2, Trash2, Upload, X } from "lucide-react";
 import Link from "next/link";
 import { ChangeEvent, memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, useTransition } from "react";
@@ -301,6 +303,8 @@ const dateFields = new Set(["Next Hearing Date", "Due Date"]);
 const initialRows = createEmptyRows(12);
 
 export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }) {
+  const { canEditRegisterRef } = useRegisterEditAccess();
+  const [isViewOnlyDialogOpen, setIsViewOnlyDialogOpen] = useState(false);
   const [rows, setRows] = useState<AppealRow[]>(initialRows);
   const [columnValueFilters, setColumnValueFilters] = useState<ColumnValueFilters>({});
   const [columnTextFilters, setColumnTextFilters] = useState<ColumnTextFilters>({});
@@ -977,6 +981,11 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
         return;
       }
 
+      if (!canEditRegisterRef.current) {
+        setMessage(viewOnlyRegisterMessage);
+        return;
+      }
+
       setMessage(`Importing ${nextRows.length} changed GSTAT row${nextRows.length === 1 ? "" : "s"}...`);
 
       const response = await fetch("/api/gstat", {
@@ -1208,6 +1217,10 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
   }
 
   async function saveRowOperation(action: "row_delete", rowIndex: number, successMessage: string) {
+    if (!canEditRegisterRef.current) {
+      setMessage(viewOnlyRegisterMessage);
+      return;
+    }
     setMessage("Deleting row...");
 
     const response = await fetch("/api/gstat", {
@@ -1270,6 +1283,11 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
   }
 
   function openEditor(rowIndex: number, row = rows[rowIndex]) {
+    if (!canEditRegisterRef.current) {
+      setIsViewOnlyDialogOpen(true);
+      return;
+    }
+
     if (!row) {
       return;
     }
@@ -1351,6 +1369,11 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
   }
 
   async function saveInlineEditor(valueOverride?: string) {
+    if (!canEditRegisterRef.current) {
+      setMessage(viewOnlyRegisterMessage);
+      return;
+    }
+
     if (inlineSaveCancelledRef.current) {
       inlineSaveCancelledRef.current = false;
       return;
@@ -1431,6 +1454,11 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
   }
 
   async function saveEditor() {
+    if (!canEditRegisterRef.current) {
+      setMessage(viewOnlyRegisterMessage);
+      return;
+    }
+
     if (!editor || isSavingEditor) {
       return;
     }
@@ -2200,6 +2228,11 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
           </aside>
         </div>
       ) : null}
+      <ViewOnlyAccessDialog
+        onClose={() => setIsViewOnlyDialogOpen(false)}
+        open={isViewOnlyDialogOpen}
+      />
+
       {billingDraft ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-navy-700/40 p-4">
           <button

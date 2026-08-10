@@ -2,6 +2,7 @@ import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { createClient, type User } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
+import { isViewOnlyRegisterUser, viewOnlyRegisterResponse } from "@/lib/register-access";
 
 type CookieToSet = { name: string; options: CookieOptions; value: string };
 type RegisterRow = Record<string, string | number>;
@@ -57,6 +58,10 @@ export async function POST(request: Request) {
 
   if ("error" in auth) {
     return auth.error;
+  }
+
+  if (isViewOnlyRegisterUser(auth.user)) {
+    return viewOnlyRegisterResponse("Client Records");
   }
 
   const payload = (await request.json()) as {
@@ -406,28 +411,47 @@ async function fetchAllClientRows(
   source: string,
   ascending: boolean
 ) {
-  const rows: ClientRecord[] = [];
+  // Count first, then fetch every 1000-row page IN PARALLEL. The previous
+  // sequential loop waited one full round-trip per page, which made large
+  // registers load in O(pages) time.
+  const counted = await admin
+    .from("clients")
+    .select("id", { count: "exact", head: true })
+    .eq("organisation_id", organisationId)
+    .eq("custom_values->>source", source);
 
-  for (let from = 0; ; from += fetchBatchSize) {
-    const to = from + fetchBatchSize - 1;
-    const { data, error } = await admin
-      .from("clients")
-      .select("id,name,custom_values,created_at,updated_at")
-      .eq("organisation_id", organisationId)
-      .eq("custom_values->>source", source)
-      .order("created_at", { ascending })
-      .range(from, to);
-
-    if (error) {
-      return { data: null, error };
-    }
-
-    rows.push(...((data ?? []) as ClientRecord[]));
-
-    if ((data ?? []).length < fetchBatchSize) {
-      return { data: rows, error: null };
-    }
+  if (counted.error) {
+    return { data: null, error: counted.error };
   }
+
+  const total = counted.count ?? 0;
+  if (!total) {
+    return { data: [] as ClientRecord[], error: null };
+  }
+
+  const pageCount = Math.ceil(total / fetchBatchSize);
+  const pages = await Promise.all(
+    Array.from({ length: pageCount }, (_, page) =>
+      admin
+        .from("clients")
+        .select("id,name,custom_values,created_at,updated_at")
+        .eq("organisation_id", organisationId)
+        .eq("custom_values->>source", source)
+        .order("created_at", { ascending })
+        .order("id", { ascending: true }) // stable tiebreaker so parallel pages never overlap
+        .range(page * fetchBatchSize, page * fetchBatchSize + fetchBatchSize - 1)
+    )
+  );
+
+  const rows: ClientRecord[] = [];
+  for (const pageResult of pages) {
+    if (pageResult.error) {
+      return { data: null, error: pageResult.error };
+    }
+    rows.push(...((pageResult.data ?? []) as ClientRecord[]));
+  }
+
+  return { data: rows, error: null };
 }
 
 async function loadAuditLogs(admin: ReturnType<typeof createAdminClient>, organisationId: string) {

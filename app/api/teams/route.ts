@@ -8,6 +8,7 @@ type TeamMember = {
   designation: string;
   email: string;
   id: string;
+  is_admin: boolean;
   joining_date: string;
   leaving_date: string;
   name: string;
@@ -16,7 +17,6 @@ type TeamMember = {
 
 const editorRoles = ["partner", "others"];
 
-const fallbackOrganisationId = "DCO1433";
 
 export async function GET() {
   const auth = await requireUser();
@@ -32,8 +32,11 @@ export async function GET() {
     return NextResponse.json({ error: "Team service is not configured." }, { status: 500 });
   }
 
-  const organisationId =
-    String(auth.user.user_metadata?.organisation_id ?? "").trim() || fallbackOrganisationId;
+  const organisationId = String(auth.user.app_metadata?.workline_organisation ?? "").trim();
+
+  if (!organisationId) {
+    return NextResponse.json({ error: "Trusted organisation access is not configured." }, { status: 403 });
+  }
   const admin = createClient(supabaseUrl, serviceRoleKey, {
     auth: {
       autoRefreshToken: false,
@@ -55,7 +58,10 @@ export async function GET() {
 
     members.push(
       ...data.users
-        .filter((user) => String(user.user_metadata?.organisation_id ?? "").trim() === organisationId)
+        .filter(
+          (user) =>
+            String(user.app_metadata?.workline_organisation ?? "").trim() === organisationId
+        )
         .map((user) => {
           const metadata = user.user_metadata ?? {};
           const designation = String(metadata.role ?? metadata.designation ?? "").trim();
@@ -65,6 +71,7 @@ export async function GET() {
             designation: designation || "-",
             email: user.email ?? "-",
             id: user.id,
+            is_admin: user.app_metadata?.workline_admin === true,
             joining_date: String(metadata.joining_date ?? "").trim(),
             leaving_date: String(metadata.leaving_date ?? "").trim(),
             name: name || "WorkLine User",
@@ -121,9 +128,7 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: "Member id is required." }, { status: 400 });
   }
 
-  const requesterRole = String(auth.user.user_metadata?.role ?? auth.user.user_metadata?.designation ?? "")
-    .trim()
-    .toLowerCase();
+  const requesterRole = String(auth.user.app_metadata?.workline_role ?? "").trim().toLowerCase();
   if (!editorRoles.includes(requesterRole)) {
     return NextResponse.json(
       { error: "Only Partner or Others roles can edit team members." },
@@ -140,12 +145,10 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: "Member not found." }, { status: 404 });
   }
 
-  const requesterOrg =
-    String(auth.user.user_metadata?.organisation_id ?? "").trim() || fallbackOrganisationId;
-  const targetOrg =
-    String(target.user.user_metadata?.organisation_id ?? "").trim() || fallbackOrganisationId;
+  const requesterOrg = String(auth.user.app_metadata?.workline_organisation ?? "").trim();
+  const targetOrg = String(target.user.app_metadata?.workline_organisation ?? "").trim();
 
-  if (requesterOrg !== targetOrg) {
+  if (!requesterOrg || requesterOrg !== targetOrg) {
     return NextResponse.json(
       { error: "You can only edit members in your organisation." },
       { status: 403 }
@@ -153,6 +156,7 @@ export async function PATCH(request: Request) {
   }
 
   const nextMetadata: Record<string, unknown> = { ...(target.user.user_metadata ?? {}) };
+  const nextAccessMetadata: Record<string, unknown> = { ...(target.user.app_metadata ?? {}) };
 
   if (body.name !== undefined) {
     nextMetadata.full_name = String(body.name).trim();
@@ -164,6 +168,7 @@ export async function PATCH(request: Request) {
     const designation = String(body.designation).trim();
     nextMetadata.role = designation;
     nextMetadata.designation = designation;
+    nextAccessMetadata.workline_role = designation;
   }
   if (body.joining_date !== undefined) {
     nextMetadata.joining_date = String(body.joining_date).trim();
@@ -173,6 +178,7 @@ export async function PATCH(request: Request) {
   }
 
   const { error: updateError } = await admin.auth.admin.updateUserById(id, {
+    app_metadata: nextAccessMetadata,
     user_metadata: nextMetadata
   });
 

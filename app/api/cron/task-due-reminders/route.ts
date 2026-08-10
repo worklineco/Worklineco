@@ -29,6 +29,12 @@ type ReminderAuditValue = {
 
 const moduleKey = "taskline";
 const fetchBatchSize = 1000;
+// Fixed subscribers: these addresses receive EVERY due-date reminder for the
+// mapped team (keys are normalised team numbers - "3" matches "Team 03",
+// "Team-03", etc.). Edit this map to add or remove standing subscribers.
+const extraDueRecipientsByTeam: Record<string, string[]> = {
+  "3": ["shuchis.dco@gmail.com"]
+};
 const appUrl = (process.env.NEXT_PUBLIC_SITE_URL ?? process.env.NEXT_PUBLIC_APP_URL ?? "https://www.worklineco.com").replace(/\/+$/, "");
 
 export async function GET(request: Request) {
@@ -43,8 +49,9 @@ export async function GET(request: Request) {
   }
 
   const admin = createAdminClient();
-  const dueDateKey = indiaDateKey(1);
-  const followingDateKey = indiaDateKey(2);
+  // Runs at 00:00 IST and targets tasks due TODAY (the due date itself).
+  const dueDateKey = indiaDateKey(0);
+  const followingDateKey = indiaDateKey(1);
   const dueTasks = await loadDueTasks(admin, dueDateKey, followingDateKey);
 
   if ("error" in dueTasks) {
@@ -304,12 +311,25 @@ function reminderRecipients(
   members: OrganisationMember[],
   authUsersById: Map<string, User>
 ) {
+  // Due-date reminders go to: the selected Resource, the MANAGERS of the
+  // row's Team, fixed per-team subscribers, and any extra addresses typed in
+  // the Reminder Email column.
   const recipients = new Set(parseEmailAddresses(row.reminder_email));
+
+  for (const extra of extraDueRecipientsByTeam[teamMatchKey(row.team)] ?? []) {
+    if (isEmail(extra.toLowerCase())) {
+      recipients.add(extra.toLowerCase());
+    }
+  }
 
   for (const member of members) {
     const user = authUsersById.get(member.id);
 
-    if (!user || !taskIsAssignedTo(row, user, member.full_name)) {
+    if (!user) {
+      continue;
+    }
+
+    if (!taskResourceMatches(row, user, member.full_name) && !isTeamManagerFor(row, user)) {
       continue;
     }
 
@@ -323,14 +343,33 @@ function reminderRecipients(
   return Array.from(recipients).sort();
 }
 
-function taskIsAssignedTo(row: TaskLineRow, user: User, fallbackName: string | null) {
-  const roleText = `${text(user.user_metadata?.role)} ${text(user.user_metadata?.designation)}`.toLowerCase();
-  const field = roleText.includes("article") ? "resource" : "name";
+function taskResourceMatches(row: TaskLineRow, user: User, fallbackName: string | null) {
   const name = normalizeName(
     user.user_metadata?.full_name ?? user.user_metadata?.name ?? fallbackName ?? user.email
   );
 
-  return Boolean(name) && splitNames(row[field]).includes(name);
+  return Boolean(name) && splitNames(row.resource).includes(name);
+}
+
+function isTeamManagerFor(row: TaskLineRow, user: User) {
+  const roleText = `${text(user.user_metadata?.role)} ${text(user.user_metadata?.designation)}`.toLowerCase();
+  const isManager =
+    roleText.includes("manager") || roleText.includes("partner") || roleText.includes("owner") || roleText.includes("admin");
+
+  if (!isManager) {
+    return false;
+  }
+
+  const rowTeam = teamMatchKey(row.team);
+  return Boolean(rowTeam) && teamMatchKey(user.user_metadata?.team) === rowTeam;
+}
+
+function teamMatchKey(value: unknown) {
+  const digits = text(value).match(/\d+/);
+  if (digits) {
+    return String(parseInt(digits[0], 10));
+  }
+  return text(value).toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
 function taskIsClosed(row: TaskLineRow) {
@@ -341,15 +380,19 @@ function taskIsClosed(row: TaskLineRow) {
 function reminderSubject(row: TaskLineRow) {
   const entity = text(row.entity) || "TaskLine task";
   const task = text(row.task) || "Task";
-  return `Due tomorrow: ${entity} — ${task}`;
+  return `Due today: ${entity} — ${task}`;
 }
 
 function reminderText(row: TaskLineRow, dueDateKey: string) {
   return [
-    "TASK DUE TOMORROW",
+    "TASK DUE TODAY",
     "",
     text(row.entity) || "Entity not specified",
     `Task: ${text(row.task) || "Not specified"}`,
+    `Team: ${text(row.team) || "-"}`,
+    `Resource: ${text(row.resource) || "-"}`,
+    `Stage: ${text(row.stage) || "-"}`,
+    `Period: ${text(row.period) || "-"}`,
     `Due date: ${formatDueDate(text(row.due_date), dueDateKey)}`,
     "",
     `Open TaskLine: ${appUrl}/taskline`
@@ -360,12 +403,16 @@ function reminderHtml(row: TaskLineRow, dueDateKey: string) {
   const entity = escapeHtml(text(row.entity) || "Entity not specified");
   const task = escapeHtml(text(row.task) || "Not specified");
   const dueDate = escapeHtml(formatDueDate(text(row.due_date), dueDateKey));
+  const team = escapeHtml(text(row.team) || "-");
+  const resource = escapeHtml(text(row.resource) || "-");
+  const stage = escapeHtml(text(row.stage) || "-");
+  const period = escapeHtml(text(row.period) || "-");
   const taskLineUrl = `${appUrl}/taskline`;
 
   return `<!doctype html>
 <html>
   <body style="margin:0;background:#f4f6fa;font-family:Arial,Helvetica,sans-serif;color:#0f172a;">
-    <div style="display:none;max-height:0;overflow:hidden;">${entity} is due tomorrow.</div>
+    <div style="display:none;max-height:0;overflow:hidden;">${entity} is due today.</div>
     <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f4f6fa;padding:28px 12px;">
       <tr>
         <td align="center">
@@ -378,12 +425,28 @@ function reminderHtml(row: TaskLineRow, dueDateKey: string) {
                       <div style="width:44px;height:44px;border-radius:14px;background:#fef3c7;color:#b45309;text-align:center;line-height:44px;font-size:21px;">&#128197;</div>
                     </td>
                     <td style="padding-left:14px;">
-                      <div style="font-size:12px;line-height:18px;font-weight:700;letter-spacing:1.2px;color:#b45309;">TASK DUE TOMORROW</div>
+                      <div style="font-size:12px;line-height:18px;font-weight:700;letter-spacing:1.2px;color:#b45309;">TASK DUE TODAY</div>
                       <div style="margin-top:6px;font-size:17px;line-height:24px;font-weight:700;color:#172033;">${entity}</div>
                       <table role="presentation" cellspacing="0" cellpadding="0" style="margin-top:12px;font-size:14px;line-height:22px;">
                         <tr>
                           <td style="width:78px;color:#94a3b8;font-weight:600;">Task</td>
                           <td style="color:#475569;font-weight:600;">${task}</td>
+                        </tr>
+                        <tr>
+                          <td style="color:#94a3b8;font-weight:600;">Team</td>
+                          <td style="color:#475569;font-weight:600;">${team}</td>
+                        </tr>
+                        <tr>
+                          <td style="color:#94a3b8;font-weight:600;">Resource</td>
+                          <td style="color:#475569;font-weight:600;">${resource}</td>
+                        </tr>
+                        <tr>
+                          <td style="color:#94a3b8;font-weight:600;">Stage</td>
+                          <td style="color:#475569;font-weight:600;">${stage}</td>
+                        </tr>
+                        <tr>
+                          <td style="color:#94a3b8;font-weight:600;">Period</td>
+                          <td style="color:#475569;font-weight:600;">${period}</td>
                         </tr>
                         <tr>
                           <td style="color:#94a3b8;font-weight:600;">Due date</td>

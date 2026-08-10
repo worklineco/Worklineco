@@ -22,6 +22,8 @@ import type { ComponentType } from "react";
 import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { getCached, setCached } from "@/lib/data-cache";
+import { useRegisterEditAccess, viewOnlyRegisterMessage } from "@/lib/use-register-access";
+import { ViewOnlyAccessDialog } from "@/components/shared/view-only-access-dialog";
 import * as XLSX from "xlsx-js-style";
 
 type RegisterRow = Record<string, string | number>;
@@ -83,6 +85,8 @@ const buttonClass =
   "inline-flex h-11 items-center justify-center gap-2 rounded-2xl bg-white px-4 text-sm font-black text-slate-800 ring-1 ring-slate-200 transition hover:bg-slate-50";
 
 export function ClientRecordsRegister() {
+  const { canEditRegisterRef } = useRegisterEditAccess();
+  const [isViewOnlyDialogOpen, setIsViewOnlyDialogOpen] = useState(false);
   const [rows, setRows] = useState<RegisterRow[]>([]);
   const [trashRows, setTrashRows] = useState<RegisterRow[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
@@ -188,7 +192,10 @@ export function ClientRecordsRegister() {
       return;
     }
 
-    setCached("client-records", { auditLogs: result.auditLogs, rows: result.rows, trashRows: result.trashRows });
+    // Cache rows only (no audit logs): audit history blobs regularly pushed
+    // large registers over the localStorage quota, which silently disabled
+    // the instant-render cache. Rows are what the table needs on first paint.
+    setCached("client-records", { rows: result.rows, trashRows: result.trashRows });
     setRows(result.rows ?? []);
     setTrashRows(result.trashRows ?? []);
     setAuditLogs(result.auditLogs ?? []);
@@ -198,6 +205,11 @@ export function ClientRecordsRegister() {
   }
 
   async function saveAction(body: Record<string, unknown>, successMessage: string | ((result: SaveActionResult) => string)) {
+    if (!canEditRegisterRef.current) {
+      setMessage(viewOnlyRegisterMessage);
+      return false;
+    }
+
     const response = await fetch("/api/client-records/managed", {
       body: JSON.stringify(body),
       headers: { "Content-Type": "application/json" },
@@ -469,6 +481,15 @@ export function ClientRecordsRegister() {
     await saveAction({ action: "restore", rowIds: [String(row.id)] }, "Restored client record from trash.");
   }
 
+  function openEditor(row: RegisterRow) {
+    if (!canEditRegisterRef.current) {
+      setIsViewOnlyDialogOpen(true);
+      return;
+    }
+
+    setEditor({ row: stripInternalFields(row), rowId: String(row.id) });
+  }
+
   async function saveEditor(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
@@ -536,7 +557,6 @@ export function ClientRecordsRegister() {
           ) : null}
         </div>
       </div>
-
 
       {message ? (
         <p className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-bold text-emerald-900">
@@ -630,7 +650,7 @@ export function ClientRecordsRegister() {
                   </td>
                   <td className="border-r border-slate-100 px-2 py-1">
                     <div className="flex items-center gap-1">
-                      <button className="inline-flex size-7 items-center justify-center rounded border border-sky-200 text-sky-700 hover:bg-sky-50" onClick={() => setEditor({ row: stripInternalFields(row), rowId: String(row.id) })} title="Edit client record" type="button"><Edit3 className="size-3.5" /></button>
+                      <button className="inline-flex size-7 items-center justify-center rounded border border-sky-200 text-sky-700 hover:bg-sky-50" onClick={() => openEditor(row)} title="Edit client record" type="button"><Edit3 className="size-3.5" /></button>
                       <button className="inline-flex size-7 items-center justify-center rounded border border-navy-200 text-navy-700 hover:bg-navy-50" onClick={() => viewRowHistory(row)} title="View history" type="button"><History className="size-3.5" /></button>
                       <button className="inline-flex size-7 items-center justify-center rounded border border-rose-200 text-rose-700 hover:bg-rose-50" onClick={() => void deleteRow(row)} title="Delete client record" type="button"><Trash2 className="size-3.5" /></button>
                     </div>
@@ -716,6 +736,11 @@ export function ClientRecordsRegister() {
           </div>
         </section>
       ) : null}
+
+      <ViewOnlyAccessDialog
+        onClose={() => setIsViewOnlyDialogOpen(false)}
+        open={isViewOnlyDialogOpen}
+      />
 
       {editor ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-navy-700/45 p-4">
