@@ -1,3 +1,4 @@
+import { getTrustedPartnerApprover } from "@/lib/auth/trusted-partners";
 import { createClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
@@ -7,7 +8,8 @@ const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 type SupabaseAdminClient = ReturnType<typeof createClient<any, "public", any>>;
 
 export async function POST(request: Request) {
-  const { email, metadata, password, teamEmail } = (await request.json()) as {
+  const { approverId, email, metadata, password, teamEmail } = (await request.json()) as {
+    approverId?: string;
     email?: string;
     metadata?: Record<string, string>;
     password?: string;
@@ -34,8 +36,45 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Please verify the email OTP first." }, { status: 400 });
   }
 
-  if (teamEmail && teamVerified !== teamEmail.trim().toLowerCase()) {
-    return NextResponse.json({ error: "Please verify the team OTP first." }, { status: 400 });
+  const signupMetadata: Record<string, string> = { ...metadata };
+  const signupRole = String(signupMetadata.role ?? "").trim().toLowerCase();
+  let requiredApprovalEmail = teamEmail?.trim().toLowerCase() ?? "";
+
+  if (signupRole === "others") {
+    if (!approverId) {
+      return NextResponse.json(
+        { error: "Please select a partner and verify the partner approval OTP first." },
+        { status: 400 }
+      );
+    }
+
+    try {
+      const approver = await getTrustedPartnerApprover(approverId);
+
+      if (!approver) {
+        return NextResponse.json(
+          { error: "The selected partner is not an approved WorkLine partner." },
+          { status: 400 }
+        );
+      }
+
+      requiredApprovalEmail = approver.email;
+      signupMetadata.approving_partner = approver.name;
+    } catch (error) {
+      return NextResponse.json(
+        {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Partner approval service is not available."
+        },
+        { status: 500 }
+      );
+    }
+  }
+
+  if (requiredApprovalEmail && teamVerified !== requiredApprovalEmail) {
+    return NextResponse.json({ error: "Please verify the approval OTP first." }, { status: 400 });
   }
 
   const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
@@ -49,7 +88,7 @@ export async function POST(request: Request) {
     email: normalizedEmail,
     email_confirm: true,
     password,
-    user_metadata: metadata
+    user_metadata: signupMetadata
   });
 
   if (error) {
@@ -66,7 +105,7 @@ export async function POST(request: Request) {
     const { error: updateError } = await supabaseAdmin.auth.admin.updateUserById(existingUser.id, {
       email_confirm: true,
       password,
-      user_metadata: metadata
+      user_metadata: signupMetadata
     });
 
     if (updateError) {
