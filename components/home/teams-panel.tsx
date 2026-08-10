@@ -31,7 +31,7 @@ type EditDraft = { designation: string; joining_date: string; leaving_date: stri
 
 const ARTICLE_ASSISTANT_TENURE_DAYS = 730;
 const gridTemplate = "grid-cols-[0.4fr_1.1fr_0.7fr_1.3fr_1fr_0.9fr_0.9fr_0.8fr]";
-const roleOptions = ["Article Assistant", "Associate", "Manager", "Senior Manager", "Partner", "Accounts", "Others"];
+const roleOptions = ["Article Assistant", "Associate", "Senior Associate", "Manager", "Senior Manager", "Partner", "Accounts", "Others"];
 
 export function TeamsPanel() {
   const [members, setMembers] = useState<TeamMember[]>([]);
