@@ -1,7 +1,7 @@
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-const publicRoutes = ["/login", "/auth/callback", "/api/auth"];
+const publicRoutes = ["/login", "/auth/callback", "/api/auth", "/api/cron"];
 type CookieToSet = { name: string; options: CookieOptions; value: string };
 
 export async function middleware(request: NextRequest) {
