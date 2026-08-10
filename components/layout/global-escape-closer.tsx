@@ -115,7 +115,7 @@ function topVisibleOverlay() {
 
 function effectiveZIndex(element: HTMLElement) {
   let current: HTMLElement | null = element;
-  let highest = 0;
+  let highest = Number.NEGATIVE_INFINITY;
 
   while (current) {
     const parsed = Number.parseInt(window.getComputedStyle(current).zIndex, 10);
@@ -127,7 +127,7 @@ function effectiveZIndex(element: HTMLElement) {
     current = current.parentElement;
   }
 
-  return highest;
+  return highest === Number.NEGATIVE_INFINITY ? 0 : highest;
 }
 
 function findDismissButton(container: HTMLElement) {
