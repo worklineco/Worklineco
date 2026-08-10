@@ -1518,17 +1518,6 @@ export function TaskLineRegister() {
           />
         </label>
 
-        <select
-          aria-label="Status Open/Close"
-          className="h-10 shrink-0 rounded-md border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 outline-none"
-          onChange={(event) => setStatusFilter(event.target.value)}
-          value={statusFilter}
-        >
-          <option value="">Status: All</option>
-          <option value="Open">Open</option>
-          <option value="Close">Close</option>
-        </select>
-
         <div className="relative shrink-0">
           <button
             className={`${buttonClass("light")} ${dueRange.preset ? "border-navy-300 text-navy-800" : ""}`}
@@ -2338,7 +2327,9 @@ const TaskLineCell = memo(function TaskLineCell({
     const current = row[column.key] ?? "";
     return (
       <td className={`border-r border-slate-100 px-3 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
-        <LazyTaskLineSelect current={current} onChange={onChange} options={teamOptions} placeholder="Select team" />
+        <span className="block truncate px-1 py-1 text-xs font-bold text-slate-700" title="Team is locked to the logged-in user's team">
+          {current || "—"}
+        </span>
       </td>
     );
   }
@@ -2533,6 +2524,16 @@ function TaskLineForm({
 }) {
   const [openSections, setOpenSections] = useState<Set<string>>(() => new Set(["core"]));
   const [formError, setFormError] = useState("");
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
 
   function handleFormSubmit() {
     const missing = requiredTaskLineFormKeys.filter((key) => !text(draft[key]));
