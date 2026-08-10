@@ -43,6 +43,33 @@ export async function GET() {
       persistSession: false
     }
   });
+
+  // Include server-managed public memberships as a safe fallback for legacy
+  // accounts that pre-date trusted WorkLine app metadata.
+  const publicMemberIds = new Set<string>();
+  const { data: organisation, error: organisationError } = await admin
+    .from("organisations")
+    .select("id")
+    .ilike("slug", organisationId)
+    .maybeSingle();
+
+  if (organisationError) {
+    return NextResponse.json({ error: organisationError.message }, { status: 500 });
+  }
+
+  if (organisation?.id) {
+    const { data: publicMembers, error: publicMembersError } = await admin
+      .from("users")
+      .select("id")
+      .eq("organisation_id", organisation.id);
+
+    if (publicMembersError) {
+      return NextResponse.json({ error: publicMembersError.message }, { status: 500 });
+    }
+
+    publicMembers?.forEach((member) => publicMemberIds.add(String(member.id)));
+  }
+
   const members: TeamMember[] = [];
   let page = 1;
 
@@ -58,10 +85,13 @@ export async function GET() {
 
     members.push(
       ...data.users
-        .filter(
-          (user) =>
-            String(user.app_metadata?.workline_organisation ?? "").trim() === organisationId
-        )
+        .filter((user) => {
+          const trustedOrganisation = String(
+            user.app_metadata?.workline_organisation ?? ""
+          ).trim();
+
+          return trustedOrganisation === organisationId || publicMemberIds.has(user.id);
+        })
         .map((user) => {
           const metadata = user.user_metadata ?? {};
           const designation = String(metadata.role ?? metadata.designation ?? "").trim();
