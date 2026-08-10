@@ -5,7 +5,7 @@ import { AlertCircle, ArrowRight, CheckCircle2, Eye, EyeOff, Loader2 } from "luc
 import { FormEvent, useEffect, useState } from "react";
 
 const organisationId = "DCO1433";
-const roleOptions = ["Article Assistant", "Associate", "Manager", "Senior Manager", "Partner", "Accounts", "Others"];
+const roleOptions = ["Article Assistant", "Associate", "Senior Associate", "Manager", "Senior Manager", "Partner", "Accounts", "Others"];
 const teamOptions = [
   "Team 01",
   "Team 03",
@@ -71,7 +71,7 @@ export function LoginForm() {
   const [isLoading, setIsLoading] = useState(false);
 
   const isValidOrg = orgId.trim().toUpperCase() === organisationId;
-  const needsTeam = ["Article Assistant", "Associate", "Manager", "Senior Manager"].includes(role);
+  const needsTeam = ["Article Assistant", "Associate", "Senior Associate", "Manager", "Senior Manager"].includes(role);
   const needsPartner = role === "Partner";
   const needsPartnerApproval = role === "Others";
   const needsAccountsApproval = role === "Accounts";
