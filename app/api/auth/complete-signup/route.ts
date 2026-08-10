@@ -5,6 +5,19 @@ import { NextResponse } from "next/server";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const organisationId = "DCO1433";
+const teamEmailByName: Record<string, string> = {
+  "Team 01": "team01.dco@gmail.com",
+  "Team 03": "team03.dco@gmail.com",
+  "Team 04": "team04.dco@gmail.com",
+  "Team 05": "team05.dco@gmail.com",
+  "Team 06": "team06.dco@gmail.com",
+  "Team 07": "team07.dco@gmail.com",
+  "Team 08": "team08.dco@gmail.com",
+  "Team 09": "team09.dco@gmail.com",
+  "Team 10": "team10.dco@gmail.com",
+  "Team 12": "team12.dco@gmail.com"
+};
 type SupabaseAdminClient = ReturnType<typeof createClient<any, "public", any>>;
 
 export async function POST(request: Request) {
@@ -38,7 +51,22 @@ export async function POST(request: Request) {
 
   const signupMetadata: Record<string, string> = { ...metadata };
   const signupRole = String(signupMetadata.role ?? "").trim().toLowerCase();
+  const signupOrganisation = String(signupMetadata.organisation_id ?? "").trim().toUpperCase();
   let requiredApprovalEmail = teamEmail?.trim().toLowerCase() ?? "";
+
+  if (signupRole === "senior associate") {
+    const selectedTeam = String(signupMetadata.team ?? "").trim();
+    const expectedTeamEmail = teamEmailByName[selectedTeam];
+
+    if (signupOrganisation !== organisationId || !expectedTeamEmail) {
+      return NextResponse.json(
+        { error: "Please select a valid WorkLine team for Senior Associate." },
+        { status: 400 }
+      );
+    }
+
+    requiredApprovalEmail = expectedTeamEmail;
+  }
 
   if (signupRole === "others") {
     if (!approverId) {
@@ -83,8 +111,16 @@ export async function POST(request: Request) {
       persistSession: false
     }
   });
+  const seniorAssociateAccess =
+    signupRole === "senior associate"
+      ? {
+          workline_organisation: organisationId,
+          workline_role: "Senior Associate"
+        }
+      : undefined;
 
   const { error } = await supabaseAdmin.auth.admin.createUser({
+    ...(seniorAssociateAccess ? { app_metadata: seniorAssociateAccess } : {}),
     email: normalizedEmail,
     email_confirm: true,
     password,
@@ -103,6 +139,14 @@ export async function POST(request: Request) {
     }
 
     const { error: updateError } = await supabaseAdmin.auth.admin.updateUserById(existingUser.id, {
+      ...(seniorAssociateAccess
+        ? {
+            app_metadata: {
+              ...(existingUser.app_metadata ?? {}),
+              ...seniorAssociateAccess
+            }
+          }
+        : {}),
       email_confirm: true,
       password,
       user_metadata: signupMetadata
