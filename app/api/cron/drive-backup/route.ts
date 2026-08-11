@@ -18,7 +18,6 @@ export const maxDuration = 300;
  *     workline-client-records-2026-08-10.xlsx
  *     workline-gstat-2026-08-10.xlsx
  *     workline-billing-2026-08-10.xlsx
- *     workline-gstat-billing-2026-08-10.xlsx
  *
  * Uploads authenticate as a Google service account (free) - see
  * docs/drive-backup-runbook.md for the one-time setup. The target folder can
@@ -72,7 +71,6 @@ export async function GET(request: Request) {
     buildClientRecordsWorkbook(admin.client, dateKey),
     buildTableWorkbook(admin.client, "gstat_appeals", "data", `workline-gstat-${dateKey}`, "GSTAT"),
     buildTableWorkbook(admin.client, "firm_billing_records", "custom_values", `workline-billing-${dateKey}`, "Billing"),
-    buildTableWorkbook(admin.client, "gstat_billing_records", "custom_values", `workline-gstat-billing-${dateKey}`, "GSTAT Billing")
   ]);
 
   let folderId: string;
