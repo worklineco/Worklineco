@@ -8,7 +8,7 @@ import { NextResponse } from "next/server";
 
 type CookieToSet = { name: string; options: CookieOptions; value: string };
 type TaskLineRow = Record<string, string>;
-type TaskLineImportRow = TaskLineRow & { import_action?: string; serial_no?: string; target_id?: string };
+type TaskLineImportRow = TaskLineRow & { import_action?: string; target_id?: string };
 type TaskRecord = {
   created_at: string;
   created_by: string | null;
@@ -654,17 +654,47 @@ async function importRows(
   rows: TaskLineImportRow[],
   returnRows: boolean
 ) {
-  const actionableRows = rows.map((row) => ({
+  const actionableRows = rows.map((row, index) => ({
     action: text(row.import_action || "Add").toLowerCase(),
     row,
-    targetId: text(row.target_id)
+    rowNumber: index + 2,
+    targetId: text(row.target_id),
+    taskCodeKey: normalizeTaskCode(row.task_code)
   }));
-  const needsSerialFallback = actionableRows.some(
+  const unsupportedActions = actionableRows.filter(({ action }) => !["add", "update", "delete"].includes(action));
+  if (unsupportedActions.length) {
+    return NextResponse.json(
+      { error: `Import stopped: unsupported Import Action in row ${unsupportedActions[0].rowNumber}. Use Add, Update, or Delete.` },
+      { status: 400 }
+    );
+  }
+
+  const missingTaskCodes = actionableRows.filter(({ taskCodeKey }) => !taskCodeKey);
+  if (missingTaskCodes.length) {
+    return NextResponse.json(
+      { error: `Import stopped: Task Code is required for every Add, Update, and Delete row. First missing value is in row ${missingTaskCodes[0].rowNumber}.` },
+      { status: 400 }
+    );
+  }
+
+  const taskCodeRows = new Map<string, number[]>();
+  for (const item of actionableRows) {
+    taskCodeRows.set(item.taskCodeKey, [...(taskCodeRows.get(item.taskCodeKey) ?? []), item.rowNumber]);
+  }
+  const duplicateTaskCode = Array.from(taskCodeRows.entries()).find(([, rowNumbers]) => rowNumbers.length > 1);
+  if (duplicateTaskCode) {
+    return NextResponse.json(
+      { error: `Import stopped: Task Code ${text(duplicateTaskCode[0])} appears more than once in this batch (rows ${duplicateTaskCode[1].join(", ")}).` },
+      { status: 400 }
+    );
+  }
+
+  const needsTaskCodeFallback = actionableRows.some(
     ({ action, targetId }) => (action === "update" || action === "delete") && !targetId
   );
   let existingRows: TaskRecord[] = [];
 
-  if (needsSerialFallback) {
+  if (needsTaskCodeFallback) {
     const existing = await loadTaskLineRecords(admin, organisationId, access);
     if (existing.error) {
       return NextResponse.json({ error: existing.error.message }, { status: 500 });
@@ -672,18 +702,44 @@ async function importRows(
     existingRows = existing.data ?? [];
   }
 
-  for (const item of actionableRows) {
-    if (item.targetId || (item.action !== "update" && item.action !== "delete")) {
-      continue;
+  if (needsTaskCodeFallback) {
+    const rowsByTaskCode = new Map<string, TaskRecord[]>();
+    for (const record of existingRows) {
+      const taskCodeKey = normalizeTaskCode(record.custom_values?.taskline_data?.task_code);
+      if (!taskCodeKey) {
+        continue;
+      }
+      rowsByTaskCode.set(taskCodeKey, [...(rowsByTaskCode.get(taskCodeKey) ?? []), record]);
     }
-    const serialIndex = Number.parseInt(text(item.row.serial_no), 10) - 1;
-    item.targetId = Number.isInteger(serialIndex) && serialIndex >= 0 ? text(existingRows[serialIndex]?.id) : "";
+
+    const targetErrors: string[] = [];
+    for (const item of actionableRows) {
+      if (item.targetId || (item.action !== "update" && item.action !== "delete")) {
+        continue;
+      }
+      const matches = rowsByTaskCode.get(item.taskCodeKey) ?? [];
+      if (matches.length === 1) {
+        item.targetId = matches[0].id;
+      } else {
+        const taskCode = text(item.row.task_code) || `row ${item.rowNumber}`;
+        targetErrors.push(matches.length ? `${taskCode} is duplicated` : `${taskCode} was not found`);
+      }
+    }
+
+    if (targetErrors.length) {
+      return NextResponse.json(
+        {
+          error: `Import stopped: Task Code must uniquely match one TaskLine record. ${targetErrors.slice(0, 5).join("; ")}${targetErrors.length > 5 ? `; and ${targetErrors.length - 5} more` : ""}.`
+        },
+        { status: 400 }
+      );
+    }
   }
 
   const requestedTargetIds = Array.from(
     new Set(actionableRows.map(({ targetId }) => targetId).filter(Boolean))
   );
-  const accessibleTargetIds = new Set<string>();
+  const accessibleTargets = new Map<string, TaskRecord>();
   if (requestedTargetIds.length) {
     const targets = await admin
       .from("tasks")
@@ -695,10 +751,25 @@ async function importRows(
     }
     for (const record of (targets.data ?? []) as TaskRecord[]) {
       if (isTaskLineRecord(record) && canAccessRecord(record, access)) {
-        accessibleTargetIds.add(record.id);
+        accessibleTargets.set(record.id, record);
       }
     }
   }
+
+  const invalidTargets = actionableRows.filter(({ action, targetId, taskCodeKey }) => {
+    if (action !== "update" && action !== "delete") {
+      return false;
+    }
+    const target = accessibleTargets.get(targetId);
+    return !target || normalizeTaskCode(target.custom_values?.taskline_data?.task_code) !== taskCodeKey;
+  });
+  if (invalidTargets.length) {
+    return NextResponse.json(
+      { error: `Import stopped: ${invalidTargets.length} Update/Delete row(s) no longer match their Task Code. Refresh TaskLine, export a new view, and try again.` },
+      { status: 409 }
+    );
+  }
+  const accessibleTargetIds = new Set(accessibleTargets.keys());
 
   const deleteIds = Array.from(
     new Set(
@@ -710,8 +781,33 @@ async function importRows(
   const updates = actionableRows.filter(
     ({ action, targetId }) => action === "update" && accessibleTargetIds.has(targetId)
   );
+  const addTaskCodes = actionableRows
+    .filter(({ action }) => action === "add")
+    .map(({ row }) => text(row.task_code));
+  const existingAddTaskCodeKeys = new Set<string>();
+
+  if (addTaskCodes.length) {
+    const existingAdds = await admin
+      .from("tasks")
+      .select("custom_values")
+      .eq("organisation_id", organisationId)
+      .eq("custom_values->>workline_module", moduleKey)
+      .in("custom_values->taskline_data->>task_code", addTaskCodes);
+
+    if (existingAdds.error) {
+      return NextResponse.json({ error: existingAdds.error.message }, { status: 500 });
+    }
+
+    for (const record of (existingAdds.data ?? []) as Pick<TaskRecord, "custom_values">[]) {
+      const taskCodeKey = normalizeTaskCode(record.custom_values?.taskline_data?.task_code);
+      if (taskCodeKey) {
+        existingAddTaskCodeKeys.add(taskCodeKey);
+      }
+    }
+  }
+
   const inserts = actionableRows
-    .filter(({ action, row }) => action === "add" && hasValue(row))
+    .filter(({ action, row, taskCodeKey }) => action === "add" && hasValue(row) && !existingAddTaskCodeKeys.has(taskCodeKey))
     .map(({ row }) => {
       const cleaned = applyTeamAccess(cleanRecord(row), access);
       return {
@@ -756,12 +852,15 @@ async function importRows(
   const added = inserts.length;
   const updated = updates.length;
   const deleted = deleteIds.length;
+  const skipped = actionableRows.filter(
+    ({ action, taskCodeKey }) => action === "add" && existingAddTaskCodeKeys.has(taskCodeKey)
+  ).length;
 
-  await writeAuditLog(admin, organisationId, user.id, "taskline.import", null, { added, deleted, updated });
+  await writeAuditLog(admin, organisationId, user.id, "taskline.import", null, { added, deleted, skipped, updated });
 
   if (!returnRows) {
     return NextResponse.json({
-      summary: { added, deleted, updated }
+      summary: { added, deleted, skipped, updated }
     });
   }
 
@@ -772,7 +871,7 @@ async function importRows(
   }
 
   return NextResponse.json({
-    summary: { added, deleted, updated },
+    summary: { added, deleted, skipped, updated },
     rows: (refreshed.data ?? []).map(formatRecord)
   });
 }
@@ -1426,8 +1525,7 @@ async function getOrganisationId(admin: ReturnType<typeof createAdminClient>, us
 async function requireUser() {
   const cookieStore = await cookies();
   const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL
-!,
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       cookies: {
@@ -1456,6 +1554,10 @@ async function requireUser() {
 
 function text(value: unknown) {
   return String(value ?? "").trim();
+}
+
+function normalizeTaskCode(value: unknown) {
+  return text(value).toLocaleLowerCase();
 }
 
 function taskLineTeamVariants(value: unknown) {
@@ -1942,3 +2044,4 @@ async function sendDueTodayReminderNow(
     console.error("TaskLine due-today email failed:", error);
   }
 }
+
