@@ -89,12 +89,12 @@ const taskLineColumnLayoutStorageKey = "workline:taskline-column-layout:v5";
 const actionColumnWidth = 116;
 const actionColumnKey = "__actions";
 const taskLineColumns: TaskLineColumn[] = [
-  { key: "team", label: "Team", width: 132 },
-  { key: "task_code", label: "Task Code", width: 132 },
+  { key: "team", label: "Team", width: 96 },
+  { key: "task_code", label: "Task Code", width: 104 },
   { key: "name", label: "Name", width: 150 },
   { key: "resource", label: "Resource", width: 140 },
   { key: "entity_group", label: "Entity Group", width: 150 },
-  { key: "entity", label: "Entity", width: 180 },
+  { key: "entity", label: "Entity", width: 240 },
   { key: "state_name", label: "State Name", width: 130 },
   { key: "gstin", label: "GSTIN", width: 170 },
   { key: "task", label: "Task", width: 210 },
