@@ -1,8 +1,8 @@
-name: TaskLine due reminders (00:00 IST)
+name: TaskLine due reminders (09:00 IST)
 
 on:
   schedule:
-    - cron: "30 18 * * *" # 00:00 IST
+    - cron: "30 3 * * *" # 09:00 IST
   workflow_dispatch: {}
 
 jobs:
@@ -14,4 +14,3 @@ jobs:
           curl -fsS --max-time 290 \
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
             https://www.worklineco.com/api/cron/task-due-reminders
-
