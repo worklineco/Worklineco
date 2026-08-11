@@ -30,8 +30,9 @@ type SortDirection = "asc" | "desc";
 type EditDraft = { designation: string; joining_date: string; leaving_date: string; name: string; team: string };
 
 const ARTICLE_ASSISTANT_TENURE_DAYS = 730;
-const gridTemplate = "grid-cols-[0.4fr_1.1fr_0.7fr_1.3fr_1fr_0.9fr_0.9fr_0.8fr]";
-const roleOptions = ["Article Assistant", "Associate", "Manager", "Senior Manager", "Partner", "Accounts", "Others"];
+const editableGridTemplate = "grid-cols-[0.4fr_1.1fr_0.7fr_1.3fr_1fr_0.9fr_0.9fr_0.8fr]";
+const readOnlyGridTemplate = "grid-cols-[0.4fr_1.1fr_0.7fr_1.3fr_1fr_0.9fr_0.9fr]";
+const roleOptions = ["Article Assistant", "Associate", "Senior Associate", "Manager", "Senior Manager", "Partner", "Accounts", "Others"];
 
 export function TeamsPanel() {
   const [members, setMembers] = useState<TeamMember[]>([]);
@@ -149,6 +150,8 @@ export function TeamsPanel() {
 
   const canEdit = editorRoles.includes(myRole.toLowerCase());
   const canManageAdminRole = adminRoleGranters.includes(myRole.toLowerCase());
+  const gridTemplate = canEdit ? editableGridTemplate : readOnlyGridTemplate;
+  const tableMinWidth = canEdit ? "min-w-[1280px]" : "min-w-[1120px]";
 
   return (
     <section className="workline-frame mt-5 rounded-[26px] p-5 md:p-6" id="teams">
@@ -188,7 +191,7 @@ export function TeamsPanel() {
 
       <div className="mt-5 overflow-hidden rounded-2xl border border-slate-950/10 bg-white shadow-sm ring-1 ring-white/70">
         <div className="overflow-x-auto">
-          <div className={`grid min-w-[1280px] ${gridTemplate} gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3 text-xs font-black uppercase text-slate-500`}>
+          <div className={`grid ${tableMinWidth} ${gridTemplate} gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3 text-xs font-black uppercase text-slate-500`}>
             <SortableHeader activeKey={sortKey} direction={sortDirection} label="S.No" onSort={changeSort} sortKey="serial" />
             <SortableHeader activeKey={sortKey} direction={sortDirection} label="Name" onSort={changeSort} sortKey="name" />
             <SortableHeader activeKey={sortKey} direction={sortDirection} label="Team No" onSort={changeSort} sortKey="team" />
@@ -196,7 +199,7 @@ export function TeamsPanel() {
             <SortableHeader activeKey={sortKey} direction={sortDirection} label="Designation" onSort={changeSort} sortKey="designation" />
             <SortableHeader activeKey={sortKey} direction={sortDirection} label="Joining Date" onSort={changeSort} sortKey="joining_date" />
             <SortableHeader activeKey={sortKey} direction={sortDirection} label="Leaving Date" onSort={changeSort} sortKey="leaving_date" />
-            <span>Actions</span>
+            {canEdit ? <span>Actions</span> : null}
           </div>
 
           {isLoading ? <p className="px-4 py-5 text-sm font-bold text-slate-500">Loading team members...</p> : null}
@@ -207,7 +210,7 @@ export function TeamsPanel() {
 
             return (
               <div
-                className={`grid min-w-[1280px] ${gridTemplate} items-center gap-3 border-b border-slate-100 px-4 py-3 text-sm last:border-b-0 ${isEditing ? "bg-navy-50/40" : ""}`}
+                className={`grid ${tableMinWidth} ${gridTemplate} items-center gap-3 border-b border-slate-100 px-4 py-3 text-sm last:border-b-0 ${isEditing ? "bg-navy-50/40" : ""}`}
                 key={member.id}
               >
                 <p className="font-bold text-slate-600">{originalIndex + 1}</p>
@@ -271,42 +274,42 @@ export function TeamsPanel() {
                   <p className="truncate font-bold text-slate-600">{formatDate(member.leaving_date || getLeavingDate(member))}</p>
                 )}
 
-                <div className="flex items-center gap-1.5">
-                  {isEditing ? (
-                    <>
+                {canEdit ? (
+                  <div className="flex items-center gap-1.5">
+                    {isEditing ? (
+                      <>
+                        <button
+                          className="inline-flex size-8 items-center justify-center rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700 transition hover:bg-emerald-100 disabled:opacity-50"
+                          disabled={isSaving}
+                          onClick={() => void saveEdit(member.id)}
+                          title="Save"
+                          type="button"
+                        >
+                          <Check className="size-4" />
+                        </button>
+                        <button
+                          className="inline-flex size-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 transition hover:bg-slate-50 disabled:opacity-50"
+                          disabled={isSaving}
+                          onClick={cancelEdit}
+                          title="Cancel"
+                          type="button"
+                        >
+                          <X className="size-4" />
+                        </button>
+                      </>
+                    ) : (
                       <button
-                        className="inline-flex size-8 items-center justify-center rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700 transition hover:bg-emerald-100 disabled:opacity-50"
-                        disabled={isSaving}
-                        onClick={() => void saveEdit(member.id)}
-                        title="Save"
+                        className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-black uppercase text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
+                        disabled={Boolean(editingId)}
+                        onClick={() => startEdit(member)}
                         type="button"
                       >
-                        <Check className="size-4" />
+                        <Pencil className="size-3.5" />
+                        Edit
                       </button>
-                      <button
-                        className="inline-flex size-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 transition hover:bg-slate-50 disabled:opacity-50"
-                        disabled={isSaving}
-                        onClick={cancelEdit}
-                        title="Cancel"
-                        type="button"
-                      >
-                        <X className="size-4" />
-                      </button>
-                    </>
-                  ) : canEdit ? (
-                    <button
-                      className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-black uppercase text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
-                      disabled={Boolean(editingId)}
-                      onClick={() => startEdit(member)}
-                      type="button"
-                    >
-                      <Pencil className="size-3.5" />
-                      Edit
-                    </button>
-                  ) : (
-                    <span className="text-xs font-bold text-slate-300">—</span>
-                  )}
-                </div>
+                    )}
+                  </div>
+                ) : null}
               </div>
             );
           })}

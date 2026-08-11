@@ -65,7 +65,10 @@ type TaskLineView = "audit" | "register";
 const importActionColumn = "Import Action";
 const importActionOptions = ["Add", "Update", "Delete"];
 const taskLineImportBatchSize = 250;
-const taskLineImportConcurrency = 3;
+const taskLineImportConcurrency = 2;
+const taskLineImportMaxAttempts = 3;
+const taskLineImportRequestTimeoutMs = 90_000;
+const taskLineImportRetryDelayMs = 1_000;
 const taskLinePageSize = 200;
 const taskLineRowsCacheKey = "taskline:rows:v4";
 const taskLineColumnGroups: { columns: string[] | null; key: string; label: string }[] = [
@@ -1438,15 +1441,20 @@ export function TaskLineRegister() {
         return;
       }
 
-      const needsImportTargets = importedRows.some((rawRow) =>
-        ["update", "delete"].includes(text(rawRow[importActionColumn] || "Add").toLowerCase())
+      const importSourceRows = importedRows.map((rawRow, index) => ({
+        importAction: text(rawRow[importActionColumn] || "Add"),
+        row: rowFromImport(rawRow),
+        sourceRow: index + 2
+      }));
+      const needsImportTargets = importSourceRows.some(({ importAction }) =>
+        ["update", "delete"].includes(importAction.toLowerCase())
       );
       let importTargetRows = rows;
 
       if (needsImportTargets) {
         let completeRows = fullRowsCacheRef.current;
         if (!completeRows) {
-          setMessage(`Resolving TaskLine rows before importing ${file.name}...`);
+          setMessage(`Resolving TaskLine rows by Task Code before importing ${file.name}...`);
           const response = await fetch("/api/taskline?all=1", { cache: "no-store" });
           const result = (await response.json()) as { error?: string; rows?: TaskLineRow[] };
           if (!response.ok) {
@@ -1456,39 +1464,74 @@ export function TaskLineRegister() {
           completeRows = result.rows ?? [];
           fullRowsCacheRef.current = completeRows;
         }
-        importTargetRows = filterAndSortTaskLineRows(completeRows, visibleColumns, {
-          columnFilters,
-          dueColorFilter,
-          search,
-          sortState,
-          statusFilter,
-          valueFilters
-        });
+        importTargetRows = completeRows;
       }
 
-      const importRows = importedRows
-        .map((rawRow) => {
-          const importAction = text(rawRow[importActionColumn] || "Add");
-          const serialNumber = text(rawRow["S. No."] || rawRow["S.No."] || rawRow["Serial No."]);
-          const serialIndex = Number.parseInt(serialNumber, 10) - 1;
-          const targetId = importAction.toLowerCase() === "add" || !Number.isInteger(serialIndex) || serialIndex < 0
-            ? ""
-            : text(importTargetRows[serialIndex]?.__id);
+      const rowsByTaskCode = new Map<string, TaskLineRow[]>();
+      for (const targetRow of importTargetRows) {
+        const taskCodeKey = normalizeTaskCode(targetRow.task_code);
+        if (!taskCodeKey) {
+          continue;
+        }
+        rowsByTaskCode.set(taskCodeKey, [...(rowsByTaskCode.get(taskCodeKey) ?? []), targetRow]);
+      }
+
+      const validationErrors: string[] = [];
+      const referencedTaskCodes = new Set<string>();
+      const dateColumns = taskLineColumns.filter((column) => column.type === "date");
+      for (const { row, sourceRow } of importSourceRows) {
+        for (const column of dateColumns) {
+          const value = text(row[column.key]);
+          if (value && normalizeEditableTaskLineDate(value) === null) {
+            validationErrors.push(`row ${sourceRow} has invalid ${column.label}: "${value}"`);
+          }
+        }
+      }
+
+      const importRows = importSourceRows
+        .map(({ importAction, row, sourceRow }) => {
+          const action = importAction.toLowerCase();
+          const taskCode = text(row.task_code);
+          const taskCodeKey = normalizeTaskCode(taskCode);
+          let targetId = "";
+
+          if (!taskCodeKey) {
+            validationErrors.push(`row ${sourceRow} has no Task Code`);
+          } else if (referencedTaskCodes.has(taskCodeKey)) {
+            validationErrors.push(`Task Code ${taskCode} appears more than once`);
+          } else {
+            referencedTaskCodes.add(taskCodeKey);
+            if (action === "update" || action === "delete") {
+              const matches = rowsByTaskCode.get(taskCodeKey) ?? [];
+              if (matches.length === 1) {
+                targetId = text(matches[0].__id);
+              } else {
+                validationErrors.push(matches.length ? `Task Code ${taskCode} is duplicated in TaskLine` : `Task Code ${taskCode} was not found`);
+              }
+            }
+          }
+
           return {
-            ...rowFromImport(rawRow),
+            ...row,
             import_action: importAction,
-            serial_no: serialNumber,
             target_id: targetId
           };
         })
         .filter(hasTaskLineValue);
+
+      if (validationErrors.length) {
+        setMessage(
+          `Import stopped before making changes: ${validationErrors.slice(0, 5).join("; ")}${validationErrors.length > 5 ? `; and ${validationErrors.length - 5} more` : ""}.`
+        );
+        return;
+      }
 
       if (!importRows.length) {
         setMessage(`No filled TaskLine rows found in ${file.name}. Please enter data below the headers before importing.`);
         return;
       }
 
-      const summary = { added: 0, deleted: 0, updated: 0 };
+      const summary = { added: 0, deleted: 0, skipped: 0, updated: 0 };
 
       const batches = Array.from({ length: Math.ceil(importRows.length / taskLineImportBatchSize) }, (_, index) =>
         importRows.slice(index * taskLineImportBatchSize, (index + 1) * taskLineImportBatchSize)
@@ -1503,12 +1546,13 @@ export function TaskLineRegister() {
           summary.added += result.summary?.added ?? 0;
           summary.updated += result.summary?.updated ?? 0;
           summary.deleted += result.summary?.deleted ?? 0;
+          summary.skipped += result.summary?.skipped ?? 0;
           processed += batchGroup[resultIndex].length;
         }
         setMessage(`Importing ${file.name}: ${processed} of ${importRows.length} rows processed...`);
       }
 
-      setMessage(`Imported ${file.name}: ${summary.added} added, ${summary.updated} updated, ${summary.deleted} deleted.`);
+      setMessage(`Imported ${file.name}: ${summary.added} added, ${summary.updated} updated, ${summary.deleted} deleted, ${summary.skipped} already present.`);
       await reloadTaskLine();
     } catch (error) {
       console.error("TaskLine import error:", error);
@@ -3164,6 +3208,10 @@ function BillingDraftInput({
   );
 }
 
+function normalizeTaskCode(value: unknown) {
+  return text(value).toLocaleLowerCase();
+}
+
 function normalizeGstin(value: unknown) {
   return String(value ?? "").replace(/[^0-9a-z]/gi, "").toUpperCase();
 }
@@ -3251,21 +3299,54 @@ function pad2(value: number) {
 }
 
 async function postTaskLineImportBatch(importRows: TaskLineRow[]) {
-  const response = await fetch("/api/taskline", {
-    body: JSON.stringify({ action: "import", importRows, returnRows: false }),
-    headers: { "Content-Type": "application/json" },
-    method: "POST"
-  });
-  const result = (await response.json().catch(() => ({}))) as {
-    error?: string;
-    summary?: { added: number; deleted: number; updated: number };
-  };
+  const canRetrySafely = importRows.every((row) => text(row.import_action || "Add").toLowerCase() === "add");
 
-  if (!response.ok) {
-    throw new Error(result.error ?? `Could not import TaskLine rows. Server returned ${response.status}.`);
+  for (let attempt = 1; attempt <= taskLineImportMaxAttempts; attempt += 1) {
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), taskLineImportRequestTimeoutMs);
+    let response: Response;
+
+    try {
+      response = await fetch("/api/taskline", {
+        body: JSON.stringify({ action: "import", importRows, returnRows: false }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+        signal: controller.signal
+      });
+    } catch (error) {
+      if (!canRetrySafely || attempt === taskLineImportMaxAttempts) {
+        const reason = error instanceof Error && error.name === "AbortError"
+          ? "The import request timed out."
+          : error instanceof Error
+            ? error.message
+            : "The import connection failed.";
+        throw new Error(`${reason} No duplicate rows were created; please try the import again.`);
+      }
+
+      await new Promise((resolve) => window.setTimeout(resolve, taskLineImportRetryDelayMs * attempt));
+      continue;
+    } finally {
+      window.clearTimeout(timeout);
+    }
+
+    const result = (await response.json().catch(() => ({}))) as {
+      error?: string;
+      summary?: { added: number; deleted: number; skipped?: number; updated: number };
+    };
+
+    if (response.ok) {
+      return result;
+    }
+
+    const retryableStatus = response.status === 429 || response.status >= 500;
+    if (!canRetrySafely || !retryableStatus || attempt === taskLineImportMaxAttempts) {
+      throw new Error(result.error ?? `Could not import TaskLine rows. Server returned ${response.status}.`);
+    }
+
+    await new Promise((resolve) => window.setTimeout(resolve, taskLineImportRetryDelayMs * attempt));
   }
 
-  return result;
+  throw new Error("Could not import TaskLine rows.");
 }
 
 function hasTaskLineValue(row: TaskLineRow) {

@@ -2,12 +2,13 @@ import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { createClient, type User } from "@supabase/supabase-js";
 import { createTransport } from "nodemailer";
 import { isViewOnlyRegisterUser, viewOnlyRegisterResponse } from "@/lib/register-access";
+import { extraDueRecipientsByTeam, indiaTodayDisplayDate, indiaTodayKey, isEmail, isManagerRoleText, parseEmailAddresses, teamMatchKey } from "@/lib/taskline-reminder-shared";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
 type CookieToSet = { name: string; options: CookieOptions; value: string };
 type TaskLineRow = Record<string, string>;
-type TaskLineImportRow = TaskLineRow & { import_action?: string; serial_no?: string; target_id?: string };
+type TaskLineImportRow = TaskLineRow & { import_action?: string; target_id?: string };
 type TaskRecord = {
   created_at: string;
   created_by: string | null;
@@ -492,6 +493,15 @@ async function handlePost(request: Request) {
         await sendResourceAllocationMail(admin, organisation.organisationId, saved.data as TaskRecord, "name");
       }
 
+      // Instant due-today reminder: if the daily 09:00 IST mail for today has
+      // already gone out, a due date set/changed TO today would otherwise
+      // never get its reminder. Send it immediately instead (the audit-log
+      // dedupe keys stop double sends either way).
+      const previousDueDate = text((existing.data as TaskRecord).custom_values?.taskline_data?.due_date);
+      if (text(cleaned.due_date) === indiaTodayDisplayDate() && previousDueDate !== text(cleaned.due_date)) {
+        await sendDueTodayReminderNow(admin, organisation.organisationId, saved.data as TaskRecord);
+      }
+
       return NextResponse.json({ record: formatRecord(saved.data as TaskRecord) });
     } else if (existing.data) {
       return NextResponse.json({ error: "You can only update TaskLine rows for your own team." }, { status: 403 });
@@ -538,6 +548,12 @@ async function handlePost(request: Request) {
 
   if (text(cleaned.name)) {
     await sendResourceAllocationMail(admin, organisation.organisationId, saved.data as TaskRecord, "name");
+  }
+
+  // Instant due-today reminder for rows created with today's due date
+  // (the daily 09:00 IST mail for today may have already gone out).
+  if (text(cleaned.due_date) === indiaTodayDisplayDate()) {
+    await sendDueTodayReminderNow(admin, organisation.organisationId, saved.data as TaskRecord);
   }
 
   return NextResponse.json({ record: formatRecord(saved.data as TaskRecord) });
@@ -638,17 +654,47 @@ async function importRows(
   rows: TaskLineImportRow[],
   returnRows: boolean
 ) {
-  const actionableRows = rows.map((row) => ({
+  const actionableRows = rows.map((row, index) => ({
     action: text(row.import_action || "Add").toLowerCase(),
     row,
-    targetId: text(row.target_id)
+    rowNumber: index + 2,
+    targetId: text(row.target_id),
+    taskCodeKey: normalizeTaskCode(row.task_code)
   }));
-  const needsSerialFallback = actionableRows.some(
+  const unsupportedActions = actionableRows.filter(({ action }) => !["add", "update", "delete"].includes(action));
+  if (unsupportedActions.length) {
+    return NextResponse.json(
+      { error: `Import stopped: unsupported Import Action in row ${unsupportedActions[0].rowNumber}. Use Add, Update, or Delete.` },
+      { status: 400 }
+    );
+  }
+
+  const missingTaskCodes = actionableRows.filter(({ taskCodeKey }) => !taskCodeKey);
+  if (missingTaskCodes.length) {
+    return NextResponse.json(
+      { error: `Import stopped: Task Code is required for every Add, Update, and Delete row. First missing value is in row ${missingTaskCodes[0].rowNumber}.` },
+      { status: 400 }
+    );
+  }
+
+  const taskCodeRows = new Map<string, number[]>();
+  for (const item of actionableRows) {
+    taskCodeRows.set(item.taskCodeKey, [...(taskCodeRows.get(item.taskCodeKey) ?? []), item.rowNumber]);
+  }
+  const duplicateTaskCode = Array.from(taskCodeRows.entries()).find(([, rowNumbers]) => rowNumbers.length > 1);
+  if (duplicateTaskCode) {
+    return NextResponse.json(
+      { error: `Import stopped: Task Code ${text(duplicateTaskCode[0])} appears more than once in this batch (rows ${duplicateTaskCode[1].join(", ")}).` },
+      { status: 400 }
+    );
+  }
+
+  const needsTaskCodeFallback = actionableRows.some(
     ({ action, targetId }) => (action === "update" || action === "delete") && !targetId
   );
   let existingRows: TaskRecord[] = [];
 
-  if (needsSerialFallback) {
+  if (needsTaskCodeFallback) {
     const existing = await loadTaskLineRecords(admin, organisationId, access);
     if (existing.error) {
       return NextResponse.json({ error: existing.error.message }, { status: 500 });
@@ -656,18 +702,44 @@ async function importRows(
     existingRows = existing.data ?? [];
   }
 
-  for (const item of actionableRows) {
-    if (item.targetId || (item.action !== "update" && item.action !== "delete")) {
-      continue;
+  if (needsTaskCodeFallback) {
+    const rowsByTaskCode = new Map<string, TaskRecord[]>();
+    for (const record of existingRows) {
+      const taskCodeKey = normalizeTaskCode(record.custom_values?.taskline_data?.task_code);
+      if (!taskCodeKey) {
+        continue;
+      }
+      rowsByTaskCode.set(taskCodeKey, [...(rowsByTaskCode.get(taskCodeKey) ?? []), record]);
     }
-    const serialIndex = Number.parseInt(text(item.row.serial_no), 10) - 1;
-    item.targetId = Number.isInteger(serialIndex) && serialIndex >= 0 ? text(existingRows[serialIndex]?.id) : "";
+
+    const targetErrors: string[] = [];
+    for (const item of actionableRows) {
+      if (item.targetId || (item.action !== "update" && item.action !== "delete")) {
+        continue;
+      }
+      const matches = rowsByTaskCode.get(item.taskCodeKey) ?? [];
+      if (matches.length === 1) {
+        item.targetId = matches[0].id;
+      } else {
+        const taskCode = text(item.row.task_code) || `row ${item.rowNumber}`;
+        targetErrors.push(matches.length ? `${taskCode} is duplicated` : `${taskCode} was not found`);
+      }
+    }
+
+    if (targetErrors.length) {
+      return NextResponse.json(
+        {
+          error: `Import stopped: Task Code must uniquely match one TaskLine record. ${targetErrors.slice(0, 5).join("; ")}${targetErrors.length > 5 ? `; and ${targetErrors.length - 5} more` : ""}.`
+        },
+        { status: 400 }
+      );
+    }
   }
 
   const requestedTargetIds = Array.from(
     new Set(actionableRows.map(({ targetId }) => targetId).filter(Boolean))
   );
-  const accessibleTargetIds = new Set<string>();
+  const accessibleTargets = new Map<string, TaskRecord>();
   if (requestedTargetIds.length) {
     const targets = await admin
       .from("tasks")
@@ -679,10 +751,25 @@ async function importRows(
     }
     for (const record of (targets.data ?? []) as TaskRecord[]) {
       if (isTaskLineRecord(record) && canAccessRecord(record, access)) {
-        accessibleTargetIds.add(record.id);
+        accessibleTargets.set(record.id, record);
       }
     }
   }
+
+  const invalidTargets = actionableRows.filter(({ action, targetId, taskCodeKey }) => {
+    if (action !== "update" && action !== "delete") {
+      return false;
+    }
+    const target = accessibleTargets.get(targetId);
+    return !target || normalizeTaskCode(target.custom_values?.taskline_data?.task_code) !== taskCodeKey;
+  });
+  if (invalidTargets.length) {
+    return NextResponse.json(
+      { error: `Import stopped: ${invalidTargets.length} Update/Delete row(s) no longer match their Task Code. Refresh TaskLine, export a new view, and try again.` },
+      { status: 409 }
+    );
+  }
+  const accessibleTargetIds = new Set(accessibleTargets.keys());
 
   const deleteIds = Array.from(
     new Set(
@@ -694,8 +781,33 @@ async function importRows(
   const updates = actionableRows.filter(
     ({ action, targetId }) => action === "update" && accessibleTargetIds.has(targetId)
   );
+  const addTaskCodes = actionableRows
+    .filter(({ action }) => action === "add")
+    .map(({ row }) => text(row.task_code));
+  const existingAddTaskCodeKeys = new Set<string>();
+
+  if (addTaskCodes.length) {
+    const existingAdds = await admin
+      .from("tasks")
+      .select("custom_values")
+      .eq("organisation_id", organisationId)
+      .eq("custom_values->>workline_module", moduleKey)
+      .in("custom_values->taskline_data->>task_code", addTaskCodes);
+
+    if (existingAdds.error) {
+      return NextResponse.json({ error: existingAdds.error.message }, { status: 500 });
+    }
+
+    for (const record of (existingAdds.data ?? []) as Pick<TaskRecord, "custom_values">[]) {
+      const taskCodeKey = normalizeTaskCode(record.custom_values?.taskline_data?.task_code);
+      if (taskCodeKey) {
+        existingAddTaskCodeKeys.add(taskCodeKey);
+      }
+    }
+  }
+
   const inserts = actionableRows
-    .filter(({ action, row }) => action === "add" && hasValue(row))
+    .filter(({ action, row, taskCodeKey }) => action === "add" && hasValue(row) && !existingAddTaskCodeKeys.has(taskCodeKey))
     .map(({ row }) => {
       const cleaned = applyTeamAccess(cleanRecord(row), access);
       return {
@@ -740,12 +852,15 @@ async function importRows(
   const added = inserts.length;
   const updated = updates.length;
   const deleted = deleteIds.length;
+  const skipped = actionableRows.filter(
+    ({ action, taskCodeKey }) => action === "add" && existingAddTaskCodeKeys.has(taskCodeKey)
+  ).length;
 
-  await writeAuditLog(admin, organisationId, user.id, "taskline.import", null, { added, deleted, updated });
+  await writeAuditLog(admin, organisationId, user.id, "taskline.import", null, { added, deleted, skipped, updated });
 
   if (!returnRows) {
     return NextResponse.json({
-      summary: { added, deleted, updated }
+      summary: { added, deleted, skipped, updated }
     });
   }
 
@@ -756,7 +871,7 @@ async function importRows(
   }
 
   return NextResponse.json({
-    summary: { added, deleted, updated },
+    summary: { added, deleted, skipped, updated },
     rows: (refreshed.data ?? []).map(formatRecord)
   });
 }
@@ -1441,6 +1556,10 @@ function text(value: unknown) {
   return String(value ?? "").trim();
 }
 
+function normalizeTaskCode(value: unknown) {
+  return text(value).toLocaleLowerCase();
+}
+
 function taskLineTeamVariants(value: unknown) {
   const current = text(value);
   const digits = current.match(/\d+/)?.[0];
@@ -1751,3 +1870,178 @@ async function sendResourceAllocationMail(
     console.error("TaskLine allocation email failed:", error);
   }
 }
+
+// ---------------------------------------------------------------------------
+// Instant due-today reminder
+// ---------------------------------------------------------------------------
+
+/**
+ * Sends the "TASK DUE TODAY" reminder immediately when a task's due date is
+ * set to today after the daily 09:00 IST mail has already gone out. Uses the same
+ * recipient rules and audit-log dedupe keys as the cron, so neither path
+ * ever double-sends.
+ */
+async function sendDueTodayReminderNow(
+  admin: ReturnType<typeof createAdminClient>,
+  organisationId: string,
+  record: TaskRecord
+) {
+  try {
+    const row = record.custom_values?.taskline_data ?? {};
+    const status = text(row.status_open_close).toLowerCase();
+
+    if (status === "close" || status === "closed") {
+      return;
+    }
+
+    const smtp = allocationSmtpConfiguration();
+
+    if ("error" in smtp) {
+      console.error("TaskLine due-today email skipped:", smtp.error);
+      return;
+    }
+
+    const todayKey = indiaTodayKey();
+    const recipients = new Set(parseEmailAddresses(row.reminder_email));
+
+    for (const extra of extraDueRecipientsByTeam[teamMatchKey(row.team)] ?? []) {
+      if (isEmail(extra.toLowerCase())) {
+        recipients.add(extra.toLowerCase());
+      }
+    }
+
+    const members = await admin
+      .from("users")
+      .select("id,email,full_name,status")
+      .eq("organisation_id", organisationId)
+      .limit(2000);
+
+    if (members.error) {
+      console.error("TaskLine due-today email: could not load members:", members.error.message);
+    }
+
+    const authUsersById = new Map<string, User>();
+    for (let page = 1; page <= 20; page += 1) {
+      const listed = await admin.auth.admin.listUsers({ page, perPage: 1000 });
+      if (listed.error) {
+        console.error("TaskLine due-today email: could not list auth users:", listed.error.message);
+        break;
+      }
+      for (const user of listed.data.users) {
+        authUsersById.set(user.id, user);
+      }
+      if (listed.data.users.length < 1000) {
+        break;
+      }
+    }
+
+    const resourceNames = splitNames(row.resource);
+    const rowTeamKey = teamMatchKey(row.team);
+
+    for (const member of members.data ?? []) {
+      if (text(member.status).toLowerCase() === "inactive") {
+        continue;
+      }
+
+      const user = authUsersById.get(member.id);
+      const memberName = allocationNormalizeName(
+        user?.user_metadata?.full_name ?? user?.user_metadata?.name ?? member.full_name ?? user?.email
+      );
+      const roleText = `${text(user?.user_metadata?.role)} ${text(user?.user_metadata?.designation)}`;
+      const isResource = Boolean(memberName) && resourceNames.includes(memberName);
+      const isTeamManager =
+        isManagerRoleText(roleText) && Boolean(rowTeamKey) && teamMatchKey(user?.user_metadata?.team) === rowTeamKey;
+
+      if (!isResource && !isTeamManager) {
+        continue;
+      }
+
+      const email = text(user?.email || member.email).toLowerCase();
+      if (allocationIsEmail(email)) {
+        recipients.add(email);
+      }
+    }
+
+    if (!recipients.size) {
+      return;
+    }
+
+    // Dedupe against anything already sent for this task today (same audit
+    // key structure the daily cron writes and reads).
+    const sentToday = await admin
+      .from("audit_logs")
+      .select("new_value")
+      .eq("action", "taskline.due_email_sent")
+      .eq("entity_type", "taskline_email_reminder")
+      .eq("entity_id", record.id)
+      .gte("created_at", new Date(Date.now() - 2 * 86400000).toISOString())
+      .limit(200);
+    const alreadySent = new Set(
+      (sentToday.data ?? [])
+        .map((log) => (log.new_value ?? {}) as { due_date?: string; recipient?: string })
+        .filter((value) => text(value.due_date) === todayKey)
+        .map((value) => text(value.recipient).toLowerCase())
+    );
+
+    const transporter = createTransport({
+      auth: {
+        pass: smtp.password,
+        user: smtp.user
+      },
+      host: smtp.host,
+      port: smtp.port,
+      secure: smtp.port === 465
+    });
+
+    const entity = text(row.entity) || "TaskLine task";
+    const taskName = text(row.task) || "Task";
+    const subject = `Due today: ${entity} — ${taskName}`;
+    const bodyText = [
+      "TASK DUE TODAY",
+      "",
+      entity,
+      `Task: ${taskName}`,
+      `Team: ${text(row.team) || "-"}`,
+      `Resource: ${text(row.resource) || "-"}`,
+      `Stage: ${text(row.stage) || "-"}`,
+      `Period: ${text(row.period) || "-"}`,
+      `Due date: ${text(row.due_date) || "-"}`,
+      "",
+      `Open TaskLine: ${allocationAppUrl}/taskline`
+    ].join("\n");
+
+    for (const recipient of recipients) {
+      if (alreadySent.has(recipient)) {
+        continue;
+      }
+
+      await transporter.sendMail({
+        from: smtp.from,
+        subject,
+        text: bodyText,
+        to: recipient
+      });
+
+      const logged = await admin.from("audit_logs").insert({
+        action: "taskline.due_email_sent",
+        actor_user_id: null,
+        entity_id: record.id,
+        entity_type: "taskline_email_reminder",
+        new_value: {
+          due_date: todayKey,
+          recipient,
+          sent_at: new Date().toISOString()
+        },
+        old_value: null,
+        organisation_id: organisationId
+      });
+
+      if (logged.error) {
+        console.error("Could not record TaskLine due-today email:", logged.error.message);
+      }
+    }
+  } catch (error) {
+    console.error("TaskLine due-today email failed:", error);
+  }
+}
+

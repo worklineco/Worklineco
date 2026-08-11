@@ -2,10 +2,10 @@
 
 import { supabase } from "@/lib/supabase/client";
 import { AlertCircle, ArrowRight, CheckCircle2, Eye, EyeOff, Loader2 } from "lucide-react";
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 
 const organisationId = "DCO1433";
-const roleOptions = ["Article Assistant", "Associate", "Manager", "Senior Manager", "Partner", "Accounts", "Others"];
+const roleOptions = ["Article Assistant", "Associate", "Senior Associate", "Manager", "Senior Manager", "Partner", "Accounts", "Others"];
 const teamOptions = [
   "Team 01",
   "Team 03",
@@ -37,6 +37,10 @@ const partnerOptions = [
   "Mr. Mudit Jain",
   "Mrs. Shuchi Sethi"
 ];
+type PartnerApprover = {
+  id: string;
+  name: string;
+};
 const inputClass =
   "mt-1.5 h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold outline-none transition focus:border-navy-400 focus:ring-4 focus:ring-navy-100";
 type AuthMode = "reset" | "signin" | "signup";
@@ -48,6 +52,10 @@ export function LoginForm() {
   const [orgId, setOrgId] = useState("");
   const [role, setRole] = useState("");
   const [team, setTeam] = useState("");
+  const [approverId, setApproverId] = useState("");
+  const [partnerApprovers, setPartnerApprovers] = useState<PartnerApprover[]>([]);
+  const [partnerLoadError, setPartnerLoadError] = useState("");
+  const [isLoadingPartners, setIsLoadingPartners] = useState(false);
   const [joiningDate, setJoiningDate] = useState("");
   const [email, setEmail] = useState("");
   const [emailOtp, setEmailOtp] = useState("");
@@ -63,15 +71,70 @@ export function LoginForm() {
   const [isLoading, setIsLoading] = useState(false);
 
   const isValidOrg = orgId.trim().toUpperCase() === organisationId;
-  const needsTeam = ["Article Assistant", "Associate", "Manager", "Senior Manager"].includes(role);
+  const needsTeam = ["Article Assistant", "Associate", "Senior Associate", "Manager", "Senior Manager"].includes(role);
   const needsPartner = role === "Partner";
+  const needsPartnerApproval = role === "Others";
   const needsAccountsApproval = role === "Accounts";
+  const selectedApprover = partnerApprovers.find((partner) => partner.id === approverId);
   const teamEmail = needsTeam
     ? teamEmailByName[team]
     : needsAccountsApproval
       ? "commercials.dco@gmail.com"
       : "";
-  const approvalLabel = needsAccountsApproval ? "Accounts access" : team;
+  const approvalLabel = needsPartnerApproval
+    ? selectedApprover?.name ?? "Partner approval"
+    : needsAccountsApproval
+      ? "Accounts access"
+      : team;
+
+  useEffect(() => {
+    if (!needsPartnerApproval) {
+      setApproverId("");
+      setPartnerApprovers([]);
+      setPartnerLoadError("");
+      return;
+    }
+
+    const controller = new AbortController();
+
+    async function loadPartnerApprovers() {
+      setIsLoadingPartners(true);
+      setPartnerLoadError("");
+
+      try {
+        const response = await fetch("/api/auth/partner-options", {
+          cache: "no-store",
+          signal: controller.signal
+        });
+        const result = (await response.json()) as {
+          error?: string;
+          partners?: PartnerApprover[];
+        };
+
+        if (!response.ok) {
+          throw new Error(result.error ?? "Could not load approved partners.");
+        }
+
+        setPartnerApprovers(result.partners ?? []);
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") {
+          return;
+        }
+
+        setPartnerApprovers([]);
+        setPartnerLoadError(
+          error instanceof Error ? error.message : "Could not load approved partners."
+        );
+      } finally {
+        if (!controller.signal.aborted) {
+          setIsLoadingPartners(false);
+        }
+      }
+    }
+
+    void loadPartnerApprovers();
+    return () => controller.abort();
+  }, [needsPartnerApproval]);
 
   function changeMode(nextMode: AuthMode) {
     setMode(nextMode);
@@ -80,6 +143,7 @@ export function LoginForm() {
     setSignupStep("details");
     setEmailOtp("");
     setTeamOtp("");
+    setApproverId("");
     setPassword("");
     setConfirmPassword("");
     setResetOtp("");
@@ -194,20 +258,28 @@ export function LoginForm() {
       return;
     }
 
-    if (!role || ((needsTeam || needsPartner) && !team)) {
-      setMessage("Please select your role and team.");
+    if (
+      !role ||
+      ((needsTeam || needsPartner) && !team) ||
+      (needsPartnerApproval && !approverId)
+    ) {
+      setMessage("Please select all required role and approval details.");
       setMessageType("error");
       setIsLoading(false);
       return;
     }
 
-    const userData = {
+    const userData: Record<string, string> = {
       full_name: name,
       joining_date: joiningDate,
       organisation_id: organisationId,
       role,
       team
     };
+
+    if (needsPartnerApproval && selectedApprover) {
+      userData.approving_partner = selectedApprover.name;
+    }
 
     if (signupStep === "details") {
       const result = await sendOtp({
@@ -244,9 +316,10 @@ export function LoginForm() {
         return;
       }
 
-      if (teamEmail) {
+      if (teamEmail || needsPartnerApproval) {
         const teamOtpResult = await sendOtp({
-          email: teamEmail,
+          approverId: needsPartnerApproval ? approverId : undefined,
+          email: needsPartnerApproval ? undefined : teamEmail,
           label: approvalLabel,
           purpose: "team"
         });
@@ -259,13 +332,23 @@ export function LoginForm() {
         }
 
         setSignupStep("teamOtp");
-        setMessage(`Approval OTP sent to ${teamEmail}.`);
+        setMessage(
+          needsPartnerApproval
+            ? `Approval OTP sent to ${selectedApprover?.name ?? "the selected partner"}.`
+            : `Approval OTP sent to ${teamEmail}.`
+        );
         setMessageType("success");
         setIsLoading(false);
         return;
       }
 
-      const completed = await completeSignup({ email, metadata: userData, password, teamEmail });
+      const completed = await completeSignup({
+        approverId: needsPartnerApproval ? approverId : undefined,
+        email,
+        metadata: userData,
+        password,
+        teamEmail
+      });
 
       if (!completed.ok) {
         setMessage(completed.error);
@@ -277,7 +360,8 @@ export function LoginForm() {
     }
 
     const teamVerified = await verifyOtp({
-      email: teamEmail,
+      approverId: needsPartnerApproval ? approverId : undefined,
+      email: needsPartnerApproval ? undefined : teamEmail,
       otp: teamOtp,
       purpose: "team"
     });
@@ -289,7 +373,13 @@ export function LoginForm() {
       return;
     }
 
-    const completed = await completeSignup({ email, metadata: userData, password, teamEmail });
+    const completed = await completeSignup({
+      approverId: needsPartnerApproval ? approverId : undefined,
+      email,
+      metadata: userData,
+      password,
+      teamEmail
+    });
 
     if (!completed.ok) {
       setMessage(completed.error);
@@ -363,7 +453,7 @@ export function LoginForm() {
               <span className="text-xs font-black uppercase text-slate-500">Name</span>
               <input
                 className={inputClass}
-                disabled={signupStep === "emailOtp"}
+                disabled={signupStep !== "details"}
                 onChange={(event) => setName(event.target.value)}
                 placeholder="Your full name"
                 required
@@ -375,7 +465,7 @@ export function LoginForm() {
               <span className="text-xs font-black uppercase text-slate-500">Joining Date</span>
               <input
                 className={inputClass}
-                disabled={signupStep === "emailOtp"}
+                disabled={signupStep !== "details"}
                 onChange={(event) => setJoiningDate(event.target.value)}
                 required
                 type="date"
@@ -387,7 +477,7 @@ export function LoginForm() {
               <span className="text-xs font-black uppercase text-slate-500">Organisation ID</span>
               <input
                 className={inputClass}
-                disabled={signupStep === "emailOtp"}
+                disabled={signupStep !== "details"}
                 onChange={(event) => {
                   setOrgId(event.target.value.toUpperCase());
                   setRole("");
@@ -411,7 +501,7 @@ export function LoginForm() {
                   <span className="text-xs font-black uppercase text-slate-500">Role</span>
                   <select
                     className={inputClass}
-                    disabled={signupStep === "emailOtp"}
+                    disabled={signupStep !== "details"}
                     onChange={(event) => {
                       setRole(event.target.value);
                       setTeam("");
@@ -433,7 +523,7 @@ export function LoginForm() {
                     </span>
                     <select
                       className={inputClass}
-                      disabled={signupStep === "emailOtp"}
+                      disabled={signupStep !== "details"}
                       onChange={(event) => setTeam(event.target.value)}
                       required
                       value={team}
@@ -445,6 +535,35 @@ export function LoginForm() {
                     </select>
                   </label>
                 ) : null}
+
+                {needsPartnerApproval ? (
+                  <label className="block">
+                    <span className="text-xs font-black uppercase text-slate-500">
+                      Approving Partner
+                    </span>
+                    <select
+                      className={inputClass}
+                      disabled={signupStep !== "details" || isLoadingPartners}
+                      onChange={(event) => setApproverId(event.target.value)}
+                      required
+                      value={approverId}
+                    >
+                      <option value="">
+                        {isLoadingPartners ? "Loading approved partners..." : "Select partner"}
+                      </option>
+                      {partnerApprovers.map((partner) => (
+                        <option key={partner.id} value={partner.id}>
+                          {partner.name}
+                        </option>
+                      ))}
+                    </select>
+                    {partnerLoadError ? (
+                      <span className="mt-1 block text-xs font-bold text-rose-700">
+                        {partnerLoadError}
+                      </span>
+                    ) : null}
+                  </label>
+                ) : null}
               </>
             ) : null}
           </>
@@ -454,7 +573,10 @@ export function LoginForm() {
           <span className="text-xs font-black uppercase text-slate-500">Email ID</span>
           <input
             className={inputClass}
-            disabled={signupStep === "emailOtp" || (mode === "reset" && resetStep !== "email")}
+            disabled={
+              (mode === "signup" && signupStep !== "details") ||
+              (mode === "reset" && resetStep !== "email")
+            }
             onChange={(event) => setEmail(event.target.value)}
             placeholder="you@firm.com"
             required
@@ -482,7 +604,7 @@ export function LoginForm() {
             <div className="mt-1.5 flex h-11 items-center rounded-xl border border-slate-200 bg-white pr-2 transition focus-within:border-navy-400 focus-within:ring-4 focus-within:ring-navy-100">
               <input
                 className="h-full min-w-0 flex-1 rounded-xl border-0 bg-transparent px-3 text-sm font-semibold outline-none"
-                disabled={signupStep === "emailOtp"}
+                disabled={signupStep !== "details"}
                 minLength={6}
                 onChange={(event) => setPassword(event.target.value)}
                 placeholder="Minimum 6 characters"
@@ -613,18 +735,20 @@ export function LoginForm() {
 }
 
 async function completeSignup({
+  approverId,
   email,
   metadata,
   password,
   teamEmail
 }: {
+  approverId?: string;
   email: string;
   metadata: Record<string, string>;
   password: string;
   teamEmail: string;
 }) {
   const response = await fetch("/api/auth/complete-signup", {
-    body: JSON.stringify({ email, metadata, password, teamEmail }),
+    body: JSON.stringify({ approverId, email, metadata, password, teamEmail }),
     headers: { "Content-Type": "application/json" },
     method: "POST"
   });
@@ -673,16 +797,18 @@ async function resetPassword({ email, password }: { email: string; password: str
 }
 
 async function sendOtp({
+  approverId,
   email,
   label,
   purpose
 }: {
-  email: string;
+  approverId?: string;
+  email?: string;
   label: string;
   purpose: string;
 }) {
   const response = await fetch("/api/auth/send-otp", {
-    body: JSON.stringify({ email, label, purpose }),
+    body: JSON.stringify({ approverId, email, label, purpose }),
     headers: { "Content-Type": "application/json" },
     method: "POST"
   });
@@ -694,16 +820,18 @@ async function sendOtp({
 }
 
 async function verifyOtp({
+  approverId,
   email,
   otp,
   purpose
 }: {
-  email: string;
+  approverId?: string;
+  email?: string;
   otp: string;
   purpose: string;
 }) {
   const response = await fetch("/api/auth/verify-otp", {
-    body: JSON.stringify({ email, otp, purpose }),
+    body: JSON.stringify({ approverId, email, otp, purpose }),
     headers: { "Content-Type": "application/json" },
     method: "POST"
   });

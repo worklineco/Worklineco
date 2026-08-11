@@ -1,6 +1,7 @@
 import { createClient, type User } from "@supabase/supabase-js";
 import { createTransport } from "nodemailer";
 import { NextResponse } from "next/server";
+import { extraDueRecipientsByTeam, isEmail, isManagerRoleText, normalizeName, parseEmailAddresses, splitNames, teamMatchKey } from "@/lib/taskline-reminder-shared";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -29,12 +30,6 @@ type ReminderAuditValue = {
 
 const moduleKey = "taskline";
 const fetchBatchSize = 1000;
-// Fixed subscribers: these addresses receive EVERY due-date reminder for the
-// mapped team (keys are normalised team numbers - "3" matches "Team 03",
-// "Team-03", etc.). Edit this map to add or remove standing subscribers.
-const extraDueRecipientsByTeam: Record<string, string[]> = {
-  "3": ["shuchis.dco@gmail.com"]
-};
 const appUrl = (process.env.NEXT_PUBLIC_SITE_URL ?? process.env.NEXT_PUBLIC_APP_URL ?? "https://www.worklineco.com").replace(/\/+$/, "");
 
 export async function GET(request: Request) {
@@ -49,9 +44,13 @@ export async function GET(request: Request) {
   }
 
   const admin = createAdminClient();
-  // Runs at 00:00 IST and targets tasks due TODAY (the due date itself).
-  const dueDateKey = indiaDateKey(0);
-  const followingDateKey = indiaDateKey(1);
+  // Runs at 09:00 IST and targets tasks due TODAY (the due date itself).
+  // Schedulers can fire early or late, so anchor on the midnight boundary
+  // instead of the wall clock: a late-evening run (18:00+ IST) means "the day
+  // about to start"; any other time means "the day that already started".
+  const dayOffset = indiaHourNow() >= 18 ? 1 : 0;
+  const dueDateKey = indiaDateKey(dayOffset);
+  const followingDateKey = indiaDateKey(dayOffset + 1);
   const dueTasks = await loadDueTasks(admin, dueDateKey, followingDateKey);
 
   if ("error" in dueTasks) {
@@ -352,11 +351,9 @@ function taskResourceMatches(row: TaskLineRow, user: User, fallbackName: string 
 }
 
 function isTeamManagerFor(row: TaskLineRow, user: User) {
-  const roleText = `${text(user.user_metadata?.role)} ${text(user.user_metadata?.designation)}`.toLowerCase();
-  const isManager =
-    roleText.includes("manager") || roleText.includes("partner") || roleText.includes("owner") || roleText.includes("admin");
+  const roleText = `${text(user.user_metadata?.role)} ${text(user.user_metadata?.designation)}`;
 
-  if (!isManager) {
+  if (!isManagerRoleText(roleText)) {
     return false;
   }
 
@@ -364,13 +361,6 @@ function isTeamManagerFor(row: TaskLineRow, user: User) {
   return Boolean(rowTeam) && teamMatchKey(user.user_metadata?.team) === rowTeam;
 }
 
-function teamMatchKey(value: unknown) {
-  const digits = text(value).match(/\d+/);
-  if (digits) {
-    return String(parseInt(digits[0], 10));
-  }
-  return text(value).toLowerCase().replace(/[^a-z0-9]/g, "");
-}
 
 function taskIsClosed(row: TaskLineRow) {
   const status = text(row.status_open_close).toLowerCase();
@@ -507,6 +497,15 @@ function displayDateFromKey(value: string) {
   return match ? `${match[3]}-${match[2]}-${match[1]}` : value;
 }
 
+function indiaHourNow() {
+  const hour = new Intl.DateTimeFormat("en-GB", {
+    hour: "2-digit",
+    hour12: false,
+    timeZone: "Asia/Kolkata"
+  }).format(new Date());
+  return Number(hour) % 24;
+}
+
 function indiaDateKey(dayOffset: number) {
   const parts = new Intl.DateTimeFormat("en-CA", {
     day: "2-digit",
@@ -525,38 +524,9 @@ function reminderKey(taskId: string, recipient: string, dueDateKey: string) {
   return `${taskId}|${recipient.toLowerCase()}|${dueDateKey}`;
 }
 
-function parseEmailAddresses(value: unknown) {
-  return text(value)
-    .split(/[\s,;]+/)
-    .map((email) => email.toLowerCase())
-    .filter(isEmail);
-}
 
-function isEmail(value: string) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
-}
 
-function splitNames(value: unknown) {
-  return text(value)
-    .split(/[,;/\n]+/)
-    .map(normalizeName)
-    .filter(Boolean);
-}
 
-function normalizeName(value: unknown) {
-  const honorifics = new Set(["ca", "cs", "cma", "adv", "advocate", "mr", "mrs", "ms", "dr", "shri", "smt", "sh"]);
-  const parts = text(value)
-    .toLowerCase()
-    .replace(/[.,]/g, " ")
-    .split(/\s+/)
-    .filter(Boolean);
-
-  while (parts.length > 1 && honorifics.has(parts[0])) {
-    parts.shift();
-  }
-
-  return parts.join(" ");
-}
 
 function extractEmailAddress(value: string) {
   const match = value.match(/<([^>]+)>/);
@@ -596,3 +566,4 @@ function pad2(value: number) {
 function text(value: unknown) {
   return String(value ?? "").trim();
 }
+

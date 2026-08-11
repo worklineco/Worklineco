@@ -5,6 +5,7 @@ import { clearWorkspaceCache, getCurrentUser } from "@/lib/supabase/session";
 import { clearDataCache } from "@/lib/data-cache";
 import { ChevronDown, LogOut, UserRound } from "lucide-react";
 import { useEffect, useState } from "react";
+import { useWorklineEscape } from "@/components/layout/global-escape-closer";
 
 type Profile = {
   email: string;
@@ -22,6 +23,8 @@ export function ProfilePanel() {
     team: ""
   });
   const [isSigningOut, setIsSigningOut] = useState(false);
+
+  useWorklineEscape(() => setIsOpen(false), isOpen);
 
   useEffect(() => {
     getCurrentUser().then((user) => {

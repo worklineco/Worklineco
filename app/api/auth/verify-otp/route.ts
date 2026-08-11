@@ -3,14 +3,18 @@ import { NextResponse } from "next/server";
 import { createHmac, timingSafeEqual } from "node:crypto";
 
 export async function POST(request: Request) {
-  const { email, otp, purpose } = (await request.json()) as {
+  const { approverId, email, otp, purpose } = (await request.json()) as {
+    approverId?: string;
     email?: string;
     otp?: string;
     purpose?: string;
   };
 
-  if (!email || !otp || !purpose) {
-    return NextResponse.json({ error: "Email, OTP, and purpose are required." }, { status: 400 });
+  if (!otp || !purpose || (!email && !approverId)) {
+    return NextResponse.json(
+      { error: "OTP, purpose, and verification target are required." },
+      { status: 400 }
+    );
   }
 
   const cookieStore = await cookies();
@@ -22,15 +26,28 @@ export async function POST(request: Request) {
   }
 
   const saved = JSON.parse(Buffer.from(savedOtp, "base64url").toString("utf8")) as {
+    approverId?: string;
     email: string;
     expiresAt: number;
     hash: string;
     otp?: string;
   };
-  const normalizedEmail = email.trim().toLowerCase();
+  const normalizedEmail = saved.approverId
+    ? saved.email
+    : email?.trim().toLowerCase() ?? "";
   const normalizedOtp = otp.trim();
+  const approverMismatch =
+    Boolean(saved.approverId) &&
+    (purpose !== "team" || saved.approverId !== approverId);
+  const unexpectedApprover = !saved.approverId && Boolean(approverId);
 
-  if (saved.email !== normalizedEmail || saved.expiresAt < Date.now()) {
+  if (
+    !normalizedEmail ||
+    saved.email !== normalizedEmail ||
+    approverMismatch ||
+    unexpectedApprover ||
+    saved.expiresAt < Date.now()
+  ) {
     return NextResponse.json({ error: "OTP expired. Please request a new OTP." }, { status: 400 });
   }
 

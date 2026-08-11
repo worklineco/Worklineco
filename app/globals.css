@@ -102,11 +102,6 @@ select option {
   padding: 0.5rem 0.75rem;
 }
 
-select option:checked {
-  background: linear-gradient(#203b78, #203b78);
-  color: #ffffff;
-}
-
 select option:hover {
   background: #e8eefc;
   color: #203b78;
