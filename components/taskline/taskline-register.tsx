@@ -3264,27 +3264,15 @@ async function postTaskLineImportBatch(importRows: TaskLineRow[]) {
   for (let attempt = 1; attempt <= taskLineImportMaxAttempts; attempt += 1) {
     const controller = new AbortController();
     const timeout = window.setTimeout(() => controller.abort(), taskLineImportRequestTimeoutMs);
+    let response: Response;
 
     try {
-      const response = await fetch("/api/taskline", {
+      response = await fetch("/api/taskline", {
         body: JSON.stringify({ action: "import", importRows, returnRows: false }),
         headers: { "Content-Type": "application/json" },
         method: "POST",
         signal: controller.signal
       });
-      const result = (await response.json().catch(() => ({}))) as {
-        error?: string;
-        summary?: { added: number; deleted: number; skipped?: number; updated: number };
-      };
-
-      if (response.ok) {
-        return result;
-      }
-
-      const retryableStatus = response.status === 429 || response.status >= 500;
-      if (!canRetrySafely || !retryableStatus || attempt === taskLineImportMaxAttempts) {
-        throw new Error(result.error ?? `Could not import TaskLine rows. Server returned ${response.status}.`);
-      }
     } catch (error) {
       if (!canRetrySafely || attempt === taskLineImportMaxAttempts) {
         const reason = error instanceof Error && error.name === "AbortError"
@@ -3294,8 +3282,25 @@ async function postTaskLineImportBatch(importRows: TaskLineRow[]) {
             : "The import connection failed.";
         throw new Error(`${reason} No duplicate rows were created; please try the import again.`);
       }
+
+      await new Promise((resolve) => window.setTimeout(resolve, taskLineImportRetryDelayMs * attempt));
+      continue;
     } finally {
       window.clearTimeout(timeout);
+    }
+
+    const result = (await response.json().catch(() => ({}))) as {
+      error?: string;
+      summary?: { added: number; deleted: number; skipped?: number; updated: number };
+    };
+
+    if (response.ok) {
+      return result;
+    }
+
+    const retryableStatus = response.status === 429 || response.status >= 500;
+    if (!canRetrySafely || !retryableStatus || attempt === taskLineImportMaxAttempts) {
+      throw new Error(result.error ?? `Could not import TaskLine rows. Server returned ${response.status}.`);
     }
 
     await new Promise((resolve) => window.setTimeout(resolve, taskLineImportRetryDelayMs * attempt));
