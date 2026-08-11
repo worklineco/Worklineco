@@ -157,6 +157,37 @@ function isArticleDesignation(value: string) {
   return String(value ?? "").toLowerCase().includes("article");
 }
 
+const personNameHonorifics = new Set(["ca", "cs", "cma", "adv", "advocate", "mr", "mrs", "ms", "dr", "shri", "smt", "sh"]);
+
+// Normalise a person's name for matching: lowercase, drop punctuation and any
+// leading honorific (CA / Adv / Mr ...). So "Shuchi Sethi" and "CA Shuchi Sethi"
+// resolve to the same key.
+function normalizePersonName(value: unknown) {
+  const parts = String(value ?? "")
+    .toLowerCase()
+    .replace(/[.,]/g, " ")
+    .split(/\s+/)
+    .filter(Boolean);
+  while (parts.length > 1 && personNameHonorifics.has(parts[0])) {
+    parts.shift();
+  }
+  return parts.join(" ");
+}
+
+// Map a stored cell value to the canonical member option it matches (by
+// normalised name), so an older stored name renders as the real member instead
+// of showing up as a separate duplicate entry in the dropdown.
+function resolvePersonOption(current: string, options: readonly string[]) {
+  if (!current || options.includes(current)) {
+    return current;
+  }
+  const key = normalizePersonName(current);
+  if (!key) {
+    return current;
+  }
+  return options.find((option) => normalizePersonName(option) === key) ?? current;
+}
+
 function taskLineMemberLeavingDate(designation: string, joiningDate: string): string {
   if (designation.trim().toLowerCase() !== "article assistant" || !joiningDate) {
     return "";
@@ -2375,7 +2406,7 @@ const TaskLineCell = memo(function TaskLineCell({
     const current = row[column.key] ?? "";
     return (
       <td className={`border-r border-slate-100 px-3 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
-        <LazyTaskLineSelect current={current} onChange={onChange} onOpen={() => onDropdownOpen(column.key)} options={nameOptions} placeholder="Select" />
+        <LazyTaskLineSelect current={current} matchNames onChange={onChange} onOpen={() => onDropdownOpen(column.key)} options={nameOptions} placeholder="Select" />
       </td>
     );
   }
@@ -2384,7 +2415,7 @@ const TaskLineCell = memo(function TaskLineCell({
     const current = row[column.key] ?? "";
     return (
       <td className={`border-r border-slate-100 px-3 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
-        <LazyTaskLineSelect current={current} onChange={onChange} onOpen={() => onDropdownOpen(column.key)} options={resourceOptions} placeholder="Select" />
+        <LazyTaskLineSelect current={current} matchNames onChange={onChange} onOpen={() => onDropdownOpen(column.key)} options={resourceOptions} placeholder="Select" />
       </td>
     );
   }
@@ -2452,18 +2483,21 @@ const TaskLineCell = memo(function TaskLineCell({
 
 function LazyTaskLineSelect({
   current,
+  matchNames = false,
   onChange,
   onOpen,
   options,
   placeholder
 }: {
   current: string;
+  matchNames?: boolean;
   onChange: (value: string) => void;
   onOpen?: () => void;
   options: readonly string[];
   placeholder: string;
 }) {
   const [isActive, setIsActive] = useState(false);
+  const resolved = matchNames ? resolvePersonOption(current, options) : current;
 
   function activate() {
     setIsActive(true);
@@ -2482,16 +2516,16 @@ function LazyTaskLineSelect({
       }}
       onFocus={activate}
       onMouseDown={activate}
-      value={current}
+      value={resolved}
     >
       {isActive ? (
         <>
           <option value="">{placeholder}</option>
           {options.filter(Boolean).map((option) => <option key={option} value={option}>{option}</option>)}
-          {current && !options.includes(current) ? <option value={current}>{current}</option> : null}
+          {resolved && !options.includes(resolved) ? <option value={resolved}>{resolved}</option> : null}
         </>
       ) : (
-        <option value={current}>{current || placeholder}</option>
+        <option value={resolved}>{resolved || placeholder}</option>
       )}
     </select>
   );
@@ -2598,29 +2632,35 @@ function TaskLineForm({
                   <select
                     className={formSelectControlClass}
                     onChange={(event) => onChange(column.key, event.target.value)}
-                    value={draft[column.key] ?? ""}
+                    value={resolvePersonOption(draft[column.key] ?? "", nameOptionsForTeam(draft.team ?? ""))}
                   >
                     <option value="">Select</option>
                     {nameOptionsForTeam(draft.team ?? "").map((name) => (
                       <option key={name} value={name}>{name}</option>
                     ))}
-                    {draft[column.key] && !nameOptionsForTeam(draft.team ?? "").includes(draft[column.key]) ? (
-                      <option value={draft[column.key]}>{draft[column.key]}</option>
-                    ) : null}
+                    {(() => {
+                      const value = resolvePersonOption(draft[column.key] ?? "", nameOptionsForTeam(draft.team ?? ""));
+                      return value && !nameOptionsForTeam(draft.team ?? "").includes(value) ? (
+                        <option value={value}>{value}</option>
+                      ) : null;
+                    })()}
                   </select>
                 ) : column.key === "resource" ? (
                   <select
                     className={formSelectControlClass}
                     onChange={(event) => onChange(column.key, event.target.value)}
-                    value={draft[column.key] ?? ""}
+                    value={resolvePersonOption(draft[column.key] ?? "", resourceOptionsForTeam(draft.team ?? ""))}
                   >
                     <option value="">Select</option>
                     {resourceOptionsForTeam(draft.team ?? "").map((name) => (
                       <option key={name} value={name}>{name}</option>
                     ))}
-                    {draft[column.key] && !resourceOptionsForTeam(draft.team ?? "").includes(draft[column.key]) ? (
-                      <option value={draft[column.key]}>{draft[column.key]}</option>
-                    ) : null}
+                    {(() => {
+                      const value = resolvePersonOption(draft[column.key] ?? "", resourceOptionsForTeam(draft.team ?? ""));
+                      return value && !resourceOptionsForTeam(draft.team ?? "").includes(value) ? (
+                        <option value={value}>{value}</option>
+                      ) : null;
+                    })()}
                   </select>
                 ) : column.key === "task" ? (
                   <select
