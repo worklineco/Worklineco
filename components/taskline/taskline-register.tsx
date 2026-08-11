@@ -1407,15 +1407,20 @@ export function TaskLineRegister() {
         return;
       }
 
-      const needsImportTargets = importedRows.some((rawRow) =>
-        ["update", "delete"].includes(text(rawRow[importActionColumn] || "Add").toLowerCase())
+      const importSourceRows = importedRows.map((rawRow, index) => ({
+        importAction: text(rawRow[importActionColumn] || "Add"),
+        row: rowFromImport(rawRow),
+        sourceRow: index + 2
+      }));
+      const needsImportTargets = importSourceRows.some(({ importAction }) =>
+        ["update", "delete"].includes(importAction.toLowerCase())
       );
       let importTargetRows = rows;
 
       if (needsImportTargets) {
         let completeRows = fullRowsCacheRef.current;
         if (!completeRows) {
-          setMessage(`Resolving TaskLine rows before importing ${file.name}...`);
+          setMessage(`Resolving TaskLine rows by Task Code before importing ${file.name}...`);
           const response = await fetch("/api/taskline?all=1", { cache: "no-store" });
           const result = (await response.json()) as { error?: string; rows?: TaskLineRow[] };
           if (!response.ok) {
@@ -1425,32 +1430,57 @@ export function TaskLineRegister() {
           completeRows = result.rows ?? [];
           fullRowsCacheRef.current = completeRows;
         }
-        importTargetRows = filterAndSortTaskLineRows(completeRows, visibleColumns, {
-          columnFilters,
-          dueColorFilter,
-          search,
-          sortState,
-          statusFilter,
-          valueFilters
-        });
+        importTargetRows = completeRows;
       }
 
-      const importRows = importedRows
-        .map((rawRow) => {
-          const importAction = text(rawRow[importActionColumn] || "Add");
-          const serialNumber = text(rawRow["S. No."] || rawRow["S.No."] || rawRow["Serial No."]);
-          const serialIndex = Number.parseInt(serialNumber, 10) - 1;
-          const targetId = importAction.toLowerCase() === "add" || !Number.isInteger(serialIndex) || serialIndex < 0
-            ? ""
-            : text(importTargetRows[serialIndex]?.__id);
+      const rowsByTaskCode = new Map<string, TaskLineRow[]>();
+      for (const targetRow of importTargetRows) {
+        const taskCodeKey = normalizeTaskCode(targetRow.task_code);
+        if (!taskCodeKey) {
+          continue;
+        }
+        rowsByTaskCode.set(taskCodeKey, [...(rowsByTaskCode.get(taskCodeKey) ?? []), targetRow]);
+      }
+
+      const targetErrors: string[] = [];
+      const referencedTaskCodes = new Set<string>();
+      const importRows = importSourceRows
+        .map(({ importAction, row, sourceRow }) => {
+          const action = importAction.toLowerCase();
+          const taskCode = text(row.task_code);
+          const taskCodeKey = normalizeTaskCode(taskCode);
+          let targetId = "";
+
+          if (action === "update" || action === "delete") {
+            if (!taskCodeKey) {
+              targetErrors.push(`row ${sourceRow} has no Task Code`);
+            } else if (referencedTaskCodes.has(taskCodeKey)) {
+              targetErrors.push(`Task Code ${taskCode} appears more than once`);
+            } else {
+              referencedTaskCodes.add(taskCodeKey);
+              const matches = rowsByTaskCode.get(taskCodeKey) ?? [];
+              if (matches.length === 1) {
+                targetId = text(matches[0].__id);
+              } else {
+                targetErrors.push(matches.length ? `Task Code ${taskCode} is duplicated in TaskLine` : `Task Code ${taskCode} was not found`);
+              }
+            }
+          }
+
           return {
-            ...rowFromImport(rawRow),
+            ...row,
             import_action: importAction,
-            serial_no: serialNumber,
             target_id: targetId
           };
         })
         .filter(hasTaskLineValue);
+
+      if (targetErrors.length) {
+        setMessage(
+          `Import stopped before making changes: Task Code must uniquely match one TaskLine record. ${targetErrors.slice(0, 5).join("; ")}${targetErrors.length > 5 ? `; and ${targetErrors.length - 5} more` : ""}.`
+        );
+        return;
+      }
 
       if (!importRows.length) {
         setMessage(`No filled TaskLine rows found in ${file.name}. Please enter data below the headers before importing.`);
@@ -3122,6 +3152,10 @@ function BillingDraftInput({
       />
     </label>
   );
+}
+
+function normalizeTaskCode(value: unknown) {
+  return text(value).toLocaleLowerCase();
 }
 
 function normalizeGstin(value: unknown) {
