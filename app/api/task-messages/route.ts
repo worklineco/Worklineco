@@ -38,26 +38,34 @@ export async function GET(request: Request) {
   }
 
   if (view === "threads") {
-    const access = getAccess(auth.user);
     const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-    let query = admin
+    const memberships = await admin
+      .from("task_chat_participants")
+      .select("task_code")
+      .eq("organisation_id", organisation.organisationId)
+      .eq("user_id", auth.user.id);
+    if (memberships.error) {
+      return errorResponse(memberships.error);
+    }
+    const participantCodes = Array.from(
+      new Set((memberships.data ?? []).map((row) => text(row.task_code)).filter(Boolean))
+    );
+    if (!participantCodes.length) {
+      return NextResponse.json({ threads: [] });
+    }
+
+    const { data, error } = await admin
       .from("task_messages")
       .select("id,task_code,team,entity,task,author_id,author_name,recipient_id,is_private,body,created_at")
       .eq("organisation_id", organisation.organisationId)
+      .in("task_code", participantCodes)
       .gte("created_at", since)
       .order("created_at", { ascending: true });
-    if (!access.canViewAll && access.team) {
-      query = query.eq("team", access.team);
-    }
-    const { data, error } = await query;
     if (error) {
       return errorResponse(error);
     }
     const byCode = new Map<string, { count: number; entity: string; last_at: string; last_body: string; messages: { author_name: string; body: string; created_at: string; id: string }[]; task: string; task_code: string; team: string }>();
     for (const message of data ?? []) {
-      if (message.is_private && message.author_id !== auth.user.id && message.recipient_id !== auth.user.id) {
-        continue;
-      }
       const key = String(message.task_code ?? "");
       if (!key) {
         continue;
@@ -77,13 +85,7 @@ export async function GET(request: Request) {
       if (message.team) current.team = String(message.team);
       byCode.set(key, current);
     }
-    const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
-    const threads = Array.from(byCode.values())
-      .filter((thread) => {
-        const lastAt = new Date(thread.last_at).getTime();
-        return Number.isNaN(lastAt) || lastAt >= cutoff;
-      })
-      .sort((a, b) => (a.last_at < b.last_at ? 1 : -1));
+    const threads = Array.from(byCode.values()).sort((a, b) => (a.last_at < b.last_at ? 1 : -1));
     return NextResponse.json({ threads });
   }
 
@@ -91,24 +93,30 @@ export async function GET(request: Request) {
   if (!code) {
     return NextResponse.json({ messages: [] });
   }
-  const access = getAccess(auth.user);
-  let query = admin
+  const membership = await admin
+    .from("task_chat_participants")
+    .select("task_code")
+    .eq("organisation_id", organisation.organisationId)
+    .eq("task_code", code)
+    .eq("user_id", auth.user.id)
+    .maybeSingle();
+  if (membership.error) {
+    return errorResponse(membership.error);
+  }
+  if (!membership.data) {
+    return NextResponse.json({ messages: [] });
+  }
+
+  const { data, error } = await admin
     .from("task_messages")
     .select("id,task_code,team,author_id,author_name,recipient_id,is_private,body,created_at")
     .eq("organisation_id", organisation.organisationId)
     .eq("task_code", code)
     .order("created_at", { ascending: true });
-  if (!access.canViewAll && access.team) {
-    query = query.eq("team", access.team);
-  }
-  const { data, error } = await query;
   if (error) {
     return errorResponse(error);
   }
-  const visible = (data ?? []).filter(
-    (message) => !message.is_private || message.author_id === auth.user.id || message.recipient_id === auth.user.id
-  );
-  return NextResponse.json({ messages: visible });
+  return NextResponse.json({ messages: data ?? [] });
 }
 
 export async function POST(request: Request) {
@@ -150,8 +158,13 @@ export async function POST(request: Request) {
   }
 
   const body = text(payload.body);
-  const metadata = auth.user.user_metadata ?? {};
-  const authorName = text(metadata.full_name ?? metadata.name ?? auth.user.email) || "WorkLine user";
+  const profile = await admin
+    .from("users")
+    .select("full_name,email")
+    .eq("id", auth.user.id)
+    .eq("organisation_id", organisation.organisationId)
+    .maybeSingle();
+  const authorName = text(profile.data?.full_name ?? profile.data?.email ?? auth.user.email) || "WorkLine user";
 
   let code = text(payload.code);
   let entity = text(payload.entity);
@@ -168,30 +181,47 @@ export async function POST(request: Request) {
       .eq("id", replyToId)
       .eq("organisation_id", organisation.organisationId)
       .single();
-    const originalRow = original.data as {
-      author_id?: string | null;
-      entity?: string | null;
-      task?: string | null;
-      task_code?: string | null;
-      team?: string | null;
-    } | null;
-    if (originalRow) {
-      code = code || text(originalRow.task_code);
-      entity = entity || text(originalRow.entity);
-      task = task || text(originalRow.task);
-      team = team || text(originalRow.team);
-      recipientId = originalRow.author_id ?? null;
-      if (recipientId) {
-        const authorUser = await admin.auth.admin.getUserById(recipientId);
-        recipientEmail = authorUser.data?.user?.email ?? "";
-      }
+    if (original.error || !original.data) {
+      return NextResponse.json({ error: "The message being replied to was not found." }, { status: 404 });
+    }
+    const originalCode = text(original.data.task_code);
+    const replyMembership = await admin
+      .from("task_chat_participants")
+      .select("user_id")
+      .eq("organisation_id", organisation.organisationId)
+      .eq("task_code", originalCode)
+      .eq("user_id", auth.user.id)
+      .maybeSingle();
+    if (replyMembership.error) {
+      return errorResponse(replyMembership.error);
+    }
+    if (!replyMembership.data) {
+      return NextResponse.json({ error: "You are not a participant in this Task Chat." }, { status: 403 });
+    }
+
+    code = code || originalCode;
+    entity = entity || text(original.data.entity);
+    task = task || text(original.data.task);
+    team = team || text(original.data.team);
+    recipientId = original.data.author_id ?? null;
+    if (recipientId) {
+      const recipientProfile = await admin
+        .from("users")
+        .select("email")
+        .eq("id", recipientId)
+        .eq("organisation_id", organisation.organisationId)
+        .maybeSingle();
+      recipientEmail = text(recipientProfile.data?.email).toLowerCase();
     }
   } else {
     const mentionEmail = extractMentionEmail(body);
     if (mentionEmail) {
-      recipientEmail = mentionEmail;
-      const recipient = await findUserByEmail(admin, mentionEmail);
-      recipientId = recipient?.id ?? null;
+      const recipient = await findOrganisationUserByEmail(admin, organisation.organisationId, mentionEmail);
+      if (!recipient) {
+        return NextResponse.json({ error: "The tagged teammate was not found in your organisation." }, { status: 400 });
+      }
+      recipientEmail = recipient.email;
+      recipientId = recipient.id;
     }
   }
 
@@ -199,14 +229,49 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Task code and message are required." }, { status: 400 });
   }
 
-  const isPrivate = Boolean(recipientEmail || recipientId);
+  const participantResult = await admin
+    .from("task_chat_participants")
+    .select("user_id")
+    .eq("organisation_id", organisation.organisationId)
+    .eq("task_code", code);
+  if (participantResult.error) {
+    return errorResponse(participantResult.error);
+  }
+  const participantIds = new Set((participantResult.data ?? []).map((row) => text(row.user_id)).filter(Boolean));
+  if (participantIds.size && !participantIds.has(auth.user.id)) {
+    return NextResponse.json({ error: "This Task Chat is only available to its participants." }, { status: 403 });
+  }
+  if (!participantIds.size && (!recipientId || recipientId === auth.user.id)) {
+    return NextResponse.json(
+      { error: "Tag a teammate by email to start this private Task Chat." },
+      { status: 400 }
+    );
+  }
+
+  const newParticipants = [auth.user.id, recipientId].filter(
+    (userId): userId is string => Boolean(userId)
+  );
+  const participantRows = Array.from(new Set(newParticipants)).map((userId) => ({
+    added_by: auth.user.id,
+    organisation_id: organisation.organisationId,
+    task_code: code,
+    user_id: userId
+  }));
+  if (participantRows.length) {
+    const participants = await admin
+      .from("task_chat_participants")
+      .upsert(participantRows, { onConflict: "organisation_id,task_code,user_id" });
+    if (participants.error) {
+      return errorResponse(participants.error);
+    }
+  }
 
   const inserted = await admin.from("task_messages").insert({
     author_id: auth.user.id,
     author_name: authorName,
     body,
     entity: entity || null,
-    is_private: isPrivate,
+    is_private: true,
     organisation_id: organisation.organisationId,
     recipient_email: recipientEmail || null,
     recipient_id: recipientId,
@@ -218,7 +283,7 @@ export async function POST(request: Request) {
     return errorResponse(inserted.error);
   }
 
-  if (recipientEmail) {
+  if (recipientEmail && recipientId !== auth.user.id) {
     void sendMentionEmail(recipientEmail, authorName, code, entity, task, body).catch(() => {
       // email delivery is best-effort; the in-app message is already saved
     });
@@ -232,24 +297,22 @@ function extractMentionEmail(body: string): string {
   return match ? match[1].trim().toLowerCase() : "";
 }
 
-async function findUserByEmail(admin: ReturnType<typeof createAdminClient>, email: string) {
+async function findOrganisationUserByEmail(
+  admin: ReturnType<typeof createAdminClient>,
+  organisationId: string,
+  email: string
+) {
   const target = email.trim().toLowerCase();
-  let page = 1;
-  while (page <= 20) {
-    const { data, error } = await admin.auth.admin.listUsers({ page, perPage: 1000 });
-    if (error) {
-      return null;
-    }
-    const found = data.users.find((user) => (user.email ?? "").trim().toLowerCase() === target);
-    if (found) {
-      return found;
-    }
-    if (data.users.length < 1000) {
-      break;
-    }
-    page += 1;
+  const { data, error } = await admin
+    .from("users")
+    .select("id,email")
+    .eq("organisation_id", organisationId)
+    .ilike("email", target)
+    .maybeSingle();
+  if (error || !data?.id || !data.email) {
+    return null;
   }
-  return null;
+  return { email: text(data.email).toLowerCase(), id: String(data.id) };
 }
 
 function smtpConfiguration() {
@@ -305,13 +368,6 @@ function errorResponse(error: { message: string }) {
     },
     { status: setupRequired ? 400 : 500 }
   );
-}
-
-function getAccess(user: User) {
-  const role = text(user.user_metadata?.role).toLowerCase();
-  const team = text(user.user_metadata?.team);
-  const canViewAll = role.includes("partner") || role === "owner" || role === "admin";
-  return { canViewAll, team };
 }
 
 function createAdminClient() {
