@@ -653,12 +653,22 @@ async function importRows(
     );
   }
 
-  const missingTaskCodes = actionableRows.filter(
-    ({ action, taskCodeKey }) => (action === "update" || action === "delete") && !taskCodeKey
-  );
+  const missingTaskCodes = actionableRows.filter(({ taskCodeKey }) => !taskCodeKey);
   if (missingTaskCodes.length) {
     return NextResponse.json(
-      { error: `Import stopped: Task Code is required for Update/Delete rows. First missing value is in row ${missingTaskCodes[0].rowNumber}.` },
+      { error: `Import stopped: Task Code is required for every Add, Update, and Delete row. First missing value is in row ${missingTaskCodes[0].rowNumber}.` },
+      { status: 400 }
+    );
+  }
+
+  const taskCodeRows = new Map<string, number[]>();
+  for (const item of actionableRows) {
+    taskCodeRows.set(item.taskCodeKey, [...(taskCodeRows.get(item.taskCodeKey) ?? []), item.rowNumber]);
+  }
+  const duplicateTaskCode = Array.from(taskCodeRows.entries()).find(([, rowNumbers]) => rowNumbers.length > 1);
+  if (duplicateTaskCode) {
+    return NextResponse.json(
+      { error: `Import stopped: Task Code ${text(duplicateTaskCode[0])} appears more than once in this batch (rows ${duplicateTaskCode[1].join(", ")}).` },
       { status: 400 }
     );
   }
@@ -755,8 +765,33 @@ async function importRows(
   const updates = actionableRows.filter(
     ({ action, targetId }) => action === "update" && accessibleTargetIds.has(targetId)
   );
+  const addTaskCodes = actionableRows
+    .filter(({ action }) => action === "add")
+    .map(({ row }) => text(row.task_code));
+  const existingAddTaskCodeKeys = new Set<string>();
+
+  if (addTaskCodes.length) {
+    const existingAdds = await admin
+      .from("tasks")
+      .select("custom_values")
+      .eq("organisation_id", organisationId)
+      .eq("custom_values->>workline_module", moduleKey)
+      .in("custom_values->taskline_data->>task_code", addTaskCodes);
+
+    if (existingAdds.error) {
+      return NextResponse.json({ error: existingAdds.error.message }, { status: 500 });
+    }
+
+    for (const record of (existingAdds.data ?? []) as Pick<TaskRecord, "custom_values">[]) {
+      const taskCodeKey = normalizeTaskCode(record.custom_values?.taskline_data?.task_code);
+      if (taskCodeKey) {
+        existingAddTaskCodeKeys.add(taskCodeKey);
+      }
+    }
+  }
+
   const inserts = actionableRows
-    .filter(({ action, row }) => action === "add" && hasValue(row))
+    .filter(({ action, row, taskCodeKey }) => action === "add" && hasValue(row) && !existingAddTaskCodeKeys.has(taskCodeKey))
     .map(({ row }) => {
       const cleaned = applyTeamAccess(cleanRecord(row), access);
       return {
@@ -801,12 +836,15 @@ async function importRows(
   const added = inserts.length;
   const updated = updates.length;
   const deleted = deleteIds.length;
+  const skipped = actionableRows.filter(
+    ({ action, taskCodeKey }) => action === "add" && existingAddTaskCodeKeys.has(taskCodeKey)
+  ).length;
 
-  await writeAuditLog(admin, organisationId, user.id, "taskline.import", null, { added, deleted, updated });
+  await writeAuditLog(admin, organisationId, user.id, "taskline.import", null, { added, deleted, skipped, updated });
 
   if (!returnRows) {
     return NextResponse.json({
-      summary: { added, deleted, updated }
+      summary: { added, deleted, skipped, updated }
     });
   }
 
@@ -817,7 +855,7 @@ async function importRows(
   }
 
   return NextResponse.json({
-    summary: { added, deleted, updated },
+    summary: { added, deleted, skipped, updated },
     rows: (refreshed.data ?? []).map(formatRecord)
   });
 }
