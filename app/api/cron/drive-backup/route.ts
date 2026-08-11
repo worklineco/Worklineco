@@ -25,8 +25,12 @@ export const maxDuration = 300;
  * be a normal link-shared folder; only its folder ID is needed.
  *
  * Environment variables:
- *   GOOGLE_SERVICE_ACCOUNT_EMAIL        service account email address
- *   GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY  service account private key (PEM;
+ *   GOOGLE_OAUTH_CLIENT_ID              OAuth client id (recommended auth)
+ *   GOOGLE_OAUTH_CLIENT_SECRET          OAuth client secret
+ *   GOOGLE_OAUTH_REFRESH_TOKEN          refresh token for the Google account
+ *                                       whose storage quota uploads should use
+ *   GOOGLE_SERVICE_ACCOUNT_EMAIL        (fallback) service account email
+ *   GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY  (fallback) service account key (PEM;
  *                                       \n-escaped when stored in Vercel)
  *   DRIVE_BACKUP_FOLDER_ID              ID of the Drive folder (from its link)
  *   DRIVE_BACKUP_RETENTION_DAYS         optional; delete dated backup folders
@@ -55,7 +59,7 @@ export async function GET(request: Request) {
   const dateKey = indiaDateKey();
   let accessToken: string;
   try {
-    accessToken = await driveAccessToken(drive.email, drive.privateKey);
+    accessToken = await driveAccessToken(drive);
   } catch (error) {
     return NextResponse.json(
       { error: `Could not authenticate with Google Drive: ${message(error)}` },
@@ -256,19 +260,66 @@ function workbookBuffer(sheets: { name: string; rows: FlatRow[] }[]) {
 // Google Drive (service account, no extra dependencies)
 // ---------------------------------------------------------------------------
 
-function driveConfiguration() {
+type DriveConfiguration = {
+  clientId?: string;
+  clientSecret?: string;
+  email?: string;
+  folderId: string;
+  privateKey?: string;
+  refreshToken?: string;
+};
+
+function driveConfiguration(): { error: string } | DriveConfiguration {
   const email = String(process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL ?? "").trim();
   const privateKey = String(process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY ?? "").replace(/\\n/g, "\n").trim();
   const folderId = String(process.env.DRIVE_BACKUP_FOLDER_ID ?? "").trim();
+  const clientId = String(process.env.GOOGLE_OAUTH_CLIENT_ID ?? "").trim();
+  const clientSecret = String(process.env.GOOGLE_OAUTH_CLIENT_SECRET ?? "").trim();
+  const refreshToken = String(process.env.GOOGLE_OAUTH_REFRESH_TOKEN ?? "").trim();
 
-  if (!email || !privateKey || !folderId) {
-    return { error: "Drive backup is not configured. Set GOOGLE_SERVICE_ACCOUNT_EMAIL, GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY, and DRIVE_BACKUP_FOLDER_ID." as const };
+  if (!folderId) {
+    return { error: "Drive backup is not configured. Set DRIVE_BACKUP_FOLDER_ID." };
   }
 
-  return { email, folderId, privateKey };
+  // Preferred: OAuth refresh token for a real Google account. Uploads then use
+  // that account's own storage quota (service accounts have none on personal
+  // Drive, so uploads fail with "Service Accounts do not have storage quota").
+  if (clientId && clientSecret && refreshToken) {
+    return { clientId, clientSecret, folderId, refreshToken };
+  }
+
+  if (email && privateKey) {
+    return { email, folderId, privateKey };
+  }
+
+  return {
+    error:
+      "Drive backup is not configured. Set GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET, and GOOGLE_OAUTH_REFRESH_TOKEN (recommended), or GOOGLE_SERVICE_ACCOUNT_EMAIL and GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY."
+  };
 }
 
-async function driveAccessToken(email: string, privateKey: string) {
+async function driveAccessToken(drive: DriveConfiguration) {
+  if (drive.clientId && drive.clientSecret && drive.refreshToken) {
+    const response = await fetch("https://oauth2.googleapis.com/token", {
+      body: new URLSearchParams({
+        client_id: drive.clientId,
+        client_secret: drive.clientSecret,
+        grant_type: "refresh_token",
+        refresh_token: drive.refreshToken
+      }),
+      method: "POST"
+    });
+    const payload = (await response.json().catch(() => ({}))) as { access_token?: string; error_description?: string };
+
+    if (!response.ok || !payload.access_token) {
+      throw new Error(payload.error_description || `Google token refresh failed (${response.status}).`);
+    }
+
+    return payload.access_token;
+  }
+
+  const email = drive.email ?? "";
+  const privateKey = drive.privateKey ?? "";
   const now = Math.floor(Date.now() / 1000);
   const header = base64Url(JSON.stringify({ alg: "RS256", typ: "JWT" }));
   const claims = base64Url(
@@ -302,6 +353,21 @@ async function driveAccessToken(email: string, privateKey: string) {
 }
 
 async function createDriveFolder(accessToken: string, parentId: string, name: string) {
+  // Reuse today's folder if it already exists (e.g. a retried run).
+  const escapedName = name.replace(/'/g, "\\'");
+  const query = encodeURIComponent(
+    `'${parentId}' in parents and mimeType = 'application/vnd.google-apps.folder' and name = '${escapedName}' and trashed = false`
+  );
+  const existing = await fetch(
+    `https://www.googleapis.com/drive/v3/files?q=${query}&fields=files(id)&pageSize=1&supportsAllDrives=true&includeItemsFromAllDrives=true`,
+    { headers: { Authorization: `Bearer ${accessToken}` } }
+  );
+  const existingPayload = (await existing.json().catch(() => ({}))) as { files?: { id: string }[] };
+  const existingId = existingPayload.files?.[0]?.id;
+  if (existing.ok && existingId) {
+    return existingId;
+  }
+
   const response = await fetch("https://www.googleapis.com/drive/v3/files?supportsAllDrives=true", {
     body: JSON.stringify({
       mimeType: "application/vnd.google-apps.folder",
@@ -424,4 +490,5 @@ function base64Url(value: string) {
 function message(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
+
 
