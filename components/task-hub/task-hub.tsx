@@ -20,6 +20,7 @@ export function TaskHub() {
   const [messageDraft, setMessageDraft] = useState("");
   const [threadLoading, setThreadLoading] = useState(false);
   const [sending, setSending] = useState(false);
+  const [messageError, setMessageError] = useState("");
 
   useEffect(() => {
     let active = true;
@@ -99,6 +100,7 @@ export function TaskHub() {
     setThread({ code, team });
     setMessages([]);
     setMessageDraft("");
+    setMessageError("");
     setThreadLoading(true);
     try {
       const response = await fetch(`/api/task-messages?code=${encodeURIComponent(code)}`, { cache: "no-store" });
@@ -119,18 +121,26 @@ export function TaskHub() {
     const row = rows.find((item) => String(item.task_code ?? "").trim() === thread.code);
     const entity = row ? String(row.entity ?? "") : "";
     const task = row ? String(row.task ?? "") : "";
-    const optimistic = { author_name: "You", body: bodyText, created_at: new Date().toISOString(), id: `temp-${Date.now()}` };
+    const optimisticId = `temp-${Date.now()}`;
+    const optimistic = { author_name: "You", body: bodyText, created_at: new Date().toISOString(), id: optimisticId };
     setMessages((current) => [...current, optimistic]);
     setMessageDraft("");
+    setMessageError("");
     setSending(true);
     try {
-      await fetch("/api/task-messages", {
+      const response = await fetch("/api/task-messages", {
         body: JSON.stringify({ body: bodyText, code: thread.code, entity, task, team: thread.team }),
         headers: { "Content-Type": "application/json" },
         method: "POST"
       });
-    } catch {
-      // message stays shown optimistically; a refresh will reconcile
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(String(result?.error ?? "Message could not be sent."));
+      }
+    } catch (error) {
+      setMessages((current) => current.filter((message) => message.id !== optimisticId));
+      setMessageDraft(bodyText);
+      setMessageError(error instanceof Error ? error.message : "Message could not be sent.");
     } finally {
       setSending(false);
     }
@@ -262,22 +272,25 @@ export function TaskHub() {
                 <p className="text-sm font-semibold text-slate-400">No messages yet. Start the conversation.</p>
               )}
             </div>
-            <div className="flex gap-2 border-t border-slate-200 px-4 py-3">
-              <input
-                className="h-10 min-w-0 flex-1 rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold outline-none focus:border-navy-400"
-                onChange={(event) => setMessageDraft(event.target.value)}
-                onKeyDown={(event) => event.key === "Enter" && sendMessage()}
-                placeholder="Write a message… (type @email to notify one person privately)"
-                value={messageDraft}
-              />
-              <button
-                className="inline-flex size-10 items-center justify-center rounded-md bg-navy-700 text-white transition hover:bg-navy-800 disabled:opacity-50"
-                disabled={sending || !messageDraft.trim()}
-                onClick={sendMessage}
-                type="button"
-              >
-                <Send className="size-4" />
-              </button>
+            <div className="border-t border-slate-200 px-4 py-3">
+              {messageError ? <p className="mb-2 text-xs font-bold text-rose-600">{messageError}</p> : null}
+              <div className="flex gap-2">
+                <input
+                  className="h-10 min-w-0 flex-1 rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold outline-none focus:border-navy-400"
+                  onChange={(event) => setMessageDraft(event.target.value)}
+                  onKeyDown={(event) => event.key === "Enter" && sendMessage()}
+                  placeholder="First message: tag a teammate with @email"
+                  value={messageDraft}
+                />
+                <button
+                  className="inline-flex size-10 items-center justify-center rounded-md bg-navy-700 text-white transition hover:bg-navy-800 disabled:opacity-50"
+                  disabled={sending || !messageDraft.trim()}
+                  onClick={sendMessage}
+                  type="button"
+                >
+                  <Send className="size-4" />
+                </button>
+              </div>
             </div>
           </div>
         </div>
