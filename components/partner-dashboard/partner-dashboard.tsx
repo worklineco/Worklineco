@@ -174,12 +174,14 @@ export function PartnerDashboard() {
     return content
       .split("\n")
       .map((line) => {
-        const cleaned = line.replace(/^\s*\d+\.\s*/, "").trim();
-        if (!cleaned) {
-          return "";
+        // Strip only an existing "N. " prefix; keep the rest of the line exactly
+        // as typed (including spaces) so the spacebar and blank lines work.
+        const rest = line.replace(/^\s*\d+\.\s?/, "");
+        if (rest.trim() === "") {
+          return rest;
         }
         count += 1;
-        return `${count}. ${cleaned}`;
+        return `${count}. ${rest}`;
       })
       .join("\n");
   }
