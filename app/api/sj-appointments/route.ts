@@ -26,6 +26,8 @@ const somyaEmail = "somya.dco@gmail.com";
 const tableName = "sj_appointments";
 const logTableName = "sj_appointment_logs";
 const maxDurationMinutes = 120;
+const mandatoryCallStartMinutes = 23 * 60;
+const mandatoryCallMessage = "Mandatory Call — You cannot book a slot during this time.";
 
 export async function GET() {
   const access = await requireAccess();
@@ -197,6 +199,7 @@ function validateAppointment(appointment: ReturnType<typeof cleanAppointment>) {
   if (!appointment.appointment_date || !appointment.from_time || !appointment.to_time || !appointment.title || !appointment.purpose) {
     return "Date, time, title, and purpose are required.";
   }
+  if (overlapsMandatoryCall(appointment.from_time, appointment.to_time)) return mandatoryCallMessage;
   const duration = minutesFromTime(appointment.to_time) - minutesFromTime(appointment.from_time);
   if (duration <= 0) return "Choose a To time after the From time.";
   if (duration > maxDurationMinutes) return "Maximum appointment slot is 2 hours.";
@@ -333,6 +336,13 @@ function normalizeTime(value: unknown) {
 function minutesFromTime(value: string) {
   const [hour, minute] = value.split(":").map(Number);
   return hour * 60 + minute;
+}
+
+function overlapsMandatoryCall(fromTime: string, toTime: string) {
+  const fromMinutes = minutesFromTime(fromTime);
+  const toMinutes = minutesFromTime(toTime);
+  const effectiveToMinutes = toMinutes < fromMinutes ? toMinutes + 24 * 60 : toMinutes;
+  return fromMinutes >= mandatoryCallStartMinutes || effectiveToMinutes > mandatoryCallStartMinutes;
 }
 
 function formatDisplayDate(value: string) {

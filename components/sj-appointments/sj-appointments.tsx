@@ -25,6 +25,9 @@ type AppointmentLog = {
 };
 type ViewMode = "board" | "log";
 
+const mandatoryCallStartMinutes = 23 * 60;
+const mandatoryCallMessage = "Mandatory Call — You cannot book a slot during this time.";
+
 const purposeOptions = [
   "Client Meeting",
   "Internal Discussion",
@@ -100,7 +103,12 @@ export function SJAppointments() {
     event.preventDefault();
     const validation = validateDraft(draft, appointments, editingId);
     if (validation) {
-      setMessage(validation);
+      if (validation === mandatoryCallMessage) {
+        window.alert("Mandatory Call\n\nYou cannot book a slot during this time.");
+        setMessage("");
+      } else {
+        setMessage(validation);
+      }
       return;
     }
 
@@ -118,7 +126,13 @@ export function SJAppointments() {
         logs?: AppointmentLog[];
       };
       if (!response.ok) {
-        setMessage(result.error ?? "Could not save the appointment.");
+        const errorMessage = result.error ?? "Could not save the appointment.";
+        if (errorMessage === mandatoryCallMessage) {
+          window.alert("Mandatory Call\n\nYou cannot book a slot during this time.");
+          setMessage("");
+        } else {
+          setMessage(errorMessage);
+        }
         return;
       }
 
@@ -425,6 +439,7 @@ function validateDraft(draft: Appointment, appointments: Appointment[], editingI
   if (!draft.appointment_date || !draft.from_time || !draft.to_time || !draft.title.trim() || !draft.purpose) {
     return "Date, time, title, and purpose are required.";
   }
+  if (overlapsMandatoryCall(draft.from_time, draft.to_time)) return mandatoryCallMessage;
   const duration = minutesFromTime(draft.to_time) - minutesFromTime(draft.from_time);
   if (duration <= 0) return "Choose a To time after the From time.";
   if (duration > 120) return "Maximum appointment slot is 2 hours.";
@@ -446,6 +461,13 @@ function normalizeTime(value: string) {
 function minutesFromTime(value: string) {
   const [hour, minute] = normalizeTime(value).split(":").map(Number);
   return hour * 60 + minute;
+}
+
+function overlapsMandatoryCall(fromTime: string, toTime: string) {
+  const fromMinutes = minutesFromTime(fromTime);
+  const toMinutes = minutesFromTime(toTime);
+  const effectiveToMinutes = toMinutes < fromMinutes ? toMinutes + 24 * 60 : toMinutes;
+  return fromMinutes >= mandatoryCallStartMinutes || effectiveToMinutes > mandatoryCallStartMinutes;
 }
 
 function formatTime(value: string) {
