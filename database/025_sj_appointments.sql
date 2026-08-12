@@ -34,7 +34,7 @@ on public.sj_appointments for select
 to authenticated
 using (
   organisation_id = (select public.current_user_organisation_id())
-  and lower(coalesce((select auth.jwt() ->> 'email'), '')) in (
+  and (select lower(coalesce(auth.jwt() ->> 'email', ''))) in (
     'jatinshah.dco@gmail.com',
     'somya.dco@gmail.com'
   )
@@ -71,7 +71,7 @@ on public.sj_appointment_logs for select
 to authenticated
 using (
   organisation_id = (select public.current_user_organisation_id())
-  and lower(coalesce((select auth.jwt() ->> 'email'), '')) in (
+  and (select lower(coalesce(auth.jwt() ->> 'email', ''))) in (
     'jatinshah.dco@gmail.com',
     'somya.dco@gmail.com'
   )
