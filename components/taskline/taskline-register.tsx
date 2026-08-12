@@ -1017,10 +1017,6 @@ export function TaskLineRegister() {
   }
 
   function addRow() {
-    if (!canEditRegisterRef.current) {
-      setMessage(viewOnlyRegisterMessage);
-      return;
-    }
     loadEditorOptions();
     setEditingRowId(null);
     const draft = createEmptyRow(`draft-${crypto.randomUUID()}`);
