@@ -2637,145 +2637,123 @@ function TaskLineForm({
   }
 
   function renderField(column: TaskLineColumn) {
+    const currentValue = draft[column.key] ?? "";
+    const withCurrentValue = (options: string[], value = currentValue) =>
+      Array.from(new Set([...options.filter(Boolean), ...(value ? [value] : [])]));
+
     return (
-              <label className={["remarks", "issue", "document_link", "el_reference", "fee_comments"].includes(column.key) ? "xl:col-span-2" : ""} key={column.key}>
-                <span className="text-[10px] font-black uppercase text-slate-500">{column.label}{requiredTaskLineFormKeys.includes(column.key) ? <span className="text-rose-600"> *</span> : null}</span>
-                {column.key === "team" ? (
-                  <select className={`${formSelectControlClass} ${draft[column.key] ? "cursor-not-allowed bg-slate-50 text-slate-600" : ""}`} disabled={Boolean(draft[column.key])} onChange={(event) => onChange(column.key, event.target.value)} title="Set from your logged-in team" value={draft[column.key] ?? ""}>
-                    <option value="">Select team</option>
-                    {teamOptions.map((team) => <option key={team} value={team}>{team}</option>)}
-                    {draft[column.key] && !teamOptions.includes(draft[column.key]) ? <option value={draft[column.key]}>{draft[column.key]}</option> : null}
-                  </select>
-                ) : ["entity", "state_name", "section"].includes(column.key) ? (
-                  <select className={formSelectControlClass} onChange={(event) => onChange(column.key, event.target.value)} value={draft[column.key] ?? ""}>
-                    <option value="">{column.key === "section" ? "Select Section" : `Select ${column.label}`}</option>
-                    {(column.key === "entity" ? entityOptions : column.key === "state_name" ? gstinStateOptions.map(([, state]) => state) : sectionOptions)
-                      .map((option) => <option key={option} value={option}>{option}</option>)}
-                    {draft[column.key] && !(column.key === "entity" ? entityOptions : column.key === "state_name" ? gstinStateOptions.map(([, state]) => state) : sectionOptions).includes(draft[column.key]) ? (
-                      <option value={draft[column.key]}>{draft[column.key]}</option>
-                    ) : null}
-                  </select>
-                ) : column.key === "entity_group" ? (
-                  <input className={`${formControlClass} cursor-not-allowed bg-slate-50 text-slate-600`} readOnly title="Filled automatically from Entity" value={draft[column.key] ?? ""} />
-                ) : column.key === "period" ? (
-                  <>
-                    <input
-                      className={formControlClass}
-                      list="taskline-period-options"
-                      onChange={(event) => onChange(column.key, event.target.value)}
-                      placeholder="Select or type a period"
-                      value={draft[column.key] ?? ""}
-                    />
-                    <datalist id="taskline-period-options">
-                      {financialPeriodOptions.map((period) => <option key={period} value={period} />)}
-                    </datalist>
-                  </>
-                ) : column.key === "due_date" || column.key === "ref_date" ? (
-                  <TaskLineDateInput onChange={(value) => onChange(column.key, value)} value={draft[column.key] ?? ""} />
-                ) : column.key === "name" ? (
-                  <select
-                    className={formSelectControlClass}
-                    onChange={(event) => onChange(column.key, event.target.value)}
-                    value={resolvePersonOption(draft[column.key] ?? "", nameOptionsForTeam(draft.team ?? ""))}
-                  >
-                    <option value="">Select</option>
-                    {nameOptionsForTeam(draft.team ?? "").map((name) => (
-                      <option key={name} value={name}>{name}</option>
-                    ))}
-                    {(() => {
-                      const value = resolvePersonOption(draft[column.key] ?? "", nameOptionsForTeam(draft.team ?? ""));
-                      return value && !nameOptionsForTeam(draft.team ?? "").includes(value) ? (
-                        <option value={value}>{value}</option>
-                      ) : null;
-                    })()}
-                  </select>
-                ) : column.key === "resource" ? (
-                  <select
-                    className={formSelectControlClass}
-                    onChange={(event) => onChange(column.key, event.target.value)}
-                    value={resolvePersonOption(draft[column.key] ?? "", resourceOptionsForTeam(draft.team ?? ""))}
-                  >
-                    <option value="">Select</option>
-                    {resourceOptionsForTeam(draft.team ?? "").map((name) => (
-                      <option key={name} value={name}>{name}</option>
-                    ))}
-                    {(() => {
-                      const value = resolvePersonOption(draft[column.key] ?? "", resourceOptionsForTeam(draft.team ?? ""));
-                      return value && !resourceOptionsForTeam(draft.team ?? "").includes(value) ? (
-                        <option value={value}>{value}</option>
-                      ) : null;
-                    })()}
-                  </select>
-                ) : column.key === "task" ? (
-                  <select
-                    className={formSelectControlClass}
-                    onChange={(event) => onChange(column.key, event.target.value)}
-                    value={draft[column.key] ?? ""}
-                  >
-                    <option value="">Select task</option>
-                    {taskMasterNames.map((name) => (
-                      <option key={name} value={name}>{name}</option>
-                    ))}
-                    {draft[column.key] && !taskMasterNames.includes(draft[column.key]) ? (
-                      <option value={draft[column.key]}>{draft[column.key]} (not in master)</option>
-                    ) : null}
-                  </select>
-                ) : column.key === "stage" ? (
-                  <select
-                    className={formSelectControlClass}
-                    onChange={(event) => onChange(column.key, event.target.value)}
-                    value={draft[column.key] ?? ""}
-                  >
-                    <option value="">Select stage</option>
-                    <option value="Open">Open</option>
-                    {stageMasterNames.filter((name) => name !== "Open").map((name) => (
-                      <option key={name} value={name}>{name}</option>
-                    ))}
-                    {draft[column.key] && draft[column.key] !== "Open" && !stageMasterNames.includes(draft[column.key]) ? (
-                      <option value={draft[column.key]}>{draft[column.key]} (not in master)</option>
-                    ) : null}
-                  </select>
-                ) : column.key === "billable" ? (
-                  <select
-                    className={formSelectControlClass}
-                    onChange={(event) => onChange(column.key, event.target.value)}
-                    value={draft[column.key] ?? ""}
-                  >
-                    <option value="">Select</option>
-                    {billableOptions.map((option) => (
-                      <option key={option} value={option}>{option}</option>
-                    ))}
-                  </select>
-                ) : column.key === "billing_status" ? (
-                  draft.billable === "Yes" ? (
-                    <select className={formSelectControlClass} onChange={(event) => onChange(column.key, event.target.value)} value={draft[column.key] || "No"}>
-                      <option value="No">No</option>
-                      <option value="Yes">Yes</option>
-                    </select>
-                  ) : (
-                    <input className={`${formControlClass} cursor-not-allowed bg-slate-50 text-slate-600`} readOnly title="NA for non-billable / retainership tasks" value="NA" />
-                  )
-                ) : column.type === "select" ? (
-                  <select
-                    className={formSelectControlClass}
-                    onChange={(event) => onChange(column.key, event.target.value)}
-                    value={draft[column.key] ?? ""}
-                  >
-                    <option value="">Select</option>
-                    {statusOptions.map((option) => (
-                      <option key={option} value={option}>{option}</option>
-                    ))}
-                  </select>
-                ) : (
-                  <input
-                    className={formControlClass}
-                    onChange={(event) => onChange(column.key, event.target.value)}
-                    placeholder={column.type === "date" ? "dd-mm-yyyy" : undefined}
-                    type={column.type === "number" || column.type === "money" ? "number" : "text"}
-                    value={draft[column.key] ?? ""}
-                  />
-                )}
-              </label>
+      <label className={["remarks", "issue", "document_link", "el_reference", "fee_comments"].includes(column.key) ? "xl:col-span-2" : ""} key={column.key}>
+        <span className="text-[10px] font-black uppercase text-slate-500">
+          {column.label}{requiredTaskLineFormKeys.includes(column.key) ? <span className="text-rose-600"> *</span> : null}
+        </span>
+        {column.key === "team" ? (
+          <TaskLineSearchableSelect
+            disabled={Boolean(currentValue)}
+            onChange={(value) => onChange(column.key, value)}
+            options={withCurrentValue(teamOptions)}
+            placeholder="Select team"
+            title="Set from your logged-in team"
+            value={currentValue}
+          />
+        ) : ["entity", "state_name", "section"].includes(column.key) ? (
+          <TaskLineSearchableSelect
+            onChange={(value) => onChange(column.key, value)}
+            options={withCurrentValue(
+              column.key === "entity"
+                ? entityOptions
+                : column.key === "state_name"
+                  ? gstinStateOptions.map(([, state]) => state)
+                  : sectionOptions
+            )}
+            placeholder={column.key === "section" ? "Select Section" : `Select ${column.label}`}
+            value={currentValue}
+          />
+        ) : column.key === "entity_group" ? (
+          <input className={`${formControlClass} cursor-not-allowed bg-slate-50 text-slate-600`} readOnly title="Filled automatically from Entity" value={currentValue} />
+        ) : column.key === "period" ? (
+          <>
+            <input
+              className={formControlClass}
+              list="taskline-period-options"
+              onChange={(event) => onChange(column.key, event.target.value)}
+              placeholder="Select or type a period"
+              value={currentValue}
+            />
+            <datalist id="taskline-period-options">
+              {financialPeriodOptions.map((period) => <option key={period} value={period} />)}
+            </datalist>
+          </>
+        ) : column.key === "due_date" || column.key === "ref_date" ? (
+          <TaskLineDateInput onChange={(value) => onChange(column.key, value)} value={currentValue} />
+        ) : column.key === "name" ? (
+          <TaskLineSearchableSelect
+            onChange={(value) => onChange(column.key, value)}
+            options={withCurrentValue(
+              nameOptionsForTeam(draft.team ?? ""),
+              resolvePersonOption(currentValue, nameOptionsForTeam(draft.team ?? ""))
+            )}
+            placeholder="Select"
+            value={resolvePersonOption(currentValue, nameOptionsForTeam(draft.team ?? ""))}
+          />
+        ) : column.key === "resource" ? (
+          <TaskLineSearchableSelect
+            onChange={(value) => onChange(column.key, value)}
+            options={withCurrentValue(
+              resourceOptionsForTeam(draft.team ?? ""),
+              resolvePersonOption(currentValue, resourceOptionsForTeam(draft.team ?? ""))
+            )}
+            placeholder="Select"
+            value={resolvePersonOption(currentValue, resourceOptionsForTeam(draft.team ?? ""))}
+          />
+        ) : column.key === "task" ? (
+          <TaskLineSearchableSelect
+            onChange={(value) => onChange(column.key, value)}
+            options={withCurrentValue(taskMasterNames)}
+            placeholder="Select task"
+            value={currentValue}
+          />
+        ) : column.key === "stage" ? (
+          <TaskLineSearchableSelect
+            onChange={(value) => onChange(column.key, value)}
+            options={withCurrentValue(["Open", ...stageMasterNames.filter((name) => name !== "Open")])}
+            placeholder="Select stage"
+            value={currentValue}
+          />
+        ) : column.key === "billable" ? (
+          <TaskLineSearchableSelect
+            onChange={(value) => onChange(column.key, value)}
+            options={withCurrentValue(billableOptions)}
+            placeholder="Select"
+            value={currentValue}
+          />
+        ) : column.key === "billing_status" ? (
+          draft.billable === "Yes" ? (
+            <TaskLineSearchableSelect
+              onChange={(value) => onChange(column.key, value)}
+              options={["No", "Yes"]}
+              placeholder="Select"
+              value={currentValue || "No"}
+            />
+          ) : (
+            <input className={`${formControlClass} cursor-not-allowed bg-slate-50 text-slate-600`} readOnly title="NA for non-billable / retainership tasks" value="NA" />
+          )
+        ) : column.type === "select" ? (
+          <TaskLineSearchableSelect
+            onChange={(value) => onChange(column.key, value)}
+            options={withCurrentValue(statusOptions)}
+            placeholder="Select"
+            value={currentValue}
+          />
+        ) : (
+          <input
+            className={formControlClass}
+            onChange={(event) => onChange(column.key, event.target.value)}
+            placeholder={column.type === "date" ? "dd-mm-yyyy" : undefined}
+            type={column.type === "number" || column.type === "money" ? "number" : "text"}
+            value={currentValue}
+          />
+        )}
+      </label>
     );
   }
 
@@ -2848,6 +2826,172 @@ function TaskLineForm({
           </button>
         </footer>
       </section>
+    </div>
+  );
+}
+
+
+function TaskLineSearchableSelect({
+  disabled = false,
+  onChange,
+  options,
+  placeholder,
+  title,
+  value
+}: {
+  disabled?: boolean;
+  onChange: (value: string) => void;
+  options: string[];
+  placeholder: string;
+  title?: string;
+  value: string;
+}) {
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [isOpen, setIsOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [menuPosition, setMenuPosition] = useState({ left: 0, maxHeight: 280, top: 0, width: 0 });
+  const normalizedOptions = useMemo(
+    () => Array.from(new Set(options.map((option) => text(option)).filter(Boolean))),
+    [options]
+  );
+  const visibleOptions = useMemo(() => {
+    const normalizedQuery = query.trim().toLocaleLowerCase();
+    if (!normalizedQuery) {
+      return normalizedOptions;
+    }
+    return normalizedOptions.filter((option) => option.toLocaleLowerCase().includes(normalizedQuery));
+  }, [normalizedOptions, query]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+    function onPointerDown(event: MouseEvent) {
+      const target = event.target;
+      if (
+        target instanceof Node &&
+        !buttonRef.current?.contains(target) &&
+        !menuRef.current?.contains(target)
+      ) {
+        setIsOpen(false);
+        setQuery("");
+      }
+    }
+    function onResize() {
+      setIsOpen(false);
+      setQuery("");
+    }
+    document.addEventListener("mousedown", onPointerDown);
+    window.addEventListener("resize", onResize);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      window.removeEventListener("resize", onResize);
+    };
+  }, [isOpen]);
+
+  function openMenu() {
+    if (disabled || !buttonRef.current) {
+      return;
+    }
+    const rect = buttonRef.current.getBoundingClientRect();
+    const spaceBelow = window.innerHeight - rect.bottom - 12;
+    const spaceAbove = rect.top - 12;
+    const openBelow = spaceBelow >= 220 || spaceBelow >= spaceAbove;
+    const maxHeight = Math.max(150, Math.min(320, openBelow ? spaceBelow : spaceAbove));
+    setMenuPosition({
+      left: rect.left,
+      maxHeight,
+      top: openBelow ? rect.bottom + 4 : Math.max(8, rect.top - maxHeight - 4),
+      width: rect.width
+    });
+    setQuery("");
+    setIsOpen(true);
+  }
+
+  function selectValue(nextValue: string) {
+    onChange(nextValue);
+    setIsOpen(false);
+    setQuery("");
+  }
+
+  return (
+    <div
+      className="mt-1"
+      onKeyDown={(event) => {
+        if (event.key === "Escape" && isOpen) {
+          event.preventDefault();
+          event.stopPropagation();
+          setIsOpen(false);
+          setQuery("");
+          buttonRef.current?.focus();
+        }
+      }}
+    >
+      <button
+        aria-expanded={isOpen}
+        aria-haspopup="listbox"
+        className={`flex h-10 w-full items-center justify-between gap-2 rounded-md border border-slate-200 bg-white px-3 text-left text-sm font-bold text-slate-900 outline-none transition focus:border-rose-300 focus:ring-2 focus:ring-rose-100 ${disabled ? "cursor-not-allowed bg-slate-50 text-slate-600" : "hover:border-slate-300"}`}
+        disabled={disabled}
+        onClick={() => (isOpen ? setIsOpen(false) : openMenu())}
+        ref={buttonRef}
+        title={title}
+        type="button"
+      >
+        <span className={`min-w-0 flex-1 truncate ${value ? "" : "text-slate-500"}`}>{value || placeholder}</span>
+        <ChevronDown className={`size-4 shrink-0 text-slate-500 transition ${isOpen ? "rotate-180" : ""}`} />
+      </button>
+      {isOpen && typeof document !== "undefined"
+        ? createPortal(
+            <div
+              className="fixed z-[120] overflow-hidden rounded-lg border border-slate-200 bg-white shadow-2xl"
+              ref={menuRef}
+              style={{ left: menuPosition.left, top: menuPosition.top, width: menuPosition.width }}
+            >
+              <div className="border-b border-slate-200 bg-white p-2">
+                <label className="flex h-9 items-center gap-2 rounded-md border border-slate-200 px-2 focus-within:border-rose-300 focus-within:ring-2 focus-within:ring-rose-100">
+                  <Search className="size-4 shrink-0 text-slate-400" />
+                  <input
+                    autoFocus
+                    className="min-w-0 flex-1 border-0 bg-transparent text-sm font-semibold text-slate-900 outline-none"
+                    onChange={(event) => setQuery(event.target.value)}
+                    placeholder={`Search ${placeholder.replace(/^Select\s*/i, "").toLowerCase() || "options"}`}
+                    value={query}
+                  />
+                </label>
+              </div>
+              <div className="overflow-y-auto p-1" role="listbox" style={{ maxHeight: Math.max(90, menuPosition.maxHeight - 58) }}>
+                {value ? (
+                  <button
+                    className="flex w-full items-center rounded-md px-3 py-2 text-left text-sm font-semibold text-slate-500 hover:bg-slate-50"
+                    onClick={() => selectValue("")}
+                    type="button"
+                  >
+                    Clear selection
+                  </button>
+                ) : null}
+                {visibleOptions.length ? (
+                  visibleOptions.map((option) => (
+                    <button
+                      aria-selected={option === value}
+                      className={`flex w-full items-center justify-between gap-3 rounded-md px-3 py-2 text-left text-sm font-bold transition ${option === value ? "bg-navy-700 text-white" : "text-slate-800 hover:bg-navy-50 hover:text-navy-800"}`}
+                      key={option}
+                      onClick={() => selectValue(option)}
+                      role="option"
+                      type="button"
+                    >
+                      <span className="min-w-0 flex-1 truncate">{option}</span>
+                      {option === value ? <Check className="size-4 shrink-0" /> : null}
+                    </button>
+                  ))
+                ) : (
+                  <p className="px-3 py-4 text-center text-sm font-semibold text-slate-500">No matching options</p>
+                )}
+              </div>
+            </div>,
+            document.body
+          )
+        : null}
     </div>
   );
 }
