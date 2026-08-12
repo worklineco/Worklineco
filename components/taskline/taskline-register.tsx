@@ -1062,7 +1062,7 @@ export function TaskLineRegister() {
       if (key !== "entity") return { ...current, [key]: value };
 
       const group = entityGroupByName.get(normalizeOptionKey(value)) ?? "";
-      setMessage(value && !group ? `No Entity Group mapping found for "${value}".` : "");
+      setMessage("");
       return { ...current, entity: value, entity_group: group };
     });
   }
