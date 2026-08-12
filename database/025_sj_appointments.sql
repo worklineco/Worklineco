@@ -33,10 +33,15 @@ create policy "Jatin and Somya read SJ appointments"
 on public.sj_appointments for select
 to authenticated
 using (
-  organisation_id = (select public.current_user_organisation_id())
-  and (select lower(coalesce(auth.jwt() ->> 'email', ''))) in (
-    'jatinshah.dco@gmail.com',
-    'somya.dco@gmail.com'
+  (select auth.uid()) in (
+    'fd11992e-4e4d-4f1d-9da8-39d22fdaf6a3'::uuid,
+    'd0715235-7289-4b77-acde-9348a530c06b'::uuid
+  )
+  and organisation_id = (
+    select member.organisation_id
+    from public.users member
+    where member.id = (select auth.uid())
+      and member.status = 'active'
   )
 );
 
@@ -70,10 +75,15 @@ create policy "Jatin and Somya read SJ appointment logs"
 on public.sj_appointment_logs for select
 to authenticated
 using (
-  organisation_id = (select public.current_user_organisation_id())
-  and (select lower(coalesce(auth.jwt() ->> 'email', ''))) in (
-    'jatinshah.dco@gmail.com',
-    'somya.dco@gmail.com'
+  (select auth.uid()) in (
+    'fd11992e-4e4d-4f1d-9da8-39d22fdaf6a3'::uuid,
+    'd0715235-7289-4b77-acde-9348a530c06b'::uuid
+  )
+  and organisation_id = (
+    select member.organisation_id
+    from public.users member
+    where member.id = (select auth.uid())
+      and member.status = 'active'
   )
 );
 
