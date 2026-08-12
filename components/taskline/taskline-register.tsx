@@ -84,7 +84,7 @@ const taskLineFormSections: { columns: string[]; key: string; label: string }[] 
   { key: "billing", label: "Billing / Fees", columns: ["billing_status", "total_agreed_fee", "amount_raised", "amount_realised", "counsel_fee", "referral_fee", "fee_comments"] },
   { key: "other", label: "Other", columns: ["any_other", "any_other_1"] }
 ];
-const requiredTaskLineFormKeys = ["team", "entity_group", "entity", "state_name", "task", "due_date", "stage", "status_open_close", "billable"];
+const requiredTaskLineFormKeys: string[] = [];
 const taskLineColumnLayoutStorageKey = "workline:taskline-column-layout:v5";
 const actionColumnWidth = 116;
 const actionColumnKey = "__actions";
@@ -1017,6 +1017,10 @@ export function TaskLineRegister() {
   }
 
   function addRow() {
+    if (!canEditRegisterRef.current) {
+      setMessage(viewOnlyRegisterMessage);
+      return;
+    }
     loadEditorOptions();
     setEditingRowId(null);
     const draft = createEmptyRow(`draft-${crypto.randomUUID()}`);
@@ -1058,7 +1062,7 @@ export function TaskLineRegister() {
       if (key !== "entity") return { ...current, [key]: value };
 
       const group = entityGroupByName.get(normalizeOptionKey(value)) ?? "";
-      setMessage(value && !group ? `No Entity Group mapping found for "${value}".` : "");
+      setMessage("");
       return { ...current, entity: value, entity_group: group };
     });
   }
@@ -2653,6 +2657,7 @@ function TaskLineForm({
           />
         ) : ["entity", "state_name", "section"].includes(column.key) ? (
           <TaskLineSearchableSelect
+            allowCustom={column.key === "entity"}
             onChange={(value) => onChange(column.key, value)}
             options={withCurrentValue(
               column.key === "entity"
@@ -2828,6 +2833,7 @@ function TaskLineForm({
 
 
 function TaskLineSearchableSelect({
+  allowCustom = false,
   disabled = false,
   onChange,
   options,
@@ -2835,6 +2841,7 @@ function TaskLineSearchableSelect({
   title,
   value
 }: {
+  allowCustom?: boolean;
   disabled?: boolean;
   onChange: (value: string) => void;
   options: string[];
@@ -2951,7 +2958,14 @@ function TaskLineSearchableSelect({
                     autoFocus
                     className="min-w-0 flex-1 border-0 bg-transparent text-sm font-semibold text-slate-900 outline-none"
                     onChange={(event) => setQuery(event.target.value)}
-                    placeholder={`Search ${placeholder.replace(/^Select\s*/i, "").toLowerCase() || "options"}`}
+                    onKeyDown={(event) => {
+                      const customValue = query.trim();
+                      if (event.key === "Enter" && allowCustom && customValue) {
+                        event.preventDefault();
+                        selectValue(customValue);
+                      }
+                    }}
+                    placeholder={allowCustom ? "Search or enter a new entity" : `Search ${placeholder.replace(/^Select\s*/i, "").toLowerCase() || "options"}`}
                     value={query}
                   />
                 </label>
@@ -2964,6 +2978,15 @@ function TaskLineSearchableSelect({
                     type="button"
                   >
                     Clear selection
+                  </button>
+                ) : null}
+                {allowCustom && query.trim() && !normalizedOptions.some((option) => option.toLocaleLowerCase() === query.trim().toLocaleLowerCase()) ? (
+                  <button
+                    className="flex w-full items-center rounded-md bg-emerald-50 px-3 py-2 text-left text-sm font-black text-emerald-800 hover:bg-emerald-100"
+                    onClick={() => selectValue(query.trim())}
+                    type="button"
+                  >
+                    Use “{query.trim()}”
                   </button>
                 ) : null}
                 {visibleOptions.length ? (
