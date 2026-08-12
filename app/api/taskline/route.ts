@@ -400,10 +400,7 @@ async function handlePost(request: Request) {
     return auth.error;
   }
 
-  if (isViewOnlyRegisterUser(auth.user)) {
-    return viewOnlyRegisterResponse("TaskLine");
-  }
-
+  const isViewOnlyUser = isViewOnlyRegisterUser(auth.user);
   const payload = (await request.json()) as {
     action?: "bulk_delete" | "import" | "save";
     importRows?: TaskLineImportRow[];
@@ -411,6 +408,10 @@ async function handlePost(request: Request) {
     recordIds?: string[];
     returnRows?: boolean;
   };
+
+  if (isViewOnlyUser && payload.action !== "save") {
+    return viewOnlyRegisterResponse("TaskLine");
+  }
   const admin = createAdminClient();
   const organisation = await getOrganisationId(admin, auth.user);
 
@@ -439,6 +440,11 @@ async function handlePost(request: Request) {
 
   const rawId = text(record.__id);
   const existingId = isUuid(rawId) ? rawId : "";
+
+  if (isViewOnlyUser && existingId) {
+    return viewOnlyRegisterResponse("TaskLine");
+  }
+
   const cleaned = applyTeamAccess(cleanRecord(record), access);
   const values = toTaskValues(cleaned);
 
