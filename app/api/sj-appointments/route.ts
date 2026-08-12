@@ -341,7 +341,8 @@ function minutesFromTime(value: string) {
 function overlapsMandatoryCall(fromTime: string, toTime: string) {
   const fromMinutes = minutesFromTime(fromTime);
   const toMinutes = minutesFromTime(toTime);
-  return fromMinutes >= mandatoryCallStartMinutes || toMinutes > mandatoryCallStartMinutes;
+  const effectiveToMinutes = toMinutes < fromMinutes ? toMinutes + 24 * 60 : toMinutes;
+  return fromMinutes >= mandatoryCallStartMinutes || effectiveToMinutes > mandatoryCallStartMinutes;
 }
 
 function formatDisplayDate(value: string) {
