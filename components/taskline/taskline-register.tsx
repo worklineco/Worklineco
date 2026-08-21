@@ -3135,10 +3135,12 @@ function TaskLineSearchableSelect({
         disabled={disabled}
         onClick={() => (isOpen ? setIsOpen(false) : openMenu())}
         ref={buttonRef}
-        title={title}
+        title={value || title || placeholder}
         type="button"
       >
-        <span className={`min-w-0 flex-1 truncate ${value ? "" : "text-slate-500"}`}>{value || placeholder}</span>
+        <span className={`min-w-0 flex-1 truncate ${value ? "" : "text-slate-500"}`} title={value || undefined}>
+          {value || placeholder}
+        </span>
         <ChevronDown className={`size-4 shrink-0 text-slate-500 transition ${isOpen ? "rotate-180" : ""}`} />
       </button>
       {isOpen && typeof document !== "undefined"
@@ -3194,9 +3196,10 @@ function TaskLineSearchableSelect({
                       key={option}
                       onClick={() => selectValue(option)}
                       role="option"
+                      title={option}
                       type="button"
                     >
-                      <span className="min-w-0 flex-1 truncate">{option}</span>
+                      <span className="min-w-0 flex-1 truncate" title={option}>{option}</span>
                       {option === value ? <Check className="size-4 shrink-0" /> : null}
                     </button>
                   ))
