@@ -321,6 +321,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
   const [inlineEditor, setInlineEditor] = useState<InlineEditorState | null>(null);
   const [savingInlineCell, setSavingInlineCell] = useState<{ columnKey: string; rowIndex: number } | null>(null);
   const [editor, setEditor] = useState<EditorState | null>(null);
+  const [isEditorReadOnly, setIsEditorReadOnly] = useState(false);
   const [billingDraft, setBillingDraft] = useState<BillingDraft | null>(null);
   const [billingMessage, setBillingMessage] = useState("");
   const [isSavingBilling, setIsSavingBilling] = useState(false);
@@ -337,6 +338,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
   const inlineSaveCancelledRef = useRef(false);
   const inlineSaveInFlightRef = useRef(false);
   const dataHydratedRef = useRef(false);
+  const taskCodeDeepLinkHandledRef = useRef(false);
   const uniqueAppeals = useMemo(
     () => new Set(rows.map((row) => String(row.data["OIA No"] ?? "").trim()).filter(Boolean)).size,
     [rows]
@@ -764,6 +766,38 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
     });
   }
 
+  function openTaskCodeDeepLink(nextRows: AppealRow[]) {
+    if (typeof window === "undefined" || taskCodeDeepLinkHandledRef.current) {
+      return;
+    }
+
+    const taskCode = new URLSearchParams(window.location.search).get("taskCode")?.trim();
+
+    if (!taskCode) {
+      return;
+    }
+
+    taskCodeDeepLinkHandledRef.current = true;
+    const rowIndex = nextRows.findIndex(
+      (row) => String(row.data.Sno ?? row.row_number ?? "").trim().toLocaleLowerCase() === taskCode.toLocaleLowerCase()
+    );
+    const row = rowIndex >= 0 ? nextRows[rowIndex] : null;
+
+    if (!row) {
+      setGlobalSearch(taskCode);
+      setMessage(`No accessible GSTAT record was found for Task Code ${taskCode}.`);
+      return;
+    }
+
+    setIsEditorReadOnly(true);
+    setEditor({
+      draft: { ...row.data },
+      row,
+      rowIndex
+    });
+    setMessage(`Opened GSTAT details for Task Code ${taskCode}.`);
+  }
+
   async function loadRows() {
     const cached = !dataHydratedRef.current ? getCached<AppealRow[]>("gstat") : undefined;
     dataHydratedRef.current = true;
@@ -789,6 +823,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
     setCached("gstat", nextRows);
     setRows(nextRows);
     setSelectedRowKeys(new Set());
+    openTaskCodeDeepLink(nextRows);
     setIsLoading(false);
   }
 
@@ -1274,6 +1309,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
     const row = createEmptyRow(rows.length + 1);
     const draft = applyPersonHandlingForAccess(row.data, userAccess);
 
+    setIsEditorReadOnly(false);
     setEditor({
       draft,
       isNew: true,
@@ -1292,6 +1328,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
       return;
     }
 
+    setIsEditorReadOnly(false);
     setEditor({
       draft: applyPersonHandlingForAccess(row.data, userAccess),
       row,
@@ -2102,7 +2139,9 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
             <div className="shrink-0 border-b border-slate-200 bg-white/95 px-4 py-3 backdrop-blur">
               <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                 <div>
-                  <p className="text-xs font-black uppercase tracking-[0.14em] text-navy-700">GSTAT row editor</p>
+                  <p className="text-xs font-black uppercase tracking-[0.14em] text-navy-700">
+                    {isEditorReadOnly ? "GSTAT appeal details" : "GSTAT row editor"}
+                  </p>
                   <h3 className="mt-1 text-xl font-black text-slate-950">Appeal {editor.draft.Sno || editor.rowIndex + 1}</h3>
                 </div>
                 <div className="flex shrink-0 items-center justify-end gap-2">
@@ -2111,16 +2150,18 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                     onClick={() => setEditor(null)}
                     type="button"
                   >
-                    Cancel
+                    {isEditorReadOnly ? "Close" : "Cancel"}
                   </button>
-                  <button
-                    className="inline-flex h-10 items-center justify-center rounded-xl bg-navy-700 px-4 text-xs font-black uppercase text-white shadow-sm transition hover:bg-navy-800 disabled:cursor-not-allowed disabled:opacity-50"
-                    disabled={isSavingEditor}
-                    onClick={saveEditor}
-                    type="button"
-                  >
-                    {isSavingEditor ? "Saving..." : "Save Row"}
-                  </button>
+                  {isEditorReadOnly ? null : (
+                    <button
+                      className="inline-flex h-10 items-center justify-center rounded-xl bg-navy-700 px-4 text-xs font-black uppercase text-white shadow-sm transition hover:bg-navy-800 disabled:cursor-not-allowed disabled:opacity-50"
+                      disabled={isSavingEditor}
+                      onClick={saveEditor}
+                      type="button"
+                    >
+                      {isSavingEditor ? "Saving..." : "Save Row"}
+                    </button>
+                  )}
                   <button
                     className="inline-flex size-10 items-center justify-center rounded-xl border border-slate-200 text-slate-700 transition hover:bg-slate-50"
                     onClick={() => setEditor(null)}
@@ -2131,8 +2172,9 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                 </div>
               </div>
             </div>
-            <div className="min-h-0 flex-1 overflow-y-auto p-3">
-              <div className="grid gap-3 xl:grid-cols-2 2xl:grid-cols-3">
+            <fieldset className="contents" disabled={isEditorReadOnly}>
+              <div className="min-h-0 flex-1 overflow-y-auto p-3">
+                <div className="grid gap-3 xl:grid-cols-2 2xl:grid-cols-3">
                 {editorSections.map((section) => (
                   <section
                     className={`rounded-xl border border-slate-200 bg-slate-50/70 p-3 ${
@@ -2223,8 +2265,9 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                     ) : null}
                   </section>
                 ))}
+                </div>
               </div>
-            </div>
+            </fieldset>
           </aside>
         </div>
       ) : null}
