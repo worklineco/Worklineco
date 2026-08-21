@@ -51,17 +51,47 @@ export async function GET(request: Request) {
 
   const scopedRows = filterRowsForAccess(data ?? [], access);
 
-  if (view === "link-options") {
-    const linkOptions = scopedRows
-      .map((row) => ({
+  if (view === "link-preview") {
+    const taskCode = new URL(request.url).searchParams.get("taskCode")?.trim();
+
+    if (!taskCode) {
+      return NextResponse.json({ error: "Enter a GSTAT Task Code." }, { status: 400 });
+    }
+
+    const matches = scopedRows.filter(
+      (row) =>
+        String(row.data?.Sno ?? row.row_number ?? "").trim().toLocaleLowerCase() === taskCode.toLocaleLowerCase()
+    );
+
+    if (!matches.length) {
+      return NextResponse.json(
+        { error: `No accessible GSTAT record was found for Task Code ${taskCode}.` },
+        { status: 404 }
+      );
+    }
+
+    if (matches.length > 1) {
+      return NextResponse.json(
+        { error: `More than one GSTAT record uses Task Code ${taskCode}. Please contact the administrator.` },
+        { status: 409 }
+      );
+    }
+
+    const row = matches[0];
+    return NextResponse.json({
+      linkPreview: {
         arn: String(row.data?.["ARN of First Appeal"] ?? "").trim(),
         entityName: String(row.data?.["Entity Name"] ?? "").trim(),
+        fy: String(row.data?.FY ?? "").trim(),
         id: String(row.id ?? "").trim(),
+        nextHearingDate: String(row.data?.["Next Hearing Date"] ?? "").trim(),
+        oiaNo: String(row.data?.["OIA No"] ?? "").trim(),
+        personHandling: String(row.data?.["Person handling"] ?? "").trim(),
+        stateName: String(row.data?.["State Name"] ?? "").trim(),
+        status: String(row.data?.Status ?? "").trim(),
         taskCode: String(row.data?.Sno ?? row.row_number ?? "").trim()
-      }))
-      .filter((option) => option.id && option.taskCode);
-
-    return NextResponse.json({ linkOptions });
+      }
+    });
   }
 
   const billRaisedAppealIds = await getBillRaisedAppealIds(admin);
