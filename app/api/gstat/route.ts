@@ -29,7 +29,7 @@ function gstatFyMonth(date: Date) {
 }
 const maxBulkDeleteRows = 5;
 
-export async function GET() {
+export async function GET(request: Request) {
   const auth = await requireUser();
 
   if ("error" in auth) {
@@ -38,6 +38,7 @@ export async function GET() {
 
   const admin = createAdminClient();
   const access = getAccessScope(auth.user);
+  const view = new URL(request.url).searchParams.get("view");
   const { data, error } = await admin
     .from("gstat_appeals")
     .select("id,row_number,data,updated_at")
@@ -48,9 +49,24 @@ export async function GET() {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
+  const scopedRows = filterRowsForAccess(data ?? [], access);
+
+  if (view === "link-options") {
+    const linkOptions = scopedRows
+      .map((row) => ({
+        arn: String(row.data?.["ARN of First Appeal"] ?? "").trim(),
+        entityName: String(row.data?.["Entity Name"] ?? "").trim(),
+        id: String(row.id ?? "").trim(),
+        taskCode: String(row.data?.Sno ?? row.row_number ?? "").trim()
+      }))
+      .filter((option) => option.id && option.taskCode);
+
+    return NextResponse.json({ linkOptions });
+  }
+
   const billRaisedAppealIds = await getBillRaisedAppealIds(admin);
 
-  return NextResponse.json({ rows: markBillRaised(filterRowsForAccess(data ?? [], access), billRaisedAppealIds) });
+  return NextResponse.json({ rows: markBillRaised(scopedRows, billRaisedAppealIds) });
 }
 
 export async function POST(request: Request) {
