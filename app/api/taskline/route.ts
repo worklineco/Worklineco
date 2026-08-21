@@ -65,6 +65,8 @@ const taskLineMoneyColumns = new Set(["total_agreed_fee", "amount_raised", "amou
 const taskLineNumberColumns = new Set(["reminder_days"]);
 const taskLineColumns = [
   "task_code",
+  "gstat_task_code",
+  "gstat_appeal_id",
   "team",
   "name",
   "resource",
