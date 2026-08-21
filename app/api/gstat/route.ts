@@ -29,7 +29,7 @@ function gstatFyMonth(date: Date) {
 }
 const maxBulkDeleteRows = 5;
 
-export async function GET() {
+export async function GET(request: Request) {
   const auth = await requireUser();
 
   if ("error" in auth) {
@@ -38,6 +38,7 @@ export async function GET() {
 
   const admin = createAdminClient();
   const access = getAccessScope(auth.user);
+  const view = new URL(request.url).searchParams.get("view");
   const { data, error } = await admin
     .from("gstat_appeals")
     .select("id,row_number,data,updated_at")
@@ -48,9 +49,23 @@ export async function GET() {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
+  const scopedRows = filterRowsForAccess(data ?? [], access);
+
+  if (view === "task-codes") {
+    const taskCodes = Array.from(
+      new Set(
+        scopedRows
+          .map((row) => String(row.data?.Sno ?? row.row_number ?? "").trim())
+          .filter(Boolean)
+      )
+    );
+
+    return NextResponse.json({ taskCodes });
+  }
+
   const billRaisedAppealIds = await getBillRaisedAppealIds(admin);
 
-  return NextResponse.json({ rows: markBillRaised(filterRowsForAccess(data ?? [], access), billRaisedAppealIds) });
+  return NextResponse.json({ rows: markBillRaised(scopedRows, billRaisedAppealIds) });
 }
 
 export async function POST(request: Request) {
