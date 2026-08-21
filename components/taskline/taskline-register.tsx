@@ -63,6 +63,7 @@ type TaskLineAuditLog = {
 type TaskLineView = "audit" | "register";
 type GstatLinkPreview = {
   arn: string;
+  dueDate: string;
   entityName: string;
   fy: string;
   id: string;
@@ -2711,6 +2712,26 @@ function TaskLineForm({
 
     onChange("gstat_task_code", gstatPreview.taskCode);
     onChange("gstat_appeal_id", gstatPreview.id);
+
+    const commonFields: Array<[string, string]> = [
+      ["entity", gstatPreview.entityName],
+      ["state_name", gstatPreview.stateName],
+      ["period", gstatPreview.fy],
+      ["due_date", gstatPreview.dueDate],
+      ["appeal_no", gstatPreview.oiaNo]
+    ];
+
+    commonFields.forEach(([field, value]) => {
+      if (text(value)) {
+        onChange(field, value);
+      }
+    });
+
+    if (!text(draft.team) && text(gstatPreview.personHandling)) {
+      const teamNumber = gstatPreview.personHandling.match(/\d+/)?.[0];
+      onChange("team", teamNumber ? `Team-${teamNumber.padStart(2, "0")}` : gstatPreview.personHandling);
+    }
+
     setGstatPreview(null);
     setFormError("");
   }
@@ -2982,6 +3003,9 @@ function TaskLineForm({
                 <h4 className="mt-1 text-xl font-black text-slate-950" id="gstat-link-confirmation-title">
                   Is this the correct GSTAT matter?
                 </h4>
+                <p className="mt-1 text-xs font-semibold text-slate-500">
+                  Confirming will fill the matching TaskLine fields automatically.
+                </p>
               </div>
               <button
                 className="inline-flex size-9 items-center justify-center rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50"
@@ -2997,6 +3021,7 @@ function TaskLineForm({
               {[
                 ["Task Code", gstatPreview.taskCode],
                 ["Entity Name", gstatPreview.entityName],
+                ["Due Date", gstatPreview.dueDate],
                 ["State Name", gstatPreview.stateName],
                 ["Status", gstatPreview.status],
                 ["Person Handling", gstatPreview.personHandling],
