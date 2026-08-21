@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowDown, ArrowUp, Bookmark, CalendarDays, Check, ChevronDown, CircleDot, Star, Download, Filter, History, ListChecks, Menu, Pencil, Pin, Plus, ReceiptText, Search, Settings2, Trash2, Upload, Workflow, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Bookmark, CalendarDays, Check, ChevronDown, CircleDot, Star, Download, Filter, History, ListChecks, Menu, Pencil, Pin, Plus, ReceiptText, Scale, Search, Settings2, Trash2, Upload, Workflow, X } from "lucide-react";
 import Link from "next/link";
 import type { ComponentType } from "react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -86,7 +86,7 @@ const taskLineFormSections: { columns: string[]; key: string; label: string }[] 
 ];
 const requiredTaskLineFormKeys: string[] = [];
 const taskLineColumnLayoutStorageKey = "workline:taskline-column-layout:v5";
-const actionColumnWidth = 116;
+const actionColumnWidth = 148;
 const actionColumnKey = "__actions";
 const taskLineColumns: TaskLineColumn[] = [
   { key: "team", label: "Team", width: 96 },
@@ -247,6 +247,7 @@ export function TaskLineRegister() {
   const [isSavingBilling, setIsSavingBilling] = useState(false);
   const [editingRowId, setEditingRowId] = useState<string | null>(null);
   const [rows, setRows] = useState<TaskLineRow[]>([]);
+  const [gstatTaskCodes, setGstatTaskCodes] = useState<Set<string>>(() => new Set());
   const [activeColumnGroup, setActiveColumnGroup] = useState("core");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
@@ -409,6 +410,7 @@ export function TaskLineRegister() {
   useEffect(() => {
     void loadAllTaskLine();
     void loadViews(true);
+    void loadGstatTaskCodes();
   }, []);
 
   useEffect(() => {
@@ -979,6 +981,23 @@ export function TaskLineRegister() {
       if (requestId === taskLineRequestIdRef.current) {
         setIsLoading(false);
       }
+    }
+  }
+
+  async function loadGstatTaskCodes() {
+    try {
+      const response = await fetch("/api/gstat?view=task-codes", { cache: "no-store" });
+      const result = (await response.json().catch(() => ({}))) as { taskCodes?: string[] };
+
+      if (!response.ok) {
+        return;
+      }
+
+      setGstatTaskCodes(
+        new Set((result.taskCodes ?? []).map((taskCode) => normalizeOptionKey(taskCode)).filter(Boolean))
+      );
+    } catch {
+      // The GSTAT link is optional; TaskLine should continue loading if this lookup is unavailable.
     }
   }
 
@@ -1988,6 +2007,8 @@ export function TaskLineRegister() {
               ) : pagedRows.length ? pagedRows.map((row, rowIndex) => {
                 const rowNameOptions = nameOptionsForTeam(text(row.team));
                 const rowResourceOptions = resourceOptionsForTeam(text(row.team));
+                const rowTaskCode = text(row.task_code);
+                const hasLinkedGstatAppeal = Boolean(rowTaskCode) && gstatTaskCodes.has(normalizeOptionKey(rowTaskCode));
                 return (
                 <tr className="border-b border-slate-100 last:border-b-0" key={row.__id}>
                   {actionColumnHidden ? null : (
@@ -2009,6 +2030,18 @@ export function TaskLineRegister() {
                       >
                         <ReceiptText className="size-3.5" />
                       </button>
+                      {hasLinkedGstatAppeal ? (
+                        <Link
+                          aria-label={`Open GSTAT details for Task Code ${rowTaskCode}`}
+                          className="inline-flex size-7 items-center justify-center rounded border border-indigo-200 text-indigo-700 transition hover:bg-indigo-50"
+                          href={`/gstat?taskCode=${encodeURIComponent(rowTaskCode)}`}
+                          rel="noreferrer"
+                          target="_blank"
+                          title="Open linked GSTAT details"
+                        >
+                          <Scale className="size-3.5" />
+                        </Link>
+                      ) : null}
                     </div>
                   </td>
                   )}
