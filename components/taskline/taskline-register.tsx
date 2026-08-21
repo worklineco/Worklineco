@@ -264,6 +264,7 @@ export function TaskLineRegister() {
   const [isSavingBilling, setIsSavingBilling] = useState(false);
   const [editingRowId, setEditingRowId] = useState<string | null>(null);
   const [rows, setRows] = useState<TaskLineRow[]>([]);
+  const [gstatDetailsModal, setGstatDetailsModal] = useState<{ appealId: string; taskCode: string } | null>(null);
   const [activeColumnGroup, setActiveColumnGroup] = useState("core");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
@@ -427,6 +428,35 @@ export function TaskLineRegister() {
     void loadAllTaskLine();
     void loadViews(true);
   }, []);
+
+  useEffect(() => {
+    if (!gstatDetailsModal) {
+      return;
+    }
+
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setGstatDetailsModal(null);
+      }
+    }
+
+    function closeFromEmbeddedGstat(event: MessageEvent) {
+      if (event.origin === window.location.origin && event.data === "workline:gstat-popup:close") {
+        setGstatDetailsModal(null);
+      }
+    }
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    document.addEventListener("keydown", closeOnEscape);
+    window.addEventListener("message", closeFromEmbeddedGstat);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", closeOnEscape);
+      window.removeEventListener("message", closeFromEmbeddedGstat);
+    };
+  }, [gstatDetailsModal]);
 
   useEffect(() => {
     const entity = text(formDraft?.entity);
@@ -2027,16 +2057,20 @@ export function TaskLineRegister() {
                         <ReceiptText className="size-3.5" />
                       </button>
                       {row.gstat_appeal_id ? (
-                        <Link
+                        <button
                           aria-label={`Open linked GSTAT Task Code ${row.gstat_task_code || ""}`}
                           className="inline-flex size-7 items-center justify-center rounded border border-indigo-200 text-indigo-700 transition hover:bg-indigo-50"
-                          href={`/gstat?appeal=${encodeURIComponent(row.gstat_appeal_id)}&taskCode=${encodeURIComponent(row.gstat_task_code || "")}`}
-                          rel="noreferrer"
-                          target="_blank"
+                          onClick={() =>
+                            setGstatDetailsModal({
+                              appealId: row.gstat_appeal_id,
+                              taskCode: row.gstat_task_code || ""
+                            })
+                          }
                           title={`Open GSTAT Task Code ${row.gstat_task_code || ""}`}
+                          type="button"
                         >
                           <Scale className="size-3.5" />
-                        </Link>
+                        </button>
                       ) : null}
                     </div>
                   </td>
@@ -2096,6 +2130,46 @@ export function TaskLineRegister() {
           stageMasterNames={stageMasterNames}
           taskMasterNames={taskMasterNames}
         />
+      ) : null}
+
+      {gstatDetailsModal ? (
+        <div
+          aria-labelledby="linked-gstat-details-title"
+          aria-modal="true"
+          className="fixed inset-0 z-[80] flex items-center justify-center bg-navy-950/55 p-3 sm:p-5"
+          role="dialog"
+        >
+          <button
+            aria-label="Close GSTAT details"
+            className="absolute inset-0 cursor-default"
+            onClick={() => setGstatDetailsModal(null)}
+            type="button"
+          />
+          <section className="relative flex h-[min(92vh,980px)] w-full max-w-[1500px] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_28px_100px_rgba(15,23,42,0.45)]">
+            <header className="flex shrink-0 items-center justify-between gap-4 border-b border-slate-200 bg-white px-4 py-3 sm:px-5">
+              <div className="min-w-0">
+                <p className="text-[10px] font-black uppercase tracking-[0.16em] text-indigo-700">Linked GSTAT matter</p>
+                <h3 className="truncate text-lg font-black text-slate-950" id="linked-gstat-details-title">
+                  GSTAT Task Code {gstatDetailsModal.taskCode || "—"}
+                </h3>
+              </div>
+              <button
+                aria-label="Close GSTAT details"
+                className="inline-flex size-9 shrink-0 items-center justify-center rounded-md border border-slate-200 text-slate-700 transition hover:bg-slate-50"
+                onClick={() => setGstatDetailsModal(null)}
+                title="Close"
+                type="button"
+              >
+                <X className="size-4" />
+              </button>
+            </header>
+            <iframe
+              className="min-h-0 flex-1 bg-[#f4f6fa]"
+              src={`/gstat?appeal=${encodeURIComponent(gstatDetailsModal.appealId)}&taskCode=${encodeURIComponent(gstatDetailsModal.taskCode)}&embed=1`}
+              title={`GSTAT details for Task Code ${gstatDetailsModal.taskCode}`}
+            />
+          </section>
+        </div>
       ) : null}
 
       {billingDraft ? (

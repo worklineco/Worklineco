@@ -305,6 +305,7 @@ const initialRows = createEmptyRows(12);
 export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }) {
   const { canEditRegisterRef } = useRegisterEditAccess();
   const [isViewOnlyDialogOpen, setIsViewOnlyDialogOpen] = useState(false);
+  const [isEmbedded, setIsEmbedded] = useState(false);
   const [rows, setRows] = useState<AppealRow[]>(initialRows);
   const [columnValueFilters, setColumnValueFilters] = useState<ColumnValueFilters>({});
   const [columnTextFilters, setColumnTextFilters] = useState<ColumnTextFilters>({});
@@ -339,6 +340,26 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
   const inlineSaveInFlightRef = useRef(false);
   const dataHydratedRef = useRef(false);
   const appealDeepLinkHandledRef = useRef(false);
+
+  useEffect(() => {
+    const embedded = new URLSearchParams(window.location.search).get("embed") === "1";
+    setIsEmbedded(embedded);
+
+    if (!embedded) {
+      return;
+    }
+
+    function closeEmbeddedPopup(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        window.parent.postMessage("workline:gstat-popup:close", window.location.origin);
+      }
+    }
+
+    document.addEventListener("keydown", closeEmbeddedPopup, true);
+    return () => document.removeEventListener("keydown", closeEmbeddedPopup, true);
+  }, []);
+
   const uniqueAppeals = useMemo(
     () => new Set(rows.map((row) => String(row.data["OIA No"] ?? "").trim()).filter(Boolean)).size,
     [rows]
@@ -1568,7 +1589,13 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
   }
 
   return (
-    <main className={`min-h-screen overflow-hidden bg-[#f4f6fa] text-slate-950 ${isMaximized ? "px-2 py-2" : "px-2 py-3 sm:px-3 lg:px-4"}`}>
+    <main
+      className={`overflow-hidden bg-[#f4f6fa] text-slate-950 ${
+        isEmbedded
+          ? "fixed inset-0 z-[200] min-h-0 px-2 py-2"
+          : `min-h-screen ${isMaximized ? "px-2 py-2" : "px-2 py-3 sm:px-3 lg:px-4"}`
+      }`}
+    >
       <div className="pointer-events-none fixed inset-0 -z-10">
         <div className="absolute inset-0 " />
         <div className="absolute inset-0  bg-[size:48px_48px]" />
