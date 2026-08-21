@@ -1593,6 +1593,7 @@ function errorMessage(error: unknown) {
 // ---------------------------------------------------------------------------
 
 const allocationAppUrl = (process.env.NEXT_PUBLIC_SITE_URL ?? process.env.NEXT_PUBLIC_APP_URL ?? "https://www.worklineco.com").replace(/\/+$/, "");
+const allocationEmailExcludedRecipients = new Set(["shuchis.dco@gmail.com"]);
 
 function resourceAllocationChanged(previous: string, next: string) {
   if (!next.trim()) {
@@ -1727,7 +1728,7 @@ async function sendResourceAllocationMail(
       if (name && targetNames.includes(name)) {
         const email = text(user?.email || member.email).toLowerCase();
 
-        if (allocationIsEmail(email)) {
+        if (allocationIsEmail(email) && !allocationEmailExcludedRecipients.has(email)) {
           recipients.add(email);
         }
       }
