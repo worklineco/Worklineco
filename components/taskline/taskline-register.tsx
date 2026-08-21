@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowDown, ArrowUp, Bookmark, CalendarDays, Check, ChevronDown, CircleDot, Star, Download, Filter, History, ListChecks, Menu, Pencil, Pin, Plus, ReceiptText, Search, Settings2, Trash2, Upload, Workflow, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Bookmark, CalendarDays, Check, ChevronDown, CircleDot, Star, Download, Filter, History, ListChecks, Menu, Pencil, Pin, Plus, ReceiptText, Scale, Search, Settings2, Trash2, Upload, Workflow, X } from "lucide-react";
 import Link from "next/link";
 import type { ComponentType } from "react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -61,6 +61,18 @@ type TaskLineAuditLog = {
   rowLabel?: string;
 };
 type TaskLineView = "audit" | "register";
+type GstatLinkPreview = {
+  arn: string;
+  entityName: string;
+  fy: string;
+  id: string;
+  nextHearingDate: string;
+  oiaNo: string;
+  personHandling: string;
+  stateName: string;
+  status: string;
+  taskCode: string;
+};
 
 const importActionColumn = "Import Action";
 const importActionOptions = ["Add", "Update", "Delete"];
@@ -79,14 +91,14 @@ const taskLineColumnGroups: { columns: string[] | null; key: string; label: stri
 ];
 
 const taskLineFormSections: { columns: string[]; key: string; label: string }[] = [
-  { key: "core", label: "Core", columns: ["team", "name", "resource", "entity_group", "entity", "state_name", "gstin", "task", "due_date", "stage", "status_open_close", "billable", "remarks", "document_link"] },
+  { key: "core", label: "Core", columns: ["team", "name", "resource", "entity_group", "entity", "state_name", "gstin", "task", "gstat_task_code", "due_date", "stage", "status_open_close", "billable", "remarks", "document_link"] },
   { key: "legal", label: "Legal / Order", columns: ["ref_date", "ref_no", "period", "section", "issue", "refer_other_task", "appeal_no", "order_type", "court_location", "engaged_counsel", "printing"] },
   { key: "billing", label: "Billing / Fees", columns: ["billing_status", "total_agreed_fee", "amount_raised", "amount_realised", "counsel_fee", "referral_fee", "fee_comments"] },
   { key: "other", label: "Other", columns: ["any_other", "any_other_1"] }
 ];
 const requiredTaskLineFormKeys: string[] = [];
 const taskLineColumnLayoutStorageKey = "workline:taskline-column-layout:v5";
-const actionColumnWidth = 116;
+const actionColumnWidth = 148;
 const actionColumnKey = "__actions";
 const taskLineColumns: TaskLineColumn[] = [
   { key: "team", label: "Team", width: 96 },
@@ -127,6 +139,10 @@ const taskLineColumns: TaskLineColumn[] = [
 ];
 
 const taskLineColumnByKey = new Map(taskLineColumns.map((column) => [column.key, column]));
+const taskLineFormColumnByKey = new Map<string, TaskLineColumn>([
+  ...taskLineColumns.map((column) => [column.key, column] as [string, TaskLineColumn]),
+  ["gstat_task_code", { key: "gstat_task_code", label: "GSTAT Task Code", width: 150 }]
+]);
 const defaultTaskLineColumnOrder = taskLineColumns.map((column) => column.key);
 const statusOptions = ["Open", "Close"];
 const billableOptions = ["Yes", "No", "Retainership"];
@@ -2009,6 +2025,18 @@ export function TaskLineRegister() {
                       >
                         <ReceiptText className="size-3.5" />
                       </button>
+                      {row.gstat_appeal_id ? (
+                        <Link
+                          aria-label={`Open linked GSTAT Task Code ${row.gstat_task_code || ""}`}
+                          className="inline-flex size-7 items-center justify-center rounded border border-indigo-200 text-indigo-700 transition hover:bg-indigo-50"
+                          href={`/gstat?appeal=${encodeURIComponent(row.gstat_appeal_id)}&taskCode=${encodeURIComponent(row.gstat_task_code || "")}`}
+                          rel="noreferrer"
+                          target="_blank"
+                          title={`Open GSTAT Task Code ${row.gstat_task_code || ""}`}
+                        >
+                          <Scale className="size-3.5" />
+                        </Link>
+                      ) : null}
                     </div>
                   </td>
                   )}
@@ -2602,16 +2630,22 @@ function TaskLineForm({
 }) {
   const [openSections, setOpenSections] = useState<Set<string>>(() => new Set(["core"]));
   const [formError, setFormError] = useState("");
+  const [gstatPreview, setGstatPreview] = useState<GstatLinkPreview | null>(null);
+  const [isVerifyingGstat, setIsVerifyingGstat] = useState(false);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
-        onClose();
+        if (gstatPreview) {
+          setGstatPreview(null);
+        } else {
+          onClose();
+        }
       }
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onClose]);
+  }, [gstatPreview, onClose]);
 
   function handleFormSubmit() {
     const missing = requiredTaskLineFormKeys.filter((key) => !text(draft[key]));
@@ -2636,10 +2670,110 @@ function TaskLineForm({
     });
   }
 
+  async function verifyGstatTaskCode() {
+    const taskCode = text(draft.gstat_task_code);
+
+    if (!taskCode) {
+      setFormError("Enter a GSTAT Task Code to verify.");
+      return;
+    }
+
+    setIsVerifyingGstat(true);
+    setFormError("");
+
+    try {
+      const response = await fetch(
+        `/api/gstat?view=link-preview&taskCode=${encodeURIComponent(taskCode)}`,
+        { cache: "no-store" }
+      );
+      const result = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        linkPreview?: GstatLinkPreview;
+      };
+
+      if (!response.ok || !result.linkPreview) {
+        setFormError(result.error ?? `Could not verify GSTAT Task Code ${taskCode}.`);
+        return;
+      }
+
+      setGstatPreview(result.linkPreview);
+    } catch {
+      setFormError(`Could not verify GSTAT Task Code ${taskCode}.`);
+    } finally {
+      setIsVerifyingGstat(false);
+    }
+  }
+
+  function confirmGstatLink() {
+    if (!gstatPreview) {
+      return;
+    }
+
+    onChange("gstat_task_code", gstatPreview.taskCode);
+    onChange("gstat_appeal_id", gstatPreview.id);
+    setGstatPreview(null);
+    setFormError("");
+  }
+
   function renderField(column: TaskLineColumn) {
     const currentValue = draft[column.key] ?? "";
     const withCurrentValue = (options: string[], value = currentValue) =>
       Array.from(new Set([...options.filter(Boolean), ...(value ? [value] : [])]));
+
+    if (column.key === "gstat_task_code") {
+      const isLinked = Boolean(draft.gstat_appeal_id && currentValue);
+
+      return (
+        <div key={column.key}>
+          <span className="text-[10px] font-black uppercase text-slate-500">{column.label}</span>
+          <div className="mt-1 flex gap-2">
+            <input
+              className={formControlClass}
+              inputMode="numeric"
+              onChange={(event) => {
+                onChange("gstat_task_code", event.target.value);
+                onChange("gstat_appeal_id", "");
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  void verifyGstatTaskCode();
+                }
+              }}
+              placeholder="Enter GSTAT Task Code"
+              value={currentValue}
+            />
+            <button
+              className="inline-flex h-10 shrink-0 items-center justify-center rounded-md border border-indigo-200 bg-indigo-50 px-3 text-xs font-black text-indigo-700 transition hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={isVerifyingGstat || !text(currentValue)}
+              onClick={() => void verifyGstatTaskCode()}
+              type="button"
+            >
+              {isVerifyingGstat ? "Checking..." : "Verify Code"}
+            </button>
+          </div>
+          {isLinked ? (
+            <div className="mt-1.5 flex items-center justify-between gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-[11px] font-bold text-emerald-800">
+              <span>Linked to GSTAT Task Code {currentValue}</span>
+              <button
+                className="text-rose-700 hover:underline"
+                onClick={() => {
+                  onChange("gstat_task_code", "");
+                  onChange("gstat_appeal_id", "");
+                }}
+                type="button"
+              >
+                Remove
+              </button>
+            </div>
+          ) : (
+            <p className="mt-1 text-[10px] font-semibold text-slate-500">
+              Enter the GSTAT code and verify the basic details before linking.
+            </p>
+          )}
+        </div>
+      );
+    }
 
     return (
       <label className={["remarks", "issue", "document_link", "el_reference", "fee_comments"].includes(column.key) ? "xl:col-span-2" : ""} key={column.key}>
@@ -2778,7 +2912,7 @@ function TaskLineForm({
         <div className="max-h-[68vh] space-y-3 overflow-auto p-5">
           {taskLineFormSections.map((section) => {
             const sectionColumns = section.columns
-              .map((key) => taskLineColumnByKey.get(key))
+              .map((key) => taskLineFormColumnByKey.get(key))
               .filter((column): column is TaskLineColumn => Boolean(column));
             if (!sectionColumns.length) {
               return null;
@@ -2827,6 +2961,69 @@ function TaskLineForm({
           </button>
         </footer>
       </section>
+
+      {gstatPreview ? (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-navy-950/45 p-4 backdrop-blur-[2px]">
+          <button
+            aria-label="Close GSTAT confirmation"
+            className="absolute inset-0 cursor-default"
+            onClick={() => setGstatPreview(null)}
+            type="button"
+          />
+          <section
+            aria-labelledby="gstat-link-confirmation-title"
+            aria-modal="true"
+            className="relative w-full max-w-2xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl"
+            role="dialog"
+          >
+            <header className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
+              <div>
+                <p className="text-xs font-black uppercase tracking-[0.14em] text-indigo-700">Confirm GSTAT link</p>
+                <h4 className="mt-1 text-xl font-black text-slate-950" id="gstat-link-confirmation-title">
+                  Is this the correct GSTAT matter?
+                </h4>
+              </div>
+              <button
+                className="inline-flex size-9 items-center justify-center rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50"
+                onClick={() => setGstatPreview(null)}
+                title="Close"
+                type="button"
+              >
+                <X className="size-4" />
+              </button>
+            </header>
+
+            <div className="grid gap-3 p-5 sm:grid-cols-2">
+              {[
+                ["Task Code", gstatPreview.taskCode],
+                ["Entity Name", gstatPreview.entityName],
+                ["State Name", gstatPreview.stateName],
+                ["Status", gstatPreview.status],
+                ["Person Handling", gstatPreview.personHandling],
+                ["Financial Year", gstatPreview.fy],
+                ["OIA No.", gstatPreview.oiaNo],
+                ["ARN of First Appeal", gstatPreview.arn],
+                ["Next Hearing Date", gstatPreview.nextHearingDate]
+              ].map(([label, value]) => (
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5" key={label}>
+                  <p className="text-[10px] font-black uppercase tracking-wide text-slate-500">{label}</p>
+                  <p className="mt-1 break-words text-sm font-bold text-slate-900">{value || "-"}</p>
+                </div>
+              ))}
+            </div>
+
+            <footer className="flex justify-end gap-2 border-t border-slate-200 px-5 py-4">
+              <button className={buttonClass("light")} onClick={() => setGstatPreview(null)} type="button">
+                Use another code
+              </button>
+              <button className={buttonClass("primary")} onClick={confirmGstatLink} type="button">
+                <Check className="size-4" />
+                Confirm and link
+              </button>
+            </footer>
+          </section>
+        </div>
+      ) : null}
     </div>
   );
 }

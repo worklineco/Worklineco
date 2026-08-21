@@ -65,6 +65,8 @@ const taskLineMoneyColumns = new Set(["total_agreed_fee", "amount_raised", "amou
 const taskLineNumberColumns = new Set(["reminder_days"]);
 const taskLineColumns = [
   "task_code",
+  "gstat_task_code",
+  "gstat_appeal_id",
   "team",
   "name",
   "resource",
@@ -440,6 +442,12 @@ async function handlePost(request: Request) {
   const rawId = text(record.__id);
   const existingId = isUuid(rawId) ? rawId : "";
   const cleaned = applyTeamAccess(cleanRecord(record), access);
+  const gstatLinkError = await validateGstatLink(admin, auth.user, cleaned);
+
+  if (gstatLinkError) {
+    return NextResponse.json({ error: gstatLinkError.message }, { status: gstatLinkError.status });
+  }
+
   const values = toTaskValues(cleaned);
 
   if (existingId) {
@@ -1281,6 +1289,50 @@ function taskLineFyMonth(date: Date) {
   const fyEnd = fyStart + 1;
   const fyCode = `${String(fyStart).slice(2)}${String(fyEnd).slice(2)}`;
   return `${fyCode}-${String(month).padStart(2, "0")}`;
+}
+
+async function validateGstatLink(
+  admin: ReturnType<typeof createAdminClient>,
+  user: User,
+  row: TaskLineRow
+): Promise<{ message: string; status: number } | null> {
+  const appealId = text(row.gstat_appeal_id);
+  const taskCode = text(row.gstat_task_code);
+
+  if (!appealId && !taskCode) {
+    return null;
+  }
+
+  if (!isUuid(appealId) || !taskCode) {
+    return { message: "Verify the GSTAT Task Code before saving the TaskLine row.", status: 400 };
+  }
+
+  const linked = await admin
+    .from("gstat_appeals")
+    .select("id,row_number,data")
+    .eq("id", appealId)
+    .eq("organisation_code", defaultOrganisationCode)
+    .maybeSingle();
+
+  if (linked.error) {
+    return { message: linked.error.message, status: 500 };
+  }
+
+  const linkedTaskCode = text(linked.data?.data?.Sno ?? linked.data?.row_number);
+
+  if (!linked.data || linkedTaskCode.toLocaleLowerCase() !== taskCode.toLocaleLowerCase()) {
+    return { message: "The selected GSTAT Task Code no longer matches that appeal. Verify it again.", status: 400 };
+  }
+
+  const role = text(user.user_metadata?.role).toLowerCase();
+  const team = text(user.user_metadata?.team);
+  const personHandling = text(linked.data.data?.["Person handling"]);
+
+  if (role !== "partner" && team && personHandling !== team) {
+    return { message: "The selected GSTAT appeal is outside your team access.", status: 403 };
+  }
+
+  return null;
 }
 
 function toTaskValues(row: TaskLineRow) {
