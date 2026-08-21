@@ -81,6 +81,7 @@ export async function GET(request: Request) {
     return NextResponse.json({
       linkPreview: {
         arn: String(row.data?.["ARN of First Appeal"] ?? "").trim(),
+        dueDate: String(row.data?.["Due Date"] ?? "").trim(),
         entityName: String(row.data?.["Entity Name"] ?? "").trim(),
         fy: String(row.data?.FY ?? "").trim(),
         id: String(row.id ?? "").trim(),
