@@ -2621,28 +2621,30 @@ async function appendPortraitPages(targetPdf: PDFDocument, sourcePdf: PDFDocumen
 async function appendPortraitPage(targetPdf: PDFDocument, sourcePage: ReturnType<PDFDocument["getPage"]>) {
   const { height, width } = sourcePage.getSize();
   const rotation = normalizePageRotation(sourcePage.getRotation().angle);
-  const isLandscape = width > height || rotation === 90 || rotation === 270;
 
   sourcePage.setRotation(degrees(0));
   const embeddedPage = await targetPdf.embedPage(sourcePage);
 
-  if (isLandscape) {
-    const portraitWidth = Math.min(width, height);
-    const portraitHeight = Math.max(width, height);
-    const page = targetPdf.addPage([portraitWidth, portraitHeight]);
+  // Dimensions as the page is actually DISPLAYED (the viewer applies /Rotate).
+  const sideways = rotation === 90 || rotation === 270;
+  const viewedWidth = sideways ? height : width;
+  const viewedHeight = sideways ? width : height;
 
-    if (width > height) {
-      drawRotatedEmbeddedPage(page, embeddedPage, width, height, 90);
-    } else {
-      drawRotatedEmbeddedPage(page, embeddedPage, portraitWidth, portraitHeight, 180);
-    }
+  // Drawing the embedded page with this rotation reproduces exactly what the
+  // viewer showed (the inverse of the /Rotate flag).
+  const viewRotation: 0 | 90 | 180 | 270 = rotation === 90 ? 270 : rotation === 270 ? 90 : (rotation as 0 | 180);
 
+  if (viewedWidth <= viewedHeight) {
+    // Displayed portrait already - keep the viewed orientation as-is.
+    const page = targetPdf.addPage([viewedWidth, viewedHeight]);
+    drawRotatedEmbeddedPage(page, embeddedPage, width, height, viewRotation);
     return;
   }
 
-  const page = targetPdf.addPage([width, height]);
-
-  drawRotatedEmbeddedPage(page, embeddedPage, width, height, 0);
+  // Displayed landscape - additionally turn it 90 degrees so the output page
+  // is portrait (same convention as before for plain landscape scans).
+  const page = targetPdf.addPage([viewedHeight, viewedWidth]);
+  drawRotatedEmbeddedPage(page, embeddedPage, width, height, ((viewRotation + 90) % 360) as 0 | 90 | 180 | 270);
 }
 
 function drawRotatedEmbeddedPage(
@@ -2790,11 +2792,17 @@ async function drawContinuousPageNumbers(pdf: PDFDocument, state: ContinuousPage
 function drawPageNumberText(
   page: ReturnType<PDFDocument["getPages"]>[number],
   text: string,
-  font: Awaited<ReturnType<PDFDocument["embedFont"]>>
+  font: Awaited<ReturnType<PDFDocument["embedFont"]>>,
+  lineIndex = 0
 ) {
+  // Draws `text` so it reads upright in the top-right corner of the page AS
+  // DISPLAYED, whatever /Rotate flag the page carries (scanners commonly emit
+  // landscape pages with /Rotate 90 or 270). `lineIndex` moves the text down
+  // by whole lines in the viewed orientation.
   const { height, width } = page.getSize();
   const textWidth = font.widthOfTextAtSize(text, PDF_PAGE_NUMBER_FONT_SIZE);
   const rotation = normalizePageRotation(page.getRotation().angle);
+  const topOffset = PDF_PAGE_NUMBER_MARGIN + PDF_PAGE_NUMBER_FONT_SIZE + lineIndex * (PDF_PAGE_NUMBER_FONT_SIZE + 4);
   const baseOptions = {
     color: rgb(0, 0, 0),
     font,
@@ -2802,10 +2810,12 @@ function drawPageNumberText(
   };
 
   if (rotation === 90) {
+    // Viewed top-right corner is at page-space (x: 0, y: height); viewed
+    // "rightward" runs along +y, so the text is rotated +90 (counterclockwise).
     page.drawText(text, {
       ...baseOptions,
-      rotate: degrees(-90),
-      x: PDF_PAGE_NUMBER_MARGIN + PDF_PAGE_NUMBER_FONT_SIZE,
+      rotate: degrees(90),
+      x: topOffset,
       y: height - PDF_PAGE_NUMBER_MARGIN - textWidth,
     });
     return;
@@ -2816,16 +2826,18 @@ function drawPageNumberText(
       ...baseOptions,
       rotate: degrees(180),
       x: PDF_PAGE_NUMBER_MARGIN + textWidth,
-      y: PDF_PAGE_NUMBER_MARGIN + PDF_PAGE_NUMBER_FONT_SIZE,
+      y: topOffset,
     });
     return;
   }
 
   if (rotation === 270) {
+    // Viewed top-right corner is at page-space (x: width, y: 0); viewed
+    // "rightward" runs along -y, so the text is rotated -90 (clockwise).
     page.drawText(text, {
       ...baseOptions,
-      rotate: degrees(90),
-      x: width - PDF_PAGE_NUMBER_MARGIN - PDF_PAGE_NUMBER_FONT_SIZE,
+      rotate: degrees(-90),
+      x: width - topOffset,
       y: PDF_PAGE_NUMBER_MARGIN + textWidth,
     });
     return;
@@ -2834,7 +2846,7 @@ function drawPageNumberText(
   page.drawText(text, {
     ...baseOptions,
     x: width - PDF_PAGE_NUMBER_MARGIN - textWidth,
-    y: height - PDF_PAGE_NUMBER_MARGIN - PDF_PAGE_NUMBER_FONT_SIZE,
+    y: height - topOffset,
   });
 }
 
@@ -2861,18 +2873,51 @@ async function drawTrueCopyStampOnPages(pdf: PDFDocument, stampBuffer: ArrayBuff
 
     const page = pdf.getPage(pageIndex);
     const { height, width } = page.getSize();
-    const maxWidth = Math.min(210, width * 0.34);
-    const maxHeight = Math.min(95, height * 0.14);
+    const rotation = normalizePageRotation(page.getRotation().angle);
+    const sideways = rotation === 90 || rotation === 270;
+
+    // Size and position against the page AS DISPLAYED (respecting /Rotate),
+    // so the stamp always sits upright in the viewed bottom-left corner.
+    const viewedWidth = sideways ? height : width;
+    const viewedHeight = sideways ? width : height;
+    const maxWidth = Math.min(210, viewedWidth * 0.34);
+    const maxHeight = Math.min(95, viewedHeight * 0.14);
     const scale = Math.min(maxWidth / stamp.width, maxHeight / stamp.height, 1);
     const scaledWidth = stamp.width * scale;
     const scaledHeight = stamp.height * scale;
 
-    page.drawImage(stamp, {
-      height: scaledHeight,
-      width: scaledWidth,
-      x: margin,
-      y: margin
-    });
+    if (rotation === 90) {
+      page.drawImage(stamp, {
+        height: scaledHeight,
+        rotate: degrees(90),
+        width: scaledWidth,
+        x: width - margin,
+        y: margin
+      });
+    } else if (rotation === 180) {
+      page.drawImage(stamp, {
+        height: scaledHeight,
+        rotate: degrees(180),
+        width: scaledWidth,
+        x: width - margin,
+        y: height - margin
+      });
+    } else if (rotation === 270) {
+      page.drawImage(stamp, {
+        height: scaledHeight,
+        rotate: degrees(-90),
+        width: scaledWidth,
+        x: margin,
+        y: height - margin
+      });
+    } else {
+      page.drawImage(stamp, {
+        height: scaledHeight,
+        width: scaledWidth,
+        x: margin,
+        y: margin
+      });
+    }
   });
 }
 
@@ -2885,16 +2930,9 @@ async function drawAnnexureStartLabels(pdf: PDFDocument, labels: AnnexureStartLa
 
   labels.forEach((label) => {
     const page = pdf.getPage(label.pageIndex);
-    const { height, width } = page.getSize();
-    const textWidth = font.widthOfTextAtSize(label.text, PDF_PAGE_NUMBER_FONT_SIZE);
 
-    page.drawText(label.text, {
-      color: rgb(0, 0, 0),
-      font,
-      size: PDF_PAGE_NUMBER_FONT_SIZE,
-      x: width - PDF_PAGE_NUMBER_MARGIN - textWidth,
-      y: height - PDF_PAGE_NUMBER_MARGIN - PDF_PAGE_NUMBER_FONT_SIZE * 2 - 4
-    });
+    // One line below the page number, rotation-aware like the numbers.
+    drawPageNumberText(page, label.text, font, 1);
   });
 }
 
