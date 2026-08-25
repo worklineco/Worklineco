@@ -946,6 +946,40 @@ export function TaskLineRegister() {
     setMessage(`Showing view "${view.name}".`);
   }
 
+  function resetTaskLineView() {
+    const defaultLayout: TaskLineColumnLayout = {
+      frozenColumnKeys: [],
+      hiddenColumnKeys: [],
+      order: [...defaultTaskLineColumnOrder]
+    };
+
+    setColumnFilters({});
+    setValueFilters({});
+    setDueColorFilter([]);
+    setDueRange({ end: "", preset: "", start: "" });
+    setStatusFilter("");
+    setSearch("");
+    setSortState(null);
+    setActiveColumnGroup("core");
+    setColumnOrder(defaultLayout.order);
+    setHiddenColumnKeys(new Set());
+    setFrozenColumnKeys(new Set());
+    setActiveViewId(null);
+    setTablePage(1);
+    setViewMode("register");
+    setIsDateRangeOpen(false);
+    setIsViewsOpen(false);
+    setIsToolbarMenuOpen(false);
+    setIsMasterSubmenuOpen(false);
+    closeColumnFilter();
+
+    if (typeof window !== "undefined") {
+      window.localStorage.removeItem(taskLineColumnLayoutStorageKey);
+    }
+
+    setMessage("TaskLine view reset to default.");
+  }
+
   async function deleteView(view: TaskLineSavedView) {
     if (!window.confirm(`Delete the view "${view.name}"?`)) return;
     try {
@@ -1731,15 +1765,6 @@ export function TaskLineRegister() {
                         <button className="shrink-0 rounded p-1 text-slate-400 hover:text-navy-700" onClick={() => void renameView(view)} title="Rename view" type="button">
                           <Pencil className="size-3" />
                         </button>
-                        <button
-                          aria-label={view.is_default ? "Reset to default view" : `Reset to saved view ${view.name}`}
-                          className="shrink-0 rounded p-1 text-slate-400 hover:text-emerald-600"
-                          onClick={() => applyView(view)}
-                          title={view.is_default ? "Reset to default view" : "Reset to this saved view"}
-                          type="button"
-                        >
-                          <RotateCcw className="size-3" />
-                        </button>
                         <button className="shrink-0 rounded p-1 text-slate-400 hover:text-rose-600" onClick={() => void deleteView(view)} title="Delete view" type="button">
                           <Trash2 className="size-3" />
                         </button>
@@ -1817,6 +1842,7 @@ export function TaskLineRegister() {
                   </div>
                 ) : null}
                 <ToolbarMenuItem icon={Settings2} label="Columns" onClick={() => { setIsToolbarMenuOpen(false); setIsColumnOptionsOpen(true); }} />
+                <ToolbarMenuItem icon={RotateCcw} label="Reset TaskLine view" onClick={resetTaskLineView} />
                 <ToolbarMenuItem icon={Download} label="Export view" onClick={() => { setIsToolbarMenuOpen(false); void exportView(); }} />
                 <ToolbarMenuItem icon={Download} label="Download template" onClick={() => { setIsToolbarMenuOpen(false); downloadTemplate(); }} />
                 <ToolbarMenuItem icon={Upload} label="Import" onClick={() => { setIsToolbarMenuOpen(false); fileInputRef.current?.click(); }} />
