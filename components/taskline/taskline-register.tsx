@@ -967,7 +967,6 @@ export function TaskLineRegister() {
     setActiveViewId(null);
     setTablePage(1);
     setViewMode("register");
-    setSelectedRowKeys(new Set());
     setIsDateRangeOpen(false);
     setIsViewsOpen(false);
     setIsToolbarMenuOpen(false);
