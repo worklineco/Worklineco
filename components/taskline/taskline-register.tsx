@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowDown, ArrowUp, Bookmark, CalendarDays, Check, ChevronDown, CircleDot, Star, Download, Filter, History, ListChecks, Menu, Pencil, Pin, Plus, ReceiptText, Scale, Search, Settings2, Trash2, Upload, Workflow, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Bookmark, CalendarDays, Check, ChevronDown, CircleDot, Star, Download, Filter, History, ListChecks, Menu, Pencil, Pin, Plus, ReceiptText, RotateCcw, Scale, Search, Settings2, Trash2, Upload, Workflow, X } from "lucide-react";
 import Link from "next/link";
 import type { ComponentType } from "react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -1730,6 +1730,15 @@ export function TaskLineRegister() {
                         </button>
                         <button className="shrink-0 rounded p-1 text-slate-400 hover:text-navy-700" onClick={() => void renameView(view)} title="Rename view" type="button">
                           <Pencil className="size-3" />
+                        </button>
+                        <button
+                          aria-label={view.is_default ? "Reset to default view" : `Reset to saved view ${view.name}`}
+                          className="shrink-0 rounded p-1 text-slate-400 hover:text-emerald-600"
+                          onClick={() => applyView(view)}
+                          title={view.is_default ? "Reset to default view" : "Reset to this saved view"}
+                          type="button"
+                        >
+                          <RotateCcw className="size-3" />
                         </button>
                         <button className="shrink-0 rounded p-1 text-slate-400 hover:text-rose-600" onClick={() => void deleteView(view)} title="Delete view" type="button">
                           <Trash2 className="size-3" />
