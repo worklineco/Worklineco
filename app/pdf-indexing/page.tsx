@@ -2300,7 +2300,7 @@ async function compressUnsignedPdfToTarget(
         canvas.height = Math.max(1, Math.round(renderViewport.height));
         context.fillStyle = "#ffffff";
         context.fillRect(0, 0, canvas.width, canvas.height);
-        await sourcePage.render({ canvas, canvasContext: context, viewport: renderViewport }).promise;
+        await sourcePage.render({ canvasContext: context, viewport: renderViewport }).promise;
 
         const jpegBlob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", profile.quality));
 
