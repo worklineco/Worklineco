@@ -5,9 +5,9 @@ import { MessagesSquare, NotebookPen, Pencil, Plus, Send, Trash2, X } from "luci
 import { MonthCalendar, type CalendarEvent } from "@/components/home/month-calendar";
 import { TaskNotificationBell } from "@/components/home/task-notification-bell";
 import { getCached, setCached } from "@/lib/data-cache";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
-type NoteFile = { content: string; date?: string; id: string; title: string; updatedAt: string };
+type NoteFile = { content: string; date?: string; id: string; lineColors?: string[]; title: string; updatedAt: string };
 type DashboardState = { calendarNotes: Record<string, string[]>; notes: NoteFile[] };
 type Thread = { count: number; entity: string; last_at: string; last_body: string; messages: ChatMessage[]; task: string; task_code: string; team: string };
 type ChatMessage = { author_name?: string; body: string; created_at: string; id: string };
@@ -15,6 +15,21 @@ type ChatMessage = { author_name?: string; body: string; created_at: string; id:
 const storageKey = "workline-partner-dashboard";
 const chatReadsKey = "wl_dashboard_chat_reads";
 const chatHiddenKey = "wl_dashboard_chat_hidden";
+const noteLineColorFills: Record<string, string> = {
+  "": "transparent",
+  red: "#fee2e2",
+  amber: "#fef3c7",
+  green: "#dcfce7",
+  blue: "#dbeafe",
+  purple: "#ede9fe"
+};
+const noteLineColorSwatches: { key: string; label: string; ring: string }[] = [
+  { key: "red", label: "Red", ring: "#ef4444" },
+  { key: "amber", label: "Amber", ring: "#f59e0b" },
+  { key: "green", label: "Green", ring: "#22c55e" },
+  { key: "blue", label: "Blue", ring: "#3b82f6" },
+  { key: "purple", label: "Purple", ring: "#8b5cf6" }
+];
 const defaultState: DashboardState = {
   calendarNotes: {},
   notes: [{ content: "1. ", id: "note-1", title: "Daily Scratchpad", updatedAt: new Date().toISOString() }]
@@ -34,6 +49,9 @@ export function PartnerDashboard() {
   const [chatDraft, setChatDraft] = useState("");
   const [chatSending, setChatSending] = useState(false);
   const [teamEmails, setTeamEmails] = useState<{ email: string; name: string }[]>([]);
+  const noteEditorRef = useRef<HTMLTextAreaElement>(null);
+  const noteOverlayRef = useRef<HTMLDivElement>(null);
+  const [activeNoteLine, setActiveNoteLine] = useState(0);
 
   useEffect(() => {
     const saved = window.localStorage.getItem(storageKey);
@@ -184,6 +202,46 @@ export function PartnerDashboard() {
         return `${count}. ${rest}`;
       })
       .join("\n");
+  }
+
+  function currentNoteLineIndex() {
+    const el = noteEditorRef.current;
+    if (!el) {
+      return 0;
+    }
+    const caret = el.selectionStart ?? 0;
+    return (activeNote?.content ?? "").slice(0, caret).split("\n").length - 1;
+  }
+
+  function syncNoteScroll() {
+    const overlay = noteOverlayRef.current;
+    const editor = noteEditorRef.current;
+    if (overlay && editor) {
+      overlay.scrollTop = editor.scrollTop;
+      overlay.scrollLeft = editor.scrollLeft;
+    }
+  }
+
+  function setActiveNoteLineColor(color: string) {
+    if (!activeNote) {
+      return;
+    }
+    const index = currentNoteLineIndex();
+    setState((current) => ({
+      ...current,
+      notes: current.notes.map((note) => {
+        if (note.id !== activeNote.id) {
+          return note;
+        }
+        const colors = [...(note.lineColors ?? [])];
+        while (colors.length <= index) {
+          colors.push("");
+        }
+        colors[index] = color;
+        return { ...note, lineColors: colors, updatedAt: new Date().toISOString() };
+      })
+    }));
+    noteEditorRef.current?.focus();
   }
 
   function toggleNumberedNotes(checked: boolean) {
@@ -456,12 +514,58 @@ export function PartnerDashboard() {
                 />
               </label>
             </div>
-            <textarea
-              className="min-h-[14rem] w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm font-semibold leading-6 outline-none focus:border-navy-400 focus:bg-white"
-              onChange={(event) => updateActiveNote(useNumberedNotes ? numberNoteLines(event.target.value) : event.target.value)}
-              placeholder="Write notes here"
-              value={activeNote?.content ?? ""}
-            />
+            <div className="mb-2 flex flex-wrap items-center gap-1.5">
+              <span className="text-xs font-black uppercase tracking-wide text-slate-400">Colour line</span>
+              {noteLineColorSwatches.map((swatch) => (
+                <button
+                  className="size-6 rounded-full border-2 transition hover:scale-110"
+                  key={swatch.key}
+                  onClick={() => setActiveNoteLineColor(swatch.key)}
+                  style={{ backgroundColor: noteLineColorFills[swatch.key], borderColor: swatch.ring }}
+                  title={`Colour this line ${swatch.label}`}
+                  type="button"
+                />
+              ))}
+              <button
+                className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-bold text-slate-500 hover:bg-slate-50"
+                onClick={() => setActiveNoteLineColor("")}
+                title="Remove colour from this line"
+                type="button"
+              >
+                Clear
+              </button>
+            </div>
+            <div className="relative">
+              <div
+                aria-hidden
+                className="pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words rounded-2xl border border-transparent p-4 text-sm font-semibold leading-6 text-transparent"
+                ref={noteOverlayRef}
+              >
+                {(activeNote?.content ?? "").split("\n").map((line, index) => (
+                  <div
+                    key={index}
+                    style={{
+                      backgroundColor: noteLineColorFills[activeNote?.lineColors?.[index] ?? ""] ?? "transparent",
+                      borderRadius: 4,
+                      boxShadow: index === activeNoteLine ? "inset 0 0 0 1.5px #cbd5e1" : undefined
+                    }}
+                  >
+                    {line === "" ? "​" : line}
+                  </div>
+                ))}
+              </div>
+              <textarea
+                className="relative z-10 min-h-[14rem] w-full resize-y whitespace-pre-wrap break-words rounded-2xl border border-slate-200 bg-transparent p-4 text-sm font-semibold leading-6 outline-none focus:border-navy-400"
+                onChange={(event) => updateActiveNote(useNumberedNotes ? numberNoteLines(event.target.value) : event.target.value)}
+                onClick={() => setActiveNoteLine(currentNoteLineIndex())}
+                onKeyUp={() => setActiveNoteLine(currentNoteLineIndex())}
+                onScroll={syncNoteScroll}
+                onSelect={() => setActiveNoteLine(currentNoteLineIndex())}
+                placeholder="Write notes here"
+                ref={noteEditorRef}
+                value={activeNote?.content ?? ""}
+              />
+            </div>
           </div>
         </div>
       </section>

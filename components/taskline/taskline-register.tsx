@@ -97,7 +97,7 @@ const taskLineFormSections: { columns: string[]; key: string; label: string }[] 
   { key: "billing", label: "Billing / Fees", columns: ["billing_status", "total_agreed_fee", "amount_raised", "amount_realised", "counsel_fee", "referral_fee", "fee_comments"] },
   { key: "other", label: "Other", columns: ["any_other", "any_other_1"] }
 ];
-const requiredTaskLineFormKeys: string[] = [];
+const requiredTaskLineFormKeys: string[] = ["entity_group"];
 const taskLineColumnLayoutStorageKey = "workline:taskline-column-layout:v5";
 const actionColumnWidth = 92;
 const actionColumnKey = "__actions";

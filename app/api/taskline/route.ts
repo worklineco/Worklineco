@@ -442,6 +442,12 @@ async function handlePost(request: Request) {
   const rawId = text(record.__id);
   const existingId = isUuid(rawId) ? rawId : "";
   const cleaned = applyTeamAccess(cleanRecord(record), access);
+
+  // Entity Group is mandatory: no TaskLine row may be created without it.
+  if (!existingId && !text(cleaned.entity_group)) {
+    return NextResponse.json({ error: "Entity Group is required to add a TaskLine task." }, { status: 400 });
+  }
+
   const gstatLinkError = await validateGstatLink(admin, auth.user, cleaned);
 
   if (gstatLinkError) {
