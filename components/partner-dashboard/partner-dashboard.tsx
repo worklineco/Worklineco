@@ -475,7 +475,7 @@ export function PartnerDashboard() {
           <NotebookPen className="size-5 text-navy-700" />
           <h3 className="text-base font-black text-slate-950">Quick notes / scratchpad</h3>
         </div>
-        <div className="mt-4 grid gap-3 lg:grid-cols-[240px_minmax(0,1fr)]">
+        <div className="mt-4 grid gap-3 lg:grid-cols-[168px_minmax(0,1fr)]">
           <div>
             <button className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-navy-700 px-3 text-sm font-black text-white" onClick={createNote} type="button">
               <Plus className="size-4" />
@@ -513,9 +513,7 @@ export function PartnerDashboard() {
                   value={activeNote?.date ?? ""}
                 />
               </label>
-            </div>
-            <div className="mb-2 flex flex-wrap items-center gap-1.5">
-              <span className="text-xs font-black uppercase tracking-wide text-slate-400">Colour line</span>
+              <span className="ml-2 text-xs font-black uppercase tracking-wide text-slate-400">Colour line</span>
               {noteLineColorSwatches.map((swatch) => (
                 <button
                   className="size-6 rounded-full border-2 transition hover:scale-110"
