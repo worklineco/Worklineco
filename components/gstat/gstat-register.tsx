@@ -305,6 +305,7 @@ const initialRows = createEmptyRows(12);
 export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }) {
   const { canEditRegisterRef } = useRegisterEditAccess();
   const [isViewOnlyDialogOpen, setIsViewOnlyDialogOpen] = useState(false);
+  const [isEmbedded, setIsEmbedded] = useState(false);
   const [rows, setRows] = useState<AppealRow[]>(initialRows);
   const [columnValueFilters, setColumnValueFilters] = useState<ColumnValueFilters>({});
   const [columnTextFilters, setColumnTextFilters] = useState<ColumnTextFilters>({});
@@ -321,6 +322,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
   const [inlineEditor, setInlineEditor] = useState<InlineEditorState | null>(null);
   const [savingInlineCell, setSavingInlineCell] = useState<{ columnKey: string; rowIndex: number } | null>(null);
   const [editor, setEditor] = useState<EditorState | null>(null);
+  const [isEditorReadOnly, setIsEditorReadOnly] = useState(false);
   const [billingDraft, setBillingDraft] = useState<BillingDraft | null>(null);
   const [billingMessage, setBillingMessage] = useState("");
   const [isSavingBilling, setIsSavingBilling] = useState(false);
@@ -337,6 +339,27 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
   const inlineSaveCancelledRef = useRef(false);
   const inlineSaveInFlightRef = useRef(false);
   const dataHydratedRef = useRef(false);
+  const appealDeepLinkHandledRef = useRef(false);
+
+  useEffect(() => {
+    const embedded = new URLSearchParams(window.location.search).get("embed") === "1";
+    setIsEmbedded(embedded);
+
+    if (!embedded) {
+      return;
+    }
+
+    function closeEmbeddedPopup(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        window.parent.postMessage("workline:gstat-popup:close", window.location.origin);
+      }
+    }
+
+    document.addEventListener("keydown", closeEmbeddedPopup, true);
+    return () => document.removeEventListener("keydown", closeEmbeddedPopup, true);
+  }, []);
+
   const uniqueAppeals = useMemo(
     () => new Set(rows.map((row) => String(row.data["OIA No"] ?? "").trim()).filter(Boolean)).size,
     [rows]
@@ -764,6 +787,38 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
     });
   }
 
+  function openAppealDeepLink(nextRows: AppealRow[]) {
+    if (typeof window === "undefined" || appealDeepLinkHandledRef.current) {
+      return;
+    }
+
+    const searchParams = new URLSearchParams(window.location.search);
+    const appealId = searchParams.get("appeal")?.trim();
+
+    if (!appealId) {
+      return;
+    }
+
+    appealDeepLinkHandledRef.current = true;
+    const rowIndex = nextRows.findIndex((row) => row.id === appealId);
+    const row = rowIndex >= 0 ? nextRows[rowIndex] : null;
+    const requestedTaskCode = searchParams.get("taskCode")?.trim();
+
+    if (!row) {
+      setMessage(`The linked GSTAT appeal is unavailable or outside your access.`);
+      return;
+    }
+
+    const taskCode = requestedTaskCode || String(row.data.Sno ?? row.row_number ?? "").trim();
+    setIsEditorReadOnly(true);
+    setEditor({
+      draft: { ...row.data },
+      row,
+      rowIndex
+    });
+    setMessage(`Opened GSTAT details for Task Code ${taskCode}.`);
+  }
+
   async function loadRows() {
     const cached = !dataHydratedRef.current ? getCached<AppealRow[]>("gstat") : undefined;
     dataHydratedRef.current = true;
@@ -789,6 +844,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
     setCached("gstat", nextRows);
     setRows(nextRows);
     setSelectedRowKeys(new Set());
+    openAppealDeepLink(nextRows);
     setIsLoading(false);
   }
 
@@ -1274,6 +1330,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
     const row = createEmptyRow(rows.length + 1);
     const draft = applyPersonHandlingForAccess(row.data, userAccess);
 
+    setIsEditorReadOnly(false);
     setEditor({
       draft,
       isNew: true,
@@ -1292,6 +1349,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
       return;
     }
 
+    setIsEditorReadOnly(false);
     setEditor({
       draft: applyPersonHandlingForAccess(row.data, userAccess),
       row,
@@ -1531,7 +1589,13 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
   }
 
   return (
-    <main className={`min-h-screen overflow-hidden bg-[#f4f6fa] text-slate-950 ${isMaximized ? "px-2 py-2" : "px-2 py-3 sm:px-3 lg:px-4"}`}>
+    <main
+      className={`overflow-hidden bg-[#f4f6fa] text-slate-950 ${
+        isEmbedded
+          ? "fixed inset-0 z-[200] min-h-0 px-2 py-2"
+          : `min-h-screen ${isMaximized ? "px-2 py-2" : "px-2 py-3 sm:px-3 lg:px-4"}`
+      }`}
+    >
       <div className="pointer-events-none fixed inset-0 -z-10">
         <div className="absolute inset-0 " />
         <div className="absolute inset-0  bg-[size:48px_48px]" />
@@ -2102,7 +2166,9 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
             <div className="shrink-0 border-b border-slate-200 bg-white/95 px-4 py-3 backdrop-blur">
               <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                 <div>
-                  <p className="text-xs font-black uppercase tracking-[0.14em] text-navy-700">GSTAT row editor</p>
+                  <p className="text-xs font-black uppercase tracking-[0.14em] text-navy-700">
+                    {isEditorReadOnly ? "GSTAT appeal details" : "GSTAT row editor"}
+                  </p>
                   <h3 className="mt-1 text-xl font-black text-slate-950">Appeal {editor.draft.Sno || editor.rowIndex + 1}</h3>
                 </div>
                 <div className="flex shrink-0 items-center justify-end gap-2">
@@ -2111,16 +2177,18 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                     onClick={() => setEditor(null)}
                     type="button"
                   >
-                    Cancel
+                    {isEditorReadOnly ? "Close" : "Cancel"}
                   </button>
-                  <button
-                    className="inline-flex h-10 items-center justify-center rounded-xl bg-navy-700 px-4 text-xs font-black uppercase text-white shadow-sm transition hover:bg-navy-800 disabled:cursor-not-allowed disabled:opacity-50"
-                    disabled={isSavingEditor}
-                    onClick={saveEditor}
-                    type="button"
-                  >
-                    {isSavingEditor ? "Saving..." : "Save Row"}
-                  </button>
+                  {isEditorReadOnly ? null : (
+                    <button
+                      className="inline-flex h-10 items-center justify-center rounded-xl bg-navy-700 px-4 text-xs font-black uppercase text-white shadow-sm transition hover:bg-navy-800 disabled:cursor-not-allowed disabled:opacity-50"
+                      disabled={isSavingEditor}
+                      onClick={saveEditor}
+                      type="button"
+                    >
+                      {isSavingEditor ? "Saving..." : "Save Row"}
+                    </button>
+                  )}
                   <button
                     className="inline-flex size-10 items-center justify-center rounded-xl border border-slate-200 text-slate-700 transition hover:bg-slate-50"
                     onClick={() => setEditor(null)}
@@ -2131,8 +2199,9 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                 </div>
               </div>
             </div>
-            <div className="min-h-0 flex-1 overflow-y-auto p-3">
-              <div className="grid gap-3 xl:grid-cols-2 2xl:grid-cols-3">
+            <fieldset className="contents" disabled={isEditorReadOnly}>
+              <div className="min-h-0 flex-1 overflow-y-auto p-3">
+                <div className="grid gap-3 xl:grid-cols-2 2xl:grid-cols-3">
                 {editorSections.map((section) => (
                   <section
                     className={`rounded-xl border border-slate-200 bg-slate-50/70 p-3 ${
@@ -2223,8 +2292,9 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                     ) : null}
                   </section>
                 ))}
+                </div>
               </div>
-            </div>
+            </fieldset>
           </aside>
         </div>
       ) : null}

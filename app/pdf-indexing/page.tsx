@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowDown, ArrowLeft, ArrowUp, BookMarked, Download, Eye, FileImage, FileSearch, FolderOpen, Hash, ListOrdered, RefreshCw, Scissors, ShieldCheck, Shuffle, X, type LucideIcon } from "lucide-react";
+import { Archive, ArrowDown, ArrowLeft, ArrowUp, BookMarked, Download, Eye, FileImage, FileSearch, FolderOpen, Hash, ListOrdered, RefreshCw, Scissors, ShieldCheck, Shuffle, X, type LucideIcon } from "lucide-react";
 import { AlignmentType, BorderStyle, Document, Packer, Paragraph, Table, TableCell, TableRow, TextRun, WidthType } from "docx";
 import { PDFDict, PDFDocument, PDFHexString, PDFName, PDFNumber, PDFRef, PDFStream, StandardFonts, concatTransformationMatrix, degrees, drawObject, popGraphicsState, pushGraphicsState, rgb } from "pdf-lib";
 import Link from "next/link";
@@ -110,6 +110,9 @@ export default function PdfIndexingPage() {
   const [message, setMessage] = useState("");
   const [pdfPreview, setPdfPreview] = useState<PdfPreview | null>(null);
   const [isDscModalOpen, setIsDscModalOpen] = useState(false);
+  const [isCompressModalOpen, setIsCompressModalOpen] = useState(false);
+  const [compressionTargetMb, setCompressionTargetMb] = useState("10");
+  const [compressionMessage, setCompressionMessage] = useState("");
   const [dscHelperStatus, setDscHelperStatus] = useState<DscHelperStatus>("idle");
   const [dscMessage, setDscMessage] = useState("");
   const [dscVisiblePlacement, setDscVisiblePlacement] = useState<DscVisiblePlacement>("all_pages");
@@ -342,6 +345,21 @@ export default function PdfIndexingPage() {
   }
 
   useEffect(() => {
+    if (!isCompressModalOpen) {
+      return;
+    }
+
+    function closeCompressionOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape" && !isProcessing) {
+        setIsCompressModalOpen(false);
+      }
+    }
+
+    window.addEventListener("keydown", closeCompressionOnEscape);
+    return () => window.removeEventListener("keydown", closeCompressionOnEscape);
+  }, [isCompressModalOpen, isProcessing]);
+
+  useEffect(() => {
     if (!pdfPreview) {
       return;
     }
@@ -536,6 +554,103 @@ export default function PdfIndexingPage() {
 
       return null;
     });
+  }
+
+  function openCompressionDialog() {
+    const rows = getActionRows(true).filter((row) => row.fileKind === "pdf");
+
+    if (!rows.length) {
+      setMessage("Select at least one PDF file to compress.");
+      return;
+    }
+
+    setCompressionMessage("");
+    setIsCompressModalOpen(true);
+  }
+
+  async function compressSelectedPdfs() {
+    const rows = getActionRows(true).filter((row) => row.fileKind === "pdf");
+    const targetMb = Number(compressionTargetMb);
+    const targetBytes = Math.floor(targetMb * 1024 * 1024);
+
+    if (!rows.length) {
+      setCompressionMessage("Select at least one PDF file to compress.");
+      return;
+    }
+
+    if (!Number.isFinite(targetMb) || targetMb <= 0) {
+      setCompressionMessage("Enter a target size greater than 0 MB.");
+      return;
+    }
+
+    setIsProcessing(true);
+    setCompressionMessage(`Preparing ${rows.length} PDF file${rows.length === 1 ? "" : "s"}...`);
+
+    try {
+      const outputs: Array<{ bytes: Uint8Array; filename: string; metTarget: boolean }> = [];
+      const signedFiles: string[] = [];
+
+      for (const [index, row] of rows.entries()) {
+        const file = pdfFileMapRef.current.get(row.id);
+
+        if (!file) {
+          throw new Error(`Missing file data for ${row.name}. Refresh the folder and try again.`);
+        }
+
+        const sourceBytes = new Uint8Array(await file.arrayBuffer());
+
+        if (hasDigitalSignature(sourceBytes)) {
+          signedFiles.push(row.name);
+          continue;
+        }
+
+        setCompressionMessage(`Compressing ${row.name} (${index + 1} of ${rows.length})...`);
+        await waitForUiUpdate();
+        const result = await compressUnsignedPdfToTarget(sourceBytes, targetBytes, (detail) => {
+          setCompressionMessage(`${row.name}: ${detail}`);
+        });
+
+        outputs.push({
+          bytes: result.bytes,
+          filename: `${stripPdfExtension(row.name)}-compressed.pdf`,
+          metTarget: result.metTarget,
+        });
+      }
+
+      if (outputs.length === 1) {
+        downloadBlob(createPdfBlob(outputs[0].bytes), outputs[0].filename);
+      } else if (outputs.length > 1) {
+        const zip = new JSZip();
+
+        outputs.forEach((output) => zip.file(output.filename, output.bytes));
+        downloadBlob(await zip.generateAsync({ type: "blob" }), "workline-compressed-pdfs.zip");
+      }
+
+      const missedTargets = outputs.filter((output) => !output.metTarget).length;
+      const resultParts = [
+        outputs.length
+          ? `Compressed ${outputs.length} PDF file${outputs.length === 1 ? "" : "s"}.`
+          : "",
+        missedTargets
+          ? `${missedTargets} file${missedTargets === 1 ? "" : "s"} reached the smallest supported output but remained above ${targetMb} MB.`
+          : outputs.length
+            ? `Each output is at or below ${targetMb} MB.`
+            : "",
+        signedFiles.length
+          ? `Skipped ${signedFiles.length} digitally signed PDF${signedFiles.length === 1 ? "" : "s"} because changing them would invalidate the signature: ${signedFiles.join(", ")}.`
+          : "",
+      ].filter(Boolean);
+
+      const resultMessage = resultParts.join(" ");
+      setCompressionMessage(resultMessage);
+      setMessage(resultMessage);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "Could not compress the selected PDFs.";
+      setCompressionMessage(detail);
+      setMessage(detail);
+    } finally {
+      setIsProcessing(false);
+    }
   }
 
   async function mergeSelectedPdfs() {
@@ -1321,6 +1436,7 @@ export default function PdfIndexingPage() {
             </div>
 
             <div className="flex flex-wrap gap-2">
+              <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={Archive} label="Compress PDF" onClick={openCompressionDialog} />
               <ToolButton disabled={isProcessing || selectedRowIds.size < 2} icon={Shuffle} label="Merge" onClick={mergeSelectedPdfs} />
               <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={BookMarked} label="Smart Merge" onClick={startSmartMerge} />
               <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={Scissors} label="Split" onClick={splitSelectedPdfs} />
@@ -1542,6 +1658,80 @@ export default function PdfIndexingPage() {
           </div>
         </section>
       </section>
+      {isCompressModalOpen ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-navy-700/70 p-4"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !isProcessing) {
+              setIsCompressModalOpen(false);
+            }
+          }}
+        >
+          <div className="w-full max-w-lg overflow-hidden rounded-2xl bg-white shadow-2xl">
+            <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
+              <div>
+                <p className="text-sm font-black uppercase text-slate-950">Compress PDF</p>
+                <p className="mt-0.5 text-xs font-bold text-slate-500">
+                  {selectedRows.filter((row) => row.fileKind === "pdf").length} selected PDF file{selectedRows.filter((row) => row.fileKind === "pdf").length === 1 ? "" : "s"}
+                </p>
+              </div>
+              <button
+                aria-label="Close PDF compression"
+                className="flex size-9 items-center justify-center rounded-lg border border-slate-950/10 bg-white text-slate-700 transition hover:bg-slate-100 disabled:opacity-45"
+                disabled={isProcessing}
+                onClick={() => setIsCompressModalOpen(false)}
+                type="button"
+              >
+                <X className="size-4" />
+              </button>
+            </div>
+            <div className="space-y-4 px-4 py-4">
+              <label className="block">
+                <span className="text-xs font-black uppercase text-slate-600">Target size per PDF (MB)</span>
+                <input
+                  className="mt-2 h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-950 outline-none transition focus:border-navy-500 focus:ring-2 focus:ring-navy-100"
+                  disabled={isProcessing}
+                  min="0.1"
+                  onChange={(event) => setCompressionTargetMb(event.target.value)}
+                  step="0.1"
+                  type="number"
+                  value={compressionTargetMb}
+                />
+              </label>
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs font-bold leading-relaxed text-amber-800">
+                Digitally signed PDFs are detected and skipped. WorkLine will never alter a signed PDF because any PDF compression would invalidate its digital signature.
+              </div>
+              <p className="text-xs font-semibold leading-relaxed text-slate-600">
+                Strong compression may reduce image quality and convert searchable page content into page images. The original file on your computer is never changed.
+              </p>
+              {compressionMessage ? (
+                <p className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold leading-relaxed text-slate-700">
+                  {compressionMessage}
+                </p>
+              ) : null}
+              <div className="flex justify-end gap-2">
+                <button
+                  className="inline-flex h-10 items-center justify-center rounded-xl border border-slate-950/10 bg-white px-4 text-xs font-black uppercase text-slate-800 transition hover:bg-slate-100 disabled:opacity-45"
+                  disabled={isProcessing}
+                  onClick={() => setIsCompressModalOpen(false)}
+                  type="button"
+                >
+                  Cancel
+                </button>
+                <button
+                  className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-navy-700 px-4 text-xs font-black uppercase text-white shadow-sm transition hover:bg-navy-800 disabled:cursor-not-allowed disabled:opacity-45"
+                  disabled={isProcessing}
+                  onClick={compressSelectedPdfs}
+                  type="button"
+                >
+                  <Archive className="size-4" />
+                  {isProcessing ? "Compressing..." : "Compress & download"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
       {pdfPreview ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-navy-700/70 p-4">
           <div className="flex h-[90vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
@@ -2045,6 +2235,108 @@ async function getPdfPageCount(file: File) {
   }
 
   return null;
+}
+
+function hasDigitalSignature(bytes: Uint8Array) {
+  const pdfSource = new TextDecoder("latin1").decode(bytes);
+
+  return (
+    /\/ByteRange\s*\[/.test(pdfSource) ||
+    /\/Type\s*\/Sig\b/.test(pdfSource) ||
+    /\/FT\s*\/Sig\b/.test(pdfSource)
+  );
+}
+
+async function compressUnsignedPdfToTarget(
+  sourceBytes: Uint8Array,
+  targetBytes: number,
+  reportProgress: (message: string) => void
+) {
+  if (sourceBytes.byteLength <= targetBytes) {
+    return { bytes: sourceBytes, metTarget: true };
+  }
+
+  const sourcePdf = await PDFDocument.load(sourceBytes.slice(), { ignoreEncryption: true });
+  const losslessBytes = await sourcePdf.save({ useObjectStreams: true });
+
+  if (losslessBytes.byteLength <= targetBytes) {
+    return { bytes: losslessBytes, metTarget: true };
+  }
+
+  let bestBytes = losslessBytes.byteLength < sourceBytes.byteLength ? losslessBytes : sourceBytes;
+  const compressionRatio = targetBytes / sourceBytes.byteLength;
+  const startScale = Math.max(0.55, Math.min(1.5, 1.5 * Math.sqrt(compressionRatio)));
+  const profiles = [
+    { quality: 0.84, scale: startScale },
+    { quality: 0.72, scale: Math.max(0.5, startScale * 0.86) },
+    { quality: 0.60, scale: Math.max(0.45, startScale * 0.72) },
+    { quality: 0.48, scale: Math.max(0.4, startScale * 0.60) },
+    { quality: 0.36, scale: Math.max(0.35, startScale * 0.50) },
+  ];
+
+  const pdfjs = await import("pdfjs-dist");
+  pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
+  const loadingTask = pdfjs.getDocument({ data: sourceBytes.slice() });
+  const renderedPdf = await loadingTask.promise;
+
+  try {
+    for (const [profileIndex, profile] of profiles.entries()) {
+      reportProgress(`compression pass ${profileIndex + 1} of ${profiles.length}...`);
+      await waitForUiUpdate();
+      const candidatePdf = await PDFDocument.create();
+
+      for (let pageNumber = 1; pageNumber <= renderedPdf.numPages; pageNumber += 1) {
+        const sourcePage = await renderedPdf.getPage(pageNumber);
+        const pageSize = sourcePage.getViewport({ scale: 1 });
+        const renderViewport = sourcePage.getViewport({ scale: profile.scale });
+        const canvas = document.createElement("canvas");
+        const context = canvas.getContext("2d", { alpha: false });
+
+        if (!context) {
+          throw new Error("This browser could not prepare the PDF page for compression.");
+        }
+
+        canvas.width = Math.max(1, Math.round(renderViewport.width));
+        canvas.height = Math.max(1, Math.round(renderViewport.height));
+        context.fillStyle = "#ffffff";
+        context.fillRect(0, 0, canvas.width, canvas.height);
+        await sourcePage.render({ canvasContext: context, viewport: renderViewport }).promise;
+
+        const jpegBlob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", profile.quality));
+
+        if (!jpegBlob) {
+          throw new Error("This browser could not create the compressed PDF page.");
+        }
+
+        const embeddedPage = await candidatePdf.embedJpg(await jpegBlob.arrayBuffer());
+        const outputPage = candidatePdf.addPage([pageSize.width, pageSize.height]);
+
+        outputPage.drawImage(embeddedPage, {
+          height: pageSize.height,
+          width: pageSize.width,
+          x: 0,
+          y: 0,
+        });
+
+        canvas.width = 1;
+        canvas.height = 1;
+      }
+
+      const candidateBytes = await candidatePdf.save({ useObjectStreams: true });
+
+      if (candidateBytes.byteLength < bestBytes.byteLength) {
+        bestBytes = candidateBytes;
+      }
+
+      if (candidateBytes.byteLength <= targetBytes) {
+        return { bytes: candidateBytes, metTarget: true };
+      }
+    }
+  } finally {
+    await renderedPdf.destroy();
+  }
+
+  return { bytes: bestBytes, metTarget: bestBytes.byteLength <= targetBytes };
 }
 
 function downloadBlob(blob: Blob, filename: string) {
@@ -2621,28 +2913,30 @@ async function appendPortraitPages(targetPdf: PDFDocument, sourcePdf: PDFDocumen
 async function appendPortraitPage(targetPdf: PDFDocument, sourcePage: ReturnType<PDFDocument["getPage"]>) {
   const { height, width } = sourcePage.getSize();
   const rotation = normalizePageRotation(sourcePage.getRotation().angle);
-  const isLandscape = width > height || rotation === 90 || rotation === 270;
 
   sourcePage.setRotation(degrees(0));
   const embeddedPage = await targetPdf.embedPage(sourcePage);
 
-  if (isLandscape) {
-    const portraitWidth = Math.min(width, height);
-    const portraitHeight = Math.max(width, height);
-    const page = targetPdf.addPage([portraitWidth, portraitHeight]);
+  // Dimensions as the page is actually DISPLAYED (the viewer applies /Rotate).
+  const sideways = rotation === 90 || rotation === 270;
+  const viewedWidth = sideways ? height : width;
+  const viewedHeight = sideways ? width : height;
 
-    if (width > height) {
-      drawRotatedEmbeddedPage(page, embeddedPage, width, height, 90);
-    } else {
-      drawRotatedEmbeddedPage(page, embeddedPage, portraitWidth, portraitHeight, 180);
-    }
+  // Drawing the embedded page with this rotation reproduces exactly what the
+  // viewer showed (the inverse of the /Rotate flag).
+  const viewRotation: 0 | 90 | 180 | 270 = rotation === 90 ? 270 : rotation === 270 ? 90 : (rotation as 0 | 180);
 
+  if (viewedWidth <= viewedHeight) {
+    // Displayed portrait already - keep the viewed orientation as-is.
+    const page = targetPdf.addPage([viewedWidth, viewedHeight]);
+    drawRotatedEmbeddedPage(page, embeddedPage, width, height, viewRotation);
     return;
   }
 
-  const page = targetPdf.addPage([width, height]);
-
-  drawRotatedEmbeddedPage(page, embeddedPage, width, height, 0);
+  // Displayed landscape - additionally turn it 90 degrees so the output page
+  // is portrait (same convention as before for plain landscape scans).
+  const page = targetPdf.addPage([viewedHeight, viewedWidth]);
+  drawRotatedEmbeddedPage(page, embeddedPage, width, height, ((viewRotation + 90) % 360) as 0 | 90 | 180 | 270);
 }
 
 function drawRotatedEmbeddedPage(
@@ -2790,11 +3084,17 @@ async function drawContinuousPageNumbers(pdf: PDFDocument, state: ContinuousPage
 function drawPageNumberText(
   page: ReturnType<PDFDocument["getPages"]>[number],
   text: string,
-  font: Awaited<ReturnType<PDFDocument["embedFont"]>>
+  font: Awaited<ReturnType<PDFDocument["embedFont"]>>,
+  lineIndex = 0
 ) {
+  // Draws `text` so it reads upright in the top-right corner of the page AS
+  // DISPLAYED, whatever /Rotate flag the page carries (scanners commonly emit
+  // landscape pages with /Rotate 90 or 270). `lineIndex` moves the text down
+  // by whole lines in the viewed orientation.
   const { height, width } = page.getSize();
   const textWidth = font.widthOfTextAtSize(text, PDF_PAGE_NUMBER_FONT_SIZE);
   const rotation = normalizePageRotation(page.getRotation().angle);
+  const topOffset = PDF_PAGE_NUMBER_MARGIN + PDF_PAGE_NUMBER_FONT_SIZE + lineIndex * (PDF_PAGE_NUMBER_FONT_SIZE + 4);
   const baseOptions = {
     color: rgb(0, 0, 0),
     font,
@@ -2802,10 +3102,12 @@ function drawPageNumberText(
   };
 
   if (rotation === 90) {
+    // Viewed top-right corner is at page-space (x: 0, y: height); viewed
+    // "rightward" runs along +y, so the text is rotated +90 (counterclockwise).
     page.drawText(text, {
       ...baseOptions,
-      rotate: degrees(-90),
-      x: PDF_PAGE_NUMBER_MARGIN + PDF_PAGE_NUMBER_FONT_SIZE,
+      rotate: degrees(90),
+      x: topOffset,
       y: height - PDF_PAGE_NUMBER_MARGIN - textWidth,
     });
     return;
@@ -2816,16 +3118,18 @@ function drawPageNumberText(
       ...baseOptions,
       rotate: degrees(180),
       x: PDF_PAGE_NUMBER_MARGIN + textWidth,
-      y: PDF_PAGE_NUMBER_MARGIN + PDF_PAGE_NUMBER_FONT_SIZE,
+      y: topOffset,
     });
     return;
   }
 
   if (rotation === 270) {
+    // Viewed top-right corner is at page-space (x: width, y: 0); viewed
+    // "rightward" runs along -y, so the text is rotated -90 (clockwise).
     page.drawText(text, {
       ...baseOptions,
-      rotate: degrees(90),
-      x: width - PDF_PAGE_NUMBER_MARGIN - PDF_PAGE_NUMBER_FONT_SIZE,
+      rotate: degrees(-90),
+      x: width - topOffset,
       y: PDF_PAGE_NUMBER_MARGIN + textWidth,
     });
     return;
@@ -2834,7 +3138,7 @@ function drawPageNumberText(
   page.drawText(text, {
     ...baseOptions,
     x: width - PDF_PAGE_NUMBER_MARGIN - textWidth,
-    y: height - PDF_PAGE_NUMBER_MARGIN - PDF_PAGE_NUMBER_FONT_SIZE,
+    y: height - topOffset,
   });
 }
 
@@ -2861,18 +3165,51 @@ async function drawTrueCopyStampOnPages(pdf: PDFDocument, stampBuffer: ArrayBuff
 
     const page = pdf.getPage(pageIndex);
     const { height, width } = page.getSize();
-    const maxWidth = Math.min(210, width * 0.34);
-    const maxHeight = Math.min(95, height * 0.14);
+    const rotation = normalizePageRotation(page.getRotation().angle);
+    const sideways = rotation === 90 || rotation === 270;
+
+    // Size and position against the page AS DISPLAYED (respecting /Rotate),
+    // so the stamp always sits upright in the viewed bottom-left corner.
+    const viewedWidth = sideways ? height : width;
+    const viewedHeight = sideways ? width : height;
+    const maxWidth = Math.min(210, viewedWidth * 0.34);
+    const maxHeight = Math.min(95, viewedHeight * 0.14);
     const scale = Math.min(maxWidth / stamp.width, maxHeight / stamp.height, 1);
     const scaledWidth = stamp.width * scale;
     const scaledHeight = stamp.height * scale;
 
-    page.drawImage(stamp, {
-      height: scaledHeight,
-      width: scaledWidth,
-      x: margin,
-      y: margin
-    });
+    if (rotation === 90) {
+      page.drawImage(stamp, {
+        height: scaledHeight,
+        rotate: degrees(90),
+        width: scaledWidth,
+        x: width - margin,
+        y: margin
+      });
+    } else if (rotation === 180) {
+      page.drawImage(stamp, {
+        height: scaledHeight,
+        rotate: degrees(180),
+        width: scaledWidth,
+        x: width - margin,
+        y: height - margin
+      });
+    } else if (rotation === 270) {
+      page.drawImage(stamp, {
+        height: scaledHeight,
+        rotate: degrees(-90),
+        width: scaledWidth,
+        x: margin,
+        y: height - margin
+      });
+    } else {
+      page.drawImage(stamp, {
+        height: scaledHeight,
+        width: scaledWidth,
+        x: margin,
+        y: margin
+      });
+    }
   });
 }
 
@@ -2885,16 +3222,9 @@ async function drawAnnexureStartLabels(pdf: PDFDocument, labels: AnnexureStartLa
 
   labels.forEach((label) => {
     const page = pdf.getPage(label.pageIndex);
-    const { height, width } = page.getSize();
-    const textWidth = font.widthOfTextAtSize(label.text, PDF_PAGE_NUMBER_FONT_SIZE);
 
-    page.drawText(label.text, {
-      color: rgb(0, 0, 0),
-      font,
-      size: PDF_PAGE_NUMBER_FONT_SIZE,
-      x: width - PDF_PAGE_NUMBER_MARGIN - textWidth,
-      y: height - PDF_PAGE_NUMBER_MARGIN - PDF_PAGE_NUMBER_FONT_SIZE * 2 - 4
-    });
+    // One line below the page number, rotation-aware like the numbers.
+    drawPageNumberText(page, label.text, font, 1);
   });
 }
 

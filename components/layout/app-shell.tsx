@@ -9,6 +9,7 @@ import {
   Building2,
   FileSignature,
   CalendarDays,
+  CalendarClock,
   ClipboardCheck,
   LayoutDashboard,
   ListChecks,
@@ -48,15 +49,18 @@ const navItems: NavItem[] = [
   { href: "/client-records", icon: Building2, label: "Client Records" },
   { href: "/engagement-letters", icon: FileSignature, label: "Engagement Letters" },
   { href: "/teams", icon: UsersRound, label: "Team Members" },
+  { href: "/sj-appointments", icon: CalendarClock, label: "SJ Appointments" },
   { href: "/gstat/trash", icon: Trash2, label: "Trash" }
 ];
 
 const bareRoutePrefixes = ["/login", "/onboarding", "/auth"];
 const collapseStorageKey = "wl_sidebar_collapsed";
+const sjAppointmentEmails = new Set(["jatinshah.dco@gmail.com", "somya.dco@gmail.com"]);
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname() ?? "";
   const [profileName, setProfileName] = useState("");
+  const [profileEmail, setProfileEmail] = useState("");
   const [profileRole, setProfileRole] = useState("");
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
@@ -70,6 +74,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     void getCurrentUser().then((user) => {
       const metadata = user?.user_metadata ?? {};
       setProfileName(String(metadata.full_name ?? metadata.name ?? user?.email ?? ""));
+      setProfileEmail(String(user?.email ?? "").trim().toLowerCase());
       setProfileRole(String(metadata.role ?? ""));
     });
   }, []);
@@ -87,7 +92,11 @@ export function AppShell({ children }: { children: ReactNode }) {
   }
 
   const isArticleAssistant = profileRole.trim().toLowerCase() === "article assistant";
-  const visibleNav = navItems.filter((item) => !(isArticleAssistant && item.href === "/billing"));
+  const visibleNav = navItems.filter(
+    (item) =>
+      !(isArticleAssistant && item.href === "/billing") &&
+      (item.href !== "/sj-appointments" || sjAppointmentEmails.has(profileEmail))
+  );
 
   function toggleCollapsed() {
     setCollapsed((current) => {

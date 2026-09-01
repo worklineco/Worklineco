@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, MessagesSquare, Search, Send, X } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowUp, Filter, MessagesSquare, Search, Send, X } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { getCached, setCached } from "@/lib/data-cache";
@@ -8,6 +8,20 @@ import { getCached, setCached } from "@/lib/data-cache";
 type TaskLineRow = Record<string, string>;
 type BillingRecord = Record<string, unknown>;
 type ELRow = Record<string, string | number>;
+type TaskHubColumnKey = "task_code" | "team" | "entity" | "task" | "stage" | "status_open_close" | "el" | "billable" | "billing";
+type TaskHubSort = { dir: "asc" | "desc"; key: TaskHubColumnKey } | null;
+
+const taskHubColumns: { key: TaskHubColumnKey; label: string; width: number }[] = [
+  { key: "task_code", label: "Task Code", width: 120 },
+  { key: "team", label: "Team", width: 110 },
+  { key: "entity", label: "Entity", width: 210 },
+  { key: "task", label: "Task", width: 190 },
+  { key: "stage", label: "Work Status", width: 140 },
+  { key: "status_open_close", label: "Open/Close", width: 130 },
+  { key: "el", label: "EL No.", width: 180 },
+  { key: "billable", label: "Billable", width: 110 },
+  { key: "billing", label: "Billing", width: 150 }
+];
 
 export function TaskHub() {
   const [rows, setRows] = useState<TaskLineRow[]>([]);
@@ -15,6 +29,8 @@ export function TaskHub() {
   const [elRows, setElRows] = useState<ELRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [columnFilters, setColumnFilters] = useState<Partial<Record<TaskHubColumnKey, string>>>({});
+  const [sortState, setSortState] = useState<TaskHubSort>(null);
   const [thread, setThread] = useState<{ code: string; team: string } | null>(null);
   const [messages, setMessages] = useState<{ author_name?: string; body: string; created_at: string; id: string }[]>([]);
   const [messageDraft, setMessageDraft] = useState("");
@@ -84,17 +100,44 @@ export function TaskHub() {
   }, [elRows]);
 
   const codedTasks = useMemo(() => {
-    const query = search.trim().toLowerCase();
-    return rows
+    const query = search.trim().toLocaleLowerCase();
+    const filtered = rows
       .filter((row) => String(row.task_code ?? "").trim())
-      .filter(
-        (row) =>
-          !query ||
-          ["task_code", "team", "entity", "entity_group", "task", "stage", "status_open_close"].some((key) =>
-            String(row[key] ?? "").toLowerCase().includes(query)
-          )
-      );
-  }, [rows, search]);
+      .filter((row) => {
+        const values = taskHubColumns.map((column) => taskHubValue(row, column.key, billingByCode, elByCode));
+        const matchesSearch = !query || values.some((value) => value.toLocaleLowerCase().includes(query));
+        const matchesColumns = taskHubColumns.every((column) => {
+          const filterValue = String(columnFilters[column.key] ?? "").trim().toLocaleLowerCase();
+          return !filterValue || taskHubValue(row, column.key, billingByCode, elByCode).toLocaleLowerCase().includes(filterValue);
+        });
+        return matchesSearch && matchesColumns;
+      });
+
+    if (!sortState) return filtered;
+    const direction = sortState.dir === "asc" ? 1 : -1;
+    return [...filtered].sort((first, second) =>
+      taskHubValue(first, sortState.key, billingByCode, elByCode).localeCompare(
+        taskHubValue(second, sortState.key, billingByCode, elByCode),
+        undefined,
+        { numeric: true, sensitivity: "base" }
+      ) * direction
+    );
+  }, [billingByCode, columnFilters, elByCode, rows, search, sortState]);
+
+  const hasActiveFilters = taskHubColumns.some((column) => String(columnFilters[column.key] ?? "").trim());
+
+  function toggleSort(key: TaskHubColumnKey) {
+    setSortState((current) => {
+      if (current?.key !== key) return { dir: "asc", key };
+      if (current.dir === "asc") return { dir: "desc", key };
+      return null;
+    });
+  }
+
+  function clearFilters() {
+    setColumnFilters({});
+    setSearch("");
+  }
 
   async function openThread(code: string, team: string) {
     setThread({ code, team });
@@ -170,22 +213,75 @@ export function TaskHub() {
             value={search}
           />
         </label>
+        {hasActiveFilters || search ? (
+          <button
+            className="inline-flex h-10 items-center rounded-md border border-slate-200 bg-white px-3 text-xs font-black text-slate-700 transition hover:bg-slate-50"
+            onClick={clearFilters}
+            type="button"
+          >
+            Clear filters
+          </button>
+        ) : null}
       </div>
 
       <div className="mt-4 max-h-[calc(100vh-200px)] overflow-auto rounded-md border border-slate-200">
         <table className="w-full min-w-[1000px] border-collapse text-left text-sm">
+          <colgroup>
+            {taskHubColumns.map((column) => <col key={column.key} style={{ width: column.width }} />)}
+            <col style={{ width: 72 }} />
+          </colgroup>
           <thead className="sticky top-0 z-10 bg-slate-100 text-[11px] font-semibold uppercase tracking-wide text-slate-600 [&_th]:border-b [&_th]:border-slate-200">
             <tr>
-              <th className="px-3 py-2">Task Code</th>
-              <th className="px-3 py-2">Team</th>
-              <th className="px-3 py-2">Entity</th>
-              <th className="px-3 py-2">Task</th>
-              <th className="px-3 py-2">Work Status</th>
-              <th className="px-3 py-2">Open/Close</th>
-              <th className="px-3 py-2">EL No.</th>
-              <th className="px-3 py-2">Billable</th>
-              <th className="px-3 py-2">Billing</th>
+              {taskHubColumns.map((column) => {
+                const isAscending = sortState?.key === column.key && sortState.dir === "asc";
+                const isDescending = sortState?.key === column.key && sortState.dir === "desc";
+                const isFiltered = Boolean(String(columnFilters[column.key] ?? "").trim());
+                return (
+                  <th className="border-r border-slate-200 px-3 py-2 last:border-r-0" key={column.key}>
+                    <div className="flex items-center gap-1">
+                      <button
+                        className="flex min-w-0 flex-1 items-center justify-between gap-1 text-left"
+                        onClick={() => toggleSort(column.key)}
+                        title={`Sort by ${column.label}`}
+                        type="button"
+                      >
+                        <span className="min-w-0 leading-tight">{column.label}</span>
+                        <span className="flex shrink-0 flex-col leading-none">
+                          <ArrowUp className={`size-3 ${isAscending ? "text-navy-700" : "text-slate-300"}`} />
+                          <ArrowDown className={`-mt-1 size-3 ${isDescending ? "text-navy-700" : "text-slate-300"}`} />
+                        </span>
+                      </button>
+                      <button
+                        aria-label={`Focus ${column.label} filter`}
+                        className={`inline-flex size-5 shrink-0 items-center justify-center rounded border transition ${
+                          isFiltered ? "border-navy-600 bg-navy-600 text-white" : "border-slate-300 bg-white text-slate-500 hover:bg-slate-100"
+                        }`}
+                        onClick={() => document.getElementById(`task-hub-filter-${column.key}`)?.focus()}
+                        title={`Filter ${column.label}`}
+                        type="button"
+                      >
+                        <Filter className="size-3" />
+                      </button>
+                    </div>
+                  </th>
+                );
+              })}
               <th className="px-3 py-2">Chat</th>
+            </tr>
+            <tr className="bg-slate-50">
+              {taskHubColumns.map((column) => (
+                <th className="border-r border-slate-200 px-2 py-1 last:border-r-0" key={`filter-${column.key}`}>
+                  <input
+                    aria-label={`Filter ${column.label}`}
+                    className="h-7 w-full rounded-md border border-slate-200 bg-white px-2 text-xs font-semibold normal-case text-slate-950 outline-none focus:border-navy-400"
+                    id={`task-hub-filter-${column.key}`}
+                    onChange={(event) => setColumnFilters((current) => ({ ...current, [column.key]: event.target.value }))}
+                    placeholder="Filter"
+                    value={columnFilters[column.key] ?? ""}
+                  />
+                </th>
+              ))}
+              <th className="bg-slate-50 px-2 py-1" />
             </tr>
           </thead>
           <tbody>
@@ -297,6 +393,24 @@ export function TaskHub() {
       ) : null}
     </section>
   );
+}
+
+function taskHubValue(
+  row: TaskLineRow,
+  key: TaskHubColumnKey,
+  billingByCode: Map<string, string>,
+  elByCode: Map<string, { no: string; status: string }>
+) {
+  const code = String(row.task_code ?? "").trim();
+  if (key === "entity") return String(row.entity || row.entity_group || "").trim();
+  if (key === "el") {
+    const el = elByCode.get(code);
+    return el ? [el.no || "Generated", el.status].filter(Boolean).join(" · ") : "Not generated";
+  }
+  if (key === "billing") {
+    return billingByCode.get(code) || (String(row.billable ?? "").toLocaleLowerCase() === "no" ? "Non-billable" : "");
+  }
+  return String(row[key] ?? "").trim();
 }
 
 function formatMessageTime(value: string) {

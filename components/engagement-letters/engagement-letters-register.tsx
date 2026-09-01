@@ -1,6 +1,6 @@
 "use client";
 
-import { Download, ExternalLink, Pencil, Plus, Search, Trash2, X } from "lucide-react";
+import { Check, ChevronDown, Download, ExternalLink, Pencil, Plus, Search, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx-js-style";
 import { getCached, setCached } from "@/lib/data-cache";
@@ -285,35 +285,32 @@ export function EngagementLettersRegister() {
             <div className="max-h-[70vh] overflow-auto p-5">
               <div className="grid gap-3 md:grid-cols-2">
                 {editableFields.map((field) => (
-                  <label className={field.wide ? "md:col-span-2" : ""} key={field.key}>
+                  <div className={field.wide ? "md:col-span-2" : ""} key={field.key}>
                     <span className="text-[10px] font-black uppercase text-slate-500">{field.key}</span>
                     {field.type === "taskcode" ? (
-                      <select
-                        className="mt-1 h-10 w-full rounded-md border border-slate-200 bg-white px-2 text-sm font-semibold outline-none focus:border-navy-400"
-                        onChange={(event) => setEditor((current) => (current ? { ...current, row: { ...current.row, [field.key]: event.target.value } } : current))}
+                      <EngagementLetterSearchableSelect
+                        onChange={(value) => setEditor((current) => (current ? { ...current, row: { ...current.row, [field.key]: value } } : current))}
+                        options={[
+                          ...codeOptions.map((option) => ({
+                            label: `${option.code}${option.entity ? ` — ${option.entity}` : option.task ? ` — ${option.task}` : ""}`,
+                            value: option.code
+                          })),
+                          ...(editor.row[field.key] && !codeOptions.some((option) => option.code === editor.row[field.key])
+                            ? [{ label: String(editor.row[field.key]), value: String(editor.row[field.key]) }]
+                            : [])
+                        ]}
+                        placeholder="Select task code"
+                        searchPlaceholder="Search task code, entity or task"
                         value={String(editor.row[field.key] ?? "")}
-                      >
-                        <option value="">Select task code</option>
-                        {codeOptions.map((option) => (
-                          <option key={option.code} value={option.code}>
-                            {option.code}{option.entity ? ` — ${option.entity}` : option.task ? ` — ${option.task}` : ""}
-                          </option>
-                        ))}
-                        {editor.row[field.key] && !codeOptions.some((option) => option.code === editor.row[field.key]) ? (
-                          <option value={String(editor.row[field.key])}>{String(editor.row[field.key])}</option>
-                        ) : null}
-                      </select>
+                      />
                     ) : field.type === "select" ? (
-                      <select
-                        className="mt-1 h-10 w-full rounded-md border border-slate-200 bg-white px-2 text-sm font-semibold outline-none focus:border-navy-400"
-                        onChange={(event) => setEditor((current) => (current ? { ...current, row: { ...current.row, [field.key]: event.target.value } } : current))}
+                      <EngagementLetterSearchableSelect
+                        onChange={(value) => setEditor((current) => (current ? { ...current, row: { ...current.row, [field.key]: value } } : current))}
+                        options={(field.options ?? []).map((option) => ({ label: option, value: option }))}
+                        placeholder="Select"
+                        searchPlaceholder={`Search ${field.key.toLowerCase()}`}
                         value={String(editor.row[field.key] ?? "")}
-                      >
-                        <option value="">Select</option>
-                        {(field.options ?? []).map((option) => (
-                          <option key={option} value={option}>{option}</option>
-                        ))}
-                      </select>
+                      />
                     ) : field.type === "textarea" ? (
                       <textarea
                         className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-1.5 text-sm font-semibold outline-none focus:border-navy-400"
@@ -330,7 +327,7 @@ export function EngagementLettersRegister() {
                         value={String(editor.row[field.key] ?? "")}
                       />
                     )}
-                  </label>
+                  </div>
                 ))}
               </div>
             </div>
@@ -344,5 +341,143 @@ export function EngagementLettersRegister() {
         </div>
       ) : null}
     </section>
+  );
+}
+
+
+type EngagementLetterSelectOption = { label: string; value: string };
+
+function EngagementLetterSearchableSelect({
+  onChange,
+  options,
+  placeholder,
+  searchPlaceholder,
+  value
+}: {
+  onChange: (value: string) => void;
+  options: EngagementLetterSelectOption[];
+  placeholder: string;
+  searchPlaceholder: string;
+  value: string;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const rootRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const selectedLabel = options.find((option) => option.value === value)?.label || value;
+  const filteredOptions = useMemo(() => {
+    const normalizedQuery = query.trim().toLocaleLowerCase();
+    if (!normalizedQuery) {
+      return options;
+    }
+    return options.filter((option) =>
+      `${option.label} ${option.value}`.toLocaleLowerCase().includes(normalizedQuery)
+    );
+  }, [options, query]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+
+    function closeOnOutsideClick(event: PointerEvent) {
+      if (!rootRef.current?.contains(event.target as Node)) {
+        setIsOpen(false);
+        setQuery("");
+      }
+    }
+
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setIsOpen(false);
+        setQuery("");
+      }
+    }
+
+    document.addEventListener("pointerdown", closeOnOutsideClick);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsideClick);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (isOpen) {
+      searchRef.current?.focus();
+    }
+  }, [isOpen]);
+
+  function selectOption(nextValue: string) {
+    onChange(nextValue);
+    setIsOpen(false);
+    setQuery("");
+  }
+
+  return (
+    <div className="relative mt-1" ref={rootRef}>
+      <button
+        aria-expanded={isOpen}
+        className="flex h-10 w-full items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-left text-sm font-semibold text-slate-900 outline-none transition focus:border-navy-400 focus:ring-2 focus:ring-navy-100"
+        onClick={() => {
+          setIsOpen((current) => !current);
+          setQuery("");
+        }}
+        title={selectedLabel || placeholder}
+        type="button"
+      >
+        <span className={`min-w-0 flex-1 truncate ${selectedLabel ? "" : "text-slate-500"}`}>
+          {selectedLabel || placeholder}
+        </span>
+        <ChevronDown className={`size-4 shrink-0 text-slate-500 transition ${isOpen ? "rotate-180" : ""}`} />
+      </button>
+
+      {isOpen ? (
+        <div className="absolute left-0 right-0 top-full z-[100] mt-1 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-[0_18px_55px_rgba(15,23,42,0.22)]">
+          <div className="sticky top-0 z-10 border-b border-slate-200 bg-white p-2">
+            <label className="flex h-9 items-center gap-2 rounded-md border border-slate-200 bg-white px-2 focus-within:border-navy-400 focus-within:ring-2 focus-within:ring-navy-100">
+              <Search className="size-4 shrink-0 text-slate-400" />
+              <input
+                className="min-w-0 flex-1 bg-transparent text-sm font-semibold text-slate-900 outline-none placeholder:text-slate-400"
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder={searchPlaceholder}
+                ref={searchRef}
+                value={query}
+              />
+            </label>
+          </div>
+          <div className="max-h-72 overflow-y-auto py-1">
+            <button
+              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-semibold text-slate-600 transition hover:bg-navy-50 hover:text-navy-800"
+              onClick={() => selectOption("")}
+              type="button"
+            >
+              <span className="min-w-0 flex-1 truncate">{placeholder}</span>
+              {!value ? <Check className="size-4 shrink-0 text-navy-700" /> : null}
+            </button>
+            {filteredOptions.length ? (
+              filteredOptions.map((option) => (
+                <button
+                  className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-semibold transition ${
+                    option.value === value
+                      ? "bg-navy-700 text-white"
+                      : "text-slate-800 hover:bg-navy-50 hover:text-navy-800"
+                  }`}
+                  key={`${option.value}-${option.label}`}
+                  onClick={() => selectOption(option.value)}
+                  title={option.label}
+                  type="button"
+                >
+                  <span className="min-w-0 flex-1 truncate">{option.label}</span>
+                  {option.value === value ? <Check className="size-4 shrink-0" /> : null}
+                </button>
+              ))
+            ) : (
+              <p className="px-3 py-5 text-center text-sm font-semibold text-slate-500">No matching options</p>
+            )}
+          </div>
+        </div>
+      ) : null}
+    </div>
   );
 }
