@@ -17,6 +17,7 @@ type Booking = {
   to_time: string;
 };
 type TeamMember = {
+  designation?: string;
   name: string;
   team: string;
 };
@@ -148,9 +149,21 @@ export function MeetingRoomBooking() {
     try {
       const response = await fetch("/api/teams", { cache: "no-store" });
       const result = (await response.json()) as { members?: TeamMember[] };
-      const teamNames = Array.from(
-        new Set((result.members ?? []).map((member) => member.team || member.name).filter(Boolean))
+      const members = result.members ?? [];
+      // Only team IDs (Team 03, Team 04, ...) and Partner names should appear —
+      // not every individual member's name.
+      const teamIds = Array.from(new Set(members.map((member) => member.team).filter(Boolean))).sort((first, second) =>
+        first.localeCompare(second)
+      );
+      const partnerNames = Array.from(
+        new Set(
+          members
+            .filter((member) => (member.designation ?? "").toLowerCase().includes("partner"))
+            .map((member) => member.name)
+            .filter(Boolean)
+        )
       ).sort((first, second) => first.localeCompare(second));
+      const teamNames = [...partnerNames, ...teamIds];
 
       if (teamNames.length) {
         setTeams(teamNames);
