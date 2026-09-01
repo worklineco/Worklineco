@@ -2274,7 +2274,10 @@ async function compressUnsignedPdfToTarget(
     { quality: 0.36, scale: Math.max(0.35, startScale * 0.50) },
   ];
 
-  const pdfjs = await import("pdfjs-dist");
+  // Loaded lazily; module specifier cast to string so the typecheck does not
+  // require pdfjs-dist type resolution (the package is installed at runtime).
+  const pdfjsModule = "pdfjs-dist";
+  const pdfjs = await import(pdfjsModule);
   pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
   const loadingTask = pdfjs.getDocument({ data: sourceBytes.slice() });
   const renderedPdf = await loadingTask.promise;
