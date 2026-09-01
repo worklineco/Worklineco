@@ -1485,9 +1485,21 @@ export function TaskLineRegister() {
       }
     }
 
-    const exportSourceRows = filterAndSortTaskLineRows(sourceRows, visibleColumns, {
+    // Resolve Entity Group from Client Records first (same as the on-screen
+    // rows), then filter with the SAME function the table uses so the export
+    // matches exactly what is visible — including filters on hidden columns and
+    // the date-range filter, which the old export logic ignored.
+    const resolvedSourceRows = entityGroupByName.size
+      ? sourceRows.map((row) => {
+          const key = normalizeOptionKey(row.entity);
+          const group = key ? entityGroupByName.get(key) : undefined;
+          return group && text(group) !== text(row.entity_group) ? { ...row, entity_group: group } : row;
+        })
+      : sourceRows;
+    const exportSourceRows = applyTaskLineFilters(resolvedSourceRows, {
       columnFilters,
       dueColorFilter,
+      dueRange,
       search,
       sortState,
       statusFilter,
