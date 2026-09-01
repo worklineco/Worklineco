@@ -86,11 +86,11 @@ const taskLineFormSections: { columns: string[]; key: string; label: string }[] 
 ];
 const requiredTaskLineFormKeys = ["team", "entity_group", "entity", "state_name", "task", "due_date", "stage", "status_open_close", "billable"];
 const taskLineColumnLayoutStorageKey = "workline:taskline-column-layout:v5";
-const actionColumnWidth = 116;
+const actionColumnWidth = 92;
 const actionColumnKey = "__actions";
 const taskLineColumns: TaskLineColumn[] = [
   { key: "team", label: "Team", width: 96 },
-  { key: "task_code", label: "Task Code", width: 104 },
+  { key: "task_code", label: "Task Code", width: 150 },
   { key: "name", label: "Name", width: 150 },
   { key: "resource", label: "Resource", width: 140 },
   { key: "entity_group", label: "Entity Group", width: 150 },
