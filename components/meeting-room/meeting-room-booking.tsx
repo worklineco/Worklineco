@@ -56,6 +56,20 @@ const fallbackTeams = [
   "Mr. Mudit Jain",
   "Mrs. Shuchi Sethi"
 ];
+const partnerNameHonorifics = new Set(["ca", "cs", "cma", "adv", "advocate", "mr", "mrs", "ms", "dr", "shri", "smt", "sh"]);
+// Normalise a partner name so "CA Shuchi Sethi", "Mrs. Shuchi Sethi" and
+// "SHUCHI SETHI" all collapse to one entry.
+function normalizePartnerName(value: string) {
+  const parts = value
+    .toLowerCase()
+    .replace(/[.,]/g, " ")
+    .split(/\s+/)
+    .filter(Boolean);
+  while (parts.length > 1 && partnerNameHonorifics.has(parts[0])) {
+    parts.shift();
+  }
+  return parts.join(" ");
+}
 const floors = ["All", "3rd Floor", "2nd Floor", "1st Floor"];
 const purposeOptions = [
   "Team Meetings",
@@ -155,14 +169,21 @@ export function MeetingRoomBooking() {
       const teamIds = Array.from(new Set(members.map((member) => member.team).filter(Boolean))).sort((first, second) =>
         first.localeCompare(second)
       );
-      const partnerNames = Array.from(
-        new Set(
-          members
-            .filter((member) => (member.designation ?? "").toLowerCase().includes("partner"))
-            .map((member) => member.name)
-            .filter(Boolean)
-        )
-      ).sort((first, second) => first.localeCompare(second));
+      const partnerRaw = members
+        .filter((member) => (member.designation ?? "").toLowerCase().includes("partner"))
+        .map((member) => member.name)
+        .filter(Boolean)
+        .sort((first, second) => first.localeCompare(second));
+      const seenPartners = new Set<string>();
+      const partnerNames: string[] = [];
+      for (const partnerName of partnerRaw) {
+        const key = normalizePartnerName(partnerName);
+        if (!key || seenPartners.has(key)) {
+          continue;
+        }
+        seenPartners.add(key);
+        partnerNames.push(partnerName);
+      }
       const teamNames = [...partnerNames, ...teamIds];
 
       if (teamNames.length) {
