@@ -393,9 +393,25 @@ export function TaskLineRegister() {
   function frozenInfo(key: string) {
     return { isFrozen: frozenColumnKeys.has(key), left: frozenLefts.get(key) ?? 0 };
   }
+  // Keep Entity Group in sync with Client Records: whenever an entity maps to a
+  // group in the current masters, use that group (so editing a client record's
+  // group is reflected in TaskLine immediately, and blank groups get filled).
+  const resolvedRows = useMemo(() => {
+    if (!entityGroupByName.size) {
+      return rows;
+    }
+    return rows.map((row) => {
+      const key = normalizeOptionKey(row.entity);
+      const group = key ? entityGroupByName.get(key) : undefined;
+      if (group && text(group) !== text(row.entity_group)) {
+        return { ...row, entity_group: group };
+      }
+      return row;
+    });
+  }, [rows, entityGroupByName]);
   const filteredRows = useMemo(
-    () => applyTaskLineFilters(rows, { columnFilters, dueColorFilter, dueRange, search, sortState, statusFilter, valueFilters }),
-    [rows, columnFilters, dueColorFilter, dueRange, search, sortState, statusFilter, valueFilters]
+    () => applyTaskLineFilters(resolvedRows, { columnFilters, dueColorFilter, dueRange, search, sortState, statusFilter, valueFilters }),
+    [resolvedRows, columnFilters, dueColorFilter, dueRange, search, sortState, statusFilter, valueFilters]
   );
   const hasActiveColumnFilters = Object.values(columnFilters).some((value) => value.trim());
   const hasActiveDataQuery = Boolean(
