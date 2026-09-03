@@ -6,6 +6,7 @@ import { PDFDict, PDFDocument, PDFHexString, PDFName, PDFNumber, PDFRef, PDFStre
 import Link from "next/link";
 import { ChangeEvent, useEffect, useRef, useState } from "react";
 import JSZip from "jszip";
+import { preparePdfForDscSigning } from "@/lib/pdf-signing";
 
 type PdfFileRow = {
   annexureLabel: string;
@@ -26,7 +27,6 @@ const DEFAULT_SMART_MERGE_MAX_MB = 19.5;
 const SMART_MERGE_MAX_SIZE = DEFAULT_SMART_MERGE_MAX_MB * 1024 * 1024;
 const DSC_HELPER_URL = "http://127.0.0.1:48783";
 const DSC_HELPER_DOWNLOAD_URL = "/WorkLineDSCHelperSetup.vbs";
-const EMSIGNER_DOWNLOAD_URL = "https://tutorial.gst.gov.in/installers/dscemSigner/GSTSigner-v2.8.msi";
 const TRUE_COPY_STAMP_URL = "/true-copy-stamp.png";
 const PAPERBOOK_TRUE_COPY_DOCUMENT_TYPES = new Set(["SCN", "OIO", "OIA"]);
 const MERGE_FILE_ACCEPT = "application/pdf,.pdf,image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp";
@@ -90,14 +90,24 @@ type PdfPreview = {
   url: string;
 };
 
-type DscHelperStatus = "idle" | "checking" | "ready" | "offline" | "emsigner_missing" | "emsigner_not_running" | "unsupported" | "signing";
+type DscHelperStatus = "idle" | "checking" | "ready" | "offline" | "outdated" | "unsupported_platform" | "no_certificates" | "signing";
 type DscVisiblePlacement = "all_pages" | "first_page" | "last_page";
+type DscCertificate = {
+  commonName: string;
+  issuerName: string;
+  notAfter: string;
+  notBefore: string;
+  subject: string;
+  thumbprint: string;
+};
 
 const DSC_VISIBLE_PLACEMENTS: { label: string; value: DscVisiblePlacement }[] = [
   { label: "All pages", value: "all_pages" },
   { label: "First page", value: "first_page" },
   { label: "Last page", value: "last_page" },
 ];
+const DSC_HELPER_REQUIRED_VERSION = 12;
+const DSC_DEFAULT_REASON = "WorkLine DSC filing";
 
 export default function PdfIndexingPage() {
   const [pdfRows, setPdfRows] = useState<PdfFileRow[]>([]);
@@ -116,6 +126,9 @@ export default function PdfIndexingPage() {
   const [dscHelperStatus, setDscHelperStatus] = useState<DscHelperStatus>("idle");
   const [dscMessage, setDscMessage] = useState("");
   const [dscVisiblePlacement, setDscVisiblePlacement] = useState<DscVisiblePlacement>("all_pages");
+  const [dscCertificates, setDscCertificates] = useState<DscCertificate[]>([]);
+  const [dscSelectedThumbprint, setDscSelectedThumbprint] = useState("");
+  const [dscReason, setDscReason] = useState(DSC_DEFAULT_REASON);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
   const pdfFileMapRef = useRef<Map<string, File>>(new Map());
@@ -136,6 +149,9 @@ export default function PdfIndexingPage() {
   async function checkDscHelper() {
     setDscHelperStatus("checking");
     setDscMessage("Checking local DSC helper...");
+    setDscCertificates([]);
+
+    let payload: { canSignPdfs?: boolean; engine?: string; helperVersion?: string; message?: string } | null = null;
 
     try {
       const response = await fetch(`${DSC_HELPER_URL}/health`, {
@@ -147,42 +163,64 @@ export default function PdfIndexingPage() {
         throw new Error("Local DSC helper did not respond correctly.");
       }
 
-      const payload = await response.json().catch(() => null);
-      const helperEngine = String(payload?.engine || "");
-      const helperMessage = String(payload?.message || "");
-      const canSignPdfs = payload?.canSignPdfs !== false;
-      const hasNicSigner = helperEngine === "nic-digital-signer-service-detected";
-      const signerNotReachable =
-        helperEngine === "emsigner-installed-not-running" ||
-        /(?:GSTSigner|emSigner).*(?:not running|not reachable)|(?:not running|not reachable).*(?:GSTSigner|emSigner)/i.test(helperMessage);
-      const needsEmSigner =
-        (helperEngine === "emsigner-missing" && !signerNotReachable) ||
-        helperEngine === "pending" ||
-        /signing engine is not connected/i.test(helperMessage);
-
-      setDscHelperStatus(
-        needsEmSigner
-          ? "emsigner_missing"
-          : signerNotReachable
-            ? "emsigner_not_running"
-            : canSignPdfs && !hasNicSigner
-              ? "ready"
-              : "unsupported"
-      );
-      setDscMessage(
-        needsEmSigner
-          ? payload?.message || "WorkLine DSC helper is installed. Install or start GSTSigner/emSigner, then click Check again."
-        : signerNotReachable
-            ? payload?.message || "GSTSigner is running, but WorkLine cannot reach its local signing service. Fully exit GSTSigner/emSigner, reopen it, allow any firewall prompt, then click Check again."
-          : hasNicSigner
-            ? payload?.message || "NIC Digital Signer Service is running on this computer. WorkLine can use it after the signing request connector is mapped."
-          : !canSignPdfs
-            ? payload?.message || "emSigner is detected. WorkLine PDF signing connector is not enabled yet."
-          : payload?.message || "Local DSC helper is reachable."
-      );
+      payload = await response.json().catch(() => null);
     } catch {
       setDscHelperStatus("offline");
-      setDscMessage("Local DSC helper is not running on this computer.");
+      setDscMessage("Local DSC helper is not running on this computer. Install it once, then click Check again.");
+      return;
+    }
+
+    const helperVersion = Number(String(payload?.helperVersion || "").replace(/[^0-9]/g, "")) || 0;
+
+    if (helperVersion < DSC_HELPER_REQUIRED_VERSION || payload?.engine !== "windows-certificate-store") {
+      if (payload?.engine === "unsupported-platform" || payload?.canSignPdfs === false) {
+        setDscHelperStatus(helperVersion >= DSC_HELPER_REQUIRED_VERSION ? "unsupported_platform" : "outdated");
+        setDscMessage(
+          helperVersion >= DSC_HELPER_REQUIRED_VERSION
+            ? payload?.message || "DSC signing requires a Windows computer with the token drivers installed."
+            : "An older WorkLine DSC helper is installed. Update it once to enable direct PDF signing."
+        );
+        return;
+      }
+      setDscHelperStatus("outdated");
+      setDscMessage("An older WorkLine DSC helper is installed. Update it once to enable direct PDF signing.");
+      return;
+    }
+
+    setDscMessage("Helper is ready. Looking for DSC certificates...");
+
+    try {
+      const response = await fetch(`${DSC_HELPER_URL}/certificates`, { cache: "no-store", method: "GET" });
+      const certificatesPayload = (await response.json().catch(() => null)) as
+        | { certificates?: DscCertificate[]; error?: string; message?: string }
+        | null;
+
+      if (!response.ok) {
+        throw new Error(certificatesPayload?.error || "Could not read DSC certificates.");
+      }
+
+      const certificates = certificatesPayload?.certificates ?? [];
+      setDscCertificates(certificates);
+
+      if (!certificates.length) {
+        setDscHelperStatus("no_certificates");
+        setDscMessage(
+          certificatesPayload?.message ||
+            "No DSC certificates found. Insert the DSC USB token (with its driver installed), then click Check again."
+        );
+        return;
+      }
+
+      setDscSelectedThumbprint((current) =>
+        certificates.some((certificate) => certificate.thumbprint === current) ? current : certificates[0].thumbprint
+      );
+      setDscHelperStatus("ready");
+      setDscMessage(
+        `Ready to sign. ${certificates.length} DSC certificate${certificates.length === 1 ? "" : "s"} detected on this computer.`
+      );
+    } catch (error) {
+      setDscHelperStatus("no_certificates");
+      setDscMessage(error instanceof Error ? error.message : "Could not read DSC certificates from this computer.");
     }
   }
 
@@ -192,51 +230,68 @@ export default function PdfIndexingPage() {
       return;
     }
 
+    const certificate = dscCertificates.find((item) => item.thumbprint === dscSelectedThumbprint);
+    if (!certificate) {
+      setDscMessage("Select a DSC certificate before signing.");
+      return;
+    }
+
     setDscHelperStatus("signing");
-    setDscMessage("Sending selected PDFs to local DSC helper...");
+    let signedCount = 0;
 
     try {
-      const formData = new FormData();
-
-      for (const row of selectedRows) {
+      for (const [index, row] of selectedRows.entries()) {
         const file = pdfFileMapRef.current.get(row.id);
 
         if (!file) {
           throw new Error(`Missing file data for ${row.name}. Refresh the folder and try again.`);
         }
 
-        formData.append("files", file, row.name);
-      }
+        setDscMessage(`Preparing ${row.name} (${index + 1} of ${selectedRows.length})...`);
+        const prepared = await preparePdfForDscSigning(await file.arrayBuffer(), {
+          placement: dscVisiblePlacement,
+          reason: dscReason.trim() || DSC_DEFAULT_REASON,
+          signedAt: new Date(),
+          signerName: certificate.commonName || "DSC Signatory",
+        });
 
-      formData.append("visiblePlacement", dscVisiblePlacement);
-      formData.append("signatureMode", "single_document_signature");
-
-      const response = await fetch(`${DSC_HELPER_URL}/sign`, {
-        body: formData,
-        method: "POST",
-      });
-
-      if (!response.ok) {
-        const payload = await response.json().catch(() => null);
-        if (response.status === 501) {
-          setDscHelperStatus("unsupported");
-        }
-        throw new Error(
-          [payload?.error || "DSC helper could not sign the selected PDFs.", payload?.nextStep]
-            .filter(Boolean)
-            .join(" ")
+        setDscMessage(
+          `Signing ${row.name} (${index + 1} of ${selectedRows.length})... Enter the token PIN if Windows asks for it.`
         );
+        const response = await fetch(`${DSC_HELPER_URL}/sign`, {
+          body: new Blob([prepared as BlobPart], { type: "application/pdf" }),
+          headers: {
+            "Content-Type": "application/pdf",
+            "X-Workline-Cert-Thumbprint": certificate.thumbprint,
+            "X-Workline-Filename": row.name,
+          },
+          method: "POST",
+        });
+
+        if (!response.ok) {
+          const payload = await response.json().catch(() => null);
+          throw new Error(payload?.error || `DSC helper could not sign ${row.name}.`);
+        }
+
+        const blob = await response.blob();
+        const disposition = response.headers.get("Content-Disposition") || "";
+        const filenameMatch = disposition.match(/filename="?([^"]+)"?/i);
+        downloadBlob(blob, filenameMatch?.[1] || `${row.name.replace(/\.pdf$/i, "")}-signed.pdf`);
+        signedCount += 1;
       }
 
-      const blob = await response.blob();
-      const disposition = response.headers.get("Content-Disposition") || "";
-      const filenameMatch = disposition.match(/filename="?([^"]+)"?/i);
-      downloadBlob(blob, filenameMatch?.[1] || "workline-dsc-signed.pdf");
       setDscHelperStatus("ready");
-      setDscMessage("Signed PDF downloaded.");
+      setDscMessage(`Signed and downloaded ${signedCount} PDF${signedCount === 1 ? "" : "s"} with ${certificate.commonName}.`);
     } catch (error) {
-      setDscHelperStatus((status) => (status === "unsupported" ? "unsupported" : "ready"));
-      setDscMessage(error instanceof Error ? error.message : "Could not complete DSC filing.");
+      setDscHelperStatus("ready");
+      setDscMessage(
+        [
+          signedCount ? `Signed ${signedCount} of ${selectedRows.length} PDFs before stopping.` : "",
+          error instanceof Error ? error.message : "Could not complete DSC signing.",
+        ]
+          .filter(Boolean)
+          .join(" ")
+      );
     }
   }
 
@@ -1788,50 +1843,56 @@ export default function PdfIndexingPage() {
                     Install DSC helper
                   </a>
                 ) : null}
-                {dscHelperStatus === "emsigner_missing" ? (
+                {dscHelperStatus === "outdated" ? (
                   <>
                     <p className="mt-2 text-xs font-bold leading-relaxed text-slate-600">
-                      If GSTSigner is already installed, open it from the Start Menu and click Check again. Use the download only when GSTSigner is not installed on this computer.
-                    </p>
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      <a
-                        className="inline-flex h-9 items-center justify-center rounded-lg border border-slate-950/10 bg-white px-3 text-xs font-black uppercase text-slate-800 shadow-sm transition hover:bg-slate-100"
-                        download
-                        href={DSC_HELPER_DOWNLOAD_URL}
-                      >
-                        Update helper
-                      </a>
-                      <a
-                        className="inline-flex h-9 items-center justify-center rounded-lg border border-slate-950/10 bg-white px-3 text-xs font-black uppercase text-slate-800 shadow-sm transition hover:bg-slate-100"
-                        href={EMSIGNER_DOWNLOAD_URL}
-                        rel="noreferrer"
-                        target="_blank"
-                      >
-                        Download GSTSigner
-                      </a>
-                    </div>
-                  </>
-                ) : null}
-                {dscHelperStatus === "emsigner_not_running" ? (
-                  <>
-                    <p className="mt-2 text-xs font-bold leading-relaxed text-slate-600">
-                      GSTSigner appears to be installed, but its local service is not reachable. Fully exit GSTSigner/emSigner from the taskbar or Task Manager, reopen it, allow any Windows firewall prompt, then click Check again.
+                      Download and run the installer once. It updates the helper in the background and starts it automatically - then click Check again.
                     </p>
                     <a
-                      className="mt-3 inline-flex h-9 items-center justify-center rounded-lg border border-slate-950/10 bg-white px-3 text-xs font-black uppercase text-slate-800 shadow-sm transition hover:bg-slate-100"
+                      className="mt-3 inline-flex h-9 items-center justify-center rounded-lg bg-navy-700 px-3 text-xs font-black uppercase text-white shadow-sm transition hover:bg-navy-800"
                       download
                       href={DSC_HELPER_DOWNLOAD_URL}
                     >
-                      Update helper
+                      Update DSC helper
                     </a>
                   </>
                 ) : null}
-                {dscHelperStatus === "unsupported" ? (
+                {dscHelperStatus === "no_certificates" ? (
                   <p className="mt-2 text-xs font-bold leading-relaxed text-amber-700">
-                    Setup is complete on this computer, but automatic PDF signing still needs the final WorkLine connector. Use the manual pack below to sign in NIC Digital Signing Tool for now.
+                    Insert the DSC USB token into this computer, make sure its driver (ePass, ProxKey, mToken, etc.) is installed, then click Check again.
+                  </p>
+                ) : null}
+                {dscHelperStatus === "unsupported_platform" ? (
+                  <p className="mt-2 text-xs font-bold leading-relaxed text-amber-700">
+                    Direct DSC signing works on Windows computers with the token drivers installed. Use the manual pack below on this computer.
                   </p>
                 ) : null}
               </div>
+              {dscCertificates.length ? (
+                <div className="rounded-xl border border-slate-200 bg-white p-3">
+                  <p className="text-xs font-black uppercase text-slate-500">DSC certificate</p>
+                  <select
+                    className="mt-2 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold text-slate-950 outline-none focus:border-navy-400"
+                    onChange={(event) => setDscSelectedThumbprint(event.target.value)}
+                    value={dscSelectedThumbprint}
+                  >
+                    {dscCertificates.map((certificate) => (
+                      <option key={certificate.thumbprint} value={certificate.thumbprint}>
+                        {certificate.commonName} - {certificate.issuerName} (valid till {new Date(certificate.notAfter).toLocaleDateString("en-IN")})
+                      </option>
+                    ))}
+                  </select>
+                  <label className="mt-3 block">
+                    <span className="text-xs font-black uppercase text-slate-500">Signing reason</span>
+                    <input
+                      className="mt-1 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold text-slate-950 outline-none focus:border-navy-400"
+                      onChange={(event) => setDscReason(event.target.value)}
+                      placeholder={DSC_DEFAULT_REASON}
+                      value={dscReason}
+                    />
+                  </label>
+                </div>
+              ) : null}
               {!selectedRows.length ? (
                 <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold leading-relaxed text-amber-800">
                   Select one or more PDFs in the table before signing.
