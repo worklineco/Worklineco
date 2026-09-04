@@ -2,7 +2,7 @@
 
 import { ArrowDown, ArrowUp, Bookmark, CalendarDays, Check, ChevronDown, CircleDot, Star, Download, Filter, History, ListChecks, Menu, Pencil, Pin, Plus, ReceiptText, RotateCcw, Scale, Search, Settings2, Trash2, Upload, Workflow, X } from "lucide-react";
 import Link from "next/link";
-import type { ComponentType } from "react";
+import type { ComponentType, PointerEvent as ReactPointerEvent } from "react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import * as XLSX from "xlsx-js-style";
@@ -99,6 +99,9 @@ const taskLineFormSections: { columns: string[]; key: string; label: string }[] 
 ];
 const requiredTaskLineFormKeys: string[] = ["entity_group"];
 const taskLineColumnLayoutStorageKey = "workline:taskline-column-layout:v5";
+const taskLineColumnWidthsStorageKey = "workline:taskline-column-widths:v1";
+const minimumTaskLineColumnWidth = 80;
+const maximumTaskLineColumnWidth = 600;
 const actionColumnWidth = 92;
 const actionColumnKey = "__actions";
 const taskLineColumns: TaskLineColumn[] = [
@@ -251,6 +254,7 @@ export function TaskLineRegister() {
   const [filterMenuPos, setFilterMenuPos] = useState<{ left: number; maxHeight: number; top: number } | null>(null);
   const [dueColorFilter, setDueColorFilter] = useState<string[]>([]);
   const [columnOrder, setColumnOrder] = useState(() => getSavedTaskLineColumnLayout().order);
+  const [columnWidths, setColumnWidths] = useState<Record<string, number>>(getSavedTaskLineColumnWidths);
   const [auditLogs, setAuditLogs] = useState<TaskLineAuditLog[]>([]);
   const [isAuditLoading, setIsAuditLoading] = useState(false);
   const [formDraft, setFormDraft] = useState<TaskLineRow | null>(null);
@@ -367,8 +371,11 @@ export function TaskLineRegister() {
   );
 
   const orderedColumns = useMemo(
-    () => columnOrder.map((key) => taskLineColumnByKey.get(key)).filter((column): column is TaskLineColumn => Boolean(column)),
-    [columnOrder]
+    () => columnOrder
+      .map((key) => taskLineColumnByKey.get(key))
+      .filter((column): column is TaskLineColumn => Boolean(column))
+      .map((column) => ({ ...column, width: columnWidths[column.key] ?? column.width })),
+    [columnOrder, columnWidths]
   );
   const activeGroupColumnSet = useMemo(() => {
     const group = taskLineColumnGroups.find((item) => item.key === activeColumnGroup);
@@ -395,6 +402,48 @@ export function TaskLineRegister() {
 
   function frozenInfo(key: string) {
     return { isFrozen: frozenColumnKeys.has(key), left: frozenLefts.get(key) ?? 0 };
+  }
+
+  function startColumnResize(event: ReactPointerEvent<HTMLButtonElement>, column: TaskLineColumn) {
+    event.preventDefault();
+    event.stopPropagation();
+    const startX = event.clientX;
+    const startWidth = column.width;
+    let resizedWidth = startWidth;
+
+    function handlePointerMove(pointerEvent: PointerEvent) {
+      resizedWidth = Math.min(
+        maximumTaskLineColumnWidth,
+        Math.max(minimumTaskLineColumnWidth, startWidth + pointerEvent.clientX - startX)
+      );
+      setColumnWidths((current) => ({ ...current, [column.key]: resizedWidth }));
+    }
+
+    function handlePointerUp() {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      setColumnWidths((current) => {
+        const next = { ...current, [column.key]: resizedWidth };
+        saveTaskLineColumnWidths(next);
+        return next;
+      });
+    }
+
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp, { once: true });
+  }
+
+  function resetColumnWidth(column: TaskLineColumn) {
+    setColumnWidths((current) => {
+      const next = { ...current };
+      delete next[column.key];
+      saveTaskLineColumnWidths(next);
+      return next;
+    });
   }
   // Keep Entity Group in sync with Client Records: whenever an entity maps to a
   // group in the current masters, use that group (so editing a client record's
@@ -2014,7 +2063,7 @@ export function TaskLineRegister() {
                     key={column.key}
                     style={frozen.isFrozen ? { left: frozen.left } : undefined}
                   >
-                    <div className="flex items-center gap-1">
+                    <div className="relative flex items-center gap-1">
                       <button
                         className="flex min-w-0 flex-1 items-center justify-between gap-1 text-left"
                         onClick={() => toggleSort(column.key)}
@@ -2040,6 +2089,14 @@ export function TaskLineRegister() {
                       >
                         <Filter className="size-3" />
                       </button>
+                      <button
+                        aria-label={`Resize ${column.label} column`}
+                        className="absolute -right-3 -top-2 h-[42px] w-2 cursor-col-resize touch-none border-r-2 border-transparent transition hover:border-navy-400 focus:border-navy-500 focus:outline-none"
+                        onDoubleClick={() => resetColumnWidth(column)}
+                        onPointerDown={(event) => startColumnResize(event, column)}
+                        title={`Drag to resize ${column.label}; double-click to reset`}
+                        type="button"
+                      />
                     </div>
                     {openFilterKey === column.key && filterMenuPos ? (
                       <TaskLineFilterMenu
@@ -4113,6 +4170,34 @@ function getSavedTaskLineColumnLayout() {
       : { frozenColumnKeys: [], hiddenColumnKeys: [], order: defaultTaskLineColumnOrder };
   } catch {
     return { frozenColumnKeys: [], hiddenColumnKeys: [], order: defaultTaskLineColumnOrder };
+  }
+}
+
+function saveTaskLineColumnWidths(widths: Record<string, number>) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  window.localStorage.setItem(taskLineColumnWidthsStorageKey, JSON.stringify(widths));
+}
+
+function getSavedTaskLineColumnWidths(): Record<string, number> {
+  if (typeof window === "undefined") {
+    return {};
+  }
+  try {
+    const saved = JSON.parse(window.localStorage.getItem(taskLineColumnWidthsStorageKey) ?? "{}") as Record<string, unknown>;
+    return Object.fromEntries(
+      Object.entries(saved).filter(
+        ([key, width]) =>
+          taskLineColumnByKey.has(key) &&
+          typeof width === "number" &&
+          Number.isFinite(width) &&
+          width >= minimumTaskLineColumnWidth &&
+          width <= maximumTaskLineColumnWidth
+      )
+    ) as Record<string, number>;
+  } catch {
+    return {};
   }
 }
 
