@@ -2091,7 +2091,7 @@ export function TaskLineRegister() {
                       </button>
                       <button
                         aria-label={`Resize ${column.label} column`}
-                        className="absolute -right-3 -top-2 h-[42px] w-2 cursor-col-resize touch-none border-r-2 border-transparent transition hover:border-navy-400 focus:border-navy-500 focus:outline-none"
+                        className="absolute -right-3 -top-2 z-30 h-[42px] w-3 cursor-col-resize touch-none border-r-2 border-slate-300 transition hover:border-navy-500 hover:bg-navy-100/40 focus:border-navy-600 focus:bg-navy-100/40 focus:outline-none"
                         onDoubleClick={() => resetColumnWidth(column)}
                         onPointerDown={(event) => startColumnResize(event, column)}
                         title={`Drag to resize ${column.label}; double-click to reset`}
