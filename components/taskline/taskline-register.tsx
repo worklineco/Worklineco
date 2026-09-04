@@ -2629,9 +2629,12 @@ const TaskLineCell = memo(function TaskLineCell({
   }
 
   if (column.key === "task_code") {
+    const fullTaskCode = row[column.key] ?? "";
     return (
       <td className={`border-r border-slate-100 px-3 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
-        <span className="block h-7 truncate px-1.5 py-1 font-bold text-navy-700">{row[column.key] || serialNumber}</span>
+        <span className="block h-7 truncate px-1.5 py-1 font-bold text-navy-700" title={fullTaskCode}>
+          {fullTaskCode ? fullTaskCode.slice(-3) : serialNumber}
+        </span>
       </td>
     );
   }
