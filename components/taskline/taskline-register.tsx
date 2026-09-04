@@ -104,7 +104,7 @@ const actionColumnKey = "__actions";
 const taskLineColumns: TaskLineColumn[] = [
   { key: "team", label: "Team", width: 96 },
   { key: "task_code", label: "Task Code", width: 150 },
-  { key: "name", label: "Name", width: 150 },
+  { key: "name", label: "Name", width: 260 },
   { key: "resource", label: "Resource", width: 140 },
   { key: "entity_group", label: "Entity Group", width: 150 },
   { key: "entity", label: "Entity", width: 240 },
