@@ -552,7 +552,19 @@ export function TaskLineRegister() {
     const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
     const top = rect.bottom + 4;
     const maxHeight = Math.max(240, window.innerHeight - top - 16);
-    const options = uniqueSortedValues(rowsRef.current.map((row) => text(row[key])), true);
+    // Excel-style: show only the values that still exist once every OTHER
+    // active filter is applied (exclude this column's own value/text filter so
+    // you can still see and re-tick values you filtered out here).
+    const optionSourceRows = applyTaskLineFilters(resolvedRows, {
+      columnFilters: { ...columnFilters, [key]: "" },
+      dueColorFilter,
+      dueRange,
+      search,
+      sortState: null,
+      statusFilter,
+      valueFilters: { ...valueFilters, [key]: [] }
+    });
+    const options = uniqueSortedValues(optionSourceRows.map((row) => text(row[key])), true);
 
     setOpenFilterKey(key);
     setFilterSearch("");
