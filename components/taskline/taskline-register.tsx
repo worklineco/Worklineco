@@ -285,7 +285,10 @@ export function TaskLineRegister() {
   const [stageMasterMessage, setStageMasterMessage] = useState("");
   const [masterKind, setMasterKind] = useState<"stage" | "task">("task");
   const [isMasterSubmenuOpen, setIsMasterSubmenuOpen] = useState(false);
-  const stageMasterNames = useMemo(() => stageMasters.map((master) => master.name), [stageMasters]);
+  const stageMasterNames = useMemo(
+    () => Array.from(new Set([...stageMasters.map((master) => master.name), "Pending for review"])),
+    [stageMasters]
+  );
   const [stageMastersFetched, setStageMastersFetched] = useState(false);
   const stageSeedDoneRef = useRef(false);
   const [teamMembers, setTeamMembers] = useState<TeamMemberLite[]>([]);
