@@ -197,6 +197,16 @@ function normalizePersonName(value: unknown) {
   return parts.join(" ");
 }
 
+function canonicalTaskLineName(value: unknown) {
+  const current = String(value ?? "").trim();
+  return normalizePersonName(current) === "shuchi sethi" ? "Shuchi Sethi" : current;
+}
+
+function canonicalizeTaskLineRowName(row: TaskLineRow): TaskLineRow {
+  const canonicalName = canonicalTaskLineName(row.name);
+  return canonicalName === row.name ? row : { ...row, name: canonicalName };
+}
+
 // Map a stored cell value to the canonical member option it matches (by
 // normalised name), so an older stored name renders as the real member instead
 // of showing up as a separate duplicate entry in the dropdown.
@@ -327,7 +337,7 @@ export function TaskLineRegister() {
   const teamNameOptions = useMemo(() => {
     const partners = teamMembers
       .filter((member) => isPartnerDesignation(member.designation) && isTaskLineMemberActive(member))
-      .map((member) => member.name.trim())
+      .map((member) => canonicalTaskLineName(member.name))
       .filter(Boolean);
     const byTeam = new Map<string, string[]>();
     for (const member of teamMembers) {
@@ -336,7 +346,7 @@ export function TaskLineRegister() {
       }
       const key = teamMatchKey(member.team);
       const list = byTeam.get(key) ?? [];
-      list.push(member.name.trim());
+      list.push(canonicalTaskLineName(member.name));
       byTeam.set(key, list);
     }
     const map = new Map<string, string[]>();
@@ -1104,7 +1114,7 @@ export function TaskLineRegister() {
     const cached = useCache ? getCached<{ rows?: TaskLineRow[] }>(taskLineRowsCacheKey) : undefined;
 
     if (cached?.rows?.length) {
-      setRows(cached.rows);
+      setRows(cached.rows.map(canonicalizeTaskLineRowName));
       setIsLoading(false);
     } else {
       setIsLoading(true);
@@ -1125,7 +1135,7 @@ export function TaskLineRegister() {
         return result.rows ?? [];
       }
 
-      const nextRows = result.rows ?? [];
+      const nextRows = (result.rows ?? []).map(canonicalizeTaskLineRowName);
       setCached(taskLineRowsCacheKey, { rows: nextRows });
       setRows(nextRows);
       setMessage("");
