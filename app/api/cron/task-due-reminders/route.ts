@@ -369,8 +369,11 @@ function taskIsClosed(row: TaskLineRow) {
 
 function reminderSubject(row: TaskLineRow) {
   const entity = text(row.entity) || "TaskLine task";
+  const taskCode = text(row.task_code);
   const task = text(row.task) || "Task";
-  return `Due today: ${entity} — ${task}`;
+  return taskCode
+    ? `Due today: ${taskCode} — ${entity} — ${task}`
+    : `Due today: ${entity} — ${task}`;
 }
 
 function reminderText(row: TaskLineRow, dueDateKey: string) {
