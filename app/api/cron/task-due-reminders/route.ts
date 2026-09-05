@@ -369,8 +369,11 @@ function taskIsClosed(row: TaskLineRow) {
 
 function reminderSubject(row: TaskLineRow) {
   const entity = text(row.entity) || "TaskLine task";
+  const taskCode = text(row.task_code);
   const task = text(row.task) || "Task";
-  return `Due today: ${entity} — ${task}`;
+  return taskCode
+    ? `Due today: ${taskCode} — ${entity} — ${task}`
+    : `Due today: ${entity} — ${task}`;
 }
 
 function reminderText(row: TaskLineRow, dueDateKey: string) {
@@ -378,6 +381,7 @@ function reminderText(row: TaskLineRow, dueDateKey: string) {
     "TASK DUE TODAY",
     "",
     text(row.entity) || "Entity not specified",
+    `Task Code: ${text(row.task_code) || "-"}`,
     `Task: ${text(row.task) || "Not specified"}`,
     `Team: ${text(row.team) || "-"}`,
     `Resource: ${text(row.resource) || "-"}`,
@@ -391,6 +395,7 @@ function reminderText(row: TaskLineRow, dueDateKey: string) {
 
 function reminderHtml(row: TaskLineRow, dueDateKey: string) {
   const entity = escapeHtml(text(row.entity) || "Entity not specified");
+  const taskCode = escapeHtml(text(row.task_code) || "-");
   const task = escapeHtml(text(row.task) || "Not specified");
   const dueDate = escapeHtml(formatDueDate(text(row.due_date), dueDateKey));
   const team = escapeHtml(text(row.team) || "-");
@@ -419,7 +424,11 @@ function reminderHtml(row: TaskLineRow, dueDateKey: string) {
                       <div style="margin-top:6px;font-size:17px;line-height:24px;font-weight:700;color:#172033;">${entity}</div>
                       <table role="presentation" cellspacing="0" cellpadding="0" style="margin-top:12px;font-size:14px;line-height:22px;">
                         <tr>
-                          <td style="width:78px;color:#94a3b8;font-weight:600;">Task</td>
+                          <td style="width:78px;color:#94a3b8;font-weight:600;">Task Code</td>
+                          <td style="color:#475569;font-weight:600;">${taskCode}</td>
+                        </tr>
+                        <tr>
+                          <td style="color:#94a3b8;font-weight:600;">Task</td>
                           <td style="color:#475569;font-weight:600;">${task}</td>
                         </tr>
                         <tr>
