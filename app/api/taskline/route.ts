@@ -2053,8 +2053,11 @@ async function sendDueTodayReminderNow(
     });
 
     const entity = text(row.entity) || "TaskLine task";
+    const taskCode = text(row.task_code);
     const taskName = text(row.task) || "Task";
-    const subject = `Due today: ${entity} — ${taskName}`;
+    const subject = taskCode
+      ? `Due today: ${taskCode} — ${entity} — ${taskName}`
+      : `Due today: ${entity} — ${taskName}`;
     const bodyText = [
       "TASK DUE TODAY",
       "",
