@@ -211,14 +211,15 @@ function canonicalizeTaskLineRowName(row: TaskLineRow): TaskLineRow {
 // normalised name), so an older stored name renders as the real member instead
 // of showing up as a separate duplicate entry in the dropdown.
 function resolvePersonOption(current: string, options: readonly string[]) {
-  if (!current || options.includes(current)) {
-    return current;
+  const canonicalCurrent = canonicalTaskLineName(current);
+  if (!canonicalCurrent || options.includes(canonicalCurrent)) {
+    return canonicalCurrent;
   }
-  const key = normalizePersonName(current);
+  const key = normalizePersonName(canonicalCurrent);
   if (!key) {
-    return current;
+    return canonicalCurrent;
   }
-  return options.find((option) => normalizePersonName(option) === key) ?? current;
+  return options.find((option) => normalizePersonName(option) === key) ?? canonicalCurrent;
 }
 
 function taskLineMemberLeavingDate(designation: string, joiningDate: string): string {
@@ -349,6 +350,8 @@ export function TaskLineRegister() {
       list.push(canonicalTaskLineName(member.name));
       byTeam.set(key, list);
     }
+    const team03Key = teamMatchKey("Team 03");
+    byTeam.set(team03Key, [...(byTeam.get(team03Key) ?? []), "Sourabh Chhipa"]);
     const map = new Map<string, string[]>();
     for (const [key, names] of byTeam) {
       map.set(key, Array.from(new Set([...names, ...partners].filter(Boolean))));
@@ -2792,7 +2795,10 @@ function LazyTaskLineSelect({
   placeholder: string;
 }) {
   const [isActive, setIsActive] = useState(false);
-  const resolved = matchNames ? resolvePersonOption(current, options) : current;
+  const normalizedOptions = matchNames
+    ? Array.from(new Set(options.map(canonicalTaskLineName).filter(Boolean)))
+    : options;
+  const resolved = matchNames ? resolvePersonOption(current, normalizedOptions) : current;
 
   function activate() {
     setIsActive(true);
@@ -2816,8 +2822,8 @@ function LazyTaskLineSelect({
       {isActive ? (
         <>
           <option value="">{placeholder}</option>
-          {options.filter(Boolean).map((option) => <option key={option} value={option}>{option}</option>)}
-          {resolved && !options.includes(resolved) ? <option value={resolved}>{resolved}</option> : null}
+          {normalizedOptions.filter(Boolean).map((option) => <option key={option} value={option}>{option}</option>)}
+          {resolved && !normalizedOptions.includes(resolved) ? <option value={resolved}>{resolved}</option> : null}
         </>
       ) : (
         <option value={resolved}>{resolved || placeholder}</option>
