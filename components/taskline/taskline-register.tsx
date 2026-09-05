@@ -351,7 +351,7 @@ export function TaskLineRegister() {
       byTeam.set(key, list);
     }
     const team03Key = teamMatchKey("Team 03");
-    byTeam.set(team03Key, [...(byTeam.get(team03Key) ?? []), "Sourabh Chhipa"]);
+    byTeam.set(team03Key, [...(byTeam.get(team03Key) ?? []), "Sourabh Chhipa", "Mohit Gupta"]);
     const map = new Map<string, string[]>();
     for (const [key, names] of byTeam) {
       map.set(key, Array.from(new Set([...names, ...partners].filter(Boolean))));
