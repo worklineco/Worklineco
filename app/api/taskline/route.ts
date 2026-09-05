@@ -2059,6 +2059,7 @@ async function sendDueTodayReminderNow(
       "TASK DUE TODAY",
       "",
       entity,
+      `Task Code: ${text(row.task_code) || "-"}`,
       `Task: ${taskName}`,
       `Team: ${text(row.team) || "-"}`,
       `Resource: ${text(row.resource) || "-"}`,
