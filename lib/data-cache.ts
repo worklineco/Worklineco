@@ -11,6 +11,49 @@
 
 const memory = new Map<string, unknown>();
 const storagePrefix = "wl_cache:";
+const persistentCacheBudgetBytes = 2 * 1024 * 1024;
+
+function storageSize(value: string): number {
+  return value.length * 2;
+}
+
+function makePersistentCacheRoom(targetKey: string, targetValue: string): boolean {
+  if (!hasWindow()) {
+    return false;
+  }
+
+  const targetSize = storageSize(targetKey) + storageSize(targetValue);
+  if (targetSize > persistentCacheBudgetBytes) {
+    window.localStorage.removeItem(targetKey);
+    return false;
+  }
+
+  const entries: { key: string; size: number }[] = [];
+  let totalSize = 0;
+
+  for (let index = 0; index < window.localStorage.length; index += 1) {
+    const key = window.localStorage.key(index);
+    if (!key || !key.startsWith(storagePrefix) || key === targetKey) {
+      continue;
+    }
+    const value = window.localStorage.getItem(key) ?? "";
+    const size = storageSize(key) + storageSize(value);
+    entries.push({ key, size });
+    totalSize += size;
+  }
+
+  entries.sort((left, right) => right.size - left.size);
+  while (entries.length && totalSize + targetSize > persistentCacheBudgetBytes) {
+    const entry = entries.shift();
+    if (!entry) {
+      break;
+    }
+    window.localStorage.removeItem(entry.key);
+    totalSize -= entry.size;
+  }
+
+  return totalSize + targetSize <= persistentCacheBudgetBytes;
+}
 
 function hasWindow(): boolean {
   return typeof window !== "undefined";
@@ -44,7 +87,11 @@ export function setCached(key: string, value: unknown): void {
 
   if (hasWindow()) {
     try {
-      window.localStorage.setItem(storagePrefix + key, JSON.stringify(value));
+      const storageKey = storagePrefix + key;
+      const serialized = JSON.stringify(value);
+      if (makePersistentCacheRoom(storageKey, serialized)) {
+        window.localStorage.setItem(storageKey, serialized);
+      }
     } catch {
       // Storage full or unavailable — memory cache still works.
     }
@@ -64,10 +111,8 @@ export function clearCached(key: string): void {
   }
 }
 
-/** Clear everything — call on sign-out. */
-export function clearDataCache(): void {
-  memory.clear();
-
+/** Clear only persisted cache entries while keeping the in-memory cache available. */
+export function clearPersistentDataCache(): void {
   if (hasWindow()) {
     try {
       for (let index = window.localStorage.length - 1; index >= 0; index -= 1) {
@@ -80,4 +125,10 @@ export function clearDataCache(): void {
       // Ignore.
     }
   }
+}
+
+/** Clear everything — call on sign-out. */
+export function clearDataCache(): void {
+  memory.clear();
+  clearPersistentDataCache();
 }
