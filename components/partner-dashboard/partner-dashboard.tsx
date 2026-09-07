@@ -35,6 +35,51 @@ const defaultState: DashboardState = {
   notes: [{ content: "1. ", id: "note-1", title: "Daily Scratchpad", updatedAt: new Date().toISOString() }]
 };
 
+function restoreDashboardState(saved: string): DashboardState | null {
+  try {
+    const parsed = JSON.parse(saved) as Partial<DashboardState> | null;
+    if (!parsed || typeof parsed !== "object") {
+      return null;
+    }
+
+    const calendarNotes =
+      parsed.calendarNotes && typeof parsed.calendarNotes === "object" && !Array.isArray(parsed.calendarNotes)
+        ? Object.fromEntries(
+            Object.entries(parsed.calendarNotes)
+              .filter(([, notes]) => Array.isArray(notes))
+              .map(([dateKey, notes]) => [dateKey, notes.filter((note): note is string => typeof note === "string")])
+          )
+        : {};
+
+    const notes = Array.isArray(parsed.notes)
+      ? parsed.notes.flatMap((note, index) => {
+          if (!note || typeof note !== "object" || typeof note.content !== "string") {
+            return [];
+          }
+          const content = note.content;
+          const item = note as Partial<NoteFile>;
+          return [{
+            content,
+            ...(typeof item.date === "string" ? { date: item.date } : {}),
+            id: typeof item.id === "string" && item.id ? item.id : `saved-note-${index + 1}`,
+            ...(Array.isArray(item.lineColors)
+              ? { lineColors: item.lineColors.map((color) => (typeof color === "string" && color in noteLineColorFills ? color : "")) }
+              : {}),
+            title: typeof item.title === "string" && item.title.trim() ? item.title : `Note ${index + 1}`,
+            updatedAt: typeof item.updatedAt === "string" ? item.updatedAt : new Date().toISOString()
+          }];
+        })
+      : [];
+
+    return {
+      calendarNotes,
+      notes: notes.length ? notes : defaultState.notes
+    };
+  } catch {
+    return null;
+  }
+}
+
 export function PartnerDashboard() {
   const [profileName, setProfileName] = useState("Partner");
   const [profileEmail, setProfileEmail] = useState("");
@@ -49,19 +94,22 @@ export function PartnerDashboard() {
   const [chatDraft, setChatDraft] = useState("");
   const [chatSending, setChatSending] = useState(false);
   const [teamEmails, setTeamEmails] = useState<{ email: string; name: string }[]>([]);
+  const [noteStorageWarning, setNoteStorageWarning] = useState("");
   const noteEditorRef = useRef<HTMLTextAreaElement>(null);
   const noteOverlayRef = useRef<HTMLDivElement>(null);
+  const skipInitialDashboardSaveRef = useRef(true);
   const [activeNoteLine, setActiveNoteLine] = useState(0);
 
   useEffect(() => {
     const saved = window.localStorage.getItem(storageKey);
     if (saved) {
-      const parsed = JSON.parse(saved) as Partial<DashboardState>;
-      setState({
-        calendarNotes: parsed.calendarNotes ?? {},
-        notes: parsed.notes?.length ? parsed.notes : defaultState.notes
-      });
-      setActiveNoteId(parsed.notes?.[0]?.id ?? defaultState.notes[0]?.id ?? "");
+      const restored = restoreDashboardState(saved);
+      if (restored) {
+        setState(restored);
+        setActiveNoteId(restored.notes[0]?.id ?? defaultState.notes[0]?.id ?? "");
+      } else {
+        setNoteStorageWarning("Saved Quick Notes could not be read. You can continue with a new note.");
+      }
     }
 
     try {
@@ -96,7 +144,17 @@ export function PartnerDashboard() {
   }, []);
 
   useEffect(() => {
-    window.localStorage.setItem(storageKey, JSON.stringify(state));
+    if (skipInitialDashboardSaveRef.current) {
+      skipInitialDashboardSaveRef.current = false;
+      return;
+    }
+
+    try {
+      window.localStorage.setItem(storageKey, JSON.stringify(state));
+      setNoteStorageWarning("");
+    } catch {
+      setNoteStorageWarning("Quick Notes could not be saved because browser storage is unavailable or full.");
+    }
   }, [state]);
 
   useEffect(() => {
@@ -475,6 +533,11 @@ export function PartnerDashboard() {
           <NotebookPen className="size-5 text-navy-700" />
           <h3 className="text-base font-black text-slate-950">Quick notes / scratchpad</h3>
         </div>
+        {noteStorageWarning ? (
+          <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-800">
+            {noteStorageWarning}
+          </p>
+        ) : null}
         <div className="mt-4 grid gap-3 lg:grid-cols-[168px_minmax(0,1fr)]">
           <div>
             <button className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-navy-700 px-3 text-sm font-black text-white" onClick={createNote} type="button">
