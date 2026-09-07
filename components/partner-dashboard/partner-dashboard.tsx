@@ -4,7 +4,7 @@ import { getCurrentUser } from "@/lib/supabase/session";
 import { MessagesSquare, NotebookPen, Pencil, Plus, Send, Trash2, X } from "lucide-react";
 import { MonthCalendar, type CalendarEvent } from "@/components/home/month-calendar";
 import { TaskNotificationBell } from "@/components/home/task-notification-bell";
-import { getCached, setCached } from "@/lib/data-cache";
+import { clearPersistentDataCache, getCached, setCached } from "@/lib/data-cache";
 import { useEffect, useRef, useState } from "react";
 
 type NoteFile = { content: string; date?: string; id: string; lineColors?: string[]; title: string; updatedAt: string };
@@ -149,11 +149,18 @@ export function PartnerDashboard() {
       return;
     }
 
+    const serialized = JSON.stringify(state);
     try {
-      window.localStorage.setItem(storageKey, JSON.stringify(state));
+      window.localStorage.setItem(storageKey, serialized);
       setNoteStorageWarning("");
     } catch {
-      setNoteStorageWarning("Quick Notes could not be saved because browser storage is unavailable or full.");
+      clearPersistentDataCache();
+      try {
+        window.localStorage.setItem(storageKey, serialized);
+        setNoteStorageWarning("");
+      } catch {
+        setNoteStorageWarning("Quick Notes could not be saved because browser storage is unavailable or full.");
+      }
     }
   }, [state]);
 
