@@ -56,9 +56,10 @@ function restoreDashboardState(saved: string): DashboardState | null {
           if (!note || typeof note !== "object" || typeof note.content !== "string") {
             return [];
           }
+          const content = note.content;
           const item = note as Partial<NoteFile>;
           return [{
-            content: item.content,
+            content,
             ...(typeof item.date === "string" ? { date: item.date } : {}),
             id: typeof item.id === "string" && item.id ? item.id : `saved-note-${index + 1}`,
             ...(Array.isArray(item.lineColors)
