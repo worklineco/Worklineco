@@ -1435,28 +1435,7 @@ export default function PdfIndexingPage() {
               </div>
             </div>
 
-            <div className="flex flex-wrap gap-2">
-              <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={Archive} label="Compress PDF" onClick={openCompressionDialog} />
-              <ToolButton disabled={isProcessing || selectedRowIds.size < 2} icon={Shuffle} label="Merge" onClick={mergeSelectedPdfs} />
-              <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={BookMarked} label="Smart Merge" onClick={startSmartMerge} />
-              <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={Scissors} label="Split" onClick={splitSelectedPdfs} />
-              <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={Scissors} label="Smart Split" onClick={startSmartSplit} />
-              <label className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-950/10 bg-white px-3 text-xs font-black uppercase text-slate-800 shadow-sm">
-                <input
-                  checked={smartSplitShouldLimitSize}
-                  className="size-4 rounded border-slate-300 accent-navy-500"
-                  disabled={isProcessing}
-                  onChange={(event) => setSmartSplitShouldLimitSize(event.target.checked)}
-                  type="checkbox"
-                />
-                19.5 MB Split
-              </label>
-              <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={Hash} label="Page No." onClick={addPageNumbersToPdfs} />
-              <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={FileImage} label="TRUE COPY" onClick={applyTrueCopyStampToPdfs} />
-              <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={BookMarked} label="PaperBook" onClick={createPaperBookPdf} />
-              <ToolButton disabled={isProcessing || selectedRowIds.size < 2} icon={BookMarked} label="Bookmarks" onClick={createBookmarkedPdf} />
-              <ToolButton disabled={isProcessing || pdfRows.length === 0} icon={ListOrdered} label="Create Index" onClick={createPdfIndex} />
-              <ToolButton disabled={isProcessing} icon={FileSearch} label="GSTAT Docket" onClick={openGstatDocket} />
+            <div className="flex w-full flex-col gap-2 lg:max-w-[980px] lg:items-end">
               <input
                 accept={MERGE_FILE_ACCEPT}
                 className="hidden"
@@ -1474,31 +1453,63 @@ export default function PdfIndexingPage() {
                 type="file"
                 {...({ directory: "", webkitdirectory: "" } as Record<string, string>)}
               />
-              <button
-                className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-navy-700 px-4 text-xs font-black uppercase text-white shadow-sm transition hover:bg-navy-800"
-                onClick={() => folderInputRef.current?.click()}
-                type="button"
-              >
-                <FolderOpen className="size-4" />
-                Select Folder
-              </button>
-              <button
-                className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-950/10 bg-white px-4 text-xs font-black uppercase text-slate-800 shadow-sm transition hover:bg-slate-100"
-                onClick={() => fileInputRef.current?.click()}
-                type="button"
-              >
-                <FileImage className="size-4" />
-                Select Files
-              </button>
-              <button
-                className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-xs font-black uppercase text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-                disabled={pdfRows.length === 0}
-                onClick={clearAllFiles}
-                type="button"
-              >
-                <X className="size-4" />
-                Clear
-              </button>
+
+              <div className="flex w-full flex-wrap gap-2 lg:justify-end">
+                <button
+                  className="inline-flex h-10 min-w-[136px] items-center justify-center gap-2 rounded-xl bg-navy-700 px-3 text-xs font-black uppercase text-white shadow-sm transition hover:bg-navy-800"
+                  onClick={() => folderInputRef.current?.click()}
+                  type="button"
+                >
+                  <FolderOpen className="size-4" />
+                  Select Folder
+                </button>
+                <button
+                  className="inline-flex h-10 min-w-[136px] items-center justify-center gap-2 rounded-xl border border-slate-950/10 bg-white px-3 text-xs font-black uppercase text-slate-800 shadow-sm transition hover:bg-slate-100"
+                  onClick={() => fileInputRef.current?.click()}
+                  type="button"
+                >
+                  <FileImage className="size-4" />
+                  Select Files
+                </button>
+                <button
+                  className="inline-flex h-10 min-w-[136px] items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-xs font-black uppercase text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                  disabled={pdfRows.length === 0}
+                  onClick={clearAllFiles}
+                  type="button"
+                >
+                  <X className="size-4" />
+                  Clear
+                </button>
+              </div>
+
+              <div className="h-px w-full bg-slate-200" />
+
+              <div className="flex w-full flex-wrap gap-2 lg:justify-end">
+                <ToolButton disabled={isProcessing || selectedRowIds.size < 2} icon={Shuffle} label="Merge" onClick={mergeSelectedPdfs} />
+                <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={BookMarked} label="Smart Merge" onClick={startSmartMerge} />
+                <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={BookMarked} label="PaperBook" onClick={createPaperBookPdf} />
+                <ToolButton disabled={isProcessing || selectedRowIds.size < 2} icon={BookMarked} label="Bookmarks" onClick={createBookmarkedPdf} />
+                <ToolButton disabled={isProcessing || pdfRows.length === 0} icon={ListOrdered} label="Create Index" onClick={createPdfIndex} />
+                <ToolButton disabled={isProcessing} icon={FileSearch} label="GSTAT Docket" onClick={openGstatDocket} />
+              </div>
+
+              <div className="flex w-full flex-wrap gap-2 lg:justify-end">
+                <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={Archive} label="Compress PDF" onClick={openCompressionDialog} />
+                <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={Scissors} label="Split" onClick={splitSelectedPdfs} />
+                <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={Scissors} label="Smart Split" onClick={startSmartSplit} />
+                <label className="inline-flex h-10 min-w-[136px] items-center justify-center gap-2 rounded-xl border border-slate-950/10 bg-white px-3 text-xs font-black uppercase text-slate-800 shadow-sm">
+                  <input
+                    checked={smartSplitShouldLimitSize}
+                    className="size-4 rounded border-slate-300 accent-navy-500"
+                    disabled={isProcessing}
+                    onChange={(event) => setSmartSplitShouldLimitSize(event.target.checked)}
+                    type="checkbox"
+                  />
+                  19.5 MB Split
+                </label>
+                <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={Hash} label="Page No." onClick={addPageNumbersToPdfs} />
+                <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={FileImage} label="True Copy" onClick={applyTrueCopyStampToPdfs} />
+              </div>
             </div>
           </div>
         </header>
@@ -1861,7 +1872,7 @@ export default function PdfIndexingPage() {
               </div>
               <div className="flex flex-wrap justify-end gap-2">
                 <button
-                  className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-950/10 bg-white px-3 text-xs font-black uppercase text-slate-800 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:translate-y-0 disabled:hover:shadow-sm"
+                  className="inline-flex h-10 min-w-[136px] items-center justify-center gap-2 rounded-xl border border-slate-950/10 bg-white px-3 text-xs font-black uppercase text-slate-800 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:translate-y-0 disabled:hover:shadow-sm"
                   disabled={selectedRows.length === 0}
                   onClick={downloadManualDscPack}
                   type="button"
