@@ -1,7 +1,7 @@
 "use client";
 
-import { ArrowDown, ArrowUp, FileSpreadsheet, Filter, Search, UsersRound, X } from "lucide-react";
-import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
+import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, FileSpreadsheet, Filter, Search, UsersRound, X } from "lucide-react";
+import { memo, useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { ViewOnlyAccessDialog } from "@/components/shared/view-only-access-dialog";
 import allocationData from "@/lib/data/gstr-9-9c-allocations-25-26.json";
@@ -20,6 +20,7 @@ type StoredOverride = { column?: string; row_key?: string; value?: string };
 type EditingCell = { column: string; columnIndex: number; original: string; rowKey: string; value: string };
 
 const columnFilterOptionLimit = 1000;
+const rowsPerPage = 100;
 const blankColumnFilterValue = "__workline_column_blank__";
 const removedColumns = new Set(["Allocation for FY 2023-24", "EM Allocation", "ORMP"]);
 const renamedColumns: Record<string, string> = {
@@ -29,10 +30,13 @@ const renamedColumns: Record<string, string> = {
 };
 const statusOptions = ["Requirements Mailed", "Data Received", "Drafting in Progress", "Shared with client", "Filed"];
 
+const integerFormatter = new Intl.NumberFormat("en-IN");
+const decimalFormatter = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 2 });
+
 function cellText(value: CellValue | undefined) {
   if (value === "" || value === undefined) return "";
   if (typeof value === "number") {
-    return Number.isInteger(value) ? value.toLocaleString("en-IN") : value.toLocaleString("en-IN", { maximumFractionDigits: 2 });
+    return Number.isInteger(value) ? integerFormatter.format(value) : decimalFormatter.format(value);
   }
   return String(value);
 }
@@ -180,6 +184,7 @@ export function GstrNineNineCRegister({ workbook }: { workbook: GstrWorkbookData
   const [editing, setEditing] = useState<EditingCell | null>(null);
   const [message, setMessage] = useState("");
   const [isViewOnlyDialogOpen, setIsViewOnlyDialogOpen] = useState(false);
+  const [pageIndex, setPageIndex] = useState(0);
 
   const activeSheet = useMemo(() => ({ ...preparedSheet, rows: sourceRows }), [preparedSheet, sourceRows]);
   const deferredSearch = useDeferredValue(search);
@@ -209,6 +214,16 @@ export function GstrNineNineCRegister({ workbook }: { workbook: GstrWorkbookData
 
   const hasActiveFilters = Boolean(query) || activeFilterEntries.length > 0 || Boolean(sortState);
   const totalWidth = activeSheet.columns.reduce((total, column) => total + columnWidth(column), 0);
+  const pageCount = Math.max(1, Math.ceil(rows.length / rowsPerPage));
+  const currentPageIndex = Math.min(pageIndex, pageCount - 1);
+  const paginatedRows = useMemo(
+    () => rows.slice(currentPageIndex * rowsPerPage, (currentPageIndex + 1) * rowsPerPage),
+    [currentPageIndex, rows]
+  );
+
+  useEffect(() => {
+    setPageIndex(0);
+  }, [query, deferredColumnValueFilters, sortState]);
 
   const openColumnFilterOptions = useMemo(
     () =>
@@ -365,20 +380,24 @@ export function GstrNineNineCRegister({ workbook }: { workbook: GstrWorkbookData
     closeColumnFilter();
   }
 
-  function beginEdit(row: CellValue[], column: string, columnIndex: number) {
+  const columnCount = activeSheet.columns.length;
+
+  const beginEdit = useCallback((row: CellValue[], column: string, columnIndex: number) => {
     if (!canEditRegisterRef.current) {
       setIsViewOnlyDialogOpen(true);
       return;
     }
     const value = rawText(row[columnIndex]);
-    setEditing({ column, columnIndex, original: value, rowKey: String(row[activeSheet.columns.length]), value });
+    setEditing({ column, columnIndex, original: value, rowKey: String(row[columnCount]), value });
     setMessage("");
-  }
+  }, [canEditRegisterRef, columnCount]);
 
-  async function saveCell(edit: EditingCell) {
+  const cancelEdit = useCallback(() => setEditing(null), []);
+
+  const saveCell = useCallback(async (edit: EditingCell) => {
     setEditing(null);
     if (edit.value === edit.original) return;
-    setSourceRows((current) => current.map((row) => String(row[activeSheet.columns.length]) === edit.rowKey ? row.map((value, index) => index === edit.columnIndex ? edit.value : value) : row));
+    setSourceRows((current) => current.map((row) => String(row[columnCount]) === edit.rowKey ? row.map((value, index) => index === edit.columnIndex ? edit.value : value) : row));
     setMessage("Saving...");
     try {
       const response = await fetch("/api/gstr-9-9c", {
@@ -390,21 +409,10 @@ export function GstrNineNineCRegister({ workbook }: { workbook: GstrWorkbookData
       if (!response.ok) throw new Error(result.error ?? "Could not save this cell.");
       setMessage("Saved.");
     } catch (error) {
-      setSourceRows((current) => current.map((row) => String(row[activeSheet.columns.length]) === edit.rowKey ? row.map((value, index) => index === edit.columnIndex ? edit.original : value) : row));
+      setSourceRows((current) => current.map((row) => String(row[columnCount]) === edit.rowKey ? row.map((value, index) => index === edit.columnIndex ? edit.original : value) : row));
       setMessage(error instanceof Error ? error.message : "Could not save this cell.");
     }
-  }
-
-  function cellEditor(column: string, edit: EditingCell) {
-    const className = "h-9 w-full rounded border border-navy-400 bg-white px-2 font-semibold text-slate-900 outline-none ring-2 ring-navy-100";
-    if (column === "Status") {
-      return <select autoFocus className={className} onChange={(event) => void saveCell({ ...edit, value: event.target.value })} value={edit.value}><option value="">Select status</option>{statusOptions.map((option) => <option key={option} value={option}>{option}</option>)}</select>;
-    }
-    if (column === "Target Date") {
-      return <input autoFocus className={className} onBlur={() => void saveCell(edit)} onChange={(event) => setEditing({ ...edit, value: event.target.value })} type="date" value={edit.value} />;
-    }
-    return <input autoFocus className={className} onBlur={() => void saveCell(edit)} onChange={(event) => setEditing({ ...edit, value: event.target.value })} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); if (event.key === "Escape") setEditing(null); }} value={edit.value} />;
-  }
+  }, [columnCount]);
 
   return (
     <section className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
@@ -485,33 +493,134 @@ export function GstrNineNineCRegister({ workbook }: { workbook: GstrWorkbookData
             </tr>
           </thead>
           <tbody>
-            {rows.map((row) => (
-              <tr className="odd:bg-white even:bg-slate-50/70" key={String(row[activeSheet.columns.length])}>
-                {activeSheet.columns.map((column, columnIndex) => {
-                  const value = cellText(row[columnIndex]);
-                  const rowKey = String(row[activeSheet.columns.length]);
-                  const activeEdit = editing?.rowKey === rowKey && editing.columnIndex === columnIndex ? editing : null;
-                  return (
-                    <td
-                      className={`h-11 border-b border-r border-slate-100 px-2 py-1.5 font-semibold text-slate-700 ${columnIndex === 0 ? "sticky left-0 z-10 bg-inherit font-bold text-slate-900" : ""}`}
-                      key={`${column}-${columnIndex}`}
-                      onDoubleClick={() => beginEdit(row, column, columnIndex)}
-                      title={activeEdit ? undefined : `${value || "Blank"} — double-click to edit`}
-                    >
-                      {activeEdit ? cellEditor(column, activeEdit) : <div className="truncate px-1">{value || <span className="text-slate-300">—</span>}</div>}
-                    </td>
-                  );
-                })}
-              </tr>
-            ))}
+            {paginatedRows.map((row) => {
+              const rowKey = String(row[columnCount]);
+              return (
+                <RegisterRow
+                  activeEdit={editing?.rowKey === rowKey ? editing : null}
+                  columns={activeSheet.columns}
+                  key={rowKey}
+                  onBeginEdit={beginEdit}
+                  onCancelEdit={cancelEdit}
+                  onSaveCell={saveCell}
+                  row={row}
+                />
+              );
+            })}
             {!rows.length ? (
               <tr><td className="px-4 py-10 text-center text-sm font-bold text-slate-500" colSpan={activeSheet.columns.length}>No matching rows.</td></tr>
             ) : null}
           </tbody>
         </table>
       </div>
+      {pageCount > 1 ? (
+        <div className="mt-3 flex items-center justify-between gap-3 text-xs font-bold text-slate-600">
+          <span>
+            Showing {(currentPageIndex * rowsPerPage + 1).toLocaleString("en-IN")}–{Math.min((currentPageIndex + 1) * rowsPerPage, rows.length).toLocaleString("en-IN")} of {rows.length.toLocaleString("en-IN")}
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              aria-label="Previous page"
+              className="inline-flex size-9 items-center justify-center rounded-lg border border-slate-200 bg-white transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+              disabled={currentPageIndex === 0}
+              onClick={() => setPageIndex((current) => Math.max(0, current - 1))}
+              type="button"
+            >
+              <ChevronLeft className="size-4" />
+            </button>
+            <span>Page {currentPageIndex + 1} of {pageCount}</span>
+            <button
+              aria-label="Next page"
+              className="inline-flex size-9 items-center justify-center rounded-lg border border-slate-200 bg-white transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+              disabled={currentPageIndex >= pageCount - 1}
+              onClick={() => setPageIndex((current) => Math.min(pageCount - 1, current + 1))}
+              type="button"
+            >
+              <ChevronRight className="size-4" />
+            </button>
+          </div>
+        </div>
+      ) : null}
       <ViewOnlyAccessDialog onClose={() => setIsViewOnlyDialogOpen(false)} open={isViewOnlyDialogOpen} />
     </section>
+  );
+}
+
+const RegisterRow = memo(function RegisterRow({
+  activeEdit,
+  columns,
+  onBeginEdit,
+  onCancelEdit,
+  onSaveCell,
+  row
+}: {
+  activeEdit: EditingCell | null;
+  columns: string[];
+  onBeginEdit: (row: CellValue[], column: string, columnIndex: number) => void;
+  onCancelEdit: () => void;
+  onSaveCell: (edit: EditingCell) => void;
+  row: CellValue[];
+}) {
+  return (
+    <tr className="odd:bg-white even:bg-slate-50/70">
+      {columns.map((column, columnIndex) => {
+        const value = cellText(row[columnIndex]);
+        const isEditing = activeEdit?.columnIndex === columnIndex;
+        return (
+          <td
+            className={`h-11 border-b border-r border-slate-100 px-2 py-1.5 font-semibold text-slate-700 ${columnIndex === 0 ? "sticky left-0 z-10 bg-inherit font-bold text-slate-900" : ""}`}
+            key={column}
+            onDoubleClick={() => onBeginEdit(row, column, columnIndex)}
+            title={isEditing ? undefined : `${value || "Blank"} — double-click to edit`}
+          >
+            {isEditing && activeEdit ? (
+              <CellEditor column={column} edit={activeEdit} onCancel={onCancelEdit} onSave={onSaveCell} />
+            ) : (
+              <div className="truncate px-1">{value || <span className="text-slate-300">—</span>}</div>
+            )}
+          </td>
+        );
+      })}
+    </tr>
+  );
+});
+
+function CellEditor({
+  column,
+  edit,
+  onCancel,
+  onSave
+}: {
+  column: string;
+  edit: EditingCell;
+  onCancel: () => void;
+  onSave: (edit: EditingCell) => void;
+}) {
+  const [value, setValue] = useState(edit.value);
+  const className = "h-9 w-full rounded border border-navy-400 bg-white px-2 font-semibold text-slate-900 outline-none ring-2 ring-navy-100";
+
+  if (column === "Status") {
+    return (
+      <select autoFocus className={className} onBlur={() => onSave({ ...edit, value })} onChange={(event) => onSave({ ...edit, value: event.target.value })} value={value}>
+        <option value="">Select status</option>
+        {statusOptions.map((option) => <option key={option} value={option}>{option}</option>)}
+      </select>
+    );
+  }
+
+  return (
+    <input
+      autoFocus
+      className={className}
+      onBlur={() => onSave({ ...edit, value })}
+      onChange={(event) => setValue(event.target.value)}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") event.currentTarget.blur();
+        if (event.key === "Escape") onCancel();
+      }}
+      type={column === "Target Date" ? "date" : "text"}
+      value={value}
+    />
   );
 }
 
