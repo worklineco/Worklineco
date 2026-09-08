@@ -59,8 +59,15 @@ const defaultOrganisationCode = "DCO1433";
 const fetchBatchSize = 1000;
 const maxTaskLineWindowSize = 400;
 const moduleKey = "taskline";
-type RegisterKey = "cestat" | "high_court" | "non_litigation" | "taskline";
-const registerKeys = new Set<RegisterKey>(["taskline", "high_court", "cestat", "non_litigation"]);
+type RegisterKey = "all" | "cestat" | "high_court" | "non_litigation" | "taskline";
+const registerKeys = new Set<RegisterKey>(["taskline", "high_court", "cestat", "non_litigation", "all"]);
+const combinedRegisterKeys: Exclude<RegisterKey, "all">[] = ["taskline", "non_litigation", "cestat", "high_court"];
+const registerLabels: Record<Exclude<RegisterKey, "all">, string> = {
+  cestat: "CESTAT",
+  high_court: "High Court",
+  non_litigation: "Non-Litigation",
+  taskline: "Litigation"
+};
 const organisationIdCache = new Map<string, string>();
 const taskLineDateColumns = new Set(["due_date", "ref_date", "entry_date", "completion_date"]);
 const taskLineMoneyColumns = new Set(["total_agreed_fee", "amount_raised", "amount_realised", "counsel_fee", "referral_fee"]);
@@ -400,6 +407,9 @@ export async function POST(request: Request) {
 
 async function handlePost(request: Request) {
   const registerKey = getRegisterKey(new URL(request.url).searchParams);
+  if (registerKey === "all") {
+    return NextResponse.json({ error: "The TaskLine overview is read-only. Edit rows from their own register." }, { status: 400 });
+  }
   const auth = await requireUser();
 
   if ("error" in auth) {
@@ -591,6 +601,9 @@ export async function DELETE(request: Request) {
   const searchParams = new URL(request.url).searchParams;
   const id = searchParams.get("id");
   const registerKey = getRegisterKey(searchParams);
+  if (registerKey === "all") {
+    return NextResponse.json({ error: "The TaskLine overview is read-only. Delete rows from their own register." }, { status: 400 });
+  }
 
   if (!id) {
     return NextResponse.json({ error: "TaskLine record id is required." }, { status: 400 });
@@ -1147,7 +1160,7 @@ async function loadTaskLineRecords(admin: ReturnType<typeof createAdminClient>, 
     .from("tasks")
     .select("id", { count: "exact", head: true })
     .eq("organisation_id", organisationId)
-    .eq("custom_values->>workline_module", moduleForRegister(registerKey));
+    .in("custom_values->>workline_module", modulesForRegister(registerKey));
   console.timeEnd("taskline:loadRecords:count");
 
   if (countResult.error) {
@@ -1165,7 +1178,7 @@ async function loadTaskLineRecords(admin: ReturnType<typeof createAdminClient>, 
         .from("tasks")
         .select("id,custom_values")
         .eq("organisation_id", organisationId)
-        .eq("custom_values->>workline_module", moduleForRegister(registerKey))
+        .in("custom_values->>workline_module", modulesForRegister(registerKey))
         .order("created_at", { ascending: true })
         .range(from, from + fetchBatchSize - 1);
     })
@@ -1195,7 +1208,7 @@ async function loadTaskLineRecordWindow(
     .from("tasks")
     .select("id,organisation_id,title,description,due_at,custom_values,created_by,created_at,updated_at", { count: "exact" })
     .eq("organisation_id", organisationId)
-    .eq("custom_values->>workline_module", moduleForRegister(registerKey))
+    .in("custom_values->>workline_module", modulesForRegister(registerKey))
     .order("created_at", { ascending: true });
 
   if (!access.canViewAll) {
@@ -1381,7 +1394,8 @@ function auditValue(record: TaskRecord) {
 function formatRecord(record: TaskRecord): TaskLineRow {
   return {
     __id: record.id,
-    ...cleanRecord(record.custom_values?.taskline_data ?? {})
+    ...cleanRecord(record.custom_values?.taskline_data ?? {}),
+    register_name: registerLabelForModule(record.custom_values?.workline_module)
   };
 }
 
@@ -1454,6 +1468,15 @@ function isRegisterRecord(record: TaskRecord | null, registerKey: RegisterKey): 
 
 function moduleForRegister(registerKey: RegisterKey) {
   return registerKey === "taskline" ? moduleKey : registerKey;
+}
+
+function modulesForRegister(registerKey: RegisterKey) {
+  return registerKey === "all" ? combinedRegisterKeys.map(moduleForRegister) : [moduleForRegister(registerKey)];
+}
+
+function registerLabelForModule(workline_module: string | undefined) {
+  const key = (workline_module === moduleKey ? "taskline" : workline_module) as Exclude<RegisterKey, "all">;
+  return registerLabels[key] ?? "";
 }
 
 function getRegisterKey(searchParams: URLSearchParams): RegisterKey {

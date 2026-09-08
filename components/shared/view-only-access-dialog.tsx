@@ -4,11 +4,15 @@ import { LockKeyhole, X } from "lucide-react";
 import { useEffect } from "react";
 
 export function ViewOnlyAccessDialog({
+  message,
   onClose,
-  open
+  open,
+  title
 }: {
+  message?: string;
   onClose: () => void;
   open: boolean;
+  title?: string;
 }) {
   useEffect(() => {
     if (!open) return;
@@ -50,10 +54,10 @@ export function ViewOnlyAccessDialog({
           <LockKeyhole className="size-5" />
         </div>
         <h2 className="mt-4 text-lg font-black text-slate-950" id="view-only-access-title">
-          View-only access
+          {title ?? "View-only access"}
         </h2>
         <p className="mt-2 text-sm font-semibold leading-6 text-slate-600">
-          Please contact your Manager to request editing access.
+          {message ?? "Please contact your Manager to request editing access."}
         </p>
         <button
           className="mt-5 inline-flex h-10 w-full items-center justify-center rounded-lg bg-navy-700 px-4 text-sm font-black text-white transition hover:bg-navy-800"

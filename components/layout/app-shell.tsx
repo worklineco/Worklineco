@@ -40,6 +40,7 @@ type NavItem = {
 const navItems: NavItem[] = [
   { href: "/partner-dashboard", icon: LayoutDashboard, label: "Dashboard" },
   { href: "/gst", icon: ClipboardCheck, label: "GST Tracker" },
+  { href: "/taskline-overview", icon: ListChecks, label: "TaskLine" },
   { href: "/gstr-9-9c", icon: FileSpreadsheet, label: "GSTR - 9 9C" },
   { href: "/non-litigation", icon: ListChecks, label: "Non-Litigation" },
   { href: "/taskline", icon: ListChecks, label: "Litigation" },

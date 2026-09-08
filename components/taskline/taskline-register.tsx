@@ -7,7 +7,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import * as XLSX from "xlsx-js-style";
 import { clearCached, getCached, setCached } from "@/lib/data-cache";
-import { useRegisterEditAccess, viewOnlyRegisterMessage } from "@/lib/use-register-access";
+import { useRegisterEditAccess, viewOnlyRegisterMessage as sharedViewOnlyRegisterMessage } from "@/lib/use-register-access";
 import { ViewOnlyAccessDialog } from "@/components/shared/view-only-access-dialog";
 
 type TaskLineColumn = {
@@ -105,6 +105,7 @@ const actionColumnWidth = 92;
 const actionColumnKey = "__actions";
 const taskLineColumns: TaskLineColumn[] = [
   { key: "team", label: "Team", width: 96 },
+  { key: "register_name", label: "Register", width: 130 },
   { key: "task_code", label: "Task Code", width: 150 },
   { key: "name", label: "Name", width: 260 },
   { key: "resource", label: "Resource", width: 260 },
@@ -142,6 +143,8 @@ const taskLineColumns: TaskLineColumn[] = [
 ];
 
 const taskLineColumnByKey = new Map(taskLineColumns.map((column) => [column.key, column]));
+const importTaskLineColumns = taskLineColumns.filter((column) => column.key !== "register_name");
+const combinedRegisterReadOnlyMessage = "The TaskLine overview is read-only. Open Litigation, Non-Litigation, CESTAT or High Court to add or edit rows.";
 const taskLineFormColumnByKey = new Map<string, TaskLineColumn>([
   ...taskLineColumns.map((column) => [column.key, column] as [string, TaskLineColumn]),
   ["gstat_task_code", { key: "gstat_task_code", label: "GSTAT Task Code", width: 150 }]
@@ -250,17 +253,24 @@ function isPartnerDesignation(value: string) {
 const defaultRows = Array.from({ length: 8 }, (_, index) => createEmptyRow(`initial-${index + 1}`));
 
 type TaskLineRegisterProps = {
-  registerKey?: "cestat" | "high_court" | "non_litigation" | "taskline";
+  registerKey?: "all" | "cestat" | "high_court" | "non_litigation" | "taskline";
   registerName?: string;
 };
 
 export function TaskLineRegister({ registerKey = "taskline", registerName = "TaskLine" }: TaskLineRegisterProps) {
-  const hiddenColumnGroupKeys = useMemo(() => new Set(registerKey === "non_litigation" ? ["legal"] : []), [registerKey]);
+  const isCombinedView = registerKey === "all";
+  const hiddenColumnGroupKeys = useMemo(
+    () => new Set(isCombinedView ? ["legal", "billing", "all"] : registerKey === "non_litigation" ? ["legal"] : []),
+    [isCombinedView, registerKey]
+  );
   const visibleColumnGroups = useMemo(() => taskLineColumnGroups.filter((group) => !hiddenColumnGroupKeys.has(group.key)), [hiddenColumnGroupKeys]);
   const taskLineRowsCacheKey = `${registerKey}:rows:v1`;
   const taskLineApiPath = `/api/taskline?register=${encodeURIComponent(registerKey)}`;
   const taskLineApiQuery = (query: string) => `${taskLineApiPath}&${query}`;
-  const { canEditRegisterRef } = useRegisterEditAccess();
+  const registerAccess = useRegisterEditAccess();
+  const readOnlyRef = useRef(false);
+  const canEditRegisterRef = isCombinedView ? readOnlyRef : registerAccess.canEditRegisterRef;
+  const viewOnlyRegisterMessage = isCombinedView ? combinedRegisterReadOnlyMessage : sharedViewOnlyRegisterMessage;
   const [isViewOnlyDialogOpen, setIsViewOnlyDialogOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
@@ -401,11 +411,17 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
   );
   const activeGroupColumnSet = useMemo(() => {
     const group = taskLineColumnGroups.find((item) => item.key === activeColumnGroup);
-    return group?.columns ? new Set(group.columns) : null;
-  }, [activeColumnGroup]);
+    return group?.columns ? new Set(isCombinedView ? ["register_name", ...group.columns] : group.columns) : null;
+  }, [activeColumnGroup, isCombinedView]);
   const visibleColumns = useMemo(
-    () => orderedColumns.filter((column) => !hiddenColumnKeys.has(column.key) && (!activeGroupColumnSet || activeGroupColumnSet.has(column.key))),
-    [activeGroupColumnSet, hiddenColumnKeys, orderedColumns]
+    () =>
+      orderedColumns.filter(
+        (column) =>
+          (column.key !== "register_name" || isCombinedView) &&
+          !hiddenColumnKeys.has(column.key) &&
+          (!activeGroupColumnSet || activeGroupColumnSet.has(column.key))
+      ),
+    [activeGroupColumnSet, hiddenColumnKeys, isCombinedView, orderedColumns]
   );
   const actionColumnHidden = hiddenColumnKeys.has(actionColumnKey);
   const actionColumnFrozen = frozenColumnKeys.has(actionColumnKey);
@@ -1533,15 +1549,15 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
   }
 
   function downloadTemplate() {
-    const templateRow = taskLineColumns.reduce<Record<string, string>>(
+    const templateRow = importTaskLineColumns.reduce<Record<string, string>>(
       (row, column) => {
         row[column.label] = "";
         return row;
       },
       { [importActionColumn]: "Add" }
     );
-    const worksheet = XLSX.utils.json_to_sheet([templateRow], { header: [importActionColumn, ...taskLineColumns.map((column) => column.label)] });
-    worksheet["!cols"] = [importActionColumn, ...taskLineColumns.map((column) => column.label)].map(() => ({ wch: 22 }));
+    const worksheet = XLSX.utils.json_to_sheet([templateRow], { header: [importActionColumn, ...importTaskLineColumns.map((column) => column.label)] });
+    worksheet["!cols"] = [importActionColumn, ...importTaskLineColumns.map((column) => column.label)].map(() => ({ wch: 22 }));
     addImportActionDropdown(worksheet, 500);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "TaskLine Import");
@@ -1592,7 +1608,7 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
       valueFilters
     });
     const exportRows = exportSourceRows.map((row, index) =>
-      taskLineColumns.reduce<Record<string, string | number>>(
+      importTaskLineColumns.reduce<Record<string, string | number>>(
         (result, column) => {
           result[column.label] = column.key === "serial_no" ? index + 1 : row[column.key] ?? "";
           return result;
@@ -1601,9 +1617,9 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
       )
     );
     const worksheet = XLSX.utils.json_to_sheet(exportRows.length ? exportRows : [blankExportRow()], {
-      header: [importActionColumn, ...taskLineColumns.map((column) => column.label)]
+      header: [importActionColumn, ...importTaskLineColumns.map((column) => column.label)]
     });
-    worksheet["!cols"] = [importActionColumn, ...taskLineColumns.map((column) => column.label)].map(() => ({ wch: 22 }));
+    worksheet["!cols"] = [importActionColumn, ...importTaskLineColumns.map((column) => column.label)].map(() => ({ wch: 22 }));
     addImportActionDropdown(worksheet, Math.max(exportRows.length + 100, 500));
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "TaskLine");
@@ -2473,8 +2489,10 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
         </div>
       ) : null}
       <ViewOnlyAccessDialog
+        message={isCombinedView ? combinedRegisterReadOnlyMessage : undefined}
         onClose={() => setIsViewOnlyDialogOpen(false)}
         open={isViewOnlyDialogOpen}
+        title={isCombinedView ? "Read-only overview" : undefined}
       />
 
       {isMasterOpen ? (
