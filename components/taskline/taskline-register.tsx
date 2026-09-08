@@ -144,7 +144,7 @@ const taskLineColumns: TaskLineColumn[] = [
 
 const taskLineColumnByKey = new Map(taskLineColumns.map((column) => [column.key, column]));
 const importTaskLineColumns = taskLineColumns.filter((column) => column.key !== "register_name");
-const combinedRegisterReadOnlyMessage = "The TaskLine overview is read-only. Open Litigation, Non-Litigation, CESTAT or High Court to add or edit rows.";
+const combinedRegisterReadOnlyMessage = "The TaskLine overview is read-only. Open Litigation, Non-Litigation, GSTAT, CESTAT or High Court to add or edit rows.";
 const taskLineFormColumnByKey = new Map<string, TaskLineColumn>([
   ...taskLineColumns.map((column) => [column.key, column] as [string, TaskLineColumn]),
   ["gstat_task_code", { key: "gstat_task_code", label: "GSTAT Task Code", width: 150 }]

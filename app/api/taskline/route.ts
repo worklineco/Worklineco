@@ -62,12 +62,16 @@ const moduleKey = "taskline";
 type RegisterKey = "all" | "cestat" | "high_court" | "non_litigation" | "taskline";
 const registerKeys = new Set<RegisterKey>(["taskline", "high_court", "cestat", "non_litigation", "all"]);
 const combinedRegisterKeys: Exclude<RegisterKey, "all">[] = ["taskline", "non_litigation", "cestat", "high_court"];
-const registerLabels: Record<Exclude<RegisterKey, "all">, string> = {
+const gstatModuleKey = "gstat";
+const gstatOrganisationCode = "DCO1433";
+const registerLabels: Record<string, string> = {
   cestat: "CESTAT",
+  gstat: "GSTAT",
   high_court: "High Court",
   non_litigation: "Non-Litigation",
   taskline: "Litigation"
 };
+type GstatAppealRow = { data: Record<string, string | number> | null; id: string; row_number: number | null; updated_at?: string | null };
 const organisationIdCache = new Map<string, string>();
 const taskLineDateColumns = new Set(["due_date", "ref_date", "entry_date", "completion_date"]);
 const taskLineMoneyColumns = new Set(["total_agreed_fee", "amount_raised", "amount_realised", "counsel_fee", "referral_fee"]);
@@ -182,7 +186,7 @@ export async function GET(request: Request) {
       return NextResponse.json({ column, values: [] });
     }
 
-    if (!taskLineColumns.includes(column)) {
+    if (!taskLineColumns.includes(column) && column !== "register_name") {
       return NextResponse.json({ error: "Invalid TaskLine filter column." }, { status: 400 });
     }
 
@@ -206,7 +210,7 @@ export async function GET(request: Request) {
     const limit = Math.min(requestedLimit, maxTaskLineWindowSize);
     const query = parseTaskLineQuery(searchParams);
 
-    if (hasTaskLineQuery(query)) {
+    if (hasTaskLineQuery(query) || registerKey === "all") {
       const records = await loadTaskLineRecords(admin, organisation.organisationId, access, registerKey);
 
       if (records.error) {
@@ -248,7 +252,7 @@ export async function GET(request: Request) {
 }
 
 function parseTaskLineQuery(searchParams: URLSearchParams): TaskLineQuery {
-  const allowedColumns = new Set(taskLineColumns);
+  const allowedColumns = new Set([...taskLineColumns, "register_name"]);
   const rawSortKey = text(searchParams.get("sortKey"));
   const rawSortDir = searchParams.get("sortDir");
 
@@ -1193,6 +1197,14 @@ async function loadTaskLineRecords(admin: ReturnType<typeof createAdminClient>, 
     rows.push(...((data ?? []) as TaskRecord[]).filter((record) => isRegisterRecord(record, registerKey) && canAccessRecord(record, access)));
   }
 
+  if (registerKey === "all") {
+    const gstatRecords = await loadGstatRecordsForOverview(admin, access);
+    if (gstatRecords.error) {
+      return { data: null, error: gstatRecords.error };
+    }
+    rows.push(...(gstatRecords.data ?? []));
+  }
+
   return { data: rows, error: null };
 }
 
@@ -1465,7 +1477,7 @@ function isTaskLineRecord(record: TaskRecord | null): record is TaskRecord {
 function isRegisterRecord(record: TaskRecord | null, registerKey: RegisterKey): record is TaskRecord {
   if (!record) return false;
   if (registerKey === "all") {
-    return combinedRegisterKeys.some((key) => isRegisterRecord(record, key));
+    return record.custom_values?.workline_module === gstatModuleKey || combinedRegisterKeys.some((key) => isRegisterRecord(record, key));
   }
   return record.custom_values?.workline_module === moduleForRegister(registerKey) && getStoredRegisterKey(record.custom_values?.taskline_data) === registerKey;
 }
@@ -1483,8 +1495,57 @@ function modulesForRegister(registerKey: RegisterKey) {
 }
 
 function registerLabelForModule(workline_module: string | undefined) {
-  const key = (workline_module === moduleKey ? "taskline" : workline_module) as Exclude<RegisterKey, "all">;
+  const key = workline_module === moduleKey ? "taskline" : String(workline_module ?? "");
   return registerLabels[key] ?? "";
+}
+
+function gstatText(row: GstatAppealRow, column: string) {
+  return text(row.data?.[column]);
+}
+
+function gstatAppealToTaskRecord(row: GstatAppealRow): TaskRecord {
+  const tasklineData: TaskLineRow = {
+    document_link: gstatText(row, "Document Link"),
+    due_date: gstatText(row, "Due Date"),
+    entity: gstatText(row, "Entity Name"),
+    entity_group: gstatText(row, "Entity Group"),
+    name: gstatText(row, "Person handling"),
+    register_key: gstatModuleKey,
+    remarks: gstatText(row, "Remark"),
+    resource: "",
+    stage: "",
+    state_name: gstatText(row, "State Name"),
+    status_open_close: "Open",
+    task: "GSTAT Appeal",
+    task_code: gstatText(row, "Sno") || text(row.row_number),
+    team: ""
+  };
+  return {
+    created_at: "",
+    created_by: null,
+    custom_values: { taskline_data: tasklineData, workline_module: gstatModuleKey },
+    description: null,
+    due_at: null,
+    id: `gstat:${row.id}`,
+    organisation_id: "",
+    title: tasklineData.entity || "GSTAT Appeal",
+    updated_at: text(row.updated_at)
+  };
+}
+
+async function loadGstatRecordsForOverview(admin: ReturnType<typeof createAdminClient>, access: AccessScope) {
+  const { data, error } = await admin
+    .from("gstat_appeals")
+    .select("id,row_number,data,updated_at")
+    .eq("organisation_code", gstatOrganisationCode)
+    .order("row_number", { ascending: true });
+  if (error) {
+    return { data: null, error };
+  }
+  const rows = ((data ?? []) as GstatAppealRow[])
+    .filter((row) => access.canViewAll || !access.team || gstatText(row, "Person handling") === access.team)
+    .map(gstatAppealToTaskRecord);
+  return { data: rows, error: null };
 }
 
 function getRegisterKey(searchParams: URLSearchParams): RegisterKey {
