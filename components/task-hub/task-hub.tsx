@@ -7,8 +7,7 @@ import { getCached, setCached } from "@/lib/data-cache";
 
 type TaskLineRow = Record<string, string>;
 type BillingRecord = Record<string, unknown>;
-type ELRow = Record<string, string | number>;
-type TaskHubColumnKey = "task_code" | "team" | "entity" | "task" | "stage" | "status_open_close" | "el" | "billable" | "billing";
+type TaskHubColumnKey = "task_code" | "team" | "entity" | "task" | "stage" | "status_open_close" | "billable" | "billing";
 type TaskHubSort = { dir: "asc" | "desc"; key: TaskHubColumnKey } | null;
 
 const taskHubColumns: { key: TaskHubColumnKey; label: string; width: number }[] = [
@@ -18,7 +17,6 @@ const taskHubColumns: { key: TaskHubColumnKey; label: string; width: number }[] 
   { key: "task", label: "Task", width: 190 },
   { key: "stage", label: "Work Status", width: 140 },
   { key: "status_open_close", label: "Open/Close", width: 130 },
-  { key: "el", label: "EL No.", width: 180 },
   { key: "billable", label: "Billable", width: 110 },
   { key: "billing", label: "Billing", width: 150 }
 ];
@@ -26,7 +24,6 @@ const taskHubColumns: { key: TaskHubColumnKey; label: string; width: number }[] 
 export function TaskHub() {
   const [rows, setRows] = useState<TaskLineRow[]>([]);
   const [billing, setBilling] = useState<BillingRecord[]>([]);
-  const [elRows, setElRows] = useState<ELRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [columnFilters, setColumnFilters] = useState<Partial<Record<TaskHubColumnKey, string>>>({});
@@ -55,9 +52,8 @@ export function TaskHub() {
 
     Promise.all([
       fetch("/api/taskline", { cache: "no-store" }).then((r) => (r.ok ? r.json() : { rows: [] })).catch(() => ({ rows: [] })),
-      fetch("/api/billing", { cache: "no-store" }).then((r) => (r.ok ? r.json() : { records: [] })).catch(() => ({ records: [] })),
-      fetch("/api/engagement-letters/managed", { cache: "no-store" }).then((r) => (r.ok ? r.json() : { rows: [] })).catch(() => ({ rows: [] }))
-    ]).then(([task, bill, el]) => {
+      fetch("/api/billing", { cache: "no-store" }).then((r) => (r.ok ? r.json() : { records: [] })).catch(() => ({ records: [] }))
+    ]).then(([task, bill]) => {
       if (!active) {
         return;
       }
@@ -65,7 +61,6 @@ export function TaskHub() {
       setRows(taskRows);
       setCached("taskhub:tasks", taskRows);
       setBilling(Array.isArray(bill?.records) ? (bill.records as BillingRecord[]) : []);
-      setElRows(Array.isArray(el?.rows) ? (el.rows as ELRow[]) : []);
       setIsLoading(false);
     });
 
@@ -85,30 +80,16 @@ export function TaskHub() {
     return map;
   }, [billing]);
 
-  const elByCode = useMemo(() => {
-    const map = new Map<string, { no: string; status: string }>();
-    for (const row of elRows) {
-      const code = String(row["Task Code"] ?? "").trim();
-      if (code) {
-        map.set(code, {
-          no: String(row["EL No."] ?? row["Client / Entity"] ?? "").trim(),
-          status: String(row["Billed Status"] ?? "").trim()
-        });
-      }
-    }
-    return map;
-  }, [elRows]);
-
   const codedTasks = useMemo(() => {
     const query = search.trim().toLocaleLowerCase();
     const filtered = rows
       .filter((row) => String(row.task_code ?? "").trim())
       .filter((row) => {
-        const values = taskHubColumns.map((column) => taskHubValue(row, column.key, billingByCode, elByCode));
+        const values = taskHubColumns.map((column) => taskHubValue(row, column.key, billingByCode));
         const matchesSearch = !query || values.some((value) => value.toLocaleLowerCase().includes(query));
         const matchesColumns = taskHubColumns.every((column) => {
           const filterValue = String(columnFilters[column.key] ?? "").trim().toLocaleLowerCase();
-          return !filterValue || taskHubValue(row, column.key, billingByCode, elByCode).toLocaleLowerCase().includes(filterValue);
+          return !filterValue || taskHubValue(row, column.key, billingByCode).toLocaleLowerCase().includes(filterValue);
         });
         return matchesSearch && matchesColumns;
       });
@@ -116,13 +97,13 @@ export function TaskHub() {
     if (!sortState) return filtered;
     const direction = sortState.dir === "asc" ? 1 : -1;
     return [...filtered].sort((first, second) =>
-      taskHubValue(first, sortState.key, billingByCode, elByCode).localeCompare(
-        taskHubValue(second, sortState.key, billingByCode, elByCode),
+      taskHubValue(first, sortState.key, billingByCode).localeCompare(
+        taskHubValue(second, sortState.key, billingByCode),
         undefined,
         { numeric: true, sensitivity: "base" }
       ) * direction
     );
-  }, [billingByCode, columnFilters, elByCode, rows, search, sortState]);
+  }, [billingByCode, columnFilters, rows, search, sortState]);
 
   const hasActiveFilters = taskHubColumns.some((column) => String(columnFilters[column.key] ?? "").trim());
 
@@ -286,10 +267,9 @@ export function TaskHub() {
           </thead>
           <tbody>
             {isLoading ? (
-              <tr><td className="px-4 py-8 font-bold text-slate-500" colSpan={10}>Loading...</td></tr>
+              <tr><td className="px-4 py-8 font-bold text-slate-500" colSpan={9}>Loading...</td></tr>
             ) : codedTasks.length ? codedTasks.map((row) => {
               const code = String(row.task_code ?? "").trim();
-              const el = elByCode.get(code);
               const billingStatus = billingByCode.get(code);
               const openClose = String(row.status_open_close ?? "").trim();
               return (
@@ -305,11 +285,6 @@ export function TaskHub() {
                         {openClose}
                       </span>
                     ) : <span className="text-slate-300">—</span>}
-                  </td>
-                  <td className="px-3 py-2">
-                    {el ? (
-                      <span className="font-bold text-slate-800">{el.no || "Generated"}{el.status ? ` · ${el.status}` : ""}</span>
-                    ) : <span className="text-xs font-bold text-slate-400">Not generated</span>}
                   </td>
                   <td className="px-3 py-2">
                     {String(row.billable ?? "") ? (
@@ -333,7 +308,7 @@ export function TaskHub() {
                 </tr>
               );
             }) : (
-              <tr><td className="px-4 py-8 font-bold text-slate-500" colSpan={10}>No coded tasks yet. New tasks added in TaskLine will appear here with their Task Code.</td></tr>
+              <tr><td className="px-4 py-8 font-bold text-slate-500" colSpan={9}>No coded tasks yet. New tasks added in TaskLine will appear here with their Task Code.</td></tr>
             )}
           </tbody>
         </table>
@@ -398,15 +373,10 @@ export function TaskHub() {
 function taskHubValue(
   row: TaskLineRow,
   key: TaskHubColumnKey,
-  billingByCode: Map<string, string>,
-  elByCode: Map<string, { no: string; status: string }>
+  billingByCode: Map<string, string>
 ) {
   const code = String(row.task_code ?? "").trim();
   if (key === "entity") return String(row.entity || row.entity_group || "").trim();
-  if (key === "el") {
-    const el = elByCode.get(code);
-    return el ? [el.no || "Generated", el.status].filter(Boolean).join(" · ") : "Not generated";
-  }
   if (key === "billing") {
     return billingByCode.get(code) || (String(row.billable ?? "").toLocaleLowerCase() === "no" ? "Non-billable" : "");
   }
