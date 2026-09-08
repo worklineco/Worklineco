@@ -7,7 +7,6 @@ import { useEffect, useState } from "react";
 import {
   BookOpenCheck,
   Building2,
-  FileSignature,
   FileSpreadsheet,
   CalendarDays,
   CalendarClock,
@@ -15,7 +14,6 @@ import {
   LayoutDashboard,
   ListChecks,
   LogOut,
-  Megaphone,
   Menu,
   PanelLeftClose,
   PanelLeftOpen,
@@ -51,9 +49,7 @@ const navItems: NavItem[] = [
   { href: "/meeting-room", icon: CalendarDays, label: "Meeting Room" },
   { href: "/tools", icon: Wrench, label: "Tools" },
   { href: "/dco-policies", icon: BookOpenCheck, label: "DCo Policies" },
-  { href: "/applause-board", icon: Megaphone, label: "Applause Board" },
   { href: "/client-records", icon: Building2, label: "Client Records" },
-  { href: "/engagement-letters", icon: FileSignature, label: "Engagement Letters" },
   { href: "/teams", icon: UsersRound, label: "Team Members" },
   { href: "/sj-appointments", icon: CalendarClock, label: "SJ Appointments" },
   { href: "/gstat/trash", icon: Trash2, label: "Trash" }
