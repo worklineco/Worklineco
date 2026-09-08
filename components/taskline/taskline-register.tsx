@@ -413,15 +413,21 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
     const group = taskLineColumnGroups.find((item) => item.key === activeColumnGroup);
     return group?.columns ? new Set(isCombinedView ? ["register_name", ...group.columns] : group.columns) : null;
   }, [activeColumnGroup, isCombinedView]);
-  const visibleColumns = useMemo(
-    () =>
-      orderedColumns.filter(
-        (column) =>
-          (column.key !== "register_name" || isCombinedView) &&
-          !hiddenColumnKeys.has(column.key) &&
-          (!activeGroupColumnSet || activeGroupColumnSet.has(column.key))
-      ),
-    [activeGroupColumnSet, hiddenColumnKeys, isCombinedView, orderedColumns]
+  const visibleColumns = useMemo(() => {
+    const columns = orderedColumns.filter(
+      (column) =>
+        (column.key !== "register_name" || isCombinedView) &&
+        !hiddenColumnKeys.has(column.key) &&
+        (!activeGroupColumnSet || activeGroupColumnSet.has(column.key))
+    );
+    if (!isCombinedView) return columns;
+    const registerColumn = columns.find((column) => column.key === "register_name");
+    if (!registerColumn) return columns;
+    const rest = columns.filter((column) => column.key !== "register_name");
+    const teamIndex = rest.findIndex((column) => column.key === "team");
+    rest.splice(teamIndex + 1, 0, registerColumn);
+    return rest;
+  }, [activeGroupColumnSet, hiddenColumnKeys, isCombinedView, orderedColumns]
   );
   const actionColumnHidden = hiddenColumnKeys.has(actionColumnKey);
   const actionColumnFrozen = frozenColumnKeys.has(actionColumnKey);
@@ -2042,16 +2048,18 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
         </div>
         <div className="mb-1.5 flex items-center justify-end gap-1.5">
           {isLoading ? <span className="mr-auto text-xs font-bold text-slate-500">Loading {registerName} rows...</span> : null}
-          <button
-            className="inline-flex h-8 items-center gap-1 rounded-md border border-navy-700 bg-navy-700 px-3 text-xs font-bold text-white transition hover:bg-navy-800 disabled:cursor-not-allowed disabled:opacity-40"
-            disabled={isLoading}
-            onClick={addRow}
-            title={`Add a new ${registerName} task`}
-            type="button"
-          >
-            <Plus className="size-3.5" />
-            Add Task
-          </button>
+          {isCombinedView ? null : (
+            <button
+              className="inline-flex h-8 items-center gap-1 rounded-md border border-navy-700 bg-navy-700 px-3 text-xs font-bold text-white transition hover:bg-navy-800 disabled:cursor-not-allowed disabled:opacity-40"
+              disabled={isLoading}
+              onClick={addRow}
+              title={`Add a new ${registerName} task`}
+              type="button"
+            >
+              <Plus className="size-3.5" />
+              Add Task
+            </button>
+          )}
           <button
             className="inline-flex h-8 items-center rounded-md border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 transition hover:bg-slate-50 disabled:opacity-40"
             disabled={tablePage <= 1 || isLoading}

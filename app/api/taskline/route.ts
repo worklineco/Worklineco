@@ -1245,7 +1245,7 @@ async function loadAuditLogs(admin: ReturnType<typeof createAdminClient>, organi
 
   const taskLineLogs = ((logs.data ?? []) as AuditLog[]).filter((log) => {
     const value = (log.new_value ?? log.old_value) as { data?: TaskLineRow } | null;
-    return getStoredRegisterKey(value?.data) === registerKey;
+    return matchesRegisterKey(getStoredRegisterKey(value?.data), registerKey);
   });
 
   const visibleLogs = access.canViewAll
@@ -1463,7 +1463,15 @@ function isTaskLineRecord(record: TaskRecord | null): record is TaskRecord {
 }
 
 function isRegisterRecord(record: TaskRecord | null, registerKey: RegisterKey): record is TaskRecord {
-  return record?.custom_values?.workline_module === moduleForRegister(registerKey) && getStoredRegisterKey(record.custom_values?.taskline_data) === registerKey;
+  if (!record) return false;
+  if (registerKey === "all") {
+    return combinedRegisterKeys.some((key) => isRegisterRecord(record, key));
+  }
+  return record.custom_values?.workline_module === moduleForRegister(registerKey) && getStoredRegisterKey(record.custom_values?.taskline_data) === registerKey;
+}
+
+function matchesRegisterKey(storedKey: RegisterKey, registerKey: RegisterKey) {
+  return registerKey === "all" ? storedKey !== "all" : storedKey === registerKey;
 }
 
 function moduleForRegister(registerKey: RegisterKey) {
