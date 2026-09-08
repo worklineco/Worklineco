@@ -3,6 +3,8 @@
 import { ArrowDown, ArrowUp, FileSpreadsheet, Filter, Search, UsersRound, X } from "lucide-react";
 import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
+import { ViewOnlyAccessDialog } from "@/components/shared/view-only-access-dialog";
+import { useRegisterEditAccess } from "@/lib/use-register-access";
 
 type CellValue = string | number | boolean;
 type WorkbookSheet = { columns: string[]; name: string; rows: CellValue[][] };
@@ -13,9 +15,17 @@ type SortState = { columnIndex: number; direction: SortDirection } | null;
 type ColumnValueFilters = Record<number, string[]>;
 type ColumnFilterOption = { key: string; label: string };
 type FilterMenuPosition = { left: number; listMaxHeight: number; top: number };
+type StoredOverride = { column?: string; row_key?: string; value?: string };
+type EditingCell = { column: string; columnIndex: number; original: string; rowKey: string; value: string };
 
 const columnFilterOptionLimit = 1000;
 const blankColumnFilterValue = "__workline_column_blank__";
+const removedColumns = new Set(["Allocation for FY 2023-24", "EM Allocation", "ORMP"]);
+const renamedColumns: Record<string, string> = {
+  "GSTR 9": "Whether GSTR-9 applicable",
+  "GSTR 9C - Whether Applicable": "Whether GSTR-9C applicable"
+};
+const statusOptions = ["Requirements Mailed", "Data Received", "Drafting in Progress", "Shared with client", "Filed"];
 
 function cellText(value: CellValue | undefined) {
   if (value === "" || value === undefined) return "";
@@ -33,7 +43,63 @@ function columnWidth(column: string) {
   if (key.includes("allocation")) return 190;
   if (key.includes("applicable")) return 210;
   if (key.includes("gstin")) return 180;
+  if (key.includes("resource")) return 190;
+  if (key.includes("target date")) return 155;
+  if (key === "status") return 210;
   return 150;
+}
+
+function rawText(value: CellValue | undefined) {
+  return value === undefined || value === "" ? "" : String(value);
+}
+
+function normalizeKey(value: CellValue | undefined) {
+  return rawText(value).trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function prepareFirstSheet(workbook: GstrWorkbookData): WorkbookSheet {
+  const source = workbook.sheets[0];
+  const sourceColumns = source?.columns ?? [];
+  const gstinByClientState = new Map<string, string>();
+  const gstinsByClient = new Map<string, Set<string>>();
+
+  for (const sheet of workbook.sheets.slice(1)) {
+    const clientIndex = sheet.columns.findIndex((column) => normalizeKey(column) === "clientname");
+    const stateIndex = sheet.columns.findIndex((column) => normalizeKey(column) === "state");
+    const gstinIndex = sheet.columns.findIndex((column) => normalizeKey(column).startsWith("gstin"));
+    if (clientIndex < 0 || gstinIndex < 0) continue;
+    for (const row of sheet.rows) {
+      const clientKey = normalizeKey(row[clientIndex]);
+      const stateKey = normalizeKey(row[stateIndex]);
+      const gstin = rawText(row[gstinIndex]).trim();
+      if (!clientKey || !gstin) continue;
+      gstinByClientState.set(`${clientKey}|${stateKey}`, gstin);
+      const values = gstinsByClient.get(clientKey) ?? new Set<string>();
+      values.add(gstin);
+      gstinsByClient.set(clientKey, values);
+    }
+  }
+
+  const retainedIndexes = sourceColumns.map((column, index) => ({ column, index })).filter(({ column }) => !removedColumns.has(column));
+  const columns = retainedIndexes.map(({ column }) => renamedColumns[column] ?? column);
+  const clientPosition = Math.max(0, columns.indexOf("Client Name"));
+  columns.splice(clientPosition, 0, "GSTIN");
+  const allocationPosition = columns.indexOf("Allocation for FY 2024-25");
+  columns.splice(allocationPosition >= 0 ? allocationPosition + 1 : columns.length, 0, "Resource Name", "Target Date", "Status");
+
+  const rows = (source?.rows ?? []).map((sourceRow, rowIndex) => {
+    const record = new Map(retainedIndexes.map(({ column, index }) => [renamedColumns[column] ?? column, sourceRow[index] ?? ""]));
+    const clientKey = normalizeKey(record.get("Client Name"));
+    const stateKey = normalizeKey(record.get("State"));
+    const clientGstins = gstinsByClient.get(clientKey);
+    record.set("GSTIN", gstinByClientState.get(`${clientKey}|${stateKey}`) ?? (clientGstins?.size === 1 ? Array.from(clientGstins)[0] : ""));
+    record.set("Resource Name", "");
+    record.set("Target Date", "");
+    record.set("Status", "");
+    return [...columns.map((column) => record.get(column) ?? ""), `row-${rowIndex}`];
+  });
+
+  return { columns, name: source?.name ?? "GSTR - 9 9C", rows };
 }
 
 function getFilterValueKey(value: CellValue | undefined) {
@@ -74,7 +140,9 @@ function compareCells(left: CellValue | undefined, right: CellValue | undefined,
 }
 
 export function GstrNineNineCRegister({ workbook }: { workbook: GstrWorkbookData }) {
-  const [activeSheetIndex, setActiveSheetIndex] = useState(0);
+  const preparedSheet = useMemo(() => prepareFirstSheet(workbook), [workbook]);
+  const [sourceRows, setSourceRows] = useState<CellValue[][]>(preparedSheet.rows);
+  const { canEditRegisterRef } = useRegisterEditAccess();
   const [search, setSearch] = useState("");
   const [columnValueFilters, setColumnValueFilters] = useState<ColumnValueFilters>({});
   const [sortState, setSortState] = useState<SortState>(null);
@@ -82,8 +150,11 @@ export function GstrNineNineCRegister({ workbook }: { workbook: GstrWorkbookData
   const [filterMenuPosition, setFilterMenuPosition] = useState<FilterMenuPosition | null>(null);
   const [filterSearch, setFilterSearch] = useState("");
   const [draftFilterValues, setDraftFilterValues] = useState<string[]>([]);
+  const [editing, setEditing] = useState<EditingCell | null>(null);
+  const [message, setMessage] = useState("");
+  const [isViewOnlyDialogOpen, setIsViewOnlyDialogOpen] = useState(false);
 
-  const activeSheet = workbook.sheets[activeSheetIndex] ?? workbook.sheets[0];
+  const activeSheet = useMemo(() => ({ ...preparedSheet, rows: sourceRows }), [preparedSheet, sourceRows]);
   const deferredSearch = useDeferredValue(search);
   const deferredColumnValueFilters = useDeferredValue(columnValueFilters);
   const query = deferredSearch.trim().toLowerCase();
@@ -98,7 +169,7 @@ export function GstrNineNineCRegister({ workbook }: { workbook: GstrWorkbookData
 
   const rows = useMemo(() => {
     const visibleRows = activeSheet.rows.filter((row) => {
-      if (query && !row.some((value) => cellText(value).toLowerCase().includes(query))) return false;
+      if (query && !activeSheet.columns.some((_, index) => cellText(row[index]).toLowerCase().includes(query))) return false;
       return activeFilterEntries.every(({ columnIndex, selectedValues }) =>
         selectedValues.includes(getFilterValueKey(row[columnIndex]))
       );
@@ -124,6 +195,31 @@ export function GstrNineNineCRegister({ workbook }: { workbook: GstrWorkbookData
     if (!needle) return openColumnFilterOptions;
     return openColumnFilterOptions.filter((option) => option.label.toLowerCase().includes(needle));
   }, [filterSearch, openColumnFilterOptions]);
+
+  useEffect(() => {
+    let active = true;
+    void fetch("/api/gstr-9-9c", { cache: "no-store" })
+      .then(async (response) => ({ ok: response.ok, result: await response.json() as { error?: string; overrides?: StoredOverride[] } }))
+      .then(({ ok, result }) => {
+        if (!active) return;
+        if (!ok) {
+          setMessage(result.error ?? "Could not load saved changes.");
+          return;
+        }
+        const overrides = new Map((result.overrides ?? []).map((item) => [`${item.row_key}|${item.column}`, item.value ?? ""]));
+        setSourceRows(preparedSheet.rows.map((row) => {
+          const next = [...row];
+          const rowKey = String(row[preparedSheet.columns.length] ?? "");
+          preparedSheet.columns.forEach((column, columnIndex) => {
+            const saved = overrides.get(`${rowKey}|${column}`);
+            if (saved !== undefined) next[columnIndex] = saved;
+          });
+          return next;
+        }));
+      })
+      .catch(() => { if (active) setMessage("Could not load saved changes."); });
+    return () => { active = false; };
+  }, [preparedSheet]);
 
   const closeColumnFilter = useCallback(() => {
     setOpenFilterColumnIndex(null);
@@ -158,14 +254,6 @@ export function GstrNineNineCRegister({ workbook }: { workbook: GstrWorkbookData
       window.removeEventListener("scroll", closeOnViewportChange, true);
     };
   }, [closeColumnFilter, openFilterColumnIndex]);
-
-  function selectSheet(index: number) {
-    setActiveSheetIndex(index);
-    setSearch("");
-    setColumnValueFilters({});
-    setSortState(null);
-    closeColumnFilter();
-  }
 
   function openColumnFilter(columnIndex: number, clickPoint: { clientX: number; clientY: number }) {
     const options = getUniqueColumnFilterOptions(activeSheet.rows, columnIndex, columnFilterOptionLimit);
@@ -250,6 +338,47 @@ export function GstrNineNineCRegister({ workbook }: { workbook: GstrWorkbookData
     closeColumnFilter();
   }
 
+  function beginEdit(row: CellValue[], column: string, columnIndex: number) {
+    if (!canEditRegisterRef.current) {
+      setIsViewOnlyDialogOpen(true);
+      return;
+    }
+    const value = rawText(row[columnIndex]);
+    setEditing({ column, columnIndex, original: value, rowKey: String(row[activeSheet.columns.length]), value });
+    setMessage("");
+  }
+
+  async function saveCell(edit: EditingCell) {
+    setEditing(null);
+    if (edit.value === edit.original) return;
+    setSourceRows((current) => current.map((row) => String(row[activeSheet.columns.length]) === edit.rowKey ? row.map((value, index) => index === edit.columnIndex ? edit.value : value) : row));
+    setMessage("Saving...");
+    try {
+      const response = await fetch("/api/gstr-9-9c", {
+        body: JSON.stringify({ column: edit.column, rowKey: edit.rowKey, value: edit.value }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST"
+      });
+      const result = await response.json().catch(() => ({})) as { error?: string };
+      if (!response.ok) throw new Error(result.error ?? "Could not save this cell.");
+      setMessage("Saved.");
+    } catch (error) {
+      setSourceRows((current) => current.map((row) => String(row[activeSheet.columns.length]) === edit.rowKey ? row.map((value, index) => index === edit.columnIndex ? edit.original : value) : row));
+      setMessage(error instanceof Error ? error.message : "Could not save this cell.");
+    }
+  }
+
+  function cellEditor(column: string, edit: EditingCell) {
+    const className = "h-9 w-full rounded border border-navy-400 bg-white px-2 font-semibold text-slate-900 outline-none ring-2 ring-navy-100";
+    if (column === "Status") {
+      return <select autoFocus className={className} onChange={(event) => void saveCell({ ...edit, value: event.target.value })} value={edit.value}><option value="">Select status</option>{statusOptions.map((option) => <option key={option} value={option}>{option}</option>)}</select>;
+    }
+    if (column === "Target Date") {
+      return <input autoFocus className={className} onBlur={() => void saveCell(edit)} onChange={(event) => setEditing({ ...edit, value: event.target.value })} type="date" value={edit.value} />;
+    }
+    return <input autoFocus className={className} onBlur={() => void saveCell(edit)} onChange={(event) => setEditing({ ...edit, value: event.target.value })} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); if (event.key === "Escape") setEditing(null); }} value={edit.value} />;
+  }
+
   return (
     <section className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
       <header className="flex flex-col gap-3 border-b border-slate-200 pb-3 xl:flex-row xl:items-center xl:justify-between">
@@ -259,7 +388,7 @@ export function GstrNineNineCRegister({ workbook }: { workbook: GstrWorkbookData
             FY 2025-26 allocation
           </div>
           <h1 className="mt-1 text-2xl font-black text-slate-950">GSTR - 9 9C</h1>
-          <p className="mt-1 text-xs font-semibold text-slate-500">Imported from {workbook.sourceFile}</p>
+          <p className="mt-1 text-xs font-semibold text-slate-500">Double-click any field to edit it. Changes are saved automatically.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <span className="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm font-bold text-slate-700">
@@ -289,26 +418,9 @@ export function GstrNineNineCRegister({ workbook }: { workbook: GstrWorkbookData
           </label>
         </div>
       </header>
+      {message ? <p className="mt-2 text-xs font-bold text-slate-600">{message}</p> : null}
 
-      <div className="mt-3 flex gap-1.5 overflow-x-auto pb-1">
-        {workbook.sheets.map((sheet, index) => (
-          <button
-            className={`shrink-0 rounded-lg border px-3 py-2 text-xs font-black transition ${
-              index === activeSheetIndex
-                ? "border-navy-700 bg-navy-700 text-white"
-                : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-            }`}
-            key={sheet.name}
-            onClick={() => selectSheet(index)}
-            type="button"
-          >
-            {sheet.name}
-            <span className={`ml-2 ${index === activeSheetIndex ? "text-navy-100" : "text-slate-400"}`}>{sheet.rows.length}</span>
-          </button>
-        ))}
-      </div>
-
-      <div className="mt-2 max-h-[calc(100vh-205px)] overflow-auto rounded-lg border border-slate-200">
+      <div className="mt-3 max-h-[calc(100vh-170px)] overflow-auto rounded-lg border border-slate-200">
         <table className="table-fixed border-separate border-spacing-0 text-left text-xs" style={{ minWidth: Math.max(900, totalWidth), width: Math.max(900, totalWidth) }}>
           <colgroup>
             {activeSheet.columns.map((column) => <col key={column} style={{ width: columnWidth(column) }} />)}
@@ -346,17 +458,20 @@ export function GstrNineNineCRegister({ workbook }: { workbook: GstrWorkbookData
             </tr>
           </thead>
           <tbody>
-            {rows.map((row, rowIndex) => (
-              <tr className="odd:bg-white even:bg-slate-50/70" key={`${activeSheet.name}-${rowIndex}`}>
+            {rows.map((row) => (
+              <tr className="odd:bg-white even:bg-slate-50/70" key={String(row[activeSheet.columns.length])}>
                 {activeSheet.columns.map((column, columnIndex) => {
                   const value = cellText(row[columnIndex]);
+                  const rowKey = String(row[activeSheet.columns.length]);
+                  const activeEdit = editing?.rowKey === rowKey && editing.columnIndex === columnIndex ? editing : null;
                   return (
                     <td
-                      className={`h-9 truncate border-b border-r border-slate-100 px-3 py-2 font-semibold text-slate-700 ${columnIndex === 0 ? "sticky left-0 z-10 bg-inherit font-bold text-slate-900" : ""}`}
+                      className={`h-11 border-b border-r border-slate-100 px-2 py-1.5 font-semibold text-slate-700 ${columnIndex === 0 ? "sticky left-0 z-10 bg-inherit font-bold text-slate-900" : ""}`}
                       key={`${column}-${columnIndex}`}
-                      title={value}
+                      onDoubleClick={() => beginEdit(row, column, columnIndex)}
+                      title={activeEdit ? undefined : `${value || "Blank"} — double-click to edit`}
                     >
-                      {value || <span className="text-slate-300">—</span>}
+                      {activeEdit ? cellEditor(column, activeEdit) : <div className="truncate px-1">{value || <span className="text-slate-300">—</span>}</div>}
                     </td>
                   );
                 })}
@@ -368,6 +483,7 @@ export function GstrNineNineCRegister({ workbook }: { workbook: GstrWorkbookData
           </tbody>
         </table>
       </div>
+      <ViewOnlyAccessDialog onClose={() => setIsViewOnlyDialogOpen(false)} open={isViewOnlyDialogOpen} />
     </section>
   );
 }
