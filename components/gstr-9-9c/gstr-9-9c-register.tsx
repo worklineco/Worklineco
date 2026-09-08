@@ -22,7 +22,7 @@ type EditingCell = { column: string; columnIndex: number; original: string; rowK
 const columnFilterOptionLimit = 1000;
 const rowsPerPage = 100;
 const blankColumnFilterValue = "__workline_column_blank__";
-const removedColumns = new Set(["Allocation for FY 2023-24", "EM Allocation", "ORMP"]);
+const removedColumns = new Set(["Allocation for FY 2023-24", "EM Allocation", "ORMP", "Add. Remarks", "Reg taken", "Reg Surrendered"]);
 const renamedColumns: Record<string, string> = {
   "Allocation for FY 2024-25": "Allocation for FY 2025-26",
   "GSTR 9": "Whether GSTR-9 applicable",

@@ -21,10 +21,7 @@ const allowedColumns = new Set([
   "Status",
   "Whether GSTR-9 applicable",
   "Whether GSTR-9C applicable",
-  "Remarks",
-  "Add. Remarks",
-  "Reg taken",
-  "Reg Surrendered"
+  "Remarks"
 ]);
 
 export async function GET() {
