@@ -45,6 +45,7 @@ const navItems: NavItem[] = [
   { href: "/billing", icon: ReceiptText, label: "Billing" },
   { href: "/meeting-room", icon: CalendarDays, label: "Meeting Room" },
   { href: "/taskline", icon: ListChecks, label: "TaskLine" },
+  { href: "/non-litigation", icon: ListChecks, label: "Non-Litigation" },
   { href: "/high-court", icon: Scale, label: "High Court" },
   { href: "/cestat", icon: Scale, label: "CESTAT" },
   { href: "/tools", icon: Wrench, label: "Tools" },

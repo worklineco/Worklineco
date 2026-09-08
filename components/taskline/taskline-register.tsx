@@ -250,11 +250,13 @@ function isPartnerDesignation(value: string) {
 const defaultRows = Array.from({ length: 8 }, (_, index) => createEmptyRow(`initial-${index + 1}`));
 
 type TaskLineRegisterProps = {
-  registerKey?: "cestat" | "high_court" | "taskline";
+  registerKey?: "cestat" | "high_court" | "non_litigation" | "taskline";
   registerName?: string;
 };
 
 export function TaskLineRegister({ registerKey = "taskline", registerName = "TaskLine" }: TaskLineRegisterProps) {
+  const hiddenColumnGroupKeys = useMemo(() => new Set(registerKey === "non_litigation" ? ["legal"] : []), [registerKey]);
+  const visibleColumnGroups = useMemo(() => taskLineColumnGroups.filter((group) => !hiddenColumnGroupKeys.has(group.key)), [hiddenColumnGroupKeys]);
   const taskLineRowsCacheKey = `${registerKey}:rows:v1`;
   const taskLineApiPath = `/api/taskline?register=${encodeURIComponent(registerKey)}`;
   const taskLineApiQuery = (query: string) => `${taskLineApiPath}&${query}`;
@@ -1003,7 +1005,7 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
     setStatusFilter(config.statusFilter ?? "");
     setSearch(config.search ?? "");
     setSortState(config.sortState ?? null);
-    if (config.activeColumnGroup) setActiveColumnGroup(config.activeColumnGroup);
+    if (config.activeColumnGroup) setActiveColumnGroup(hiddenColumnGroupKeys.has(config.activeColumnGroup) ? "core" : config.activeColumnGroup);
     if (config.layout) {
       const normalized = normalizeTaskLineColumnLayout(config.layout);
       setColumnOrder(normalized.order);
@@ -2007,7 +2009,7 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
       {viewMode === "register" ? (
       <div className="mt-3">
         <div className="mb-2 flex flex-wrap gap-1.5">
-          {taskLineColumnGroups.map((group) => (
+          {visibleColumnGroups.map((group) => (
             <button
               className={`inline-flex h-8 items-center rounded-md border px-3 text-xs font-black transition ${
                 activeColumnGroup === group.key
@@ -2272,6 +2274,7 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
         <TaskLineForm
           draft={formDraft}
           entityOptions={entityOptions}
+          hiddenSectionKeys={hiddenColumnGroupKeys}
           isEdit={Boolean(editingRowId)}
           onChange={updateFormDraft}
           onClose={() => {
@@ -2842,6 +2845,7 @@ function LazyTaskLineSelect({
 function TaskLineForm({
   draft,
   entityOptions,
+  hiddenSectionKeys,
   isEdit,
   nameOptionsForTeam,
   onChange,
@@ -2854,6 +2858,7 @@ function TaskLineForm({
 }: {
   draft: TaskLineRow;
   entityOptions: string[];
+  hiddenSectionKeys?: Set<string>;
   isEdit: boolean;
   nameOptionsForTeam: (team: string) => string[];
   onChange: (key: string, value: string) => void;
@@ -3167,6 +3172,9 @@ function TaskLineForm({
 
         <div className="max-h-[68vh] space-y-3 overflow-auto p-5">
           {taskLineFormSections.map((section) => {
+            if (hiddenSectionKeys?.has(section.key)) {
+              return null;
+            }
             const sectionColumns = section.columns
               .map((key) => taskLineFormColumnByKey.get(key))
               .filter((column): column is TaskLineColumn => Boolean(column));
