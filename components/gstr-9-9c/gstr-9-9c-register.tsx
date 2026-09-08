@@ -1,7 +1,7 @@
 "use client";
 
-import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, FileSpreadsheet, Filter, Plus, Search, UsersRound, X } from "lucide-react";
-import { memo, useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
+import { ArrowDown, ArrowUp, ChevronDown, FileSpreadsheet, Filter, Plus, Search, UsersRound, X } from "lucide-react";
+import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ViewOnlyAccessDialog } from "@/components/shared/view-only-access-dialog";
 import allocationData from "@/lib/data/gstr-9-9c-allocations-25-26.json";
@@ -21,7 +21,7 @@ type StoredRow = { row_key?: string; values?: Record<string, string> };
 type EditingCell = { column: string; columnIndex: number; original: string; rowKey: string; value: string };
 
 const columnFilterOptionLimit = 1000;
-const rowsPerPage = 100;
+const rowsPerBatch = 100;
 const blankColumnFilterValue = "__workline_column_blank__";
 const removedColumns = new Set(["Allocation for FY 2023-24", "EM Allocation", "ORMP", "Add. Remarks", "Reg taken", "Reg Surrendered"]);
 const renamedColumns: Record<string, string> = {
@@ -186,7 +186,8 @@ export function GstrNineNineCRegister({ workbook }: { workbook: GstrWorkbookData
   const [message, setMessage] = useState("");
   const [isViewOnlyDialogOpen, setIsViewOnlyDialogOpen] = useState(false);
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
-  const [pageIndex, setPageIndex] = useState(0);
+  const [visibleCount, setVisibleCount] = useState(rowsPerBatch);
+  const loadMoreRef = useRef<HTMLDivElement | null>(null);
 
   const activeSheet = useMemo(() => ({ ...preparedSheet, rows: sourceRows }), [preparedSheet, sourceRows]);
   const deferredSearch = useDeferredValue(search);
@@ -216,16 +217,26 @@ export function GstrNineNineCRegister({ workbook }: { workbook: GstrWorkbookData
 
   const hasActiveFilters = Boolean(query) || activeFilterEntries.length > 0 || Boolean(sortState);
   const totalWidth = activeSheet.columns.reduce((total, column) => total + columnWidth(column), 0);
-  const pageCount = Math.max(1, Math.ceil(rows.length / rowsPerPage));
-  const currentPageIndex = Math.min(pageIndex, pageCount - 1);
-  const paginatedRows = useMemo(
-    () => rows.slice(currentPageIndex * rowsPerPage, (currentPageIndex + 1) * rowsPerPage),
-    [currentPageIndex, rows]
-  );
+  const visibleRows = useMemo(() => rows.slice(0, visibleCount), [rows, visibleCount]);
+  const hasMoreRows = visibleCount < rows.length;
 
   useEffect(() => {
-    setPageIndex(0);
+    setVisibleCount(rowsPerBatch);
   }, [query, deferredColumnValueFilters, sortState]);
+
+  const showMoreRows = useCallback(() => {
+    setVisibleCount((current) => current + rowsPerBatch);
+  }, []);
+
+  useEffect(() => {
+    const sentinel = loadMoreRef.current;
+    if (!sentinel || !hasMoreRows) return;
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) showMoreRows();
+    }, { rootMargin: "200px" });
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [hasMoreRows, showMoreRows, visibleCount]);
 
   const openColumnFilterOptions = useMemo(
     () =>
@@ -419,7 +430,7 @@ export function GstrNineNineCRegister({ workbook }: { workbook: GstrWorkbookData
     setSourceRows((current) => [[...activeSheet.columns.map((column) => saved.values?.[column] ?? ""), String(saved.row_key)], ...current]);
     setMessage(`Added ${saved.values?.["Client Name"] ?? "entry"}.`);
     resetAll();
-    setPageIndex(0);
+    setVisibleCount(rowsPerBatch);
   }
 
   const saveCell = useCallback(async (edit: EditingCell) => {
@@ -491,7 +502,7 @@ export function GstrNineNineCRegister({ workbook }: { workbook: GstrWorkbookData
       </header>
       {message ? <p className="mt-2 text-xs font-bold text-slate-600">{message}</p> : null}
 
-      <div className="mt-3 max-h-[calc(100vh-170px)] overflow-auto rounded-lg border border-slate-200">
+      <div className="mt-3 max-h-[calc(100vh-215px)] overflow-auto rounded-lg border border-slate-200">
         <table className="table-fixed border-separate border-spacing-0 text-left text-xs" style={{ minWidth: Math.max(900, totalWidth), width: Math.max(900, totalWidth) }}>
           <colgroup>
             {activeSheet.columns.map((column) => <col key={column} style={{ width: columnWidth(column) }} />)}
@@ -529,7 +540,7 @@ export function GstrNineNineCRegister({ workbook }: { workbook: GstrWorkbookData
             </tr>
           </thead>
           <tbody>
-            {paginatedRows.map((row) => {
+            {visibleRows.map((row) => {
               const rowKey = String(row[columnCount]);
               return (
                 <RegisterRow
@@ -548,35 +559,23 @@ export function GstrNineNineCRegister({ workbook }: { workbook: GstrWorkbookData
             ) : null}
           </tbody>
         </table>
+        {hasMoreRows ? <div className="h-px w-full" ref={loadMoreRef} /> : null}
       </div>
-      {pageCount > 1 ? (
-        <div className="mt-3 flex items-center justify-between gap-3 text-xs font-bold text-slate-600">
-          <span>
-            Showing {(currentPageIndex * rowsPerPage + 1).toLocaleString("en-IN")}–{Math.min((currentPageIndex + 1) * rowsPerPage, rows.length).toLocaleString("en-IN")} of {rows.length.toLocaleString("en-IN")}
-          </span>
-          <div className="flex items-center gap-2">
-            <button
-              aria-label="Previous page"
-              className="inline-flex size-9 items-center justify-center rounded-lg border border-slate-200 bg-white transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-              disabled={currentPageIndex === 0}
-              onClick={() => setPageIndex((current) => Math.max(0, current - 1))}
-              type="button"
-            >
-              <ChevronLeft className="size-4" />
-            </button>
-            <span>Page {currentPageIndex + 1} of {pageCount}</span>
-            <button
-              aria-label="Next page"
-              className="inline-flex size-9 items-center justify-center rounded-lg border border-slate-200 bg-white transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-              disabled={currentPageIndex >= pageCount - 1}
-              onClick={() => setPageIndex((current) => Math.min(pageCount - 1, current + 1))}
-              type="button"
-            >
-              <ChevronRight className="size-4" />
-            </button>
-          </div>
-        </div>
-      ) : null}
+      <div className="mt-2 flex items-center justify-between gap-3 pb-1 pr-20 text-xs font-bold text-slate-600">
+        <span>
+          Showing {Math.min(visibleCount, rows.length).toLocaleString("en-IN")} of {rows.length.toLocaleString("en-IN")} rows
+        </span>
+        {hasMoreRows ? (
+          <button
+            className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 transition hover:bg-slate-50"
+            onClick={showMoreRows}
+            type="button"
+          >
+            <ChevronDown className="size-4" />
+            Show {Math.min(rowsPerBatch, rows.length - visibleCount).toLocaleString("en-IN")} more
+          </button>
+        ) : null}
+      </div>
       <ViewOnlyAccessDialog onClose={() => setIsViewOnlyDialogOpen(false)} open={isViewOnlyDialogOpen} />
       {isAddDialogOpen ? (
         <AddEntryDialog columns={activeSheet.columns} onClose={() => setIsAddDialogOpen(false)} onSubmit={addEntry} />
