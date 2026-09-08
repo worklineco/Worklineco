@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, FileSpreadsheet, Filter, Search, UsersRound, X } from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, FileSpreadsheet, Filter, Plus, Search, UsersRound, X } from "lucide-react";
 import { memo, useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { ViewOnlyAccessDialog } from "@/components/shared/view-only-access-dialog";
@@ -17,6 +17,7 @@ type ColumnValueFilters = Record<number, string[]>;
 type ColumnFilterOption = { key: string; label: string };
 type FilterMenuPosition = { left: number; listMaxHeight: number; top: number };
 type StoredOverride = { column?: string; row_key?: string; value?: string };
+type StoredRow = { row_key?: string; values?: Record<string, string> };
 type EditingCell = { column: string; columnIndex: number; original: string; rowKey: string; value: string };
 
 const columnFilterOptionLimit = 1000;
@@ -184,6 +185,7 @@ export function GstrNineNineCRegister({ workbook }: { workbook: GstrWorkbookData
   const [editing, setEditing] = useState<EditingCell | null>(null);
   const [message, setMessage] = useState("");
   const [isViewOnlyDialogOpen, setIsViewOnlyDialogOpen] = useState(false);
+  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [pageIndex, setPageIndex] = useState(0);
 
   const activeSheet = useMemo(() => ({ ...preparedSheet, rows: sourceRows }), [preparedSheet, sourceRows]);
@@ -241,7 +243,7 @@ export function GstrNineNineCRegister({ workbook }: { workbook: GstrWorkbookData
   useEffect(() => {
     let active = true;
     void fetch("/api/gstr-9-9c", { cache: "no-store" })
-      .then(async (response) => ({ ok: response.ok, result: await response.json() as { error?: string; overrides?: StoredOverride[] } }))
+      .then(async (response) => ({ ok: response.ok, result: await response.json() as { error?: string; overrides?: StoredOverride[]; rows?: StoredRow[] } }))
       .then(({ ok, result }) => {
         if (!active) return;
         if (!ok) {
@@ -249,7 +251,10 @@ export function GstrNineNineCRegister({ workbook }: { workbook: GstrWorkbookData
           return;
         }
         const overrides = new Map((result.overrides ?? []).map((item) => [`${item.row_key}|${item.column}`, item.value ?? ""]));
-        setSourceRows(preparedSheet.rows.map((row) => {
+        const addedRows: CellValue[][] = (result.rows ?? [])
+          .filter((item) => item.row_key)
+          .map((item) => [...preparedSheet.columns.map((column) => item.values?.[column] ?? ""), String(item.row_key)]);
+        setSourceRows([...addedRows, ...preparedSheet.rows].map((row) => {
           const next = [...row];
           const rowKey = String(row[preparedSheet.columns.length] ?? "");
           preparedSheet.columns.forEach((column, columnIndex) => {
@@ -394,6 +399,29 @@ export function GstrNineNineCRegister({ workbook }: { workbook: GstrWorkbookData
 
   const cancelEdit = useCallback(() => setEditing(null), []);
 
+  function openAddDialog() {
+    if (!canEditRegisterRef.current) {
+      setIsViewOnlyDialogOpen(true);
+      return;
+    }
+    setIsAddDialogOpen(true);
+  }
+
+  async function addEntry(values: Record<string, string>) {
+    const response = await fetch("/api/gstr-9-9c", {
+      body: JSON.stringify({ values }),
+      headers: { "Content-Type": "application/json" },
+      method: "PUT"
+    });
+    const result = await response.json().catch(() => ({})) as { error?: string; row?: StoredRow };
+    if (!response.ok || !result.row?.row_key) throw new Error(result.error ?? "Could not add this entry.");
+    const saved = result.row;
+    setSourceRows((current) => [[...activeSheet.columns.map((column) => saved.values?.[column] ?? ""), String(saved.row_key)], ...current]);
+    setMessage(`Added ${saved.values?.["Client Name"] ?? "entry"}.`);
+    resetAll();
+    setPageIndex(0);
+  }
+
   const saveCell = useCallback(async (edit: EditingCell) => {
     setEditing(null);
     if (edit.value === edit.original) return;
@@ -432,6 +460,14 @@ export function GstrNineNineCRegister({ workbook }: { workbook: GstrWorkbookData
               ? `${rows.length.toLocaleString("en-IN")} / ${activeSheet.rows.length.toLocaleString("en-IN")} rows`
               : `${rows.length.toLocaleString("en-IN")} rows`}
           </span>
+          <button
+            className="inline-flex h-10 items-center gap-1.5 rounded-lg bg-navy-700 px-3 text-sm font-black text-white transition hover:bg-navy-800"
+            onClick={openAddDialog}
+            type="button"
+          >
+            <Plus className="size-4" />
+            Add entry
+          </button>
           {hasActiveFilters ? (
             <button
               className="inline-flex h-10 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold text-slate-600 transition hover:bg-slate-50"
@@ -542,7 +578,108 @@ export function GstrNineNineCRegister({ workbook }: { workbook: GstrWorkbookData
         </div>
       ) : null}
       <ViewOnlyAccessDialog onClose={() => setIsViewOnlyDialogOpen(false)} open={isViewOnlyDialogOpen} />
+      {isAddDialogOpen ? (
+        <AddEntryDialog columns={activeSheet.columns} onClose={() => setIsAddDialogOpen(false)} onSubmit={addEntry} />
+      ) : null}
     </section>
+  );
+}
+
+function AddEntryDialog({
+  columns,
+  onClose,
+  onSubmit
+}: {
+  columns: string[];
+  onClose: () => void;
+  onSubmit: (values: Record<string, string>) => Promise<void>;
+}) {
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [error, setError] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+  const inputClassName = "h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-900 outline-none focus:border-navy-400 focus:ring-2 focus:ring-navy-100";
+
+  useEffect(() => {
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [onClose]);
+
+  function setValue(column: string, value: string) {
+    setValues((current) => ({ ...current, [column]: value }));
+  }
+
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!String(values["Client Name"] ?? "").trim()) {
+      setError("Client Name is required.");
+      return;
+    }
+    setIsSaving(true);
+    setError("");
+    try {
+      await onSubmit(values);
+      onClose();
+    } catch (submitError) {
+      setError(submitError instanceof Error ? submitError.message : "Could not add this entry.");
+      setIsSaving(false);
+    }
+  }
+
+  return (
+    <div aria-labelledby="gstr-add-entry-title" aria-modal="true" className="fixed inset-0 z-[100] flex items-center justify-center bg-navy-950/35 p-4 backdrop-blur-[2px]" role="dialog">
+      <button aria-label="Close add entry form" className="absolute inset-0 cursor-default" onClick={onClose} type="button" />
+      <form className="relative flex max-h-[90vh] w-full max-w-2xl flex-col rounded-2xl border border-slate-200 bg-white shadow-2xl" onSubmit={handleSubmit}>
+        <div className="flex items-start justify-between border-b border-slate-200 px-5 py-4">
+          <div>
+            <h2 className="text-lg font-black text-slate-950" id="gstr-add-entry-title">Add entry</h2>
+            <p className="mt-1 text-xs font-semibold text-slate-500">New rows are saved to the GSTR - 9 9C sheet for everyone.</p>
+          </div>
+          <button aria-label="Close" className="inline-flex size-8 items-center justify-center rounded-md text-slate-500 transition hover:bg-slate-100 hover:text-slate-900" onClick={onClose} type="button">
+            <X className="size-4" />
+          </button>
+        </div>
+
+        <div className="grid flex-1 gap-3 overflow-y-auto px-5 py-4 sm:grid-cols-2">
+          {columns.map((column) => (
+            <label className={`flex flex-col gap-1 text-xs font-black uppercase tracking-wide text-slate-600 ${column === "Remarks" ? "sm:col-span-2" : ""}`} key={column}>
+              <span>
+                {column}
+                {column === "Client Name" ? <span className="ml-1 text-rose-600">*</span> : null}
+              </span>
+              {column === "Status" ? (
+                <select className={inputClassName} onChange={(event) => setValue(column, event.target.value)} value={values[column] ?? ""}>
+                  <option value="">Select status</option>
+                  {statusOptions.map((option) => <option key={option} value={option}>{option}</option>)}
+                </select>
+              ) : (
+                <input
+                  autoFocus={column === "Client Name"}
+                  className={inputClassName}
+                  onChange={(event) => setValue(column, event.target.value)}
+                  type={column === "Target Date" ? "date" : "text"}
+                  value={values[column] ?? ""}
+                />
+              )}
+            </label>
+          ))}
+        </div>
+
+        <div className="flex items-center justify-between gap-3 border-t border-slate-200 px-5 py-4">
+          <p className="text-xs font-bold text-rose-600">{error}</p>
+          <div className="flex gap-2">
+            <button className="inline-flex h-10 items-center justify-center rounded-lg border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-50" onClick={onClose} type="button">
+              Cancel
+            </button>
+            <button className="inline-flex h-10 items-center justify-center rounded-lg bg-navy-700 px-4 text-sm font-black text-white transition hover:bg-navy-800 disabled:cursor-not-allowed disabled:opacity-60" disabled={isSaving} type="submit">
+              {isSaving ? "Saving..." : "Save entry"}
+            </button>
+          </div>
+        </div>
+      </form>
+    </div>
   );
 }
 

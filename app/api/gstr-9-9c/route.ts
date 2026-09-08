@@ -6,9 +6,12 @@ import { isViewOnlyRegisterUser, viewOnlyRegisterResponse } from "@/lib/register
 
 type CookieToSet = { name: string; options: CookieOptions; value: string };
 type StoredOverride = { column?: string; row_key?: string; source?: string; value?: string };
+type StoredRow = { row_key?: string; source?: string; values?: Record<string, string> };
 
 const defaultOrganisationCode = "DCO1433";
 const sourceKey = "gstr_9_9c_override";
+const rowSourceKey = "gstr_9_9c_row";
+const rowKeyPattern = /^(row-\d+|new-[a-z0-9-]+)$/;
 const allowedColumns = new Set([
   "Group",
   "GSTIN",
@@ -32,16 +35,26 @@ export async function GET() {
   const organisation = await getOrganisationId(admin, auth.user);
   if ("error" in organisation) return organisation.error;
 
-  const { data, error } = await admin
-    .from("clients")
-    .select("custom_values")
-    .eq("organisation_id", organisation.organisationId)
-    .eq("custom_values->>source", sourceKey);
+  const [overrideResult, rowResult] = await Promise.all([
+    admin
+      .from("clients")
+      .select("custom_values")
+      .eq("organisation_id", organisation.organisationId)
+      .eq("custom_values->>source", sourceKey),
+    admin
+      .from("clients")
+      .select("custom_values, created_at")
+      .eq("organisation_id", organisation.organisationId)
+      .eq("custom_values->>source", rowSourceKey)
+      .order("created_at", { ascending: false })
+  ]);
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (overrideResult.error) return NextResponse.json({ error: overrideResult.error.message }, { status: 500 });
+  if (rowResult.error) return NextResponse.json({ error: rowResult.error.message }, { status: 500 });
 
-  const overrides = (data ?? []).map((item) => item.custom_values as StoredOverride).filter(Boolean);
-  return NextResponse.json({ overrides });
+  const overrides = (overrideResult.data ?? []).map((item) => item.custom_values as StoredOverride).filter(Boolean);
+  const rows = (rowResult.data ?? []).map((item) => item.custom_values as StoredRow).filter((item) => item?.row_key);
+  return NextResponse.json({ overrides, rows });
 }
 
 export async function POST(request: Request) {
@@ -54,7 +67,7 @@ export async function POST(request: Request) {
   const rowKey = String(payload.rowKey ?? "").trim();
   const value = String(payload.value ?? "").trim();
 
-  if (!allowedColumns.has(column) || !/^row-\d+$/.test(rowKey)) {
+  if (!allowedColumns.has(column) || !rowKeyPattern.test(rowKey)) {
     return NextResponse.json({ error: "Invalid GSTR - 9 9C cell." }, { status: 400 });
   }
 
@@ -85,6 +98,40 @@ export async function POST(request: Request) {
 
   if (saved.error) return NextResponse.json({ error: saved.error.message }, { status: 500 });
   return NextResponse.json({ override: customValues });
+}
+
+export async function PUT(request: Request) {
+  const auth = await requireUser();
+  if ("error" in auth) return auth.error;
+  if (isViewOnlyRegisterUser(auth.user)) return viewOnlyRegisterResponse("GSTR - 9 9C");
+
+  const payload = (await request.json()) as { values?: unknown };
+  const rawValues = payload.values && typeof payload.values === "object" ? (payload.values as Record<string, unknown>) : {};
+  const values: Record<string, string> = {};
+  for (const column of allowedColumns) {
+    const value = String(rawValues[column] ?? "").trim();
+    if (value) values[column] = value;
+  }
+
+  if (!values["Client Name"]) {
+    return NextResponse.json({ error: "Client Name is required." }, { status: 400 });
+  }
+
+  const admin = createAdminClient();
+  const organisation = await getOrganisationId(admin, auth.user);
+  if ("error" in organisation) return organisation.error;
+
+  const rowKey = `new-${crypto.randomUUID()}`;
+  const customValues: StoredRow = { row_key: rowKey, source: rowSourceKey, values };
+  const saved = await admin.from("clients").insert({
+    created_by: auth.user.id,
+    custom_values: customValues,
+    name: `${rowKey}: ${values["Client Name"]}`,
+    organisation_id: organisation.organisationId
+  });
+
+  if (saved.error) return NextResponse.json({ error: saved.error.message }, { status: 500 });
+  return NextResponse.json({ row: customValues });
 }
 
 function createAdminClient() {
