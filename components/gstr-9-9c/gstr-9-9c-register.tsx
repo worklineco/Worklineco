@@ -4,6 +4,7 @@ import { ArrowDown, ArrowUp, FileSpreadsheet, Filter, Search, UsersRound, X } fr
 import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { ViewOnlyAccessDialog } from "@/components/shared/view-only-access-dialog";
+import allocationData from "@/lib/data/gstr-9-9c-allocations-25-26.json";
 import { useRegisterEditAccess } from "@/lib/use-register-access";
 
 type CellValue = string | number | boolean;
@@ -63,7 +64,12 @@ function prepareFirstSheet(workbook: GstrWorkbookData): WorkbookSheet {
   const sourceColumns = source?.columns ?? [];
   const gstinByClientState = new Map<string, string>();
   const gstinsByClient = new Map<string, Set<string>>();
-  const allocationByClientState = new Map<string, { allocation: CellValue; team: CellValue }>();
+  const allocationByClientState = new Map<string, { allocation: CellValue; team: CellValue }>(
+    Object.entries(allocationData as unknown as Record<string, [string, string]>).map(([key, [allocation, team]]) => [
+      key,
+      { allocation, team }
+    ])
+  );
 
   const allocationSheet = workbook.sheets.find((sheet) =>
     sheet.columns.includes("Allocation for FY 2025-26") && sheet.columns.includes("Team Allocation")
