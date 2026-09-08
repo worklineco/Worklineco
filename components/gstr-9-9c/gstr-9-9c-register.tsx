@@ -22,6 +22,7 @@ const columnFilterOptionLimit = 1000;
 const blankColumnFilterValue = "__workline_column_blank__";
 const removedColumns = new Set(["Allocation for FY 2023-24", "EM Allocation", "ORMP"]);
 const renamedColumns: Record<string, string> = {
+  "Allocation for FY 2024-25": "Allocation for FY 2025-26",
   "GSTR 9": "Whether GSTR-9 applicable",
   "GSTR 9C - Whether Applicable": "Whether GSTR-9C applicable"
 };
@@ -62,6 +63,23 @@ function prepareFirstSheet(workbook: GstrWorkbookData): WorkbookSheet {
   const sourceColumns = source?.columns ?? [];
   const gstinByClientState = new Map<string, string>();
   const gstinsByClient = new Map<string, Set<string>>();
+  const allocationByClientState = new Map<string, { allocation: CellValue; team: CellValue }>();
+
+  const allocationSheet = workbook.sheets.find((sheet) =>
+    sheet.columns.includes("Allocation for FY 2025-26") && sheet.columns.includes("Team Allocation")
+  );
+  if (allocationSheet) {
+    const clientIndex = allocationSheet.columns.indexOf("Client Name");
+    const stateIndex = allocationSheet.columns.indexOf("State");
+    const allocationIndex = allocationSheet.columns.indexOf("Allocation for FY 2025-26");
+    const teamIndex = allocationSheet.columns.indexOf("Team Allocation");
+    for (const row of allocationSheet.rows) {
+      allocationByClientState.set(`${normalizeKey(row[clientIndex])}|${normalizeKey(row[stateIndex])}`, {
+        allocation: row[allocationIndex] ?? "",
+        team: row[teamIndex] ?? ""
+      });
+    }
+  }
 
   for (const sheet of workbook.sheets.slice(1)) {
     const clientIndex = sheet.columns.findIndex((column) => normalizeKey(column) === "clientname");
@@ -84,15 +102,18 @@ function prepareFirstSheet(workbook: GstrWorkbookData): WorkbookSheet {
   const columns = retainedIndexes.map(({ column }) => renamedColumns[column] ?? column);
   const clientPosition = Math.max(0, columns.indexOf("Client Name"));
   columns.splice(clientPosition, 0, "GSTIN");
-  const allocationPosition = columns.indexOf("Allocation for FY 2024-25");
-  columns.splice(allocationPosition >= 0 ? allocationPosition + 1 : columns.length, 0, "Resource Name", "Target Date", "Status");
+  const allocationPosition = columns.indexOf("Allocation for FY 2025-26");
+  columns.splice(allocationPosition >= 0 ? allocationPosition + 1 : columns.length, 0, "Team Allocation", "Resource Name", "Target Date", "Status");
 
   const rows = (source?.rows ?? []).map((sourceRow, rowIndex) => {
     const record = new Map(retainedIndexes.map(({ column, index }) => [renamedColumns[column] ?? column, sourceRow[index] ?? ""]));
     const clientKey = normalizeKey(record.get("Client Name"));
     const stateKey = normalizeKey(record.get("State"));
     const clientGstins = gstinsByClient.get(clientKey);
+    const allocation = allocationByClientState.get(`${clientKey}|${stateKey}`);
     record.set("GSTIN", gstinByClientState.get(`${clientKey}|${stateKey}`) ?? (clientGstins?.size === 1 ? Array.from(clientGstins)[0] : ""));
+    record.set("Allocation for FY 2025-26", allocation?.allocation ?? "");
+    record.set("Team Allocation", allocation?.team ?? "");
     record.set("Resource Name", "");
     record.set("Target Date", "");
     record.set("Status", "");
