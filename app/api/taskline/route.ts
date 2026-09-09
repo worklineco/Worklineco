@@ -79,17 +79,88 @@ function overviewCacheKey(organisationId: string, access: AccessScope) {
   return `${organisationId}|${access.canViewAll ? "all" : access.team}`;
 }
 
+const overviewTaskFields = ["register_key", "team", "task_code", "name", "resource", "entity_group", "entity", "state_name", "gstin", "task", "due_date", "stage", "status_open_close", "remarks", "document_link"];
+const overviewTaskSelect = [
+  "id",
+  "workline_module:custom_values->>workline_module",
+  ...overviewTaskFields.map((field) => `${field}:custom_values->taskline_data->>${field}`)
+].join(",");
+type LeanOverviewRow = { id: string; workline_module: string | null } & Record<string, string | null>;
+
+function leanRowToTaskRecord(row: LeanOverviewRow): TaskRecord {
+  const tasklineData: TaskLineRow = {};
+  for (const field of overviewTaskFields) {
+    tasklineData[field] = text(row[field]);
+  }
+  return {
+    created_at: "",
+    created_by: null,
+    custom_values: { taskline_data: tasklineData, workline_module: row.workline_module ?? undefined },
+    description: null,
+    due_at: null,
+    id: row.id,
+    organisation_id: "",
+    title: "",
+    updated_at: ""
+  };
+}
+
+function overviewTaskQuery(admin: ReturnType<typeof createAdminClient>, organisationId: string, access: AccessScope) {
+  let query = admin
+    .from("tasks")
+    .select(overviewTaskSelect)
+    .eq("organisation_id", organisationId)
+    .in("custom_values->>workline_module", modulesForRegister("all"))
+    .order("created_at", { ascending: true });
+  if (!access.canViewAll) {
+    const teamValues = taskLineTeamVariants(access.team);
+    query = teamValues.length ? query.in("custom_values->taskline_data->>team", teamValues) : query.eq("id", "00000000-0000-0000-0000-000000000000");
+  }
+  return query;
+}
+
+async function loadOverviewFirstPage(admin: ReturnType<typeof createAdminClient>, organisationId: string, access: AccessScope, limit: number) {
+  const { data, error } = await overviewTaskQuery(admin, organisationId, access).range(0, limit - 1);
+  if (error) {
+    return { error, rows: null };
+  }
+  const rows = ((data ?? []) as unknown as LeanOverviewRow[])
+    .map(leanRowToTaskRecord)
+    .filter((record) => isRegisterRecord(record, "all") && canAccessRecord(record, access))
+    .map(formatRecord)
+    .map(trimToOverviewRow);
+  return { error: null, rows };
+}
+
 async function loadOverviewRows(admin: ReturnType<typeof createAdminClient>, organisationId: string, access: AccessScope) {
   const key = overviewCacheKey(organisationId, access);
   const cached = overviewCache.get(key);
   if (cached && cached.expiresAt > Date.now()) {
     return { error: null, rows: cached.rows };
   }
-  const records = await loadTaskLineRecords(admin, organisationId, access, "all");
-  if (records.error) {
-    return { error: records.error, rows: null };
+
+  console.time("taskline:overview:load");
+  const gstatPromise = loadGstatRecordsForOverview(admin, access);
+  const taskRecords: TaskRecord[] = [];
+  const pageSize = 1000;
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await overviewTaskQuery(admin, organisationId, access).range(from, from + pageSize - 1);
+    if (error) {
+      return { error, rows: null };
+    }
+    const batch = ((data ?? []) as unknown as LeanOverviewRow[]).map(leanRowToTaskRecord);
+    taskRecords.push(...batch.filter((record) => isRegisterRecord(record, "all") && canAccessRecord(record, access)));
+    if (batch.length < pageSize) {
+      break;
+    }
   }
-  const rows = (records.data ?? []).map(formatRecord).map(trimToOverviewRow);
+  const gstatRecords = await gstatPromise;
+  if (gstatRecords.error) {
+    return { error: gstatRecords.error, rows: null };
+  }
+  console.timeEnd("taskline:overview:load");
+
+  const rows = [...taskRecords, ...(gstatRecords.data ?? [])].map(formatRecord).map(trimToOverviewRow);
   overviewCache.set(key, { expiresAt: Date.now() + overviewCacheTtlMs, rows });
   return { error: null, rows };
 }
@@ -239,6 +310,14 @@ export async function GET(request: Request) {
     const offset = Math.max(0, Number.parseInt(searchParams.get("offset") ?? "0", 10) || 0);
     const limit = Math.min(requestedLimit, maxTaskLineWindowSize);
     const query = parseTaskLineQuery(searchParams);
+
+    if (registerKey === "all" && !hasTaskLineQuery(query) && offset === 0) {
+      const firstPage = await loadOverviewFirstPage(admin, organisation.organisationId, access, limit);
+      if (firstPage.error) {
+        return NextResponse.json({ error: firstPage.error.message }, { status: 500 });
+      }
+      return NextResponse.json({ limit, offset, partial: true, rows: firstPage.rows ?? [], total: (firstPage.rows ?? []).length });
+    }
 
     if (hasTaskLineQuery(query) || registerKey === "all") {
       let sourceRows: TaskLineRow[];
