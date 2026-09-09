@@ -63,6 +63,36 @@ type RegisterKey = "all" | "cestat" | "high_court" | "non_litigation" | "tasklin
 const registerKeys = new Set<RegisterKey>(["taskline", "high_court", "cestat", "non_litigation", "all"]);
 const combinedRegisterKeys: Exclude<RegisterKey, "all">[] = ["taskline", "non_litigation", "cestat", "high_court"];
 const gstatModuleKey = "gstat";
+const overviewColumns = ["__id", "register_name", "team", "task_code", "name", "resource", "entity_group", "entity", "state_name", "gstin", "task", "due_date", "stage", "status_open_close", "remarks", "document_link"];
+const overviewCacheTtlMs = 60_000;
+const overviewCache = new Map<string, { expiresAt: number; rows: TaskLineRow[] }>();
+
+function trimToOverviewRow(row: TaskLineRow): TaskLineRow {
+  const trimmed: TaskLineRow = {};
+  for (const key of overviewColumns) {
+    trimmed[key] = row[key] ?? "";
+  }
+  return trimmed;
+}
+
+function overviewCacheKey(organisationId: string, access: AccessScope) {
+  return `${organisationId}|${access.canViewAll ? "all" : access.team}`;
+}
+
+async function loadOverviewRows(admin: ReturnType<typeof createAdminClient>, organisationId: string, access: AccessScope) {
+  const key = overviewCacheKey(organisationId, access);
+  const cached = overviewCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) {
+    return { error: null, rows: cached.rows };
+  }
+  const records = await loadTaskLineRecords(admin, organisationId, access, "all");
+  if (records.error) {
+    return { error: records.error, rows: null };
+  }
+  const rows = (records.data ?? []).map(formatRecord).map(trimToOverviewRow);
+  overviewCache.set(key, { expiresAt: Date.now() + overviewCacheTtlMs, rows });
+  return { error: null, rows };
+}
 const gstatOrganisationCode = "DCO1433";
 const registerLabels: Record<string, string> = {
   cestat: "CESTAT",
@@ -211,13 +241,22 @@ export async function GET(request: Request) {
     const query = parseTaskLineQuery(searchParams);
 
     if (hasTaskLineQuery(query) || registerKey === "all") {
-      const records = await loadTaskLineRecords(admin, organisation.organisationId, access, registerKey);
-
-      if (records.error) {
-        return NextResponse.json({ error: records.error.message }, { status: 500 });
+      let sourceRows: TaskLineRow[];
+      if (registerKey === "all") {
+        const overview = await loadOverviewRows(admin, organisation.organisationId, access);
+        if (overview.error) {
+          return NextResponse.json({ error: overview.error.message }, { status: 500 });
+        }
+        sourceRows = overview.rows ?? [];
+      } else {
+        const records = await loadTaskLineRecords(admin, organisation.organisationId, access, registerKey);
+        if (records.error) {
+          return NextResponse.json({ error: records.error.message }, { status: 500 });
+        }
+        sourceRows = (records.data ?? []).map(formatRecord);
       }
 
-      const matchingRows = filterAndSortTaskLineRows((records.data ?? []).map(formatRecord), query);
+      const matchingRows = filterAndSortTaskLineRows(sourceRows, query);
       return NextResponse.json({
         limit,
         offset,
@@ -238,6 +277,14 @@ export async function GET(request: Request) {
       rows: (records.data ?? []).map(formatRecord),
       total: records.count ?? 0
     });
+  }
+
+  if (registerKey === "all") {
+    const overview = await loadOverviewRows(admin, organisation.organisationId, access);
+    if (overview.error) {
+      return NextResponse.json({ error: overview.error.message }, { status: 500 });
+    }
+    return NextResponse.json({ rows: overview.rows ?? [] });
   }
 
   const records = await loadTaskLineRecords(admin, organisation.organisationId, access, registerKey);
@@ -1175,6 +1222,7 @@ async function loadTaskLineRecords(admin: ReturnType<typeof createAdminClient>, 
   const batchCount = Math.max(1, Math.ceil(total / fetchBatchSize));
 
   console.time(`taskline:loadRecords:fetch(${total} rows, ${batchCount} batches)`);
+  const gstatPromise = registerKey === "all" ? loadGstatRecordsForOverview(admin, access) : null;
   const batchResults = await Promise.all(
     Array.from({ length: batchCount }, (_, index) => {
       const from = index * fetchBatchSize;
@@ -1197,8 +1245,8 @@ async function loadTaskLineRecords(admin: ReturnType<typeof createAdminClient>, 
     rows.push(...((data ?? []) as TaskRecord[]).filter((record) => isRegisterRecord(record, registerKey) && canAccessRecord(record, access)));
   }
 
-  if (registerKey === "all") {
-    const gstatRecords = await loadGstatRecordsForOverview(admin, access);
+  if (gstatPromise) {
+    const gstatRecords = await gstatPromise;
     if (gstatRecords.error) {
       return { data: null, error: gstatRecords.error };
     }
