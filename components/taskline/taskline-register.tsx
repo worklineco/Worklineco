@@ -103,7 +103,7 @@ const actionColumnWidth = 92;
 const actionColumnKey = "__actions";
 const taskLineColumns: TaskLineColumn[] = [
   { key: "team", label: "Team", width: 96 },
-  { key: "task_code", label: "Task Code", width: 150 },
+  { key: "task_code", label: "Task Code", width: 176 },
   { key: "name", label: "Name", width: 150 },
   { key: "resource", label: "Resource", width: 140 },
   { key: "entity_group", label: "Entity Group", width: 150 },
@@ -2571,7 +2571,7 @@ const TaskLineCell = memo(function TaskLineCell({
   if (column.key === "task_code") {
     return (
       <td className={`border-r border-slate-100 px-3 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
-        <span className="block h-7 truncate px-1.5 py-1 font-bold text-navy-700">{row[column.key] || serialNumber}</span>
+        <span className="block h-7 whitespace-nowrap px-1.5 py-1 font-bold text-navy-700" title={String(row[column.key] || serialNumber)}>{row[column.key] || serialNumber}</span>
       </td>
     );
   }
