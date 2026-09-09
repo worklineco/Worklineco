@@ -1155,6 +1155,10 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
     }
 
     try {
+      if (isCombinedView) {
+        return await loadOverviewProgressively(requestId, cached?.rows ?? []);
+      }
+
       const response = await fetch(taskLineApiPath, { cache: "no-store" });
       const result = (await response.json()) as { error?: string; rows?: TaskLineRow[] };
 
@@ -1185,6 +1189,65 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
         setIsLoading(false);
       }
     }
+  }
+
+  async function loadOverviewProgressively(requestId: number, fallbackRows: TaskLineRow[]) {
+    const firstPageSize = 200;
+    const chunkSize = 400;
+    const fetchWindow = async (offset: number, limit: number) => {
+      const response = await fetch(taskLineApiQuery(`limit=${limit}&offset=${offset}`), { cache: "no-store" });
+      const result = (await response.json()) as { error?: string; rows?: TaskLineRow[]; total?: number };
+      if (!response.ok) {
+        throw new Error(result.error ?? `Could not load ${registerName}.`);
+      }
+      return { rows: (result.rows ?? []).map(canonicalizeTaskLineRowName), total: result.total ?? 0 };
+    };
+
+    let loadedRows: TaskLineRow[];
+    let total: number;
+    try {
+      const first = await fetchWindow(0, firstPageSize);
+      loadedRows = first.rows;
+      total = first.total;
+    } catch (error) {
+      if (requestId === taskLineRequestIdRef.current) {
+        setMessage(error instanceof Error ? error.message : `Could not load ${registerName}.`);
+      }
+      return fallbackRows;
+    }
+
+    if (requestId !== taskLineRequestIdRef.current) {
+      return loadedRows;
+    }
+
+    setRows(loadedRows);
+    setIsLoading(false);
+    setMessage(total > loadedRows.length ? `Showing first ${loadedRows.length} of ${total} rows, loading the rest...` : "");
+
+    for (let offset = loadedRows.length; offset < total; offset += chunkSize) {
+      try {
+        const chunk = await fetchWindow(offset, chunkSize);
+        if (requestId !== taskLineRequestIdRef.current) {
+          return loadedRows;
+        }
+        loadedRows = [...loadedRows, ...chunk.rows];
+        setRows(loadedRows);
+        if (!chunk.rows.length) {
+          break;
+        }
+      } catch {
+        if (requestId === taskLineRequestIdRef.current) {
+          setMessage(`Loaded ${loadedRows.length} of ${total} rows; some rows could not be loaded.`);
+        }
+        return loadedRows;
+      }
+    }
+
+    if (requestId === taskLineRequestIdRef.current) {
+      setCached(taskLineRowsCacheKey, { rows: loadedRows });
+      setMessage("");
+    }
+    return loadedRows;
   }
 
   async function reloadTaskLine() {
