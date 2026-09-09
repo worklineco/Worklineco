@@ -1155,6 +1155,10 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
     }
 
     try {
+      if (isCombinedView) {
+        return await loadOverviewProgressively(requestId, cached?.rows ?? []);
+      }
+
       const response = await fetch(taskLineApiPath, { cache: "no-store" });
       const result = (await response.json()) as { error?: string; rows?: TaskLineRow[] };
 
@@ -1184,6 +1188,49 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
       if (requestId === taskLineRequestIdRef.current) {
         setIsLoading(false);
       }
+    }
+  }
+
+  async function loadOverviewProgressively(requestId: number, fallbackRows: TaskLineRow[]) {
+    const firstPageSize = 100;
+    const parseRows = async (response: Response) => {
+      const result = (await response.json()) as { error?: string; rows?: TaskLineRow[] };
+      if (!response.ok) {
+        throw new Error(result.error ?? `Could not load ${registerName}.`);
+      }
+      return (result.rows ?? []).map(canonicalizeTaskLineRowName);
+    };
+
+    const fullRequest = fetch(taskLineApiPath, { cache: "no-store" });
+
+    if (!fallbackRows.length) {
+      try {
+        const firstRows = await parseRows(await fetch(taskLineApiQuery(`limit=${firstPageSize}&offset=0`), { cache: "no-store" }));
+        if (requestId !== taskLineRequestIdRef.current) {
+          return firstRows;
+        }
+        setRows(firstRows);
+        setIsLoading(false);
+        setMessage(`Showing first ${firstRows.length} rows, loading the full list...`);
+      } catch {
+        // Fall through to the full load.
+      }
+    }
+
+    try {
+      const allRows = await parseRows(await fullRequest);
+      if (requestId !== taskLineRequestIdRef.current) {
+        return allRows;
+      }
+      setCached(taskLineRowsCacheKey, { rows: allRows });
+      setRows(allRows);
+      setMessage("");
+      return allRows;
+    } catch (error) {
+      if (requestId === taskLineRequestIdRef.current) {
+        setMessage(error instanceof Error ? error.message : `Could not load ${registerName}.`);
+      }
+      return fallbackRows;
     }
   }
 

@@ -62,6 +62,7 @@ const statusSummaryColors = ["#14b8a6", "#0ea5e9", "#a855f7", "#f59e0b", "#ef444
 const baseColumns: Column[] = [
   "Sno",
   "Person handling",
+  "Name",
   "Status",
   "NTBD Reason",
   "Proceedings Status",
@@ -97,7 +98,7 @@ const baseColumns: Column[] = [
   "GSTAT Login ID",
   "GSTAT Login Password",
   "Bill raised"
-].map((label) => ({ key: label, label: label === "Sno" ? "Task Code" : label }));
+].map((label) => ({ key: label, label: label === "Sno" ? "Task Code" : label === "Person handling" ? "Team" : label }));
 
 const groupedColumns = [
   { columns: ["IGST", "CGST", "SGST"], label: "Tax Demand" },
@@ -122,6 +123,7 @@ const defaultColumnWidth = 92;
 const columnWidths: Record<string, number> = {
   "Sno": 120,
   "Person handling": 92,
+  "Name": 160,
   "Status": 96,
   "NTBD Reason": 170,
   "Proceedings Status": 132,
@@ -238,6 +240,7 @@ const editorSections = [
     fields: [
       "Sno",
       "Person handling",
+      "Name",
       "Status",
       "NTBD Reason",
       "Proceedings Status",

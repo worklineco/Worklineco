@@ -63,6 +63,107 @@ type RegisterKey = "all" | "cestat" | "high_court" | "non_litigation" | "tasklin
 const registerKeys = new Set<RegisterKey>(["taskline", "high_court", "cestat", "non_litigation", "all"]);
 const combinedRegisterKeys: Exclude<RegisterKey, "all">[] = ["taskline", "non_litigation", "cestat", "high_court"];
 const gstatModuleKey = "gstat";
+const overviewColumns = ["__id", "register_name", "team", "task_code", "name", "resource", "entity_group", "entity", "state_name", "gstin", "task", "due_date", "stage", "status_open_close", "remarks", "document_link"];
+const overviewCacheTtlMs = 60_000;
+const overviewCache = new Map<string, { expiresAt: number; rows: TaskLineRow[] }>();
+
+function trimToOverviewRow(row: TaskLineRow): TaskLineRow {
+  const trimmed: TaskLineRow = {};
+  for (const key of overviewColumns) {
+    trimmed[key] = row[key] ?? "";
+  }
+  return trimmed;
+}
+
+function overviewCacheKey(organisationId: string, access: AccessScope) {
+  return `${organisationId}|${access.canViewAll ? "all" : access.team}`;
+}
+
+const overviewTaskFields = ["register_key", "team", "task_code", "name", "resource", "entity_group", "entity", "state_name", "gstin", "task", "due_date", "stage", "status_open_close", "remarks", "document_link"];
+const overviewTaskSelect = [
+  "id",
+  "workline_module:custom_values->>workline_module",
+  ...overviewTaskFields.map((field) => `${field}:custom_values->taskline_data->>${field}`)
+].join(",");
+type LeanOverviewRow = { id: string; workline_module: string | null } & Record<string, string | null>;
+
+function leanRowToTaskRecord(row: LeanOverviewRow): TaskRecord {
+  const tasklineData: TaskLineRow = {};
+  for (const field of overviewTaskFields) {
+    tasklineData[field] = text(row[field]);
+  }
+  return {
+    created_at: "",
+    created_by: null,
+    custom_values: { taskline_data: tasklineData, workline_module: row.workline_module ?? undefined },
+    description: null,
+    due_at: null,
+    id: row.id,
+    organisation_id: "",
+    title: "",
+    updated_at: ""
+  };
+}
+
+function overviewTaskQuery(admin: ReturnType<typeof createAdminClient>, organisationId: string, access: AccessScope) {
+  let query = admin
+    .from("tasks")
+    .select(overviewTaskSelect)
+    .eq("organisation_id", organisationId)
+    .in("custom_values->>workline_module", modulesForRegister("all"))
+    .order("created_at", { ascending: true });
+  if (!access.canViewAll) {
+    const teamValues = taskLineTeamVariants(access.team);
+    query = teamValues.length ? query.in("custom_values->taskline_data->>team", teamValues) : query.eq("id", "00000000-0000-0000-0000-000000000000");
+  }
+  return query;
+}
+
+async function loadOverviewFirstPage(admin: ReturnType<typeof createAdminClient>, organisationId: string, access: AccessScope, limit: number) {
+  const { data, error } = await overviewTaskQuery(admin, organisationId, access).range(0, limit - 1);
+  if (error) {
+    return { error, rows: null };
+  }
+  const rows = ((data ?? []) as unknown as LeanOverviewRow[])
+    .map(leanRowToTaskRecord)
+    .filter((record) => isRegisterRecord(record, "all") && canAccessRecord(record, access))
+    .map(formatRecord)
+    .map(trimToOverviewRow);
+  return { error: null, rows };
+}
+
+async function loadOverviewRows(admin: ReturnType<typeof createAdminClient>, organisationId: string, access: AccessScope) {
+  const key = overviewCacheKey(organisationId, access);
+  const cached = overviewCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) {
+    return { error: null, rows: cached.rows };
+  }
+
+  console.time("taskline:overview:load");
+  const gstatPromise = loadGstatRecordsForOverview(admin, access);
+  const taskRecords: TaskRecord[] = [];
+  const pageSize = 1000;
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await overviewTaskQuery(admin, organisationId, access).range(from, from + pageSize - 1);
+    if (error) {
+      return { error, rows: null };
+    }
+    const batch = ((data ?? []) as unknown as LeanOverviewRow[]).map(leanRowToTaskRecord);
+    taskRecords.push(...batch.filter((record) => isRegisterRecord(record, "all") && canAccessRecord(record, access)));
+    if (batch.length < pageSize) {
+      break;
+    }
+  }
+  const gstatRecords = await gstatPromise;
+  if (gstatRecords.error) {
+    return { error: gstatRecords.error, rows: null };
+  }
+  console.timeEnd("taskline:overview:load");
+
+  const rows = [...taskRecords, ...(gstatRecords.data ?? [])].map(formatRecord).map(trimToOverviewRow);
+  overviewCache.set(key, { expiresAt: Date.now() + overviewCacheTtlMs, rows });
+  return { error: null, rows };
+}
 const gstatOrganisationCode = "DCO1433";
 const registerLabels: Record<string, string> = {
   cestat: "CESTAT",
@@ -210,14 +311,31 @@ export async function GET(request: Request) {
     const limit = Math.min(requestedLimit, maxTaskLineWindowSize);
     const query = parseTaskLineQuery(searchParams);
 
-    if (hasTaskLineQuery(query) || registerKey === "all") {
-      const records = await loadTaskLineRecords(admin, organisation.organisationId, access, registerKey);
+    if (registerKey === "all" && !hasTaskLineQuery(query) && offset === 0) {
+      const firstPage = await loadOverviewFirstPage(admin, organisation.organisationId, access, limit);
+      if (firstPage.error) {
+        return NextResponse.json({ error: firstPage.error.message }, { status: 500 });
+      }
+      return NextResponse.json({ limit, offset, partial: true, rows: firstPage.rows ?? [], total: (firstPage.rows ?? []).length });
+    }
 
-      if (records.error) {
-        return NextResponse.json({ error: records.error.message }, { status: 500 });
+    if (hasTaskLineQuery(query) || registerKey === "all") {
+      let sourceRows: TaskLineRow[];
+      if (registerKey === "all") {
+        const overview = await loadOverviewRows(admin, organisation.organisationId, access);
+        if (overview.error) {
+          return NextResponse.json({ error: overview.error.message }, { status: 500 });
+        }
+        sourceRows = overview.rows ?? [];
+      } else {
+        const records = await loadTaskLineRecords(admin, organisation.organisationId, access, registerKey);
+        if (records.error) {
+          return NextResponse.json({ error: records.error.message }, { status: 500 });
+        }
+        sourceRows = (records.data ?? []).map(formatRecord);
       }
 
-      const matchingRows = filterAndSortTaskLineRows((records.data ?? []).map(formatRecord), query);
+      const matchingRows = filterAndSortTaskLineRows(sourceRows, query);
       return NextResponse.json({
         limit,
         offset,
@@ -238,6 +356,14 @@ export async function GET(request: Request) {
       rows: (records.data ?? []).map(formatRecord),
       total: records.count ?? 0
     });
+  }
+
+  if (registerKey === "all") {
+    const overview = await loadOverviewRows(admin, organisation.organisationId, access);
+    if (overview.error) {
+      return NextResponse.json({ error: overview.error.message }, { status: 500 });
+    }
+    return NextResponse.json({ rows: overview.rows ?? [] });
   }
 
   const records = await loadTaskLineRecords(admin, organisation.organisationId, access, registerKey);
@@ -1175,6 +1301,7 @@ async function loadTaskLineRecords(admin: ReturnType<typeof createAdminClient>, 
   const batchCount = Math.max(1, Math.ceil(total / fetchBatchSize));
 
   console.time(`taskline:loadRecords:fetch(${total} rows, ${batchCount} batches)`);
+  const gstatPromise = registerKey === "all" ? loadGstatRecordsForOverview(admin, access) : null;
   const batchResults = await Promise.all(
     Array.from({ length: batchCount }, (_, index) => {
       const from = index * fetchBatchSize;
@@ -1197,8 +1324,8 @@ async function loadTaskLineRecords(admin: ReturnType<typeof createAdminClient>, 
     rows.push(...((data ?? []) as TaskRecord[]).filter((record) => isRegisterRecord(record, registerKey) && canAccessRecord(record, access)));
   }
 
-  if (registerKey === "all") {
-    const gstatRecords = await loadGstatRecordsForOverview(admin, access);
+  if (gstatPromise) {
+    const gstatRecords = await gstatPromise;
     if (gstatRecords.error) {
       return { data: null, error: gstatRecords.error };
     }
@@ -1509,7 +1636,7 @@ function gstatAppealToTaskRecord(row: GstatAppealRow): TaskRecord {
     due_date: gstatText(row, "Due Date"),
     entity: gstatText(row, "Entity Name"),
     entity_group: gstatText(row, "Entity Group"),
-    name: gstatText(row, "Person handling"),
+    name: gstatText(row, "Name"),
     register_key: gstatModuleKey,
     remarks: gstatText(row, "Remark"),
     resource: "",
@@ -1518,7 +1645,7 @@ function gstatAppealToTaskRecord(row: GstatAppealRow): TaskRecord {
     status_open_close: "Open",
     task: "GSTAT Appeal",
     task_code: gstatText(row, "Sno") || text(row.row_number),
-    team: ""
+    team: gstatText(row, "Person handling")
   };
   return {
     created_at: "",
