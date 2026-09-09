@@ -128,7 +128,7 @@ const columnWidths: Record<string, number> = {
   "Bench": 132,
   "Next Hearing Date": 116,
   "Entity Group": 142,
-  "Entity Name": 214,
+  "Entity Name": 320,
   "State Name": 108,
   "Due Date": 112,
   "FY": 96,

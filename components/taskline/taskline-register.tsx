@@ -2,12 +2,12 @@
 
 import { ArrowDown, ArrowUp, Bookmark, CalendarDays, Check, ChevronDown, CircleDot, Star, Download, Filter, History, ListChecks, Menu, Pencil, Pin, Plus, ReceiptText, RotateCcw, Scale, Search, Settings2, Trash2, Upload, Workflow, X } from "lucide-react";
 import Link from "next/link";
-import type { ComponentType } from "react";
+import type { ComponentType, PointerEvent as ReactPointerEvent } from "react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import * as XLSX from "xlsx-js-style";
 import { clearCached, getCached, setCached } from "@/lib/data-cache";
-import { useRegisterEditAccess, viewOnlyRegisterMessage } from "@/lib/use-register-access";
+import { useRegisterEditAccess, viewOnlyRegisterMessage as sharedViewOnlyRegisterMessage } from "@/lib/use-register-access";
 import { ViewOnlyAccessDialog } from "@/components/shared/view-only-access-dialog";
 
 type TaskLineColumn = {
@@ -83,11 +83,10 @@ const taskLineImportMaxAttempts = 3;
 const taskLineImportRequestTimeoutMs = 90_000;
 const taskLineImportRetryDelayMs = 1_000;
 const taskLinePageSize = 200;
-const taskLineRowsCacheKey = "taskline:rows:v4";
 const taskLineColumnGroups: { columns: string[] | null; key: string; label: string }[] = [
-  { key: "core", label: "Core", columns: ["team", "task_code", "name", "resource", "entity_group", "entity", "state_name", "gstin", "task", "due_date", "stage", "status_open_close", "remarks", "document_link"] },
+  { key: "core", label: "Core", columns: ["team", "task_code", "name", "resource", "entity_group", "entity", "state_name", "task", "due_date", "stage", "status_open_close", "remarks", "document_link"] },
   { key: "legal", label: "Legal / Order", columns: ["task_code", "name", "entity", "task", "ref_date", "ref_no", "period", "section", "issue", "refer_other_task", "appeal_no", "order_type", "court_location", "engaged_counsel", "printing", "due_date", "stage"] },
-  { key: "billing", label: "Billing / Fees", columns: ["task_code", "name", "entity", "task", "billable", "billing_status", "total_agreed_fee", "amount_raised", "amount_realised", "counsel_fee", "referral_fee", "fee_comments"] },
+  { key: "billing", label: "Billing / Fees", columns: ["task_code", "name", "entity", "gstin", "task", "billable", "billing_status", "total_agreed_fee", "amount_raised", "amount_realised", "counsel_fee", "referral_fee", "fee_comments"] },
   { key: "all", label: "All", columns: null }
 ];
 
@@ -99,13 +98,17 @@ const taskLineFormSections: { columns: string[]; key: string; label: string }[] 
 ];
 const requiredTaskLineFormKeys: string[] = ["entity_group"];
 const taskLineColumnLayoutStorageKey = "workline:taskline-column-layout:v5";
+const taskLineColumnWidthsStorageKey = "workline:taskline-column-widths:v1";
+const minimumTaskLineColumnWidth = 80;
+const maximumTaskLineColumnWidth = 600;
 const actionColumnWidth = 92;
 const actionColumnKey = "__actions";
 const taskLineColumns: TaskLineColumn[] = [
   { key: "team", label: "Team", width: 96 },
+  { key: "register_name", label: "Register", width: 130 },
   { key: "task_code", label: "Task Code", width: 176 },
-  { key: "name", label: "Name", width: 150 },
-  { key: "resource", label: "Resource", width: 140 },
+  { key: "name", label: "Name", width: 260 },
+  { key: "resource", label: "Resource", width: 260 },
   { key: "entity_group", label: "Entity Group", width: 150 },
   { key: "entity", label: "Entity", width: 240 },
   { key: "state_name", label: "State Name", width: 130 },
@@ -140,6 +143,8 @@ const taskLineColumns: TaskLineColumn[] = [
 ];
 
 const taskLineColumnByKey = new Map(taskLineColumns.map((column) => [column.key, column]));
+const importTaskLineColumns = taskLineColumns.filter((column) => column.key !== "register_name");
+const combinedRegisterReadOnlyMessage = "The TaskLine overview is read-only. Open Litigation, Non-Litigation, GSTAT, CESTAT or High Court to add or edit rows.";
 const taskLineFormColumnByKey = new Map<string, TaskLineColumn>([
   ...taskLineColumns.map((column) => [column.key, column] as [string, TaskLineColumn]),
   ["gstat_task_code", { key: "gstat_task_code", label: "GSTAT Task Code", width: 150 }]
@@ -194,18 +199,29 @@ function normalizePersonName(value: unknown) {
   return parts.join(" ");
 }
 
+function canonicalTaskLineName(value: unknown) {
+  const current = String(value ?? "").trim();
+  return normalizePersonName(current) === "shuchi sethi" ? "Shuchi Sethi" : current;
+}
+
+function canonicalizeTaskLineRowName(row: TaskLineRow): TaskLineRow {
+  const canonicalName = canonicalTaskLineName(row.name);
+  return canonicalName === row.name ? row : { ...row, name: canonicalName };
+}
+
 // Map a stored cell value to the canonical member option it matches (by
 // normalised name), so an older stored name renders as the real member instead
 // of showing up as a separate duplicate entry in the dropdown.
 function resolvePersonOption(current: string, options: readonly string[]) {
-  if (!current || options.includes(current)) {
-    return current;
+  const canonicalCurrent = canonicalTaskLineName(current);
+  if (!canonicalCurrent || options.includes(canonicalCurrent)) {
+    return canonicalCurrent;
   }
-  const key = normalizePersonName(current);
+  const key = normalizePersonName(canonicalCurrent);
   if (!key) {
-    return current;
+    return canonicalCurrent;
   }
-  return options.find((option) => normalizePersonName(option) === key) ?? current;
+  return options.find((option) => normalizePersonName(option) === key) ?? canonicalCurrent;
 }
 
 function taskLineMemberLeavingDate(designation: string, joiningDate: string): string {
@@ -236,8 +252,25 @@ function isPartnerDesignation(value: string) {
 }
 const defaultRows = Array.from({ length: 8 }, (_, index) => createEmptyRow(`initial-${index + 1}`));
 
-export function TaskLineRegister() {
-  const { canEditRegisterRef } = useRegisterEditAccess();
+type TaskLineRegisterProps = {
+  registerKey?: "all" | "cestat" | "high_court" | "non_litigation" | "taskline";
+  registerName?: string;
+};
+
+export function TaskLineRegister({ registerKey = "taskline", registerName = "TaskLine" }: TaskLineRegisterProps) {
+  const isCombinedView = registerKey === "all";
+  const hiddenColumnGroupKeys = useMemo(
+    () => new Set(isCombinedView ? ["legal", "billing", "all"] : registerKey === "non_litigation" ? ["legal"] : []),
+    [isCombinedView, registerKey]
+  );
+  const visibleColumnGroups = useMemo(() => taskLineColumnGroups.filter((group) => !hiddenColumnGroupKeys.has(group.key)), [hiddenColumnGroupKeys]);
+  const taskLineRowsCacheKey = `${registerKey}:rows:v1`;
+  const taskLineApiPath = `/api/taskline?register=${encodeURIComponent(registerKey)}`;
+  const taskLineApiQuery = (query: string) => `${taskLineApiPath}&${query}`;
+  const registerAccess = useRegisterEditAccess();
+  const readOnlyRef = useRef(false);
+  const canEditRegisterRef = isCombinedView ? readOnlyRef : registerAccess.canEditRegisterRef;
+  const viewOnlyRegisterMessage = isCombinedView ? combinedRegisterReadOnlyMessage : sharedViewOnlyRegisterMessage;
   const [isViewOnlyDialogOpen, setIsViewOnlyDialogOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
@@ -251,6 +284,7 @@ export function TaskLineRegister() {
   const [filterMenuPos, setFilterMenuPos] = useState<{ left: number; maxHeight: number; top: number } | null>(null);
   const [dueColorFilter, setDueColorFilter] = useState<string[]>([]);
   const [columnOrder, setColumnOrder] = useState(() => getSavedTaskLineColumnLayout().order);
+  const [columnWidths, setColumnWidths] = useState<Record<string, number>>(getSavedTaskLineColumnWidths);
   const [auditLogs, setAuditLogs] = useState<TaskLineAuditLog[]>([]);
   const [isAuditLoading, setIsAuditLoading] = useState(false);
   const [formDraft, setFormDraft] = useState<TaskLineRow | null>(null);
@@ -285,7 +319,10 @@ export function TaskLineRegister() {
   const [stageMasterMessage, setStageMasterMessage] = useState("");
   const [masterKind, setMasterKind] = useState<"stage" | "task">("task");
   const [isMasterSubmenuOpen, setIsMasterSubmenuOpen] = useState(false);
-  const stageMasterNames = useMemo(() => stageMasters.map((master) => master.name), [stageMasters]);
+  const stageMasterNames = useMemo(
+    () => Array.from(new Set([...stageMasters.map((master) => master.name), "Pending for review"])),
+    [stageMasters]
+  );
   const [stageMastersFetched, setStageMastersFetched] = useState(false);
   const stageSeedDoneRef = useRef(false);
   const [teamMembers, setTeamMembers] = useState<TeamMemberLite[]>([]);
@@ -320,7 +357,7 @@ export function TaskLineRegister() {
   const teamNameOptions = useMemo(() => {
     const partners = teamMembers
       .filter((member) => isPartnerDesignation(member.designation) && isTaskLineMemberActive(member))
-      .map((member) => member.name.trim())
+      .map((member) => canonicalTaskLineName(member.name))
       .filter(Boolean);
     const byTeam = new Map<string, string[]>();
     for (const member of teamMembers) {
@@ -329,9 +366,11 @@ export function TaskLineRegister() {
       }
       const key = teamMatchKey(member.team);
       const list = byTeam.get(key) ?? [];
-      list.push(member.name.trim());
+      list.push(canonicalTaskLineName(member.name));
       byTeam.set(key, list);
     }
+    const team03Key = teamMatchKey("Team 03");
+    byTeam.set(team03Key, [...(byTeam.get(team03Key) ?? []), "Sourabh Chhipa", "Mohit Gupta"]);
     const map = new Map<string, string[]>();
     for (const [key, names] of byTeam) {
       map.set(key, Array.from(new Set([...names, ...partners].filter(Boolean))));
@@ -364,16 +403,31 @@ export function TaskLineRegister() {
   );
 
   const orderedColumns = useMemo(
-    () => columnOrder.map((key) => taskLineColumnByKey.get(key)).filter((column): column is TaskLineColumn => Boolean(column)),
-    [columnOrder]
+    () => columnOrder
+      .map((key) => taskLineColumnByKey.get(key))
+      .filter((column): column is TaskLineColumn => Boolean(column))
+      .map((column) => ({ ...column, width: columnWidths[column.key] ?? column.width })),
+    [columnOrder, columnWidths]
   );
   const activeGroupColumnSet = useMemo(() => {
     const group = taskLineColumnGroups.find((item) => item.key === activeColumnGroup);
-    return group?.columns ? new Set(group.columns) : null;
-  }, [activeColumnGroup]);
-  const visibleColumns = useMemo(
-    () => orderedColumns.filter((column) => !hiddenColumnKeys.has(column.key) && (!activeGroupColumnSet || activeGroupColumnSet.has(column.key))),
-    [activeGroupColumnSet, hiddenColumnKeys, orderedColumns]
+    return group?.columns ? new Set(isCombinedView ? ["register_name", ...group.columns] : group.columns) : null;
+  }, [activeColumnGroup, isCombinedView]);
+  const visibleColumns = useMemo(() => {
+    const columns = orderedColumns.filter(
+      (column) =>
+        (column.key !== "register_name" || isCombinedView) &&
+        !hiddenColumnKeys.has(column.key) &&
+        (!activeGroupColumnSet || activeGroupColumnSet.has(column.key))
+    );
+    if (!isCombinedView) return columns;
+    const registerColumn = columns.find((column) => column.key === "register_name");
+    if (!registerColumn) return columns;
+    const rest = columns.filter((column) => column.key !== "register_name");
+    const teamIndex = rest.findIndex((column) => column.key === "team");
+    rest.splice(teamIndex + 1, 0, registerColumn);
+    return rest;
+  }, [activeGroupColumnSet, hiddenColumnKeys, isCombinedView, orderedColumns]
   );
   const actionColumnHidden = hiddenColumnKeys.has(actionColumnKey);
   const actionColumnFrozen = frozenColumnKeys.has(actionColumnKey);
@@ -392,6 +446,48 @@ export function TaskLineRegister() {
 
   function frozenInfo(key: string) {
     return { isFrozen: frozenColumnKeys.has(key), left: frozenLefts.get(key) ?? 0 };
+  }
+
+  function startColumnResize(event: ReactPointerEvent<HTMLButtonElement>, column: TaskLineColumn) {
+    event.preventDefault();
+    event.stopPropagation();
+    const startX = event.clientX;
+    const startWidth = column.width;
+    let resizedWidth = startWidth;
+
+    function handlePointerMove(pointerEvent: PointerEvent) {
+      resizedWidth = Math.min(
+        maximumTaskLineColumnWidth,
+        Math.max(minimumTaskLineColumnWidth, startWidth + pointerEvent.clientX - startX)
+      );
+      setColumnWidths((current) => ({ ...current, [column.key]: resizedWidth }));
+    }
+
+    function handlePointerUp() {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      setColumnWidths((current) => {
+        const next = { ...current, [column.key]: resizedWidth };
+        saveTaskLineColumnWidths(next);
+        return next;
+      });
+    }
+
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp, { once: true });
+  }
+
+  function resetColumnWidth(column: TaskLineColumn) {
+    setColumnWidths((current) => {
+      const next = { ...current };
+      delete next[column.key];
+      saveTaskLineColumnWidths(next);
+      return next;
+    });
   }
   // Keep Entity Group in sync with Client Records: whenever an entity maps to a
   // group in the current masters, use that group (so editing a client record's
@@ -931,7 +1027,7 @@ export function TaskLineRegister() {
     setStatusFilter(config.statusFilter ?? "");
     setSearch(config.search ?? "");
     setSortState(config.sortState ?? null);
-    if (config.activeColumnGroup) setActiveColumnGroup(config.activeColumnGroup);
+    if (config.activeColumnGroup) setActiveColumnGroup(hiddenColumnGroupKeys.has(config.activeColumnGroup) ? "core" : config.activeColumnGroup);
     if (config.layout) {
       const normalized = normalizeTaskLineColumnLayout(config.layout);
       setColumnOrder(normalized.order);
@@ -1052,19 +1148,19 @@ export function TaskLineRegister() {
     const cached = useCache ? getCached<{ rows?: TaskLineRow[] }>(taskLineRowsCacheKey) : undefined;
 
     if (cached?.rows?.length) {
-      setRows(cached.rows);
+      setRows(cached.rows.map(canonicalizeTaskLineRowName));
       setIsLoading(false);
     } else {
       setIsLoading(true);
     }
 
     try {
-      const response = await fetch("/api/taskline", { cache: "no-store" });
+      const response = await fetch(taskLineApiPath, { cache: "no-store" });
       const result = (await response.json()) as { error?: string; rows?: TaskLineRow[] };
 
       if (!response.ok) {
         if (requestId === taskLineRequestIdRef.current) {
-          setMessage(result.error ?? "Could not load TaskLine.");
+          setMessage(result.error ?? `Could not load ${registerName}.`);
         }
         return cached?.rows ?? [];
       }
@@ -1073,7 +1169,7 @@ export function TaskLineRegister() {
         return result.rows ?? [];
       }
 
-      const nextRows = result.rows ?? [];
+      const nextRows = (result.rows ?? []).map(canonicalizeTaskLineRowName);
       setCached(taskLineRowsCacheKey, { rows: nextRows });
       setRows(nextRows);
       setMessage("");
@@ -1081,7 +1177,7 @@ export function TaskLineRegister() {
     } catch (error) {
       console.error("TaskLine load error:", error);
       if (requestId === taskLineRequestIdRef.current) {
-        setMessage("Could not load TaskLine.");
+        setMessage(`Could not load ${registerName}.`);
       }
       return cached?.rows ?? [];
     } finally {
@@ -1109,7 +1205,7 @@ export function TaskLineRegister() {
 
     setIsAuditLoading(true);
     try {
-      const response = await fetch("/api/taskline?view=audit", { cache: "no-store" });
+      const response = await fetch(taskLineApiQuery("view=audit"), { cache: "no-store" });
       const result = (await response.json()) as { auditLogs?: Array<Record<string, unknown>>; error?: string };
       if (!response.ok) {
         setMessage(result.error ?? "Could not load TaskLine audit trail.");
@@ -1185,7 +1281,7 @@ export function TaskLineRegister() {
     setMessage(editingRowId ? "Saving TaskLine row..." : "Creating TaskLine row...");
 
     try {
-      const response = await fetch("/api/taskline", {
+      const response = await fetch(taskLineApiPath, {
         body: JSON.stringify({ action: "save", record: formDraft }),
         headers: { "Content-Type": "application/json" },
         method: "POST"
@@ -1263,7 +1359,7 @@ export function TaskLineRegister() {
 
   async function saveInlineRow(row: TaskLineRow) {
     try {
-      await fetch("/api/taskline", {
+      await fetch(taskLineApiPath, {
         body: JSON.stringify({ action: "save", record: row }),
         headers: { "Content-Type": "application/json" },
         method: "POST"
@@ -1459,15 +1555,15 @@ export function TaskLineRegister() {
   }
 
   function downloadTemplate() {
-    const templateRow = taskLineColumns.reduce<Record<string, string>>(
+    const templateRow = importTaskLineColumns.reduce<Record<string, string>>(
       (row, column) => {
         row[column.label] = "";
         return row;
       },
       { [importActionColumn]: "Add" }
     );
-    const worksheet = XLSX.utils.json_to_sheet([templateRow], { header: [importActionColumn, ...taskLineColumns.map((column) => column.label)] });
-    worksheet["!cols"] = [importActionColumn, ...taskLineColumns.map((column) => column.label)].map(() => ({ wch: 22 }));
+    const worksheet = XLSX.utils.json_to_sheet([templateRow], { header: [importActionColumn, ...importTaskLineColumns.map((column) => column.label)] });
+    worksheet["!cols"] = [importActionColumn, ...importTaskLineColumns.map((column) => column.label)].map(() => ({ wch: 22 }));
     addImportActionDropdown(worksheet, 500);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "TaskLine Import");
@@ -1483,7 +1579,7 @@ export function TaskLineRegister() {
       sourceRows = fullRowsCacheRef.current;
     } else {
       try {
-        const response = await fetch("/api/taskline?all=1", { cache: "no-store" });
+        const response = await fetch(taskLineApiQuery("all=1"), { cache: "no-store" });
         const result = (await response.json()) as { error?: string; rows?: TaskLineRow[] };
         if (!response.ok) {
           setMessage(result.error ?? "Could not prepare TaskLine export.");
@@ -1518,7 +1614,7 @@ export function TaskLineRegister() {
       valueFilters
     });
     const exportRows = exportSourceRows.map((row, index) =>
-      taskLineColumns.reduce<Record<string, string | number>>(
+      importTaskLineColumns.reduce<Record<string, string | number>>(
         (result, column) => {
           result[column.label] = column.key === "serial_no" ? index + 1 : row[column.key] ?? "";
           return result;
@@ -1527,9 +1623,9 @@ export function TaskLineRegister() {
       )
     );
     const worksheet = XLSX.utils.json_to_sheet(exportRows.length ? exportRows : [blankExportRow()], {
-      header: [importActionColumn, ...taskLineColumns.map((column) => column.label)]
+      header: [importActionColumn, ...importTaskLineColumns.map((column) => column.label)]
     });
-    worksheet["!cols"] = [importActionColumn, ...taskLineColumns.map((column) => column.label)].map(() => ({ wch: 22 }));
+    worksheet["!cols"] = [importActionColumn, ...importTaskLineColumns.map((column) => column.label)].map(() => ({ wch: 22 }));
     addImportActionDropdown(worksheet, Math.max(exportRows.length + 100, 500));
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "TaskLine");
@@ -1576,7 +1672,7 @@ export function TaskLineRegister() {
         let completeRows = fullRowsCacheRef.current;
         if (!completeRows) {
           setMessage(`Resolving TaskLine rows by Task Code before importing ${file.name}...`);
-          const response = await fetch("/api/taskline?all=1", { cache: "no-store" });
+          const response = await fetch(taskLineApiQuery("all=1"), { cache: "no-store" });
           const result = (await response.json()) as { error?: string; rows?: TaskLineRow[] };
           if (!response.ok) {
             setMessage(result.error ?? "Could not resolve TaskLine rows for this import.");
@@ -1661,7 +1757,7 @@ export function TaskLineRegister() {
 
       for (let index = 0; index < batches.length; index += taskLineImportConcurrency) {
         const batchGroup = batches.slice(index, index + taskLineImportConcurrency);
-        const results = await Promise.all(batchGroup.map(postTaskLineImportBatch));
+        const results = await Promise.all(batchGroup.map((batch) => postTaskLineImportBatch(batch, taskLineApiPath)));
         for (let resultIndex = 0; resultIndex < results.length; resultIndex += 1) {
           const result = results[resultIndex];
           summary.added += result.summary?.added ?? 0;
@@ -1935,7 +2031,7 @@ export function TaskLineRegister() {
       {viewMode === "register" ? (
       <div className="mt-3">
         <div className="mb-2 flex flex-wrap gap-1.5">
-          {taskLineColumnGroups.map((group) => (
+          {visibleColumnGroups.map((group) => (
             <button
               className={`inline-flex h-8 items-center rounded-md border px-3 text-xs font-black transition ${
                 activeColumnGroup === group.key
@@ -1951,17 +2047,19 @@ export function TaskLineRegister() {
           ))}
         </div>
         <div className="mb-1.5 flex items-center justify-end gap-1.5">
-          {isLoading ? <span className="mr-auto text-xs font-bold text-slate-500">Loading TaskLine rows...</span> : null}
-          <button
-            className="inline-flex h-8 items-center gap-1 rounded-md border border-navy-700 bg-navy-700 px-3 text-xs font-bold text-white transition hover:bg-navy-800 disabled:cursor-not-allowed disabled:opacity-40"
-            disabled={isLoading}
-            onClick={addRow}
-            title="Add a new TaskLine task"
-            type="button"
-          >
-            <Plus className="size-3.5" />
-            Add Task
-          </button>
+          {isLoading ? <span className="mr-auto text-xs font-bold text-slate-500">Loading {registerName} rows...</span> : null}
+          {isCombinedView ? null : (
+            <button
+              className="inline-flex h-8 items-center gap-1 rounded-md border border-navy-700 bg-navy-700 px-3 text-xs font-bold text-white transition hover:bg-navy-800 disabled:cursor-not-allowed disabled:opacity-40"
+              disabled={isLoading}
+              onClick={addRow}
+              title={`Add a new ${registerName} task`}
+              type="button"
+            >
+              <Plus className="size-3.5" />
+              Add Task
+            </button>
+          )}
           <button
             className="inline-flex h-8 items-center rounded-md border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 transition hover:bg-slate-50 disabled:opacity-40"
             disabled={tablePage <= 1 || isLoading}
@@ -2011,7 +2109,7 @@ export function TaskLineRegister() {
                     key={column.key}
                     style={frozen.isFrozen ? { left: frozen.left } : undefined}
                   >
-                    <div className="flex items-center gap-1">
+                    <div className="relative flex items-center gap-1">
                       <button
                         className="flex min-w-0 flex-1 items-center justify-between gap-1 text-left"
                         onClick={() => toggleSort(column.key)}
@@ -2037,6 +2135,14 @@ export function TaskLineRegister() {
                       >
                         <Filter className="size-3" />
                       </button>
+                      <button
+                        aria-label={`Resize ${column.label} column`}
+                        className="absolute -right-3 -top-2 z-30 h-[42px] w-3 cursor-col-resize touch-none border-r-2 border-slate-300 transition hover:border-navy-500 hover:bg-navy-100/40 focus:border-navy-600 focus:bg-navy-100/40 focus:outline-none"
+                        onDoubleClick={() => resetColumnWidth(column)}
+                        onPointerDown={(event) => startColumnResize(event, column)}
+                        title={`Drag to resize ${column.label}; double-click to reset`}
+                        type="button"
+                      />
                     </div>
                     {openFilterKey === column.key && filterMenuPos ? (
                       <TaskLineFilterMenu
@@ -2192,6 +2298,7 @@ export function TaskLineRegister() {
         <TaskLineForm
           draft={formDraft}
           entityOptions={entityOptions}
+          hiddenSectionKeys={hiddenColumnGroupKeys}
           isEdit={Boolean(editingRowId)}
           onChange={updateFormDraft}
           onClose={() => {
@@ -2390,8 +2497,10 @@ export function TaskLineRegister() {
         </div>
       ) : null}
       <ViewOnlyAccessDialog
+        message={isCombinedView ? combinedRegisterReadOnlyMessage : undefined}
         onClose={() => setIsViewOnlyDialogOpen(false)}
         open={isViewOnlyDialogOpen}
+        title={isCombinedView ? "Read-only overview" : undefined}
       />
 
       {isMasterOpen ? (
@@ -2569,9 +2678,12 @@ const TaskLineCell = memo(function TaskLineCell({
   }
 
   if (column.key === "task_code") {
+    const fullTaskCode = row[column.key] ?? "";
     return (
       <td className={`border-r border-slate-100 px-3 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
-        <span className="block h-7 whitespace-nowrap px-1.5 py-1 font-bold text-navy-700" title={String(row[column.key] || serialNumber)}>{row[column.key] || serialNumber}</span>
+        <span className="block h-7 whitespace-nowrap px-1.5 py-1 font-bold text-navy-700" title={String(fullTaskCode || serialNumber)}>
+          {fullTaskCode || serialNumber}
+        </span>
       </td>
     );
   }
@@ -2719,7 +2831,10 @@ function LazyTaskLineSelect({
   placeholder: string;
 }) {
   const [isActive, setIsActive] = useState(false);
-  const resolved = matchNames ? resolvePersonOption(current, options) : current;
+  const normalizedOptions = matchNames
+    ? Array.from(new Set(options.map(canonicalTaskLineName).filter(Boolean)))
+    : options;
+  const resolved = matchNames ? resolvePersonOption(current, normalizedOptions) : current;
 
   function activate() {
     setIsActive(true);
@@ -2743,8 +2858,8 @@ function LazyTaskLineSelect({
       {isActive ? (
         <>
           <option value="">{placeholder}</option>
-          {options.filter(Boolean).map((option) => <option key={option} value={option}>{option}</option>)}
-          {resolved && !options.includes(resolved) ? <option value={resolved}>{resolved}</option> : null}
+          {normalizedOptions.filter(Boolean).map((option) => <option key={option} value={option}>{option}</option>)}
+          {resolved && !normalizedOptions.includes(resolved) ? <option value={resolved}>{resolved}</option> : null}
         </>
       ) : (
         <option value={resolved}>{resolved || placeholder}</option>
@@ -2756,6 +2871,7 @@ function LazyTaskLineSelect({
 function TaskLineForm({
   draft,
   entityOptions,
+  hiddenSectionKeys,
   isEdit,
   nameOptionsForTeam,
   onChange,
@@ -2768,6 +2884,7 @@ function TaskLineForm({
 }: {
   draft: TaskLineRow;
   entityOptions: string[];
+  hiddenSectionKeys?: Set<string>;
   isEdit: boolean;
   nameOptionsForTeam: (team: string) => string[];
   onChange: (key: string, value: string) => void;
@@ -3081,6 +3198,9 @@ function TaskLineForm({
 
         <div className="max-h-[68vh] space-y-3 overflow-auto p-5">
           {taskLineFormSections.map((section) => {
+            if (hiddenSectionKeys?.has(section.key)) {
+              return null;
+            }
             const sectionColumns = section.columns
               .map((key) => taskLineFormColumnByKey.get(key))
               .filter((column): column is TaskLineColumn => Boolean(column));
@@ -3835,7 +3955,7 @@ function pad2(value: number) {
   return String(value).padStart(2, "0");
 }
 
-async function postTaskLineImportBatch(importRows: TaskLineRow[]) {
+async function postTaskLineImportBatch(importRows: TaskLineRow[], apiPath: string) {
   const canRetrySafely = importRows.every((row) => text(row.import_action || "Add").toLowerCase() === "add");
 
   for (let attempt = 1; attempt <= taskLineImportMaxAttempts; attempt += 1) {
@@ -3844,7 +3964,7 @@ async function postTaskLineImportBatch(importRows: TaskLineRow[]) {
     let response: Response;
 
     try {
-      response = await fetch("/api/taskline", {
+      response = await fetch(apiPath, {
         body: JSON.stringify({ action: "import", importRows, returnRows: false }),
         headers: { "Content-Type": "application/json" },
         method: "POST",
@@ -4110,6 +4230,34 @@ function getSavedTaskLineColumnLayout() {
       : { frozenColumnKeys: [], hiddenColumnKeys: [], order: defaultTaskLineColumnOrder };
   } catch {
     return { frozenColumnKeys: [], hiddenColumnKeys: [], order: defaultTaskLineColumnOrder };
+  }
+}
+
+function saveTaskLineColumnWidths(widths: Record<string, number>) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  window.localStorage.setItem(taskLineColumnWidthsStorageKey, JSON.stringify(widths));
+}
+
+function getSavedTaskLineColumnWidths(): Record<string, number> {
+  if (typeof window === "undefined") {
+    return {};
+  }
+  try {
+    const saved = JSON.parse(window.localStorage.getItem(taskLineColumnWidthsStorageKey) ?? "{}") as Record<string, unknown>;
+    return Object.fromEntries(
+      Object.entries(saved).filter(
+        ([key, width]) =>
+          taskLineColumnByKey.has(key) &&
+          typeof width === "number" &&
+          Number.isFinite(width) &&
+          width >= minimumTaskLineColumnWidth &&
+          width <= maximumTaskLineColumnWidth
+      )
+    ) as Record<string, number>;
+  } catch {
+    return {};
   }
 }
 

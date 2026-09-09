@@ -59,6 +59,19 @@ const defaultOrganisationCode = "DCO1433";
 const fetchBatchSize = 1000;
 const maxTaskLineWindowSize = 400;
 const moduleKey = "taskline";
+type RegisterKey = "all" | "cestat" | "high_court" | "non_litigation" | "taskline";
+const registerKeys = new Set<RegisterKey>(["taskline", "high_court", "cestat", "non_litigation", "all"]);
+const combinedRegisterKeys: Exclude<RegisterKey, "all">[] = ["taskline", "non_litigation", "cestat", "high_court"];
+const gstatModuleKey = "gstat";
+const gstatOrganisationCode = "DCO1433";
+const registerLabels: Record<string, string> = {
+  cestat: "CESTAT",
+  gstat: "GSTAT",
+  high_court: "High Court",
+  non_litigation: "Non-Litigation",
+  taskline: "Litigation"
+};
+type GstatAppealRow = { data: Record<string, string | number> | null; id: string; row_number: number | null; updated_at?: string | null };
 const organisationIdCache = new Map<string, string>();
 const taskLineDateColumns = new Set(["due_date", "ref_date", "entry_date", "completion_date"]);
 const taskLineMoneyColumns = new Set(["total_agreed_fee", "amount_raised", "amount_realised", "counsel_fee", "referral_fee"]);
@@ -134,6 +147,7 @@ export async function GET(request: Request) {
 
   const access = getAccess(auth.user);
   const searchParams = new URL(request.url).searchParams;
+  const registerKey = getRegisterKey(searchParams);
   const view = searchParams.get("view");
 
   if (view === "notifications") {
@@ -145,11 +159,11 @@ export async function GET(request: Request) {
   }
 
   if (view === "audit") {
-    return NextResponse.json({ auditLogs: await loadAuditLogs(admin, organisation.organisationId, access) });
+    return NextResponse.json({ auditLogs: await loadAuditLogs(admin, organisation.organisationId, access, registerKey) });
   }
 
   if (view === "codes") {
-    const records = await loadTaskLineRecords(admin, organisation.organisationId, access);
+    const records = await loadTaskLineRecords(admin, organisation.organisationId, access, registerKey);
     if (records.error) {
       return NextResponse.json({ error: records.error.message }, { status: 500 });
     }
@@ -172,11 +186,11 @@ export async function GET(request: Request) {
       return NextResponse.json({ column, values: [] });
     }
 
-    if (!taskLineColumns.includes(column)) {
+    if (!taskLineColumns.includes(column) && column !== "register_name") {
       return NextResponse.json({ error: "Invalid TaskLine filter column." }, { status: 400 });
     }
 
-    const records = await loadTaskLineRecords(admin, organisation.organisationId, access);
+    const records = await loadTaskLineRecords(admin, organisation.organisationId, access, registerKey);
 
     if (records.error) {
       return NextResponse.json({ error: records.error.message }, { status: 500 });
@@ -196,8 +210,8 @@ export async function GET(request: Request) {
     const limit = Math.min(requestedLimit, maxTaskLineWindowSize);
     const query = parseTaskLineQuery(searchParams);
 
-    if (hasTaskLineQuery(query)) {
-      const records = await loadTaskLineRecords(admin, organisation.organisationId, access);
+    if (hasTaskLineQuery(query) || registerKey === "all") {
+      const records = await loadTaskLineRecords(admin, organisation.organisationId, access, registerKey);
 
       if (records.error) {
         return NextResponse.json({ error: records.error.message }, { status: 500 });
@@ -212,7 +226,7 @@ export async function GET(request: Request) {
       });
     }
 
-    const records = await loadTaskLineRecordWindow(admin, organisation.organisationId, access, offset, limit);
+    const records = await loadTaskLineRecordWindow(admin, organisation.organisationId, access, offset, limit, registerKey);
 
     if (records.error) {
       return NextResponse.json({ error: records.error.message }, { status: 500 });
@@ -226,7 +240,7 @@ export async function GET(request: Request) {
     });
   }
 
-  const records = await loadTaskLineRecords(admin, organisation.organisationId, access);
+  const records = await loadTaskLineRecords(admin, organisation.organisationId, access, registerKey);
 
   if (records.error) {
     return NextResponse.json({ error: records.error.message }, { status: 500 });
@@ -238,7 +252,7 @@ export async function GET(request: Request) {
 }
 
 function parseTaskLineQuery(searchParams: URLSearchParams): TaskLineQuery {
-  const allowedColumns = new Set(taskLineColumns);
+  const allowedColumns = new Set([...taskLineColumns, "register_name"]);
   const rawSortKey = text(searchParams.get("sortKey"));
   const rawSortDir = searchParams.get("sortDir");
 
@@ -396,6 +410,10 @@ export async function POST(request: Request) {
 }
 
 async function handlePost(request: Request) {
+  const registerKey = getRegisterKey(new URL(request.url).searchParams);
+  if (registerKey === "all") {
+    return NextResponse.json({ error: "The TaskLine overview is read-only. Edit rows from their own register." }, { status: 400 });
+  }
   const auth = await requireUser();
 
   if ("error" in auth) {
@@ -426,11 +444,11 @@ async function handlePost(request: Request) {
   }
 
   if (payload.action === "import") {
-    return importRows(admin, organisation.organisationId, auth.user, access, payload.importRows ?? [], payload.returnRows !== false);
+    return importRows(admin, organisation.organisationId, auth.user, access, payload.importRows ?? [], payload.returnRows !== false, registerKey);
   }
 
   if (payload.action === "bulk_delete") {
-    return bulkDeleteRows(admin, organisation.organisationId, auth.user, access, payload.recordIds ?? []);
+    return bulkDeleteRows(admin, organisation.organisationId, auth.user, access, payload.recordIds ?? [], registerKey);
   }
 
   const record = payload.record;
@@ -454,7 +472,7 @@ async function handlePost(request: Request) {
     return NextResponse.json({ error: gstatLinkError.message }, { status: gstatLinkError.status });
   }
 
-  const values = toTaskValues(cleaned);
+  const values = toTaskValues(cleaned, registerKey);
 
   if (existingId) {
     const existing = await admin
@@ -468,7 +486,7 @@ async function handlePost(request: Request) {
       return NextResponse.json({ error: existing.error.message }, { status: 500 });
     }
 
-    if (existing.data && isTaskLineRecord(existing.data as TaskRecord) && canAccessRecord(existing.data as TaskRecord, access)) {
+    if (existing.data && isRegisterRecord(existing.data as TaskRecord, registerKey) && canAccessRecord(existing.data as TaskRecord, access)) {
       const saved = await admin
         .from("tasks")
         .update({
@@ -496,14 +514,14 @@ async function handlePost(request: Request) {
       // Allocation email: when the Resource changes, notify the newly
       // allocated resource (and only the resource).
       const previousResource = text((existing.data as TaskRecord).custom_values?.taskline_data?.resource);
-      if (resourceAllocationChanged(previousResource, text(cleaned.resource))) {
+      if (registerKey === "taskline" && resourceAllocationChanged(previousResource, text(cleaned.resource))) {
         await sendResourceAllocationMail(admin, organisation.organisationId, saved.data as TaskRecord);
       }
 
       // Name-tag email: when the Name (manager/owner) changes, notify the
       // newly tagged person the same way a resource allocation does.
       const previousName = text((existing.data as TaskRecord).custom_values?.taskline_data?.name);
-      if (resourceAllocationChanged(previousName, text(cleaned.name))) {
+      if (registerKey === "taskline" && resourceAllocationChanged(previousName, text(cleaned.name))) {
         await sendResourceAllocationMail(admin, organisation.organisationId, saved.data as TaskRecord, "name");
       }
 
@@ -512,7 +530,7 @@ async function handlePost(request: Request) {
       // never get its reminder. Send it immediately instead (the audit-log
       // dedupe keys stop double sends either way).
       const previousDueDate = text((existing.data as TaskRecord).custom_values?.taskline_data?.due_date);
-      if (text(cleaned.due_date) === indiaTodayDisplayDate() && previousDueDate !== text(cleaned.due_date)) {
+      if (registerKey === "taskline" && text(cleaned.due_date) === indiaTodayDisplayDate() && previousDueDate !== text(cleaned.due_date)) {
         await sendDueTodayReminderNow(admin, organisation.organisationId, saved.data as TaskRecord);
       }
 
@@ -536,7 +554,7 @@ async function handlePost(request: Request) {
     // Task code is optional until database/016_taskline_task_code.sql is applied.
   }
 
-  const insertValues = taskCode ? toTaskValues({ ...cleaned, task_code: taskCode }) : values;
+  const insertValues = taskCode ? toTaskValues({ ...cleaned, task_code: taskCode }, registerKey) : values;
   const saved = await admin
     .from("tasks")
     .insert({
@@ -556,17 +574,17 @@ async function handlePost(request: Request) {
 
   // Allocation email: a brand-new row created with a Resource selected
   // notifies that resource straight away.
-  if (text(cleaned.resource)) {
+  if (registerKey === "taskline" && text(cleaned.resource)) {
     await sendResourceAllocationMail(admin, organisation.organisationId, saved.data as TaskRecord);
   }
 
-  if (text(cleaned.name)) {
+  if (registerKey === "taskline" && text(cleaned.name)) {
     await sendResourceAllocationMail(admin, organisation.organisationId, saved.data as TaskRecord, "name");
   }
 
   // Instant due-today reminder for rows created with today's due date
   // (the daily 09:00 IST mail for today may have already gone out).
-  if (text(cleaned.due_date) === indiaTodayDisplayDate()) {
+  if (registerKey === "taskline" && text(cleaned.due_date) === indiaTodayDisplayDate()) {
     await sendDueTodayReminderNow(admin, organisation.organisationId, saved.data as TaskRecord);
   }
 
@@ -584,7 +602,12 @@ export async function DELETE(request: Request) {
     return viewOnlyRegisterResponse("TaskLine");
   }
 
-  const id = new URL(request.url).searchParams.get("id");
+  const searchParams = new URL(request.url).searchParams;
+  const id = searchParams.get("id");
+  const registerKey = getRegisterKey(searchParams);
+  if (registerKey === "all") {
+    return NextResponse.json({ error: "The TaskLine overview is read-only. Delete rows from their own register." }, { status: 400 });
+  }
 
   if (!id) {
     return NextResponse.json({ error: "TaskLine record id is required." }, { status: 400 });
@@ -605,7 +628,7 @@ export async function DELETE(request: Request) {
     .eq("organisation_id", organisation.organisationId)
     .single();
 
-  if (existing.error || !isTaskLineRecord(existing.data as TaskRecord | null)) {
+  if (existing.error || !isRegisterRecord(existing.data as TaskRecord | null, registerKey)) {
     return NextResponse.json({ error: existing.error?.message ?? "TaskLine record not found." }, { status: 404 });
   }
 
@@ -628,7 +651,8 @@ async function bulkDeleteRows(
   organisationId: string,
   user: User,
   access: AccessScope,
-  rawRecordIds: string[]
+  rawRecordIds: string[],
+  registerKey: RegisterKey
 ) {
   const recordIds = Array.from(new Set(rawRecordIds.map(text).filter(Boolean)));
   if (!recordIds.length || recordIds.length > 10) {
@@ -645,7 +669,7 @@ async function bulkDeleteRows(
   }
 
   const records = ((existing.data ?? []) as TaskRecord[]).filter(
-    (record) => isTaskLineRecord(record) && canAccessRecord(record, access)
+    (record) => isRegisterRecord(record, registerKey) && canAccessRecord(record, access)
   );
   if (records.length !== recordIds.length) {
     return NextResponse.json({ error: "One or more selected tasks are unavailable or outside your team access." }, { status: 403 });
@@ -666,7 +690,8 @@ async function importRows(
   user: User,
   access: AccessScope,
   rows: TaskLineImportRow[],
-  returnRows: boolean
+  returnRows: boolean,
+  registerKey: RegisterKey
 ) {
   const actionableRows = rows.map((row, index) => ({
     action: text(row.import_action || "Add").toLowerCase(),
@@ -709,7 +734,7 @@ async function importRows(
   let existingRows: TaskRecord[] = [];
 
   if (needsTaskCodeFallback) {
-    const existing = await loadTaskLineRecords(admin, organisationId, access);
+    const existing = await loadTaskLineRecords(admin, organisationId, access, registerKey);
     if (existing.error) {
       return NextResponse.json({ error: existing.error.message }, { status: 500 });
     }
@@ -764,7 +789,7 @@ async function importRows(
       return NextResponse.json({ error: targets.error.message }, { status: 500 });
     }
     for (const record of (targets.data ?? []) as TaskRecord[]) {
-      if (isTaskLineRecord(record) && canAccessRecord(record, access)) {
+      if (isRegisterRecord(record, registerKey) && canAccessRecord(record, access)) {
         accessibleTargets.set(record.id, record);
       }
     }
@@ -805,7 +830,7 @@ async function importRows(
       .from("tasks")
       .select("custom_values")
       .eq("organisation_id", organisationId)
-      .eq("custom_values->>workline_module", moduleKey)
+      .eq("custom_values->>workline_module", moduleForRegister(registerKey))
       .in("custom_values->taskline_data->>task_code", addTaskCodes);
 
     if (existingAdds.error) {
@@ -813,6 +838,9 @@ async function importRows(
     }
 
     for (const record of (existingAdds.data ?? []) as Pick<TaskRecord, "custom_values">[]) {
+      if (getStoredRegisterKey(record.custom_values?.taskline_data) !== registerKey) {
+        continue;
+      }
       const taskCodeKey = normalizeTaskCode(record.custom_values?.taskline_data?.task_code);
       if (taskCodeKey) {
         existingAddTaskCodeKeys.add(taskCodeKey);
@@ -825,7 +853,7 @@ async function importRows(
     .map(({ row }) => {
       const cleaned = applyTeamAccess(cleanRecord(row), access);
       return {
-        ...toTaskValues(cleaned),
+        ...toTaskValues(cleaned, registerKey),
         created_by: null,
         organisation_id: organisationId,
         priority: "normal"
@@ -852,7 +880,7 @@ async function importRows(
         const cleaned = applyTeamAccess(cleanRecord(row), access);
         return admin
           .from("tasks")
-          .update({ ...toTaskValues(cleaned), updated_at: new Date().toISOString() })
+          .update({ ...toTaskValues(cleaned, registerKey), updated_at: new Date().toISOString() })
           .eq("id", targetId)
           .eq("organisation_id", organisationId);
       })
@@ -878,7 +906,7 @@ async function importRows(
     });
   }
 
-  const refreshed = await loadTaskLineRecords(admin, organisationId, access);
+  const refreshed = await loadTaskLineRecords(admin, organisationId, access, registerKey);
 
   if (refreshed.error) {
     return NextResponse.json({ error: refreshed.error.message }, { status: 500 });
@@ -1130,13 +1158,13 @@ function indiaDateKey(dayOffset: number) {
   return `${date.getUTCFullYear()}-${pad2(date.getUTCMonth() + 1)}-${pad2(date.getUTCDate())}`;
 }
 
-async function loadTaskLineRecords(admin: ReturnType<typeof createAdminClient>, organisationId: string, access: AccessScope) {
+async function loadTaskLineRecords(admin: ReturnType<typeof createAdminClient>, organisationId: string, access: AccessScope, registerKey: RegisterKey = "taskline") {
   console.time("taskline:loadRecords:count");
   const countResult = await admin
     .from("tasks")
     .select("id", { count: "exact", head: true })
     .eq("organisation_id", organisationId)
-    .eq("custom_values->>workline_module", moduleKey);
+    .in("custom_values->>workline_module", modulesForRegister(registerKey));
   console.timeEnd("taskline:loadRecords:count");
 
   if (countResult.error) {
@@ -1154,7 +1182,7 @@ async function loadTaskLineRecords(admin: ReturnType<typeof createAdminClient>, 
         .from("tasks")
         .select("id,custom_values")
         .eq("organisation_id", organisationId)
-        .eq("custom_values->>workline_module", moduleKey)
+        .in("custom_values->>workline_module", modulesForRegister(registerKey))
         .order("created_at", { ascending: true })
         .range(from, from + fetchBatchSize - 1);
     })
@@ -1166,7 +1194,15 @@ async function loadTaskLineRecords(admin: ReturnType<typeof createAdminClient>, 
     if (error) {
       return { data: null, error };
     }
-    rows.push(...((data ?? []) as TaskRecord[]).filter((record) => isTaskLineRecord(record) && canAccessRecord(record, access)));
+    rows.push(...((data ?? []) as TaskRecord[]).filter((record) => isRegisterRecord(record, registerKey) && canAccessRecord(record, access)));
+  }
+
+  if (registerKey === "all") {
+    const gstatRecords = await loadGstatRecordsForOverview(admin, access);
+    if (gstatRecords.error) {
+      return { data: null, error: gstatRecords.error };
+    }
+    rows.push(...(gstatRecords.data ?? []));
   }
 
   return { data: rows, error: null };
@@ -1177,13 +1213,14 @@ async function loadTaskLineRecordWindow(
   organisationId: string,
   access: AccessScope,
   offset: number,
-  limit: number
+  limit: number,
+  registerKey: RegisterKey = "taskline"
 ) {
   let query = admin
     .from("tasks")
     .select("id,organisation_id,title,description,due_at,custom_values,created_by,created_at,updated_at", { count: "exact" })
     .eq("organisation_id", organisationId)
-    .eq("custom_values->>workline_module", moduleKey)
+    .in("custom_values->>workline_module", modulesForRegister(registerKey))
     .order("created_at", { ascending: true });
 
   if (!access.canViewAll) {
@@ -1200,12 +1237,12 @@ async function loadTaskLineRecordWindow(
 
   return {
     count: count ?? 0,
-    data: ((data ?? []) as TaskRecord[]).filter((record) => isTaskLineRecord(record) && canAccessRecord(record, access)),
+    data: ((data ?? []) as TaskRecord[]).filter((record) => isRegisterRecord(record, registerKey) && canAccessRecord(record, access)),
     error
   };
 }
 
-async function loadAuditLogs(admin: ReturnType<typeof createAdminClient>, organisationId: string, access: AccessScope) {
+async function loadAuditLogs(admin: ReturnType<typeof createAdminClient>, organisationId: string, access: AccessScope, registerKey: RegisterKey = "taskline") {
   const logs = await admin
     .from("audit_logs")
     .select("id,action,entity_id,old_value,new_value,created_at,actor_user_id")
@@ -1218,7 +1255,10 @@ async function loadAuditLogs(admin: ReturnType<typeof createAdminClient>, organi
     return [];
   }
 
-  const taskLineLogs = (logs.data ?? []) as AuditLog[];
+  const taskLineLogs = ((logs.data ?? []) as AuditLog[]).filter((log) => {
+    const value = (log.new_value ?? log.old_value) as { data?: TaskLineRow } | null;
+    return matchesRegisterKey(getStoredRegisterKey(value?.data), registerKey);
+  });
 
   const visibleLogs = access.canViewAll
     ? taskLineLogs
@@ -1341,11 +1381,11 @@ async function validateGstatLink(
   return null;
 }
 
-function toTaskValues(row: TaskLineRow) {
+function toTaskValues(row: TaskLineRow, registerKey: RegisterKey = "taskline") {
   return {
     custom_values: {
-      taskline_data: row,
-      workline_module: moduleKey
+      taskline_data: { ...row, register_key: registerKey },
+      workline_module: moduleForRegister(registerKey)
     },
     description: text(row.remarks || row.issue) || null,
     due_at: toDateTime(row.due_date),
@@ -1355,7 +1395,10 @@ function toTaskValues(row: TaskLineRow) {
 
 function auditValue(record: TaskRecord) {
   return {
-    data: cleanRecord(record.custom_values?.taskline_data ?? {}),
+    data: {
+      ...cleanRecord(record.custom_values?.taskline_data ?? {}),
+      register_key: getStoredRegisterKey(record.custom_values?.taskline_data)
+    },
     id: record.id
   };
 }
@@ -1363,7 +1406,8 @@ function auditValue(record: TaskRecord) {
 function formatRecord(record: TaskRecord): TaskLineRow {
   return {
     __id: record.id,
-    ...cleanRecord(record.custom_values?.taskline_data ?? {})
+    ...cleanRecord(record.custom_values?.taskline_data ?? {}),
+    register_name: registerLabelForModule(record.custom_values?.workline_module)
   };
 }
 
@@ -1428,6 +1472,90 @@ function isUuid(value: string) {
 
 function isTaskLineRecord(record: TaskRecord | null): record is TaskRecord {
   return record?.custom_values?.workline_module === moduleKey;
+}
+
+function isRegisterRecord(record: TaskRecord | null, registerKey: RegisterKey): record is TaskRecord {
+  if (!record) return false;
+  if (registerKey === "all") {
+    return record.custom_values?.workline_module === gstatModuleKey || combinedRegisterKeys.some((key) => isRegisterRecord(record, key));
+  }
+  return record.custom_values?.workline_module === moduleForRegister(registerKey) && getStoredRegisterKey(record.custom_values?.taskline_data) === registerKey;
+}
+
+function matchesRegisterKey(storedKey: RegisterKey, registerKey: RegisterKey) {
+  return registerKey === "all" ? storedKey !== "all" : storedKey === registerKey;
+}
+
+function moduleForRegister(registerKey: RegisterKey) {
+  return registerKey === "taskline" ? moduleKey : registerKey;
+}
+
+function modulesForRegister(registerKey: RegisterKey) {
+  return registerKey === "all" ? combinedRegisterKeys.map(moduleForRegister) : [moduleForRegister(registerKey)];
+}
+
+function registerLabelForModule(workline_module: string | undefined) {
+  const key = workline_module === moduleKey ? "taskline" : String(workline_module ?? "");
+  return registerLabels[key] ?? "";
+}
+
+function gstatText(row: GstatAppealRow, column: string) {
+  return text(row.data?.[column]);
+}
+
+function gstatAppealToTaskRecord(row: GstatAppealRow): TaskRecord {
+  const tasklineData: TaskLineRow = {
+    document_link: gstatText(row, "Document Link"),
+    due_date: gstatText(row, "Due Date"),
+    entity: gstatText(row, "Entity Name"),
+    entity_group: gstatText(row, "Entity Group"),
+    name: gstatText(row, "Person handling"),
+    register_key: gstatModuleKey,
+    remarks: gstatText(row, "Remark"),
+    resource: "",
+    stage: "",
+    state_name: gstatText(row, "State Name"),
+    status_open_close: "Open",
+    task: "GSTAT Appeal",
+    task_code: gstatText(row, "Sno") || text(row.row_number),
+    team: ""
+  };
+  return {
+    created_at: "",
+    created_by: null,
+    custom_values: { taskline_data: tasklineData, workline_module: gstatModuleKey },
+    description: null,
+    due_at: null,
+    id: `gstat:${row.id}`,
+    organisation_id: "",
+    title: tasklineData.entity || "GSTAT Appeal",
+    updated_at: text(row.updated_at)
+  };
+}
+
+async function loadGstatRecordsForOverview(admin: ReturnType<typeof createAdminClient>, access: AccessScope) {
+  const { data, error } = await admin
+    .from("gstat_appeals")
+    .select("id,row_number,data,updated_at")
+    .eq("organisation_code", gstatOrganisationCode)
+    .order("row_number", { ascending: true });
+  if (error) {
+    return { data: null, error };
+  }
+  const rows = ((data ?? []) as GstatAppealRow[])
+    .filter((row) => access.canViewAll || !access.team || gstatText(row, "Person handling") === access.team)
+    .map(gstatAppealToTaskRecord);
+  return { data: rows, error: null };
+}
+
+function getRegisterKey(searchParams: URLSearchParams): RegisterKey {
+  const value = text(searchParams.get("register")) as RegisterKey;
+  return registerKeys.has(value) ? value : "taskline";
+}
+
+function getStoredRegisterKey(row: TaskLineRow | undefined): RegisterKey {
+  const value = text(row?.register_key) as RegisterKey;
+  return registerKeys.has(value) ? value : "taskline";
 }
 
 function readId(value: unknown) {
@@ -2053,12 +2181,16 @@ async function sendDueTodayReminderNow(
     });
 
     const entity = text(row.entity) || "TaskLine task";
+    const taskCode = text(row.task_code);
     const taskName = text(row.task) || "Task";
-    const subject = `Due today: ${entity} — ${taskName}`;
+    const subject = taskCode
+      ? `Due today: ${taskCode} — ${entity} — ${taskName}`
+      : `Due today: ${entity} — ${taskName}`;
     const bodyText = [
       "TASK DUE TODAY",
       "",
       entity,
+      `Task Code: ${text(row.task_code) || "-"}`,
       `Task: ${taskName}`,
       `Team: ${text(row.team) || "-"}`,
       `Resource: ${text(row.resource) || "-"}`,
