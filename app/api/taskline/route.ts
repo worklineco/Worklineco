@@ -1636,7 +1636,7 @@ function gstatAppealToTaskRecord(row: GstatAppealRow): TaskRecord {
     due_date: gstatText(row, "Due Date"),
     entity: gstatText(row, "Entity Name"),
     entity_group: gstatText(row, "Entity Group"),
-    name: gstatText(row, "Person handling"),
+    name: gstatText(row, "Name"),
     register_key: gstatModuleKey,
     remarks: gstatText(row, "Remark"),
     resource: "",
@@ -1645,7 +1645,7 @@ function gstatAppealToTaskRecord(row: GstatAppealRow): TaskRecord {
     status_open_close: "Open",
     task: "GSTAT Appeal",
     task_code: gstatText(row, "Sno") || text(row.row_number),
-    team: ""
+    team: gstatText(row, "Person handling")
   };
   return {
     created_at: "",
