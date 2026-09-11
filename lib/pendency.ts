@@ -4,9 +4,9 @@
  *
  * A matter counts as PENDING when its Stage does not read as submitted, the
  * Stage does not read as cancelled or on hold, and the row is not marked Close
- * in Status Open/Close. Both the dashboard summary and
- * the TaskLine focus filter import these helpers, so the headline count and the
- * drill-down list can never drift apart.
+ * in Status Open/Close. Both the dashboard summary and the TaskLine focus
+ * filter import these helpers, so the headline count and the drill-down list
+ * can never drift apart.
  */
 
 export type PendencyKind = "appeal" | "scn";
@@ -33,6 +33,14 @@ function normalize(value: unknown) {
 }
 
 /**
+ * Personal hearing tasks (PH - Appeal, PH - SCN and the like). These track an
+ * attendance rather than a reply or an appeal still to be filed, so they are
+ * not counted as pendency. The word boundary keeps ordinary words beginning
+ * with "ph" from being caught.
+ */
+const personalHearingPattern = /\bph\b/;
+
+/**
  * Which pendency bucket a TaskLine "Task" value belongs to, or null when the
  * task is neither a show cause notice nor an appeal. Matched on wording rather
  * than an exact list because the Task master is maintained by the firm.
@@ -40,7 +48,7 @@ function normalize(value: unknown) {
 export function classifyPendencyKind(task: unknown): PendencyKind | null {
   const value = normalize(task);
 
-  if (!value) {
+  if (!value || personalHearingPattern.test(value)) {
     return null;
   }
 
