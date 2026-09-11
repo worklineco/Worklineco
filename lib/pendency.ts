@@ -40,6 +40,11 @@ function normalize(value: unknown) {
  */
 const personalHearingPattern = /\bph\b/;
 
+/** Whether a TaskLine "Task" value is a personal hearing (PH - Appeal, PH - SCN). */
+export function isPersonalHearingTask(task: unknown) {
+  return personalHearingPattern.test(normalize(task));
+}
+
 /**
  * Which pendency bucket a TaskLine "Task" value belongs to, or null when the
  * task is neither a show cause notice nor an appeal. Matched on wording rather
