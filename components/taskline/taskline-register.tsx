@@ -11,6 +11,7 @@ import { useRegisterEditAccess, viewOnlyRegisterMessage as sharedViewOnlyRegiste
 import {
   classifyPendencyKind,
   dueSoonCutoffKey,
+  isDueThisMonth,
   isPendingMatter,
   pendencyDueState,
   pendencyKindShortLabels,
@@ -3676,7 +3677,7 @@ function TaskLineDateInput({ compact = false, onChange, value }: { compact?: boo
   );
 }
 
-type PendencyFocus = { due: "overdue" | "soon" | null; kind: PendencyKind | null; team: string };
+type PendencyFocus = { due: "month" | "overdue" | "soon" | null; kind: PendencyKind | null; team: string };
 
 function readPendencyFocus(search: string): PendencyFocus | null {
   const params = new URLSearchParams(search);
@@ -3689,7 +3690,7 @@ function readPendencyFocus(search: string): PendencyFocus | null {
   const due = params.get("due");
 
   return {
-    due: due === "overdue" || due === "soon" ? due : null,
+    due: due === "overdue" || due === "soon" || due === "month" ? due : null,
     kind: kind === "scn" || kind === "appeal" ? kind : null,
     team: text(params.get("team"))
   };
@@ -3716,6 +3717,11 @@ function matchesPendencyFocus(row: TaskLineRow, focus: PendencyFocus) {
 
   if (focus.due) {
     const today = todayKey();
+
+    if (focus.due === "month") {
+      return isDueThisMonth(row.due_date, today);
+    }
+
     const state = pendencyDueState(row.due_date, today, dueSoonCutoffKey(today));
     return focus.due === "overdue" ? state === "overdue" : state === "dueSoon";
   }
@@ -3726,7 +3732,14 @@ function matchesPendencyFocus(row: TaskLineRow, focus: PendencyFocus) {
 function pendencyFocusLabel(focus: PendencyFocus) {
   const kind = focus.kind ? pendencyKindShortLabels[focus.kind] : "SCNs and appeals";
   const team = focus.team ? ` for ${focus.team}` : " across all teams";
-  const due = focus.due === "overdue" ? ", overdue" : focus.due === "soon" ? ", due within 7 days" : "";
+  const due =
+    focus.due === "overdue"
+      ? ", overdue"
+      : focus.due === "soon"
+        ? ", due within 7 days"
+        : focus.due === "month"
+          ? ", due this month"
+          : "";
 
   return `Pending ${kind}${team}${due}`;
 }

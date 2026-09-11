@@ -5,7 +5,11 @@ import { isViewOnlyRegisterUser, viewOnlyRegisterResponse } from "@/lib/register
 import {
   classifyPendencyKind,
   dueSoonCutoffKey,
+  emptyDueCounts,
+  isDueThisMonth,
   isPendingMatter,
+  monthEndKey,
+  pendencyDueBucket,
   pendencyDueState,
   pendencyTeamLabel,
   todayKey,
@@ -1829,8 +1833,9 @@ async function loadPendencySummary(admin: ReturnType<typeof createAdminClient>, 
 
   const today = todayKey();
   const soonCutoff = dueSoonCutoffKey(today);
+  const monthEnd = monthEndKey(today);
   const byTeam = new Map<string, PendencyTeamRow>();
-  const totals = { appeal: 0, dueSoon: 0, overdue: 0, scn: 0, total: 0 };
+  const totals = { appeal: 0, dueSoon: 0, dueThisMonth: 0, overdue: 0, scn: 0, total: 0 };
 
   for (const row of rows) {
     if (getStoredRegisterKey({ register_key: text(row.register_key) }) !== "taskline") {
@@ -1845,11 +1850,21 @@ async function loadPendencySummary(admin: ReturnType<typeof createAdminClient>, 
 
     const label = pendencyTeamLabel(row.team);
     const key = teamMatchKey(label) || label.toLowerCase();
-    const entry = byTeam.get(key) ?? { appeal: 0, dueSoon: 0, overdue: 0, scn: 0, team: label, total: 0 };
+    const entry = byTeam.get(key) ?? {
+      appeal: 0,
+      buckets: { appeal: emptyDueCounts(), scn: emptyDueCounts() },
+      dueSoon: 0,
+      dueThisMonth: 0,
+      overdue: 0,
+      scn: 0,
+      team: label,
+      total: 0
+    };
     const due = pendencyDueState(row.due_date, today, soonCutoff);
 
     entry[kind] += 1;
     entry.total += 1;
+    entry.buckets[kind][pendencyDueBucket(row.due_date, today)] += 1;
     totals[kind] += 1;
     totals.total += 1;
 
@@ -1859,6 +1874,11 @@ async function loadPendencySummary(admin: ReturnType<typeof createAdminClient>, 
     } else if (due === "dueSoon") {
       entry.dueSoon += 1;
       totals.dueSoon += 1;
+    }
+
+    if (isDueThisMonth(row.due_date, today, monthEnd)) {
+      entry.dueThisMonth += 1;
+      totals.dueThisMonth += 1;
     }
 
     byTeam.set(key, entry);

@@ -5,7 +5,11 @@ import { ArrowRight, Scale, TriangleAlert } from "lucide-react";
 import { useEffect, useState } from "react";
 import { getCached, setCached } from "@/lib/data-cache";
 import {
+  pendencyDueBucketColors,
+  pendencyDueBucketLabels,
+  pendencyDueBuckets,
   pendencyKindShortLabels,
+  type PendencyDueBucket,
   type PendencyKind,
   type PendencySummary,
   type PendencyTeamRow
@@ -17,16 +21,9 @@ import {
  * to exactly the matters behind it.
  */
 
-const cacheKey = "partner:pendency:v1";
+const cacheKey = "partner:pendency:v2";
 
-// Two categorical hues, validated for colour-vision deficiency against a white
-// surface (worst adjacent pair: protan dE 16.6, normal dE 23.7).
-const kindColors: Record<PendencyKind, string> = {
-  appeal: "#b6654f",
-  scn: "#3a5590"
-};
-
-function taskLineHref(params: { due?: "overdue" | "soon"; kind?: PendencyKind; team?: string }) {
+function taskLineHref(params: { due?: "month" | "overdue" | "soon"; kind?: PendencyKind; team?: string }) {
   const search = new URLSearchParams({ pendency: "1" });
 
   if (params.team) search.set("team", params.team);
@@ -99,33 +96,53 @@ function SummaryTile({
   );
 }
 
-function TeamBar({ row, scale }: { row: PendencyTeamRow; scale: number }) {
-  const segments: { key: PendencyKind; value: number }[] = [
-    { key: "scn", value: row.scn },
-    { key: "appeal", value: row.appeal }
-  ];
+/**
+ * One bar per kind per team, banded by due-date urgency using the same colours
+ * the Litigation register paints on its Due Date column. The SCN and Appeals
+ * split stays legible because each gets its own labelled bar, and the count at
+ * the end means urgency is never carried by colour alone.
+ */
+function KindBar({ kind, row, scale }: { kind: PendencyKind; row: PendencyTeamRow; scale: number }) {
+  const counts = row.buckets?.[kind];
+  const total = row[kind];
 
   return (
-    <div className="flex items-center gap-3">
-      <span className="w-24 shrink-0 truncate text-right text-xs font-bold text-slate-600" title={row.team}>
+    <div className="flex items-center gap-2">
+      <span className="w-12 shrink-0 text-right text-[10px] font-black uppercase tracking-wide text-slate-400">
+        {pendencyKindShortLabels[kind]}
+      </span>
+      <span className="flex h-4 min-w-0 flex-1 items-center gap-[2px]" role="presentation">
+        {total
+          ? pendencyDueBuckets.map((bucket) => {
+              const value = counts?.[bucket] ?? 0;
+              if (!value) return null;
+              return (
+                <Link
+                  aria-label={`${value} ${pendencyKindShortLabels[kind]} for ${row.team}: ${pendencyDueBucketLabels[bucket]}`}
+                  className="h-full rounded-[3px] ring-1 ring-inset ring-slate-900/10 transition hover:opacity-75"
+                  href={taskLineHref({ kind, team: row.team })}
+                  key={bucket}
+                  style={{ backgroundColor: pendencyDueBucketColors[bucket], width: `${(value / scale) * 100}%` }}
+                  title={`${row.team} · ${pendencyKindShortLabels[kind]} · ${pendencyDueBucketLabels[bucket]}: ${value}`}
+                />
+              );
+            })
+          : null}
+      </span>
+      <span className="w-7 shrink-0 text-right text-[11px] font-black tabular-nums text-slate-600">{total || "—"}</span>
+    </div>
+  );
+}
+
+function TeamBar({ row, scale }: { row: PendencyTeamRow; scale: number }) {
+  return (
+    <div className="flex items-start gap-3 border-b border-slate-100 py-1.5 last:border-b-0">
+      <span className="w-24 shrink-0 truncate pt-0.5 text-right text-xs font-bold text-slate-700" title={row.team}>
         {row.team}
       </span>
-      <div className="flex min-w-0 flex-1 items-center gap-2">
-        <span className="flex h-5 min-w-0 flex-1 items-center gap-[2px]" role="presentation">
-          {segments.map((segment) =>
-            segment.value ? (
-              <Link
-                aria-label={`${segment.value} pending ${pendencyKindShortLabels[segment.key]} for ${row.team}`}
-                className="h-full rounded-[4px] transition hover:opacity-80"
-                href={taskLineHref({ kind: segment.key, team: row.team })}
-                key={segment.key}
-                style={{ backgroundColor: kindColors[segment.key], width: `${(segment.value / scale) * 100}%` }}
-                title={`${row.team} · ${segment.value} ${pendencyKindShortLabels[segment.key]} pending`}
-              />
-            ) : null
-          )}
-        </span>
-        <span className="w-8 shrink-0 text-xs font-black tabular-nums text-slate-700">{row.total}</span>
+      <div className="min-w-0 flex-1 space-y-1">
+        <KindBar kind="scn" row={row} scale={scale} />
+        <KindBar kind="appeal" row={row} scale={scale} />
       </div>
     </div>
   );
@@ -169,7 +186,7 @@ export function PendencyReport() {
 
   const teams = summary?.teams ?? [];
   const totals = summary?.totals;
-  const scale = Math.max(1, ...teams.map((row) => row.total));
+  const scale = Math.max(1, ...teams.flatMap((row) => [row.scn, row.appeal]));
 
   return (
     <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -200,7 +217,7 @@ export function PendencyReport() {
             <SummaryTile href={taskLineHref({ kind: "scn" })} label="SCNs" value={totals.scn} />
             <SummaryTile href={taskLineHref({ kind: "appeal" })} label="Appeals" value={totals.appeal} />
             <SummaryTile
-              hint={totals.dueSoon ? `${totals.dueSoon} due in 7 days` : undefined}
+              hint={totals.dueThisMonth ? `${totals.dueThisMonth} due this month` : undefined}
               href={taskLineHref({ due: "overdue" })}
               label="Overdue"
               tone={totals.overdue ? "danger" : "default"}
@@ -208,23 +225,26 @@ export function PendencyReport() {
             />
           </div>
 
-          <div className="mt-4 flex items-center gap-4">
-            {(["scn", "appeal"] as PendencyKind[]).map((kind) => (
-              <span className="flex items-center gap-1.5 text-[11px] font-bold text-slate-600" key={kind}>
-                <span className="size-2.5 rounded-[3px]" style={{ backgroundColor: kindColors[kind] }} />
-                {pendencyKindShortLabels[kind]}
+          <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-1.5">
+            {pendencyDueBuckets.map((bucket) => (
+              <span className="flex items-center gap-1.5 text-[11px] font-bold text-slate-600" key={bucket}>
+                <span
+                  className="size-2.5 rounded-[3px] ring-1 ring-inset ring-slate-900/10"
+                  style={{ backgroundColor: pendencyDueBucketColors[bucket] }}
+                />
+                {pendencyDueBucketLabels[bucket]}
               </span>
             ))}
           </div>
 
-          <div className="mt-2 space-y-1.5">
+          <div className="mt-2">
             {teams.slice(0, 8).map((row) => (
               <TeamBar key={row.team} row={row} scale={scale} />
             ))}
           </div>
 
           <div className="mt-4 overflow-x-auto">
-            <table className="w-full min-w-[520px] border-collapse text-left text-xs">
+            <table className="w-full min-w-[600px] border-collapse text-left text-xs">
               <thead>
                 <tr className="border-b border-slate-200 text-[11px] font-black uppercase tracking-wide text-slate-500">
                   <th className="py-2 pr-3">Team</th>
@@ -233,6 +253,9 @@ export function PendencyReport() {
                   <th className="py-2 pr-3 text-right">Total</th>
                   <th className="py-2 pr-3 text-right">Overdue</th>
                   <th className="py-2 pr-3 text-right">Due ≤ 7d</th>
+                  <th className="py-2 pr-3 text-right" title="Falling due between today and the end of this month">
+                    Due this month
+                  </th>
                   <th className="py-2" />
                 </tr>
               </thead>
@@ -266,6 +289,11 @@ export function PendencyReport() {
                         {row.dueSoon}
                       </CountLink>
                     </td>
+                    <td className="py-1.5 pr-3 text-right">
+                      <CountLink href={taskLineHref({ due: "month", team: row.team })} muted={!row.dueThisMonth}>
+                        {row.dueThisMonth}
+                      </CountLink>
+                    </td>
                     <td className="py-1.5 text-right">
                       <Link
                         aria-label={`Open all pending matters for ${row.team} in TaskLine`}
@@ -287,6 +315,7 @@ export function PendencyReport() {
                   <td className="py-2 pr-3 text-right font-black tabular-nums">{totals.total}</td>
                   <td className="py-2 pr-3 text-right font-black tabular-nums text-rose-700">{totals.overdue}</td>
                   <td className="py-2 pr-3 text-right font-black tabular-nums text-amber-700">{totals.dueSoon}</td>
+                  <td className="py-2 pr-3 text-right font-black tabular-nums">{totals.dueThisMonth}</td>
                   <td className="py-2" />
                 </tr>
               </tfoot>
