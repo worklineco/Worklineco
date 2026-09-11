@@ -4,9 +4,9 @@
  *
  * A matter counts as PENDING when its Stage does not read as submitted, the
  * Stage does not read as cancelled or on hold, and the row is not marked Close
- * in Status Open/Close. Both the dashboard summary and the TaskLine focus
- * filter import these helpers, so the headline count and the drill-down list
- * can never drift apart.
+ * in Status Open/Close. Both the dashboard summary and
+ * the TaskLine focus filter import these helpers, so the headline count and the
+ * drill-down list can never drift apart.
  */
 
 export type PendencyKind = "appeal" | "scn";
