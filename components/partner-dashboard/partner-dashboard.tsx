@@ -1,14 +1,14 @@
 "use client";
 
 import { getCurrentUser } from "@/lib/supabase/session";
-import { MessagesSquare, NotebookPen, Pencil, Plus, Send, Trash2, X } from "lucide-react";
+import { MessagesSquare, NotebookPen, Pencil, Plus, Send, Strikethrough, Target, Trash2, X } from "lucide-react";
 import { MonthCalendar, type CalendarEvent } from "@/components/home/month-calendar";
 import { TaskNotificationBell } from "@/components/home/task-notification-bell";
 import { clearPersistentDataCache, getCached, setCached } from "@/lib/data-cache";
 import { PendencyReport } from "@/components/partner-dashboard/pendency-report";
 import { useEffect, useRef, useState } from "react";
 
-type NoteFile = { content: string; date?: string; id: string; lineColors?: string[]; title: string; updatedAt: string };
+type NoteFile = { content: string; date?: string; id: string; lineColors?: string[]; lineStruck?: boolean[]; targetDate?: string; title: string; updatedAt: string };
 type DashboardState = { calendarNotes: Record<string, string[]>; notes: NoteFile[] };
 type Thread = { count: number; entity: string; last_at: string; last_body: string; messages: ChatMessage[]; task: string; task_code: string; team: string };
 type ChatMessage = { author_name?: string; body: string; created_at: string; id: string };
@@ -66,6 +66,8 @@ function restoreDashboardState(saved: string): DashboardState | null {
             ...(Array.isArray(item.lineColors)
               ? { lineColors: item.lineColors.map((color) => (typeof color === "string" && color in noteLineColorFills ? color : "")) }
               : {}),
+            ...(Array.isArray(item.lineStruck) ? { lineStruck: item.lineStruck.map((struck) => struck === true) } : {}),
+            ...(typeof item.targetDate === "string" ? { targetDate: item.targetDate } : {}),
             title: typeof item.title === "string" && item.title.trim() ? item.title : `Note ${index + 1}`,
             updatedAt: typeof item.updatedAt === "string" ? item.updatedAt : new Date().toISOString()
           }];
@@ -239,6 +241,41 @@ export function PartnerDashboard() {
       ...current,
       notes: current.notes.map((note) => (note.id === activeNote.id ? { ...note, date, updatedAt: new Date().toISOString() } : note))
     }));
+  }
+
+  function updateActiveNoteTargetDate(targetDate: string) {
+    if (!activeNote) {
+      return;
+    }
+    setState((current) => ({
+      ...current,
+      notes: current.notes.map((note) =>
+        note.id === activeNote.id ? { ...note, targetDate, updatedAt: new Date().toISOString() } : note
+      )
+    }));
+  }
+
+  /** Strike the line the cursor is on, or un-strike it if it already is. */
+  function toggleActiveNoteLineStruck() {
+    if (!activeNote) {
+      return;
+    }
+    const index = currentNoteLineIndex();
+    setState((current) => ({
+      ...current,
+      notes: current.notes.map((note) => {
+        if (note.id !== activeNote.id) {
+          return note;
+        }
+        const struck = [...(note.lineStruck ?? [])];
+        while (struck.length <= index) {
+          struck.push(false);
+        }
+        struck[index] = !struck[index];
+        return { ...note, lineStruck: struck, updatedAt: new Date().toISOString() };
+      })
+    }));
+    noteEditorRef.current?.focus();
   }
 
   function renameNote(note: NoteFile) {
@@ -570,6 +607,14 @@ export function PartnerDashboard() {
                   <button className="min-w-0 flex-1 truncate px-1 text-left text-sm font-black" onClick={() => setActiveNoteId(note.id)} onDoubleClick={() => renameNote(note)} title="Double click to rename" type="button">
                     {note.title}
                     {note.date ? <span className="ml-1 text-[10px] font-bold text-slate-400">{formatNoteDate(note.date)}</span> : null}
+                    {note.targetDate ? (
+                      <span
+                        className={`ml-1 text-[10px] font-black ${isNoteTargetOverdue(note) ? "text-rose-600" : "text-emerald-700"}`}
+                        title={`Target ${formatNoteDate(note.targetDate)}`}
+                      >
+                        ⏱ {formatNoteDate(note.targetDate)}
+                      </span>
+                    ) : null}
                   </button>
                   <button className="flex size-7 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-white hover:text-navy-700" onClick={() => renameNote(note)} title="Rename note" type="button">
                     <Pencil className="size-3.5" />
@@ -596,6 +641,34 @@ export function PartnerDashboard() {
                   value={activeNote?.date ?? ""}
                 />
               </label>
+              <label
+                className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-black ${
+                  isNoteTargetOverdue(activeNote) ? "bg-rose-50 text-rose-700" : "bg-slate-50 text-slate-700"
+                }`}
+                title="When this note needs to be done by"
+              >
+                <Target className="size-4" />
+                Target date
+                <input
+                  className="rounded-md border border-slate-200 bg-white px-2 py-1 text-sm font-semibold outline-none focus:border-navy-400"
+                  onChange={(event) => updateActiveNoteTargetDate(event.target.value)}
+                  type="date"
+                  value={activeNote?.targetDate ?? ""}
+                />
+              </label>
+              <button
+                className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-sm font-black transition ${
+                  activeNote?.lineStruck?.[activeNoteLine]
+                    ? "bg-navy-700 text-white"
+                    : "bg-slate-50 text-slate-700 hover:bg-slate-100"
+                }`}
+                onClick={toggleActiveNoteLineStruck}
+                title="Strike out this line (click again to undo)"
+                type="button"
+              >
+                <Strikethrough className="size-4" />
+                Strike line
+              </button>
               <span className="ml-2 text-xs font-black uppercase tracking-wide text-slate-400">Colour line</span>
               {noteLineColorSwatches.map((swatch) => (
                 <button
@@ -628,7 +701,12 @@ export function PartnerDashboard() {
                     style={{
                       backgroundColor: noteLineColorFills[activeNote?.lineColors?.[index] ?? ""] ?? "transparent",
                       borderRadius: 4,
-                      boxShadow: index === activeNoteLine ? "inset 0 0 0 1.5px #cbd5e1" : undefined
+                      boxShadow: index === activeNoteLine ? "inset 0 0 0 1.5px #cbd5e1" : undefined,
+                      // The overlay text is transparent, but its strike rule is not,
+                      // so this draws a line across the matching row of the textarea.
+                      textDecorationColor: "#334155",
+                      textDecorationLine: activeNote?.lineStruck?.[index] ? "line-through" : "none",
+                      textDecorationThickness: "2px"
                     }}
                   >
                     {line === "" ? "​" : line}
@@ -660,6 +738,18 @@ export function PartnerDashboard() {
       />
     </div>
   );
+}
+
+/** A target date earlier than today, so the note can be flagged as running late. */
+function isNoteTargetOverdue(note: NoteFile | undefined) {
+  const target = note?.targetDate;
+
+  if (!target) {
+    return false;
+  }
+
+  const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date());
+  return target < today;
 }
 
 function formatNoteDate(value: string) {
