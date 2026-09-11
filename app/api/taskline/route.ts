@@ -1858,13 +1858,13 @@ async function loadPendencySummary(admin: ReturnType<typeof createAdminClient>, 
       scn: 0,
       team: label,
       total: 0,
-      urgency: emptyUrgencyCounts()
+      urgency: { appeal: emptyUrgencyCounts(), scn: emptyUrgencyCounts() }
     };
     const due = pendencyDueState(row.due_date, today, soonCutoff);
 
     entry[kind] += 1;
     entry.total += 1;
-    entry.urgency[pendencyUrgency(row.due_date, today, monthEnd)] += 1;
+    entry.urgency[kind][pendencyUrgency(row.due_date, today, monthEnd)] += 1;
     totals[kind] += 1;
     totals.total += 1;
 

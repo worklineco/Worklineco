@@ -147,29 +147,35 @@ export function dueSoonCutoffKey(fromKey = todayKey()) {
  * bands a partner can act on. "This month" is the same test as the Due this
  * month column, so the gold band and that column always agree.
  */
-export type PendencyUrgency = "later" | "none" | "overdue" | "thisMonth";
+export type PendencyUrgency = "later" | "none" | "overdue" | "thisMonth" | "today";
 
-export const pendencyUrgencies: PendencyUrgency[] = ["overdue", "thisMonth", "later", "none"];
+export const pendencyUrgencies: PendencyUrgency[] = ["overdue", "today", "thisMonth", "later", "none"];
 
 export const pendencyUrgencyLabels: Record<PendencyUrgency, string> = {
   later: "Due after this month",
   none: "No due date",
   overdue: "Overdue",
-  thisMonth: "Due this month"
+  thisMonth: "Later this month",
+  today: "Due today"
 };
 
-/** Validated against a white surface: worst pair dE 18.0 normal, 10.0 deutan. */
+/**
+ * Validated against a white surface: every pair clears the normal-vision floor
+ * (worst 18.0) and the colour-vision floor (worst 10.0 deutan). Red for late
+ * and gold for today echo the register's own Due Date colouring.
+ */
 export const pendencyUrgencyColors: Record<PendencyUrgency, string> = {
   later: "#2563eb",
-  none: "#94a3b8",
+  none: "#475569",
   overdue: "#dc2626",
-  thisMonth: "#ca8a04"
+  thisMonth: "#0d9488",
+  today: "#ca8a04"
 };
 
 export type PendencyUrgencyCounts = Record<PendencyUrgency, number>;
 
 export function emptyUrgencyCounts(): PendencyUrgencyCounts {
-  return { later: 0, none: 0, overdue: 0, thisMonth: 0 };
+  return { later: 0, none: 0, overdue: 0, thisMonth: 0, today: 0 };
 }
 
 /** Last day of the month `today` falls in, as yyyy-mm-dd. */
@@ -197,6 +203,10 @@ export function pendencyUrgency(dueDate: unknown, today = todayKey(), monthEnd =
     return "overdue";
   }
 
+  if (key === today) {
+    return "today";
+  }
+
   return key <= monthEnd ? "thisMonth" : "later";
 }
 
@@ -206,7 +216,8 @@ export function pendencyUrgency(dueDate: unknown, today = todayKey(), monthEnd =
  * column, and the drill-down applies the identical test.
  */
 export function isDueThisMonth(dueDate: unknown, today = todayKey(), monthEnd = monthEndKey(today)) {
-  return pendencyUrgency(dueDate, today, monthEnd) === "thisMonth";
+  const urgency = pendencyUrgency(dueDate, today, monthEnd);
+  return urgency === "today" || urgency === "thisMonth";
 }
 
 export type PendencyDueState = "dueSoon" | "later" | "none" | "overdue";
@@ -237,7 +248,7 @@ export type PendencyTeamRow = {
   scn: number;
   team: string;
   total: number;
-  urgency: PendencyUrgencyCounts;
+  urgency: Record<PendencyKind, PendencyUrgencyCounts>;
 };
 
 export type PendencySummary = {

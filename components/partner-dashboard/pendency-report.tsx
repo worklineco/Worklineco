@@ -103,10 +103,47 @@ function SummaryTile({
 
 /**
  * One row per team: a bold bar split into SCNs and Appeals so team workloads
- * stay directly comparable, with a thin urgency strip beneath it carrying the
- * register's colour language. Counts sit at the end of every bar and the strip
- * is named in its own legend, so neither reading depends on colour alone.
+ * stay directly comparable, and beneath each half its own urgency strip in the
+ * register's colour language. Keeping the strips separate means you can see at
+ * a glance whether the lateness sits with the notices or the appeals.
  */
+function KindColumn({ kind, row }: { kind: PendencyKind; row: PendencyTeamRow }) {
+  const counts = row.urgency?.[kind];
+  const total = row[kind];
+
+  return (
+    <div className="flex min-w-0 flex-col" style={{ flexGrow: total, flexBasis: 0 }}>
+      <Link
+        aria-label={`${total} pending ${pendencyKindShortLabels[kind]} for ${row.team}`}
+        className="flex h-6 items-center justify-end overflow-hidden rounded-[4px] px-1.5 transition hover:opacity-85"
+        href={taskLineHref({ kind, team: row.team })}
+        style={{ backgroundColor: kindColors[kind] }}
+        title={`${row.team} · ${total} ${pendencyKindShortLabels[kind]} pending`}
+      >
+        <span className="text-[10px] font-black tabular-nums text-white/90">{total}</span>
+      </Link>
+
+      <div
+        className="mt-[3px] flex h-[6px] items-stretch gap-[2px]"
+        title={`${row.team} · ${pendencyKindShortLabels[kind]} by due date`}
+      >
+        {pendencyUrgencies.map((urgency) => {
+          const value = counts?.[urgency] ?? 0;
+          if (!value) return null;
+          return (
+            <span
+              className="rounded-[2px]"
+              key={urgency}
+              style={{ backgroundColor: pendencyUrgencyColors[urgency], flexGrow: value, flexBasis: 0 }}
+              title={`${row.team} · ${pendencyKindShortLabels[kind]} · ${pendencyUrgencyLabels[urgency]}: ${value}`}
+            />
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function TeamRow({ row, scale }: { row: PendencyTeamRow; scale: number }) {
   const widthPercent = `${Math.max((row.total / scale) * 100, 2)}%`;
   const kinds: PendencyKind[] = ["scn", "appeal"];
@@ -118,38 +155,8 @@ function TeamRow({ row, scale }: { row: PendencyTeamRow; scale: number }) {
       </span>
 
       <div className="min-w-0 flex-1">
-        <div style={{ width: widthPercent }}>
-          <div className="flex h-6 items-stretch gap-[2px]">
-            {kinds.map((kind) =>
-              row[kind] ? (
-                <Link
-                  aria-label={`${row[kind]} pending ${pendencyKindShortLabels[kind]} for ${row.team}`}
-                  className="flex items-center justify-end overflow-hidden rounded-[4px] px-1.5 transition hover:opacity-85"
-                  href={taskLineHref({ kind, team: row.team })}
-                  key={kind}
-                  style={{ backgroundColor: kindColors[kind], flexGrow: row[kind], flexBasis: 0 }}
-                  title={`${row.team} · ${row[kind]} ${pendencyKindShortLabels[kind]} pending`}
-                >
-                  <span className="text-[10px] font-black tabular-nums text-white/90">{row[kind]}</span>
-                </Link>
-              ) : null
-            )}
-          </div>
-
-          <div className="mt-[3px] flex h-[6px] items-stretch gap-[2px]">
-            {pendencyUrgencies.map((urgency) => {
-              const value = row.urgency?.[urgency] ?? 0;
-              if (!value) return null;
-              return (
-                <span
-                  className="rounded-[2px]"
-                  key={urgency}
-                  style={{ backgroundColor: pendencyUrgencyColors[urgency], flexGrow: value, flexBasis: 0 }}
-                  title={`${row.team} · ${pendencyUrgencyLabels[urgency]}: ${value}`}
-                />
-              );
-            })}
-          </div>
+        <div className="flex items-start gap-[3px]" style={{ width: widthPercent }}>
+          {kinds.map((kind) => (row[kind] ? <KindColumn key={kind} kind={kind} row={row} /> : null))}
         </div>
       </div>
 
