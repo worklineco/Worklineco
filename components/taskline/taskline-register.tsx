@@ -3,7 +3,7 @@
 import { ArrowDown, ArrowUp, Bookmark, CalendarDays, Check, ChevronDown, CircleDot, Star, Download, Filter, History, ListChecks, Menu, Pencil, Pin, Plus, ReceiptText, RotateCcw, Scale, Search, Settings2, Trash2, Upload, Workflow, X } from "lucide-react";
 import Link from "next/link";
 import type { ComponentType, PointerEvent as ReactPointerEvent } from "react";
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import * as XLSX from "xlsx-js-style";
 import { clearCached, getCached, setCached } from "@/lib/data-cache";
@@ -106,7 +106,7 @@ const actionColumnKey = "__actions";
 const taskLineColumns: TaskLineColumn[] = [
   { key: "team", label: "Team", width: 96 },
   { key: "register_name", label: "Register", width: 130 },
-  { key: "task_code", label: "Task Code", width: 150 },
+  { key: "task_code", label: "Task Code", width: 176 },
   { key: "name", label: "Name", width: 260 },
   { key: "resource", label: "Resource", width: 260 },
   { key: "entity_group", label: "Entity Group", width: 150 },
@@ -505,9 +505,20 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
       return row;
     });
   }, [rows, entityGroupByName]);
+  const deferredSearch = useDeferredValue(search);
+  const deferredColumnFilters = useDeferredValue(columnFilters);
+  const deferredValueFilters = useDeferredValue(valueFilters);
   const filteredRows = useMemo(
-    () => applyTaskLineFilters(resolvedRows, { columnFilters, dueColorFilter, dueRange, search, sortState, statusFilter, valueFilters }),
-    [resolvedRows, columnFilters, dueColorFilter, dueRange, search, sortState, statusFilter, valueFilters]
+    () => applyTaskLineFilters(resolvedRows, {
+      columnFilters: deferredColumnFilters,
+      dueColorFilter,
+      dueRange,
+      search: deferredSearch,
+      sortState,
+      statusFilter,
+      valueFilters: deferredValueFilters
+    }),
+    [resolvedRows, deferredColumnFilters, dueColorFilter, dueRange, deferredSearch, sortState, statusFilter, deferredValueFilters]
   );
   const hasActiveColumnFilters = Object.values(columnFilters).some((value) => value.trim());
   const hasActiveDataQuery = Boolean(
@@ -958,6 +969,10 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
       void loadStageMasters();
     }
   }
+
+  const loadDropdownOptionsRef = useRef(loadDropdownOptions);
+  loadDropdownOptionsRef.current = loadDropdownOptions;
+  const handleDropdownOpen = useCallback((columnKey: string) => loadDropdownOptionsRef.current(columnKey), []);
 
   function loadEditorOptions() {
     void Promise.all([loadMasters(), loadStageMasters(), loadTeamMembers(), loadEntityMasters()]);
@@ -2314,7 +2329,7 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
                         key={`${row.__id}-${column.key}`}
                         nameOptions={rowNameOptions}
                         onCellChange={updateRow}
-                        onDropdownOpen={loadDropdownOptions}
+                        onDropdownOpen={handleDropdownOpen}
                         resourceOptions={rowResourceOptions}
                         row={row}
                         sectionOptions={sectionOptions}
@@ -2714,7 +2729,10 @@ const TaskLineCell = memo(function TaskLineCell({
   taskMasterNames: string[];
 }) {
   const frozenStyle = isFrozen ? { left: frozenLeft } : undefined;
-  const onChange = (value: string) => onCellChange(row.__id, column.key, value);
+  const rowId = row.__id;
+  const columnKey = column.key;
+  const onChange = useCallback((value: string) => onCellChange(rowId, columnKey, value), [columnKey, onCellChange, rowId]);
+  const onOpen = useCallback(() => onDropdownOpen(columnKey), [columnKey, onDropdownOpen]);
 
   if (column.key === "serial_no") {
     return (
@@ -2728,8 +2746,8 @@ const TaskLineCell = memo(function TaskLineCell({
     const fullTaskCode = row[column.key] ?? "";
     return (
       <td className={`border-r border-slate-100 px-3 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
-        <span className="block h-7 truncate px-1.5 py-1 font-bold text-navy-700" title={fullTaskCode}>
-          {fullTaskCode ? fullTaskCode.slice(-3) : serialNumber}
+        <span className="block h-7 whitespace-nowrap px-1.5 py-1 font-bold text-navy-700" title={String(fullTaskCode || serialNumber)}>
+          {fullTaskCode || serialNumber}
         </span>
       </td>
     );
@@ -2751,14 +2769,14 @@ const TaskLineCell = memo(function TaskLineCell({
     const options = column.key === "entity"
       ? entityOptions
       : column.key === "state_name"
-        ? gstinStateOptions.map(([, state]) => state)
+        ? gstinStateNameOptions
         : sectionOptions;
     return (
       <td className={`border-r border-slate-100 px-3 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
         <LazyTaskLineSelect
           current={current}
           onChange={onChange}
-          onOpen={() => onDropdownOpen(column.key)}
+          onOpen={onOpen}
           options={options}
           placeholder={column.key === "section" ? "Select Section" : `Select ${column.label}`}
         />
@@ -2787,7 +2805,7 @@ const TaskLineCell = memo(function TaskLineCell({
     const current = row[column.key] ?? "";
     return (
       <td className={`border-r border-slate-100 px-3 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
-        <LazyTaskLineSelect current={current} matchNames onChange={onChange} onOpen={() => onDropdownOpen(column.key)} options={nameOptions} placeholder="Select" />
+        <LazyTaskLineSelect current={current} matchNames onChange={onChange} onOpen={onOpen} options={nameOptions} placeholder="Select" />
       </td>
     );
   }
@@ -2796,7 +2814,7 @@ const TaskLineCell = memo(function TaskLineCell({
     const current = row[column.key] ?? "";
     return (
       <td className={`border-r border-slate-100 px-3 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
-        <LazyTaskLineSelect current={current} matchNames onChange={onChange} onOpen={() => onDropdownOpen(column.key)} options={resourceOptions} placeholder="Select" />
+        <LazyTaskLineSelect current={current} matchNames onChange={onChange} onOpen={onOpen} options={resourceOptions} placeholder="Select" />
       </td>
     );
   }
@@ -2805,7 +2823,7 @@ const TaskLineCell = memo(function TaskLineCell({
     const current = row[column.key] ?? "";
     return (
       <td className={`border-r border-slate-100 px-3 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
-        <LazyTaskLineSelect current={current} onChange={onChange} onOpen={() => onDropdownOpen(column.key)} options={taskMasterNames} placeholder="Select task" />
+        <LazyTaskLineSelect current={current} onChange={onChange} onOpen={onOpen} options={taskMasterNames} placeholder="Select task" />
       </td>
     );
   }
@@ -2814,7 +2832,7 @@ const TaskLineCell = memo(function TaskLineCell({
     const current = row[column.key] ?? "";
     return (
       <td className={`border-r border-slate-100 px-3 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
-        <LazyTaskLineSelect current={current} onChange={onChange} onOpen={() => onDropdownOpen(column.key)} options={stageMasterNames} placeholder="Select stage" />
+        <LazyTaskLineSelect current={current} onChange={onChange} onOpen={onOpen} options={stageMasterNames} placeholder="Select stage" />
       </td>
     );
   }
@@ -2878,13 +2896,13 @@ function LazyTaskLineSelect({
   placeholder: string;
 }) {
   const [isActive, setIsActive] = useState(false);
-  const normalizedOptions = matchNames
-    ? Array.from(new Set(options.map(canonicalTaskLineName).filter(Boolean)))
-    : options;
+  const normalizedOptions = matchNames ? canonicalTaskLineNameOptions(options) : options;
   const resolved = matchNames ? resolvePersonOption(current, normalizedOptions) : current;
 
   function activate() {
-    setIsActive(true);
+    if (!isActive) {
+      setIsActive(true);
+    }
     onOpen?.();
   }
 
@@ -3610,6 +3628,19 @@ function TaskLineDateInput({ compact = false, onChange, value }: { compact?: boo
       </label>
     </div>
   );
+}
+
+const gstinStateNameOptions = gstinStateOptions.map(([, state]) => state);
+const canonicalOptionsCache = new WeakMap<readonly string[], string[]>();
+
+function canonicalTaskLineNameOptions(options: readonly string[]) {
+  const cached = canonicalOptionsCache.get(options);
+  if (cached) {
+    return cached;
+  }
+  const normalized = Array.from(new Set(options.map(canonicalTaskLineName).filter(Boolean)));
+  canonicalOptionsCache.set(options, normalized);
+  return normalized;
 }
 
 const compactSelectClass = "h-7 w-full rounded-md border border-slate-200 bg-white pl-2 pr-7 text-xs font-bold outline-none focus:border-rose-300 focus:ring-2 focus:ring-rose-100";
