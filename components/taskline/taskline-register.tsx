@@ -8,6 +8,15 @@ import { createPortal } from "react-dom";
 import * as XLSX from "xlsx-js-style";
 import { clearCached, getCached, setCached } from "@/lib/data-cache";
 import { useRegisterEditAccess, viewOnlyRegisterMessage as sharedViewOnlyRegisterMessage } from "@/lib/use-register-access";
+import {
+  classifyPendencyKind,
+  dueSoonCutoffKey,
+  isPendingMatter,
+  pendencyDueState,
+  pendencyKindShortLabels,
+  todayKey,
+  type PendencyKind
+} from "@/lib/pendency";
 import { ViewOnlyAccessDialog } from "@/components/shared/view-only-access-dialog";
 
 type TaskLineColumn = {
@@ -309,6 +318,7 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
   const [viewNameDraft, setViewNameDraft] = useState("");
   const [activeViewId, setActiveViewId] = useState<string | null>(null);
   const [tablePage, setTablePage] = useState(1);
+  const [pendencyFocus, setPendencyFocus] = useState<PendencyFocus | null>(null);
   const [viewMode, setViewMode] = useState<TaskLineView>("register");
   const [taskMasters, setTaskMasters] = useState<{ id: string; name: string }[]>([]);
   const [isMasterOpen, setIsMasterOpen] = useState(false);
@@ -508,8 +518,12 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
   const deferredSearch = useDeferredValue(search);
   const deferredColumnFilters = useDeferredValue(columnFilters);
   const deferredValueFilters = useDeferredValue(valueFilters);
+  const focusedRows = useMemo(
+    () => (pendencyFocus ? resolvedRows.filter((row) => matchesPendencyFocus(row, pendencyFocus)) : resolvedRows),
+    [pendencyFocus, resolvedRows]
+  );
   const filteredRows = useMemo(
-    () => applyTaskLineFilters(resolvedRows, {
+    () => applyTaskLineFilters(focusedRows, {
       columnFilters: deferredColumnFilters,
       dueColorFilter,
       dueRange,
@@ -518,7 +532,7 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
       statusFilter,
       valueFilters: deferredValueFilters
     }),
-    [resolvedRows, deferredColumnFilters, dueColorFilter, dueRange, deferredSearch, sortState, statusFilter, deferredValueFilters]
+    [focusedRows, deferredColumnFilters, dueColorFilter, dueRange, deferredSearch, sortState, statusFilter, deferredValueFilters]
   );
   const hasActiveColumnFilters = Object.values(columnFilters).some((value) => value.trim());
   const hasActiveDataQuery = Boolean(
@@ -548,8 +562,19 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
   }, [filteredRows, tablePage]);
 
   useEffect(() => {
+    // Deep link from the partner dashboard:
+    // /taskline?pendency=1&team=..&kind=..&due=..
+    // It must show exactly the matters counted there, so it takes precedence
+    // over the user's default saved view instead of stacking on top of it.
+    const focus = readPendencyFocus(window.location.search);
+
+    if (focus) {
+      setPendencyFocus(focus);
+      window.history.replaceState(null, "", window.location.pathname);
+    }
+
     void loadAllTaskLine();
-    void loadViews(true);
+    void loadViews(!focus);
   }, []);
 
   useEffect(() => {
@@ -1253,6 +1278,8 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
     clearCached(taskLineRowsCacheKey);
     return loadAllTaskLine(false);
   }
+
+  const clearPendencyFocus = useCallback(() => setPendencyFocus(null), []);
 
   function goToPage(nextPage: number) {
     setTablePage(Math.max(1, Math.min(pageCount, nextPage)));
@@ -2088,6 +2115,25 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
 
       {message ? (
         <p className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-bold text-emerald-900">{message}</p>
+      ) : null}
+
+      {pendencyFocus ? (
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-navy-200 bg-navy-50 px-3 py-2">
+          <p className="text-sm font-bold text-navy-800">
+            {pendencyFocusLabel(pendencyFocus)}
+            <span className="ml-2 font-semibold text-navy-600">
+              {filteredRows.length.toLocaleString("en-IN")} {filteredRows.length === 1 ? "matter" : "matters"}
+            </span>
+          </p>
+          <button
+            className="inline-flex h-8 items-center gap-1 rounded-md border border-navy-200 bg-white px-2.5 text-xs font-bold text-navy-700 transition hover:bg-navy-50"
+            onClick={clearPendencyFocus}
+            type="button"
+          >
+            <X className="size-3.5" />
+            Show all rows
+          </button>
+        </div>
       ) : null}
 
       {viewMode === "register" ? (
@@ -3628,6 +3674,61 @@ function TaskLineDateInput({ compact = false, onChange, value }: { compact?: boo
       </label>
     </div>
   );
+}
+
+type PendencyFocus = { due: "overdue" | "soon" | null; kind: PendencyKind | null; team: string };
+
+function readPendencyFocus(search: string): PendencyFocus | null {
+  const params = new URLSearchParams(search);
+
+  if (params.get("pendency") !== "1") {
+    return null;
+  }
+
+  const kind = params.get("kind");
+  const due = params.get("due");
+
+  return {
+    due: due === "overdue" || due === "soon" ? due : null,
+    kind: kind === "scn" || kind === "appeal" ? kind : null,
+    team: text(params.get("team"))
+  };
+}
+
+/**
+ * Rows behind a pendency figure on the partner dashboard. Kept in step with
+ * lib/pendency.ts so the count there and the list here always agree.
+ */
+function matchesPendencyFocus(row: TaskLineRow, focus: PendencyFocus) {
+  const kind = classifyPendencyKind(row.task);
+
+  if (!kind || !isPendingMatter(row.stage, row.status_open_close)) {
+    return false;
+  }
+
+  if (focus.kind && kind !== focus.kind) {
+    return false;
+  }
+
+  if (focus.team && teamMatchKey(row.team) !== teamMatchKey(focus.team)) {
+    return false;
+  }
+
+  if (focus.due) {
+    const today = todayKey();
+    const state = pendencyDueState(row.due_date, today, dueSoonCutoffKey(today));
+    return focus.due === "overdue" ? state === "overdue" : state === "dueSoon";
+  }
+
+  return true;
+}
+
+function pendencyFocusLabel(focus: PendencyFocus) {
+  const kind = focus.kind ? pendencyKindShortLabels[focus.kind] : "SCNs and appeals";
+  const team = focus.team ? ` for ${focus.team}` : " across all teams";
+  const due = focus.due === "overdue" ? ", overdue" : focus.due === "soon" ? ", due within 7 days" : "";
+
+  return `Pending ${kind}${team}${due}`;
 }
 
 const gstinStateNameOptions = gstinStateOptions.map(([, state]) => state);

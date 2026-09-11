@@ -5,6 +5,7 @@ import { MessagesSquare, NotebookPen, Pencil, Plus, Send, Trash2, X } from "luci
 import { MonthCalendar, type CalendarEvent } from "@/components/home/month-calendar";
 import { TaskNotificationBell } from "@/components/home/task-notification-bell";
 import { clearPersistentDataCache, getCached, setCached } from "@/lib/data-cache";
+import { PendencyReport } from "@/components/partner-dashboard/pendency-report";
 import { useEffect, useRef, useState } from "react";
 
 type NoteFile = { content: string; date?: string; id: string; lineColors?: string[]; title: string; updatedAt: string };
@@ -83,6 +84,7 @@ function restoreDashboardState(saved: string): DashboardState | null {
 export function PartnerDashboard() {
   const [profileName, setProfileName] = useState("Partner");
   const [profileEmail, setProfileEmail] = useState("");
+  const [isPartner, setIsPartner] = useState(false);
   const [state, setState] = useState<DashboardState>(defaultState);
   const [activeNoteId, setActiveNoteId] = useState(defaultState.notes[0]?.id ?? "");
   const [useNumberedNotes, setUseNumberedNotes] = useState(true);
@@ -139,6 +141,15 @@ export function PartnerDashboard() {
       setProfileName(String(metadata.full_name ?? metadata.name ?? user?.email ?? "Partner").trim() || "Partner");
       setProfileEmail(user?.email ?? "");
     });
+
+    // Designation comes from trusted role metadata, so the pendency report is
+    // only rendered for partners. The API enforces the same check server-side.
+    void fetch("/api/me", { cache: "no-store" })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((profile: { role?: string } | null) => {
+        setIsPartner(String(profile?.role ?? "").toLowerCase().includes("partner"));
+      })
+      .catch(() => undefined);
 
     void loadChats();
   }, []);
@@ -422,6 +433,8 @@ export function PartnerDashboard() {
         </div>
         <TaskNotificationBell />
       </section>
+
+      {isPartner ? <PendencyReport /> : null}
 
       <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="flex items-center gap-2">

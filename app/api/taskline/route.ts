@@ -2,6 +2,16 @@ import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { createClient, type User } from "@supabase/supabase-js";
 import { createTransport } from "nodemailer";
 import { isViewOnlyRegisterUser, viewOnlyRegisterResponse } from "@/lib/register-access";
+import {
+  classifyPendencyKind,
+  dueSoonCutoffKey,
+  isPendingMatter,
+  pendencyDueState,
+  pendencyTeamLabel,
+  todayKey,
+  type PendencySummary,
+  type PendencyTeamRow
+} from "@/lib/pendency";
 import { extraDueRecipientsByTeam, indiaTodayDisplayDate, indiaTodayKey, isEmail, isManagerRoleText, parseEmailAddresses, teamMatchKey } from "@/lib/taskline-reminder-shared";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
@@ -257,6 +267,10 @@ export async function GET(request: Request) {
 
   if (view === "calendar") {
     return loadCalendarEvents(admin, organisation.organisationId, auth.user, access);
+  }
+
+  if (view === "pendency") {
+    return loadPendencySummary(admin, organisation.organisationId, auth.user);
   }
 
   if (view === "audit") {
@@ -1762,6 +1776,103 @@ function formatDisplayDate(year: number, month: number, day: number) {
 
 function pad2(value: number) {
   return String(value).padStart(2, "0");
+}
+
+const pendencySelect = [
+  "id",
+  "workline_module:custom_values->>workline_module",
+  "team:custom_values->taskline_data->>team",
+  "task:custom_values->taskline_data->>task",
+  "stage:custom_values->taskline_data->>stage",
+  "status_open_close:custom_values->taskline_data->>status_open_close",
+  "due_date:custom_values->taskline_data->>due_date",
+  "register_key:custom_values->taskline_data->>register_key"
+].join(",");
+type PendencyLeanRow = Record<string, string | null>;
+
+function isPartnerUser(user: User) {
+  return String(user.app_metadata?.workline_role ?? "").trim().toLowerCase().includes("partner");
+}
+
+/**
+ * Firm-wide pendency of show cause notices and appeals in the Litigation
+ * register, grouped by team. Partners only: this deliberately crosses the
+ * per-team access boundary that the rest of the register enforces.
+ */
+async function loadPendencySummary(admin: ReturnType<typeof createAdminClient>, organisationId: string, user: User) {
+  if (!isPartnerUser(user)) {
+    return NextResponse.json({ error: "The pendency report is available to partners." }, { status: 403 });
+  }
+
+  const rows: PendencyLeanRow[] = [];
+  const pageSize = 1000;
+
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await admin
+      .from("tasks")
+      .select(pendencySelect)
+      .eq("organisation_id", organisationId)
+      .eq("custom_values->>workline_module", moduleKey)
+      .range(from, from + pageSize - 1);
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    const batch = (data ?? []) as unknown as PendencyLeanRow[];
+    rows.push(...batch);
+
+    if (batch.length < pageSize) {
+      break;
+    }
+  }
+
+  const today = todayKey();
+  const soonCutoff = dueSoonCutoffKey(today);
+  const byTeam = new Map<string, PendencyTeamRow>();
+  const totals = { appeal: 0, dueSoon: 0, overdue: 0, scn: 0, total: 0 };
+
+  for (const row of rows) {
+    if (getStoredRegisterKey({ register_key: text(row.register_key) }) !== "taskline") {
+      continue;
+    }
+
+    const kind = classifyPendencyKind(row.task);
+
+    if (!kind || !isPendingMatter(row.stage, row.status_open_close)) {
+      continue;
+    }
+
+    const label = pendencyTeamLabel(row.team);
+    const key = teamMatchKey(label) || label.toLowerCase();
+    const entry = byTeam.get(key) ?? { appeal: 0, dueSoon: 0, overdue: 0, scn: 0, team: label, total: 0 };
+    const due = pendencyDueState(row.due_date, today, soonCutoff);
+
+    entry[kind] += 1;
+    entry.total += 1;
+    totals[kind] += 1;
+    totals.total += 1;
+
+    if (due === "overdue") {
+      entry.overdue += 1;
+      totals.overdue += 1;
+    } else if (due === "dueSoon") {
+      entry.dueSoon += 1;
+      totals.dueSoon += 1;
+    }
+
+    byTeam.set(key, entry);
+  }
+
+  const summary: PendencySummary = {
+    asOf: indiaTodayDisplayDate(),
+    teams: Array.from(byTeam.values()).sort(
+      (first, second) => second.total - first.total || first.team.localeCompare(second.team, undefined, { numeric: true })
+    ),
+    totals
+  };
+
+  return NextResponse.json(summary);
 }
 
 function createAdminClient() {
