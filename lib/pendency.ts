@@ -2,10 +2,11 @@
  * Shared pendency rules for the partner Pendency Report and for the TaskLine
  * deep link that opens the matching rows.
  *
- * A matter counts as PENDING when its Stage does not read as submitted and the
- * row is not marked Close in Status Open/Close. Both the dashboard summary and
- * the TaskLine focus filter import these helpers, so the headline count and the
- * drill-down list can never drift apart.
+ * A matter counts as PENDING when its Stage does not read as submitted, the
+ * Stage does not read as cancelled or on hold, and the row is not marked Close
+ * in Status Open/Close. Both the dashboard summary and the TaskLine focus
+ * filter import these helpers, so the headline count and the drill-down list
+ * can never drift apart.
  */
 
 export type PendencyKind = "appeal" | "scn";
@@ -59,12 +60,24 @@ export function isSubmittedStage(stage: unknown) {
   return normalize(stage).includes("submit");
 }
 
+/**
+ * Stage wording for matters that are off the desk without having been
+ * submitted: cancelled, or parked on hold. Neither is a live pendency, so they
+ * stay out of the partner's count. Word boundaries keep this from catching
+ * unrelated wording such as "stakeholder".
+ */
+const droppedStagePattern = /\bcancel|\bon[\s-]?hold\b|\bhold\b/;
+
+export function isDroppedStage(stage: unknown) {
+  return droppedStagePattern.test(normalize(stage));
+}
+
 export function isClosedStatus(status: unknown) {
   return normalize(status).startsWith("close");
 }
 
 export function isPendingMatter(stage: unknown, status: unknown) {
-  return !isSubmittedStage(stage) && !isClosedStatus(status);
+  return !isSubmittedStage(stage) && !isDroppedStage(stage) && !isClosedStatus(status);
 }
 
 export function pendencyTeamLabel(team: unknown) {

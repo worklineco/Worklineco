@@ -180,8 +180,8 @@ export function PendencyReport() {
             <h3 className="text-base font-black text-slate-950">Pendency by team</h3>
           </div>
           <p className="mt-1 text-xs font-semibold text-slate-500">
-            Show cause notices and appeals in Litigation whose stage is not yet submitted. Click any number to open those
-            matters in TaskLine.
+            Show cause notices and appeals in Litigation still to be submitted. Cancelled, on-hold and closed matters are
+            left out. Click any number to open those matters in TaskLine.
           </p>
         </div>
         {summary ? <span className="text-[11px] font-bold text-slate-400">As on {summary.asOf}</span> : null}
@@ -191,7 +191,7 @@ export function PendencyReport() {
         <p className="mt-4 text-sm font-bold text-slate-400">Loading pendency…</p>
       ) : !totals || !totals.total ? (
         <p className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-6 text-center text-sm font-bold text-emerald-700">
-          Nothing pending. Every show cause notice and appeal is marked submitted.
+          Nothing pending. Every show cause notice and appeal is submitted, cancelled, on hold or closed.
         </p>
       ) : (
         <>
