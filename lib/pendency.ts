@@ -135,88 +135,36 @@ export function dueSoonCutoffKey(fromKey = todayKey()) {
 }
 
 /**
- * Due-date buckets, matching the colour bands the Litigation register paints on
- * its Due Date column so the dashboard chart reads the same way as the register.
+ * Urgency bands for the dashboard chart. The Litigation register paints seven
+ * colour bands on its Due Date column, which is right for a cell behind text
+ * but far too many to tell apart as thin fills in a chart, so this keeps the
+ * register's colour language (red means late, grey means no date) across four
+ * bands a partner can act on. "This month" is the same test as the Due this
+ * month column, so the gold band and that column always agree.
  */
-export type PendencyDueBucket = "d15" | "d30" | "d7" | "d90" | "none" | "overdue" | "today";
+export type PendencyUrgency = "later" | "none" | "overdue" | "thisMonth";
 
-export const pendencyDueBuckets: PendencyDueBucket[] = ["overdue", "today", "d7", "d15", "d30", "d90", "none"];
+export const pendencyUrgencies: PendencyUrgency[] = ["overdue", "thisMonth", "later", "none"];
 
-export const pendencyDueBucketLabels: Record<PendencyDueBucket, string> = {
-  d15: "Due within 15 days",
-  d30: "Due within 30 days",
-  d7: "Due within 7 days",
-  d90: "Due in 30 to 90 days",
-  none: "No due date or 90+ days",
+export const pendencyUrgencyLabels: Record<PendencyUrgency, string> = {
+  later: "Due after this month",
+  none: "No due date",
   overdue: "Overdue",
-  today: "Due today"
+  thisMonth: "Due this month"
 };
 
-/** The register's Tailwind swatches, as hex for inline chart fills. */
-export const pendencyDueBucketColors: Record<PendencyDueBucket, string> = {
-  d15: "#93c5fd",
-  d30: "#f59e0b",
-  d7: "#4ade80",
-  d90: "#fdba74",
-  none: "#e2e8f0",
-  overdue: "#fecaca",
-  today: "#fde047"
+/** Validated against a white surface: worst pair dE 18.0 normal, 10.0 deutan. */
+export const pendencyUrgencyColors: Record<PendencyUrgency, string> = {
+  later: "#2563eb",
+  none: "#94a3b8",
+  overdue: "#dc2626",
+  thisMonth: "#ca8a04"
 };
 
-export type PendencyDueCounts = Record<PendencyDueBucket, number>;
+export type PendencyUrgencyCounts = Record<PendencyUrgency, number>;
 
-export function emptyDueCounts(): PendencyDueCounts {
-  return { d15: 0, d30: 0, d7: 0, d90: 0, none: 0, overdue: 0, today: 0 };
-}
-
-function daysBetween(fromKey: string, toKey: string) {
-  const from = fromKey.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  const to = toKey.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-
-  if (!from || !to) {
-    return null;
-  }
-
-  const fromTime = Date.UTC(Number(from[1]), Number(from[2]) - 1, Number(from[3]));
-  const toTime = Date.UTC(Number(to[1]), Number(to[2]) - 1, Number(to[3]));
-
-  return Math.round((toTime - fromTime) / 86400000);
-}
-
-/** Same thresholds as the register's Due Date colouring. */
-export function pendencyDueBucket(dueDate: unknown, today = todayKey()): PendencyDueBucket {
-  const key = dueDateSortKey(dueDate);
-  const diff = key ? daysBetween(today, key) : null;
-
-  if (diff === null) {
-    return "none";
-  }
-
-  if (diff < 0) {
-    return "overdue";
-  }
-
-  if (diff === 0) {
-    return "today";
-  }
-
-  if (diff <= 7) {
-    return "d7";
-  }
-
-  if (diff <= 15) {
-    return "d15";
-  }
-
-  if (diff <= 30) {
-    return "d30";
-  }
-
-  if (diff <= 90) {
-    return "d90";
-  }
-
-  return "none";
+export function emptyUrgencyCounts(): PendencyUrgencyCounts {
+  return { later: 0, none: 0, overdue: 0, thisMonth: 0 };
 }
 
 /** Last day of the month `today` falls in, as yyyy-mm-dd. */
@@ -233,14 +181,27 @@ export function monthEndKey(today = todayKey()) {
   return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())}`;
 }
 
+export function pendencyUrgency(dueDate: unknown, today = todayKey(), monthEnd = monthEndKey(today)): PendencyUrgency {
+  const key = dueDateSortKey(dueDate);
+
+  if (!key) {
+    return "none";
+  }
+
+  if (key < today) {
+    return "overdue";
+  }
+
+  return key <= monthEnd ? "thisMonth" : "later";
+}
+
 /**
  * Falls due between today and the end of the current calendar month. Overdue
  * matters are deliberately left out so this never double-counts the Overdue
  * column, and the drill-down applies the identical test.
  */
 export function isDueThisMonth(dueDate: unknown, today = todayKey(), monthEnd = monthEndKey(today)) {
-  const key = dueDateSortKey(dueDate);
-  return Boolean(key) && key >= today && key <= monthEnd;
+  return pendencyUrgency(dueDate, today, monthEnd) === "thisMonth";
 }
 
 export type PendencyDueState = "dueSoon" | "later" | "none" | "overdue";
@@ -265,17 +226,17 @@ export function pendencyDueState(dueDate: unknown, today = todayKey(), soonCutof
 
 export type PendencyTeamRow = {
   appeal: number;
-  buckets: Record<PendencyKind, PendencyDueCounts>;
   dueSoon: number;
   dueThisMonth: number;
   overdue: number;
   scn: number;
   team: string;
   total: number;
+  urgency: PendencyUrgencyCounts;
 };
 
 export type PendencySummary = {
   asOf: string;
   teams: PendencyTeamRow[];
-  totals: Omit<PendencyTeamRow, "buckets" | "team">;
+  totals: Omit<PendencyTeamRow, "team" | "urgency">;
 };

@@ -5,11 +5,10 @@ import { ArrowRight, Scale, TriangleAlert } from "lucide-react";
 import { useEffect, useState } from "react";
 import { getCached, setCached } from "@/lib/data-cache";
 import {
-  pendencyDueBucketColors,
-  pendencyDueBucketLabels,
-  pendencyDueBuckets,
   pendencyKindShortLabels,
-  type PendencyDueBucket,
+  pendencyUrgencies,
+  pendencyUrgencyColors,
+  pendencyUrgencyLabels,
   type PendencyKind,
   type PendencySummary,
   type PendencyTeamRow
@@ -21,7 +20,13 @@ import {
  * to exactly the matters behind it.
  */
 
-const cacheKey = "partner:pendency:v2";
+const cacheKey = "partner:pendency:v3";
+
+// Validated against the white card: worst pair dE 23.7 normal, 16.6 protan.
+const kindColors: Record<PendencyKind, string> = {
+  appeal: "#b6654f",
+  scn: "#3a5590"
+};
 
 function taskLineHref(params: { due?: "month" | "overdue" | "soon"; kind?: PendencyKind; team?: string }) {
   const search = new URLSearchParams({ pendency: "1" });
@@ -97,53 +102,58 @@ function SummaryTile({
 }
 
 /**
- * One bar per kind per team, banded by due-date urgency using the same colours
- * the Litigation register paints on its Due Date column. The SCN and Appeals
- * split stays legible because each gets its own labelled bar, and the count at
- * the end means urgency is never carried by colour alone.
+ * One row per team: a bold bar split into SCNs and Appeals so team workloads
+ * stay directly comparable, with a thin urgency strip beneath it carrying the
+ * register's colour language. Counts sit at the end of every bar and the strip
+ * is named in its own legend, so neither reading depends on colour alone.
  */
-function KindBar({ kind, row, scale }: { kind: PendencyKind; row: PendencyTeamRow; scale: number }) {
-  const counts = row.buckets?.[kind];
-  const total = row[kind];
+function TeamRow({ row, scale }: { row: PendencyTeamRow; scale: number }) {
+  const widthPercent = `${Math.max((row.total / scale) * 100, 2)}%`;
+  const kinds: PendencyKind[] = ["scn", "appeal"];
 
   return (
-    <div className="flex items-center gap-2">
-      <span className="w-12 shrink-0 text-right text-[10px] font-black uppercase tracking-wide text-slate-400">
-        {pendencyKindShortLabels[kind]}
-      </span>
-      <span className="flex h-4 min-w-0 flex-1 items-center gap-[2px]" role="presentation">
-        {total
-          ? pendencyDueBuckets.map((bucket) => {
-              const value = counts?.[bucket] ?? 0;
-              if (!value) return null;
-              return (
-                <Link
-                  aria-label={`${value} ${pendencyKindShortLabels[kind]} for ${row.team}: ${pendencyDueBucketLabels[bucket]}`}
-                  className="h-full rounded-[3px] ring-1 ring-inset ring-slate-900/10 transition hover:opacity-75"
-                  href={taskLineHref({ kind, team: row.team })}
-                  key={bucket}
-                  style={{ backgroundColor: pendencyDueBucketColors[bucket], width: `${(value / scale) * 100}%` }}
-                  title={`${row.team} · ${pendencyKindShortLabels[kind]} · ${pendencyDueBucketLabels[bucket]}: ${value}`}
-                />
-              );
-            })
-          : null}
-      </span>
-      <span className="w-7 shrink-0 text-right text-[11px] font-black tabular-nums text-slate-600">{total || "—"}</span>
-    </div>
-  );
-}
-
-function TeamBar({ row, scale }: { row: PendencyTeamRow; scale: number }) {
-  return (
-    <div className="flex items-start gap-3 border-b border-slate-100 py-1.5 last:border-b-0">
-      <span className="w-24 shrink-0 truncate pt-0.5 text-right text-xs font-bold text-slate-700" title={row.team}>
+    <div className="flex items-center gap-3 py-1.5">
+      <span className="w-24 shrink-0 truncate text-right text-xs font-bold text-slate-700" title={row.team}>
         {row.team}
       </span>
-      <div className="min-w-0 flex-1 space-y-1">
-        <KindBar kind="scn" row={row} scale={scale} />
-        <KindBar kind="appeal" row={row} scale={scale} />
+
+      <div className="min-w-0 flex-1">
+        <div style={{ width: widthPercent }}>
+          <div className="flex h-6 items-stretch gap-[2px]">
+            {kinds.map((kind) =>
+              row[kind] ? (
+                <Link
+                  aria-label={`${row[kind]} pending ${pendencyKindShortLabels[kind]} for ${row.team}`}
+                  className="flex items-center justify-end overflow-hidden rounded-[4px] px-1.5 transition hover:opacity-85"
+                  href={taskLineHref({ kind, team: row.team })}
+                  key={kind}
+                  style={{ backgroundColor: kindColors[kind], flexGrow: row[kind], flexBasis: 0 }}
+                  title={`${row.team} · ${row[kind]} ${pendencyKindShortLabels[kind]} pending`}
+                >
+                  <span className="text-[10px] font-black tabular-nums text-white/90">{row[kind]}</span>
+                </Link>
+              ) : null
+            )}
+          </div>
+
+          <div className="mt-[3px] flex h-[6px] items-stretch gap-[2px]">
+            {pendencyUrgencies.map((urgency) => {
+              const value = row.urgency?.[urgency] ?? 0;
+              if (!value) return null;
+              return (
+                <span
+                  className="rounded-[2px]"
+                  key={urgency}
+                  style={{ backgroundColor: pendencyUrgencyColors[urgency], flexGrow: value, flexBasis: 0 }}
+                  title={`${row.team} · ${pendencyUrgencyLabels[urgency]}: ${value}`}
+                />
+              );
+            })}
+          </div>
+        </div>
       </div>
+
+      <span className="w-9 shrink-0 text-right text-sm font-black tabular-nums text-slate-800">{row.total}</span>
     </div>
   );
 }
@@ -186,7 +196,7 @@ export function PendencyReport() {
 
   const teams = summary?.teams ?? [];
   const totals = summary?.totals;
-  const scale = Math.max(1, ...teams.flatMap((row) => [row.scn, row.appeal]));
+  const scale = Math.max(1, ...teams.map((row) => row.total));
 
   return (
     <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -225,21 +235,27 @@ export function PendencyReport() {
             />
           </div>
 
-          <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-1.5">
-            {pendencyDueBuckets.map((bucket) => (
-              <span className="flex items-center gap-1.5 text-[11px] font-bold text-slate-600" key={bucket}>
-                <span
-                  className="size-2.5 rounded-[3px] ring-1 ring-inset ring-slate-900/10"
-                  style={{ backgroundColor: pendencyDueBucketColors[bucket] }}
-                />
-                {pendencyDueBucketLabels[bucket]}
+          <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1.5 border-b border-slate-100 pb-2">
+            {(["scn", "appeal"] as PendencyKind[]).map((kind) => (
+              <span className="flex items-center gap-1.5 text-[11px] font-black text-slate-700" key={kind}>
+                <span className="h-3 w-3 rounded-[3px]" style={{ backgroundColor: kindColors[kind] }} />
+                {pendencyKindShortLabels[kind]}
               </span>
             ))}
+            <span className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1">
+              <span className="text-[10px] font-black uppercase tracking-wide text-slate-400">Due</span>
+              {pendencyUrgencies.map((urgency) => (
+                <span className="flex items-center gap-1 text-[11px] font-bold text-slate-600" key={urgency}>
+                  <span className="h-[6px] w-4 rounded-[2px]" style={{ backgroundColor: pendencyUrgencyColors[urgency] }} />
+                  {pendencyUrgencyLabels[urgency]}
+                </span>
+              ))}
+            </span>
           </div>
 
-          <div className="mt-2">
+          <div className="mt-1 divide-y divide-slate-50">
             {teams.slice(0, 8).map((row) => (
-              <TeamBar key={row.team} row={row} scale={scale} />
+              <TeamRow key={row.team} row={row} scale={scale} />
             ))}
           </div>
 

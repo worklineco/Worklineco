@@ -5,12 +5,12 @@ import { isViewOnlyRegisterUser, viewOnlyRegisterResponse } from "@/lib/register
 import {
   classifyPendencyKind,
   dueSoonCutoffKey,
-  emptyDueCounts,
+  emptyUrgencyCounts,
   isDueThisMonth,
   isPendingMatter,
   monthEndKey,
-  pendencyDueBucket,
   pendencyDueState,
+  pendencyUrgency,
   pendencyTeamLabel,
   todayKey,
   type PendencySummary,
@@ -1852,19 +1852,19 @@ async function loadPendencySummary(admin: ReturnType<typeof createAdminClient>, 
     const key = teamMatchKey(label) || label.toLowerCase();
     const entry = byTeam.get(key) ?? {
       appeal: 0,
-      buckets: { appeal: emptyDueCounts(), scn: emptyDueCounts() },
       dueSoon: 0,
       dueThisMonth: 0,
       overdue: 0,
       scn: 0,
       team: label,
-      total: 0
+      total: 0,
+      urgency: emptyUrgencyCounts()
     };
     const due = pendencyDueState(row.due_date, today, soonCutoff);
 
     entry[kind] += 1;
     entry.total += 1;
-    entry.buckets[kind][pendencyDueBucket(row.due_date, today)] += 1;
+    entry.urgency[pendencyUrgency(row.due_date, today, monthEnd)] += 1;
     totals[kind] += 1;
     totals.total += 1;
 
