@@ -571,6 +571,9 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
 
     if (focus) {
       setPendencyFocus(focus);
+      // Newest due date first, so the most recent deadlines lead and rows with
+      // no due date fall to the bottom.
+      setSortState({ dir: "desc", key: "due_date" });
       window.history.replaceState(null, "", window.location.pathname);
     }
 
@@ -1280,7 +1283,10 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
     return loadAllTaskLine(false);
   }
 
-  const clearPendencyFocus = useCallback(() => setPendencyFocus(null), []);
+  const clearPendencyFocus = useCallback(() => {
+    setPendencyFocus(null);
+    setSortState(null);
+  }, []);
 
   function goToPage(nextPage: number) {
     setTablePage(Math.max(1, Math.min(pageCount, nextPage)));
