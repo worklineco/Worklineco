@@ -1,14 +1,15 @@
 "use client";
 
 import { getCurrentUser } from "@/lib/supabase/session";
-import { MessagesSquare, NotebookPen, Pencil, Plus, Send, Strikethrough, Target, Trash2, X } from "lucide-react";
+import { MessagesSquare, NotebookPen, Pencil, Plus, Send, Target, Trash2, X } from "lucide-react";
 import { MonthCalendar, type CalendarEvent } from "@/components/home/month-calendar";
 import { TaskNotificationBell } from "@/components/home/task-notification-bell";
 import { clearPersistentDataCache, getCached, setCached } from "@/lib/data-cache";
 import { PendencyReport } from "@/components/partner-dashboard/pendency-report";
 import { useEffect, useRef, useState } from "react";
 
-type NoteFile = { content: string; date?: string; id: string; lineColors?: string[]; lineStruck?: boolean[]; targetDate?: string; title: string; updatedAt: string };
+type NoteTask = { color: string; done: boolean; id: string; targetDate: string; text: string };
+type NoteFile = { date?: string; id: string; tasks: NoteTask[]; title: string; updatedAt: string };
 type DashboardState = { calendarNotes: Record<string, string[]>; notes: NoteFile[] };
 type Thread = { count: number; entity: string; last_at: string; last_body: string; messages: ChatMessage[]; task: string; task_code: string; team: string };
 type ChatMessage = { author_name?: string; body: string; created_at: string; id: string };
@@ -33,8 +34,69 @@ const noteLineColorSwatches: { key: string; label: string; ring: string }[] = [
 ];
 const defaultState: DashboardState = {
   calendarNotes: {},
-  notes: [{ content: "1. ", id: "note-1", title: "Daily Scratchpad", updatedAt: new Date().toISOString() }]
+  notes: [
+    {
+      id: "note-1",
+      tasks: [{ color: "", done: false, id: "task-1", targetDate: "", text: "" }],
+      title: "Daily Scratchpad",
+      updatedAt: new Date().toISOString()
+    }
+  ]
 };
+
+/** Shape of notes saved before the scratchpad became a task list. */
+type LegacyNoteFields = { content?: unknown; lineColors?: unknown; lineStruck?: unknown; targetDate?: unknown };
+
+/**
+ * Read a note's tasks, converting notes saved in the old free-text format:
+ * each line becomes a task, carrying over the colour and strike it had.
+ */
+function restoreNoteTasks(note: Partial<NoteFile> & LegacyNoteFields, noteIndex: number): NoteTask[] {
+  if (Array.isArray(note.tasks)) {
+    const tasks = note.tasks.flatMap((task, index) => {
+      if (!task || typeof task !== "object") {
+        return [];
+      }
+      const item = task as Partial<NoteTask>;
+      return [{
+        color: typeof item.color === "string" && item.color in noteLineColorFills ? item.color : "",
+        done: item.done === true,
+        id: typeof item.id === "string" && item.id ? item.id : `task-${noteIndex + 1}-${index + 1}`,
+        targetDate: typeof item.targetDate === "string" ? item.targetDate : "",
+        text: typeof item.text === "string" ? item.text : ""
+      }];
+    });
+    return tasks.length ? tasks : [blankNoteTask()];
+  }
+
+  if (typeof note.content !== "string") {
+    return [blankNoteTask()];
+  }
+
+  const colors = Array.isArray(note.lineColors) ? note.lineColors : [];
+  const struck = Array.isArray(note.lineStruck) ? note.lineStruck : [];
+  const tasks = note.content
+    .split("\n")
+    .map((line, index) => ({
+      color: typeof colors[index] === "string" && (colors[index] as string) in noteLineColorFills ? (colors[index] as string) : "",
+      done: struck[index] === true,
+      id: `task-${noteIndex + 1}-${index + 1}`,
+      // Drop the old "1. " numbering; rows are numbered by position now.
+      targetDate: typeof note.targetDate === "string" ? note.targetDate : "",
+      text: line.replace(/^\s*\d+\.\s?/, "").trim()
+    }))
+    .filter((task) => task.text);
+
+  return tasks.length ? tasks : [blankNoteTask()];
+}
+
+function blankNoteTask(): NoteTask {
+  return { color: "", done: false, id: makeTaskId(), targetDate: "", text: "" };
+}
+
+function makeTaskId() {
+  return typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `task-${Math.random().toString(36).slice(2)}`;
+}
 
 function restoreDashboardState(saved: string): DashboardState | null {
   try {
@@ -54,20 +116,14 @@ function restoreDashboardState(saved: string): DashboardState | null {
 
     const notes = Array.isArray(parsed.notes)
       ? parsed.notes.flatMap((note, index) => {
-          if (!note || typeof note !== "object" || typeof note.content !== "string") {
+          if (!note || typeof note !== "object") {
             return [];
           }
-          const content = note.content;
-          const item = note as Partial<NoteFile>;
+          const item = note as Partial<NoteFile> & LegacyNoteFields;
           return [{
-            content,
             ...(typeof item.date === "string" ? { date: item.date } : {}),
             id: typeof item.id === "string" && item.id ? item.id : `saved-note-${index + 1}`,
-            ...(Array.isArray(item.lineColors)
-              ? { lineColors: item.lineColors.map((color) => (typeof color === "string" && color in noteLineColorFills ? color : "")) }
-              : {}),
-            ...(Array.isArray(item.lineStruck) ? { lineStruck: item.lineStruck.map((struck) => struck === true) } : {}),
-            ...(typeof item.targetDate === "string" ? { targetDate: item.targetDate } : {}),
+            tasks: restoreNoteTasks(item, index),
             title: typeof item.title === "string" && item.title.trim() ? item.title : `Note ${index + 1}`,
             updatedAt: typeof item.updatedAt === "string" ? item.updatedAt : new Date().toISOString()
           }];
@@ -89,7 +145,6 @@ export function PartnerDashboard() {
   const [isPartner, setIsPartner] = useState(false);
   const [state, setState] = useState<DashboardState>(defaultState);
   const [activeNoteId, setActiveNoteId] = useState(defaultState.notes[0]?.id ?? "");
-  const [useNumberedNotes, setUseNumberedNotes] = useState(true);
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [chats, setChats] = useState<Thread[]>([]);
   const [chatReads, setChatReads] = useState<Record<string, number>>({});
@@ -99,10 +154,8 @@ export function PartnerDashboard() {
   const [chatSending, setChatSending] = useState(false);
   const [teamEmails, setTeamEmails] = useState<{ email: string; name: string }[]>([]);
   const [noteStorageWarning, setNoteStorageWarning] = useState("");
-  const noteEditorRef = useRef<HTMLTextAreaElement>(null);
-  const noteOverlayRef = useRef<HTMLDivElement>(null);
   const skipInitialDashboardSaveRef = useRef(true);
-  const [activeNoteLine, setActiveNoteLine] = useState(0);
+  const [focusTaskId, setFocusTaskId] = useState("");
 
   useEffect(() => {
     const saved = window.localStorage.getItem(storageKey);
@@ -218,64 +271,9 @@ export function PartnerDashboard() {
   }
 
   function createNote() {
-    const note = { content: useNumberedNotes ? "1. " : "", id: crypto.randomUUID(), title: `Note ${state.notes.length + 1}`, updatedAt: new Date().toISOString() };
+    const note: NoteFile = { id: makeTaskId(), tasks: [blankNoteTask()], title: `Note ${state.notes.length + 1}`, updatedAt: new Date().toISOString() };
     setState((current) => ({ ...current, notes: [note, ...current.notes] }));
     setActiveNoteId(note.id);
-  }
-
-  function updateActiveNote(content: string) {
-    if (!activeNote) {
-      return;
-    }
-    setState((current) => ({
-      ...current,
-      notes: current.notes.map((note) => (note.id === activeNote.id ? { ...note, content, updatedAt: new Date().toISOString() } : note))
-    }));
-  }
-
-  function updateActiveNoteDate(date: string) {
-    if (!activeNote) {
-      return;
-    }
-    setState((current) => ({
-      ...current,
-      notes: current.notes.map((note) => (note.id === activeNote.id ? { ...note, date, updatedAt: new Date().toISOString() } : note))
-    }));
-  }
-
-  function updateActiveNoteTargetDate(targetDate: string) {
-    if (!activeNote) {
-      return;
-    }
-    setState((current) => ({
-      ...current,
-      notes: current.notes.map((note) =>
-        note.id === activeNote.id ? { ...note, targetDate, updatedAt: new Date().toISOString() } : note
-      )
-    }));
-  }
-
-  /** Strike the line the cursor is on, or un-strike it if it already is. */
-  function toggleActiveNoteLineStruck() {
-    if (!activeNote) {
-      return;
-    }
-    const index = currentNoteLineIndex();
-    setState((current) => ({
-      ...current,
-      notes: current.notes.map((note) => {
-        if (note.id !== activeNote.id) {
-          return note;
-        }
-        const struck = [...(note.lineStruck ?? [])];
-        while (struck.length <= index) {
-          struck.push(false);
-        }
-        struck[index] = !struck[index];
-        return { ...note, lineStruck: struck, updatedAt: new Date().toISOString() };
-      })
-    }));
-    noteEditorRef.current?.focus();
   }
 
   function renameNote(note: NoteFile) {
@@ -292,7 +290,12 @@ export function PartnerDashboard() {
   function deleteNote(id: string) {
     setState((current) => {
       const notes = current.notes.filter((note) => note.id !== id);
-      return { ...current, notes: notes.length ? notes : [{ content: "", id: crypto.randomUUID(), title: "Note 1", updatedAt: new Date().toISOString() }] };
+      return {
+        ...current,
+        notes: notes.length
+          ? notes
+          : [{ id: makeTaskId(), tasks: [blankNoteTask()], title: "Note 1", updatedAt: new Date().toISOString() }]
+      };
     });
     setActiveNoteId((current) => {
       const remaining = state.notes.filter((note) => note.id !== id);
@@ -300,68 +303,57 @@ export function PartnerDashboard() {
     });
   }
 
-  function numberNoteLines(content: string) {
-    let count = 0;
-    return content
-      .split("\n")
-      .map((line) => {
-        // Strip only an existing "N. " prefix; keep the rest of the line exactly
-        // as typed (including spaces) so the spacebar and blank lines work.
-        const rest = line.replace(/^\s*\d+\.\s?/, "");
-        if (rest.trim() === "") {
-          return rest;
-        }
-        count += 1;
-        return `${count}. ${rest}`;
-      })
-      .join("\n");
-  }
-
-  function currentNoteLineIndex() {
-    const el = noteEditorRef.current;
-    if (!el) {
-      return 0;
-    }
-    const caret = el.selectionStart ?? 0;
-    return (activeNote?.content ?? "").slice(0, caret).split("\n").length - 1;
-  }
-
-  function syncNoteScroll() {
-    const overlay = noteOverlayRef.current;
-    const editor = noteEditorRef.current;
-    if (overlay && editor) {
-      overlay.scrollTop = editor.scrollTop;
-      overlay.scrollLeft = editor.scrollLeft;
-    }
-  }
-
-  function setActiveNoteLineColor(color: string) {
+  function updateActiveNoteTasks(mutate: (tasks: NoteTask[]) => NoteTask[]) {
     if (!activeNote) {
       return;
     }
-    const index = currentNoteLineIndex();
     setState((current) => ({
       ...current,
-      notes: current.notes.map((note) => {
-        if (note.id !== activeNote.id) {
-          return note;
-        }
-        const colors = [...(note.lineColors ?? [])];
-        while (colors.length <= index) {
-          colors.push("");
-        }
-        colors[index] = color;
-        return { ...note, lineColors: colors, updatedAt: new Date().toISOString() };
-      })
+      notes: current.notes.map((note) =>
+        note.id === activeNote.id ? { ...note, tasks: mutate(note.tasks), updatedAt: new Date().toISOString() } : note
+      )
     }));
-    noteEditorRef.current?.focus();
   }
 
-  function toggleNumberedNotes(checked: boolean) {
-    setUseNumberedNotes(checked);
-    if (checked && activeNote) {
-      updateActiveNote(activeNote.content.trim() ? numberNoteLines(activeNote.content) : "1. ");
+  function updateActiveNoteDate(date: string) {
+    if (!activeNote) {
+      return;
     }
+    setState((current) => ({
+      ...current,
+      notes: current.notes.map((note) => (note.id === activeNote.id ? { ...note, date, updatedAt: new Date().toISOString() } : note))
+    }));
+  }
+
+  /** Add a task, optionally right below an existing one. */
+  function addNoteTask(afterId?: string) {
+    const task = blankNoteTask();
+    updateActiveNoteTasks((tasks) => {
+      const at = afterId ? tasks.findIndex((item) => item.id === afterId) : -1;
+      if (at < 0) {
+        return [...tasks, task];
+      }
+      return [...tasks.slice(0, at + 1), task, ...tasks.slice(at + 1)];
+    });
+    setFocusTaskId(task.id);
+  }
+
+  function updateNoteTask(id: string, patch: Partial<NoteTask>) {
+    updateActiveNoteTasks((tasks) => tasks.map((task) => (task.id === id ? { ...task, ...patch } : task)));
+  }
+
+  function deleteNoteTask(id: string) {
+    updateActiveNoteTasks((tasks) => {
+      const remaining = tasks.filter((task) => task.id !== id);
+      return remaining.length ? remaining : [blankNoteTask()];
+    });
+  }
+
+  function clearDoneNoteTasks() {
+    updateActiveNoteTasks((tasks) => {
+      const remaining = tasks.filter((task) => !task.done);
+      return remaining.length ? remaining : [blankNoteTask()];
+    });
   }
 
   async function loadTeamEmails() {
@@ -607,12 +599,15 @@ export function PartnerDashboard() {
                   <button className="min-w-0 flex-1 truncate px-1 text-left text-sm font-black" onClick={() => setActiveNoteId(note.id)} onDoubleClick={() => renameNote(note)} title="Double click to rename" type="button">
                     {note.title}
                     {note.date ? <span className="ml-1 text-[10px] font-bold text-slate-400">{formatNoteDate(note.date)}</span> : null}
-                    {note.targetDate ? (
+                    {noteSummary(note).open ? (
+                      <span className="ml-1 text-[10px] font-bold text-slate-500">{noteSummary(note).open} open</span>
+                    ) : null}
+                    {noteSummary(note).nextTarget ? (
                       <span
-                        className={`ml-1 text-[10px] font-black ${isNoteTargetOverdue(note) ? "text-rose-600" : "text-emerald-700"}`}
-                        title={`Target ${formatNoteDate(note.targetDate)}`}
+                        className={`ml-1 text-[10px] font-black ${noteSummary(note).overdue ? "text-rose-600" : "text-emerald-700"}`}
+                        title={`Next target ${formatNoteDate(noteSummary(note).nextTarget)}`}
                       >
-                        ⏱ {formatNoteDate(note.targetDate)}
+                        ⏱ {formatNoteDate(noteSummary(note).nextTarget)}
                       </span>
                     ) : null}
                   </button>
@@ -628,10 +623,14 @@ export function PartnerDashboard() {
           </div>
           <div>
             <div className="mb-3 flex flex-wrap items-center gap-2">
-              <label className="inline-flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-2 text-sm font-black text-slate-700">
-                <input checked={useNumberedNotes} onChange={(event) => toggleNumberedNotes(event.target.checked)} type="checkbox" />
-                Numbered bullets
-              </label>
+              <button
+                className="inline-flex items-center gap-1.5 rounded-xl bg-navy-700 px-3 py-2 text-sm font-black text-white transition hover:bg-navy-800"
+                onClick={() => addNoteTask()}
+                type="button"
+              >
+                <Plus className="size-4" />
+                Add task
+              </button>
               <label className="inline-flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-2 text-sm font-black text-slate-700">
                 Date
                 <input
@@ -641,90 +640,111 @@ export function PartnerDashboard() {
                   value={activeNote?.date ?? ""}
                 />
               </label>
-              <label
-                className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-black ${
-                  isNoteTargetOverdue(activeNote) ? "bg-rose-50 text-rose-700" : "bg-slate-50 text-slate-700"
-                }`}
-                title="When this note needs to be done by"
-              >
-                <Target className="size-4" />
-                Target date
-                <input
-                  className="rounded-md border border-slate-200 bg-white px-2 py-1 text-sm font-semibold outline-none focus:border-navy-400"
-                  onChange={(event) => updateActiveNoteTargetDate(event.target.value)}
-                  type="date"
-                  value={activeNote?.targetDate ?? ""}
-                />
-              </label>
-              <button
-                className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-sm font-black transition ${
-                  activeNote?.lineStruck?.[activeNoteLine]
-                    ? "bg-navy-700 text-white"
-                    : "bg-slate-50 text-slate-700 hover:bg-slate-100"
-                }`}
-                onClick={toggleActiveNoteLineStruck}
-                title="Strike out this line (click again to undo)"
-                type="button"
-              >
-                <Strikethrough className="size-4" />
-                Strike line
-              </button>
-              <span className="ml-2 text-xs font-black uppercase tracking-wide text-slate-400">Colour line</span>
-              {noteLineColorSwatches.map((swatch) => (
+              {activeNote?.tasks.some((task) => task.done) ? (
                 <button
-                  className="size-6 rounded-full border-2 transition hover:scale-110"
-                  key={swatch.key}
-                  onClick={() => setActiveNoteLineColor(swatch.key)}
-                  style={{ backgroundColor: noteLineColorFills[swatch.key], borderColor: swatch.ring }}
-                  title={`Colour this line ${swatch.label}`}
+                  className="inline-flex items-center gap-1.5 rounded-xl bg-slate-50 px-3 py-2 text-sm font-bold text-slate-600 transition hover:bg-slate-100"
+                  onClick={clearDoneNoteTasks}
+                  title="Remove every struck-out task from this note"
                   type="button"
-                />
-              ))}
-              <button
-                className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-bold text-slate-500 hover:bg-slate-50"
-                onClick={() => setActiveNoteLineColor("")}
-                title="Remove colour from this line"
-                type="button"
-              >
-                Clear
-              </button>
+                >
+                  <Trash2 className="size-4" />
+                  Clear done
+                </button>
+              ) : null}
+              <span className="ml-auto text-xs font-bold text-slate-400">
+                {activeNote ? `${activeNote.tasks.filter((task) => !task.done && task.text.trim()).length} open` : ""}
+              </span>
             </div>
-            <div className="relative">
-              <div
-                aria-hidden
-                className="pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words rounded-2xl border border-transparent p-4 text-sm font-semibold leading-6 text-transparent"
-                ref={noteOverlayRef}
-              >
-                {(activeNote?.content ?? "").split("\n").map((line, index) => (
-                  <div
-                    key={index}
-                    style={{
-                      backgroundColor: noteLineColorFills[activeNote?.lineColors?.[index] ?? ""] ?? "transparent",
-                      borderRadius: 4,
-                      boxShadow: index === activeNoteLine ? "inset 0 0 0 1.5px #cbd5e1" : undefined,
-                      // The overlay text is transparent, but its strike rule is not,
-                      // so this draws a line across the matching row of the textarea.
-                      textDecorationColor: "#334155",
-                      textDecorationLine: activeNote?.lineStruck?.[index] ? "line-through" : "none",
-                      textDecorationThickness: "2px"
-                    }}
+
+            <ul className="space-y-1.5">
+              {(activeNote?.tasks ?? []).map((task, index) => {
+                const overdue = isTaskOverdue(task);
+                return (
+                  <li
+                    className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 px-2 py-1.5"
+                    key={task.id}
+                    style={{ backgroundColor: noteLineColorFills[task.color] ?? "transparent" }}
                   >
-                    {line === "" ? "​" : line}
-                  </div>
-                ))}
-              </div>
-              <textarea
-                className="relative z-10 min-h-[14rem] w-full resize-y whitespace-pre-wrap break-words rounded-2xl border border-slate-200 bg-transparent p-4 text-sm font-semibold leading-6 outline-none focus:border-navy-400"
-                onChange={(event) => updateActiveNote(useNumberedNotes ? numberNoteLines(event.target.value) : event.target.value)}
-                onClick={() => setActiveNoteLine(currentNoteLineIndex())}
-                onKeyUp={() => setActiveNoteLine(currentNoteLineIndex())}
-                onScroll={syncNoteScroll}
-                onSelect={() => setActiveNoteLine(currentNoteLineIndex())}
-                placeholder="Write notes here"
-                ref={noteEditorRef}
-                value={activeNote?.content ?? ""}
-              />
-            </div>
+                    <span className="w-5 shrink-0 text-right text-[11px] font-black text-slate-400">{index + 1}.</span>
+
+                    <input
+                      aria-label="Mark task done"
+                      checked={task.done}
+                      className="size-4 shrink-0 accent-navy-700"
+                      onChange={(event) => updateNoteTask(task.id, { done: event.target.checked })}
+                      title="Tick to strike this task out"
+                      type="checkbox"
+                    />
+
+                    <input
+                      autoFocus={task.id === focusTaskId}
+                      className={`min-w-[8rem] flex-1 border-0 bg-transparent px-1 text-sm font-semibold outline-none placeholder:font-medium placeholder:text-slate-400 ${
+                        task.done ? "text-slate-400 line-through" : "text-slate-900"
+                      }`}
+                      onChange={(event) => updateNoteTask(task.id, { text: event.target.value })}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          addNoteTask(task.id);
+                        }
+                      }}
+                      placeholder="Write a task"
+                      value={task.text}
+                    />
+
+                    <label
+                      className={`flex shrink-0 items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px] font-bold ${
+                        overdue ? "border-rose-300 bg-rose-50 text-rose-700" : "border-slate-200 bg-white/70 text-slate-600"
+                      }`}
+                      title={overdue ? "Target date has passed" : "Target date for this task"}
+                    >
+                      <Target className="size-3" />
+                      <input
+                        aria-label="Target date"
+                        className="w-[7.5rem] border-0 bg-transparent text-[11px] font-bold outline-none"
+                        onChange={(event) => updateNoteTask(task.id, { targetDate: event.target.value })}
+                        type="date"
+                        value={task.targetDate}
+                      />
+                    </label>
+
+                    <select
+                      aria-label="Task colour"
+                      className="h-7 shrink-0 rounded-md border border-slate-200 bg-white/70 px-1 text-[11px] font-bold text-slate-600 outline-none"
+                      onChange={(event) => updateNoteTask(task.id, { color: event.target.value })}
+                      title="Colour this task"
+                      value={task.color}
+                    >
+                      <option value="">No colour</option>
+                      {noteLineColorSwatches.map((swatch) => (
+                        <option key={swatch.key} value={swatch.key}>
+                          {swatch.label}
+                        </option>
+                      ))}
+                    </select>
+
+                    <button
+                      aria-label="Delete task"
+                      className="flex size-7 shrink-0 items-center justify-center rounded-lg text-slate-400 transition hover:bg-white hover:text-rose-600"
+                      onClick={() => deleteNoteTask(task.id)}
+                      title="Delete this task"
+                      type="button"
+                    >
+                      <X className="size-3.5" />
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+
+            <button
+              className="mt-2 inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-bold text-navy-700 transition hover:bg-navy-50"
+              onClick={() => addNoteTask()}
+              type="button"
+            >
+              <Plus className="size-3.5" />
+              Add another task
+            </button>
           </div>
         </div>
       </section>
@@ -740,16 +760,25 @@ export function PartnerDashboard() {
   );
 }
 
-/** A target date earlier than today, so the note can be flagged as running late. */
-function isNoteTargetOverdue(note: NoteFile | undefined) {
-  const target = note?.targetDate;
-
-  if (!target) {
+/** A task still open whose target date has already passed. */
+function isTaskOverdue(task: NoteTask) {
+  if (task.done || !task.targetDate) {
     return false;
   }
 
-  const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date());
-  return target < today;
+  return task.targetDate < new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date());
+}
+
+/** Open count and nearest target date, for the note list on the left. */
+function noteSummary(note: NoteFile) {
+  const open = note.tasks.filter((task) => !task.done && task.text.trim());
+  const targets = open.map((task) => task.targetDate).filter(Boolean).sort();
+
+  return {
+    nextTarget: targets[0] ?? "",
+    open: open.length,
+    overdue: open.some(isTaskOverdue)
+  };
 }
 
 function formatNoteDate(value: string) {
