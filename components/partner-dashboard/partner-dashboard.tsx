@@ -1,7 +1,7 @@
 "use client";
 
 import { getCurrentUser } from "@/lib/supabase/session";
-import { MessagesSquare, NotebookPen, Pencil, Plus, Send, Target, Trash2, X } from "lucide-react";
+import { CalendarDays, MessagesSquare, NotebookPen, Pencil, Plus, Send, Target, Trash2, X } from "lucide-react";
 import { MonthCalendar, type CalendarEvent } from "@/components/home/month-calendar";
 import { TaskNotificationBell } from "@/components/home/task-notification-bell";
 import { clearPersistentDataCache, getCached, setCached } from "@/lib/data-cache";
@@ -633,10 +633,11 @@ export function PartnerDashboard() {
               </button>
               <label className="inline-flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-2 text-sm font-black text-slate-700">
                 Date
-                <input
-                  className="rounded-md border border-slate-200 bg-white px-2 py-1 text-sm font-semibold outline-none focus:border-navy-400"
-                  onChange={(event) => updateActiveNoteDate(event.target.value)}
-                  type="date"
+                <DateField
+                  ariaLabel="Note date"
+                  className="rounded-md border border-slate-200 bg-white px-2 py-1 focus-within:border-navy-400"
+                  inputClassName="w-[6.5rem] text-sm font-semibold"
+                  onChange={updateActiveNoteDate}
                   value={activeNote?.date ?? ""}
                 />
               </label>
@@ -699,11 +700,10 @@ export function PartnerDashboard() {
                       title={overdue ? "Target date has passed" : "Target date for this task"}
                     >
                       <Target className="size-3" />
-                      <input
-                        aria-label="Target date"
-                        className="w-[7.5rem] border-0 bg-transparent text-[11px] font-bold outline-none"
-                        onChange={(event) => updateNoteTask(task.id, { targetDate: event.target.value })}
-                        type="date"
+                      <DateField
+                        ariaLabel="Target date"
+                        inputClassName="w-[5.5rem] text-[11px] font-bold placeholder:font-medium placeholder:text-slate-400"
+                        onChange={(targetDate) => updateNoteTask(task.id, { targetDate })}
                         value={task.targetDate}
                       />
                     </label>
@@ -779,6 +779,145 @@ function noteSummary(note: NoteFile) {
     open: open.length,
     overdue: open.some(isTaskOverdue)
   };
+}
+
+/**
+ * Turn a typed date into the yyyy-mm-dd the note stores. Accepts the way people
+ * actually type dates here: 12-09-2026, 12/9/26, 12.09.2026, or 12092026, and
+ * also a plain yyyy-mm-dd. Returns null when it cannot be read as a real date,
+ * so the caller can put the previous value back rather than wipe it.
+ */
+function parseTypedDate(raw: string): string | null {
+  const text = raw.trim();
+
+  if (!text) {
+    return "";
+  }
+
+  const iso = text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  const parts = iso
+    ? [Number(iso[3]), Number(iso[2]), Number(iso[1])]
+    : (() => {
+        const split = text.match(/^(\d{1,2})[-/. ](\d{1,2})[-/. ](\d{2}|\d{4})$/);
+        if (split) {
+          return [Number(split[1]), Number(split[2]), Number(split[3])];
+        }
+        const packed = text.match(/^(\d{2})(\d{2})(\d{4})$/);
+        return packed ? [Number(packed[1]), Number(packed[2]), Number(packed[3])] : null;
+      })();
+
+  if (!parts) {
+    return null;
+  }
+
+  const [day, month, rawYear] = parts;
+  const year = rawYear < 100 ? 2000 + rawYear : rawYear;
+  const date = new Date(Date.UTC(year, month - 1, day));
+
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) {
+    return null;
+  }
+
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${year}-${pad(month)}-${pad(day)}`;
+}
+
+/**
+ * A date you can either type as dd-mm-yyyy or pick from the calendar. The text
+ * box is the primary control; the calendar button opens the native picker and
+ * writes straight back into it.
+ */
+function DateField({
+  ariaLabel,
+  className = "",
+  inputClassName = "",
+  onChange,
+  placeholder = "dd-mm-yyyy",
+  value
+}: {
+  ariaLabel: string;
+  className?: string;
+  inputClassName?: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  value: string;
+}) {
+  const [draft, setDraft] = useState(() => formatNoteDate(value));
+  const [isBad, setIsBad] = useState(false);
+  const pickerRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setDraft(formatNoteDate(value));
+    setIsBad(false);
+  }, [value]);
+
+  function commit() {
+    const parsed = parseTypedDate(draft);
+
+    if (parsed === null) {
+      setIsBad(true);
+      return;
+    }
+
+    setIsBad(false);
+    onChange(parsed);
+  }
+
+  function openPicker() {
+    const picker = pickerRef.current;
+
+    if (!picker) {
+      return;
+    }
+
+    if (typeof picker.showPicker === "function") {
+      picker.showPicker();
+    } else {
+      picker.focus();
+    }
+  }
+
+  return (
+    <span className={`relative inline-flex items-center gap-1 ${className}`}>
+      <input
+        aria-label={ariaLabel}
+        className={`bg-transparent outline-none ${isBad ? "text-rose-600" : ""} ${inputClassName}`}
+        inputMode="numeric"
+        onBlur={commit}
+        onChange={(event) => setDraft(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            commit();
+          }
+          if (event.key === "Escape") {
+            setDraft(formatNoteDate(value));
+            setIsBad(false);
+          }
+        }}
+        placeholder={placeholder}
+        title={isBad ? "Could not read that date. Try 12-09-2026." : "Type a date or use the calendar"}
+        value={draft}
+      />
+      <button
+        aria-label={`Pick ${ariaLabel} from a calendar`}
+        className="flex size-5 shrink-0 items-center justify-center rounded text-slate-400 transition hover:bg-white hover:text-navy-700"
+        onClick={openPicker}
+        title="Open the calendar"
+        type="button"
+      >
+        <CalendarDays className="size-3.5" />
+      </button>
+      <input
+        className="pointer-events-none absolute bottom-0 right-0 size-0 opacity-0"
+        onChange={(event) => onChange(event.target.value)}
+        ref={pickerRef}
+        tabIndex={-1}
+        type="date"
+        value={value}
+      />
+    </span>
+  );
 }
 
 function formatNoteDate(value: string) {
