@@ -1315,8 +1315,6 @@ async function loadTaskLineRecords(admin: ReturnType<typeof createAdminClient>, 
   const batchCount = Math.max(1, Math.ceil(total / fetchBatchSize));
 
   console.time(`taskline:loadRecords:fetch(${total} rows, ${batchCount} batches)`);
-  // GSTAT appeal tasks are intentionally excluded from the TaskLine overview.
-  const gstatPromise: ReturnType<typeof loadGstatRecordsForOverview> | null = null;
   const batchResults = await Promise.all(
     Array.from({ length: batchCount }, (_, index) => {
       const from = index * fetchBatchSize;
@@ -1339,14 +1337,7 @@ async function loadTaskLineRecords(admin: ReturnType<typeof createAdminClient>, 
     rows.push(...((data ?? []) as TaskRecord[]).filter((record) => isRegisterRecord(record, registerKey) && canAccessRecord(record, access)));
   }
 
-  if (gstatPromise) {
-    const gstatRecords = await gstatPromise;
-    if (gstatRecords.error) {
-      return { data: null, error: gstatRecords.error };
-    }
-    rows.push(...(gstatRecords.data ?? []));
-  }
-
+  // GSTAT appeal tasks are intentionally excluded from the TaskLine overview.
   return { data: rows, error: null };
 }
 
