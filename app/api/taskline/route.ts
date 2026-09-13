@@ -154,6 +154,7 @@ async function loadOverviewRows(admin: ReturnType<typeof createAdminClient>, org
   }
 
   console.time("taskline:overview:load");
+  const gstatPromise = loadGstatRecordsForOverview(admin, access);
   const taskRecords: TaskRecord[] = [];
   const pageSize = 1000;
   for (let from = 0; ; from += pageSize) {
@@ -167,10 +168,14 @@ async function loadOverviewRows(admin: ReturnType<typeof createAdminClient>, org
       break;
     }
   }
+  const gstatRecords = await gstatPromise;
+  if (gstatRecords.error) {
+    return { error: gstatRecords.error, rows: null };
+  }
   console.timeEnd("taskline:overview:load");
 
-  // GSTAT appeal tasks are intentionally excluded from the TaskLine overview.
-  const rows = taskRecords.map(formatRecord).map(trimToOverviewRow);
+  // GSTAT: only personal-hearing (GSTAT-PH) rows are shown here; appeals are excluded.
+  const rows = [...taskRecords, ...(gstatRecords.data ?? [])].map(formatRecord).map(trimToOverviewRow);
   overviewCache.set(key, { expiresAt: Date.now() + overviewCacheTtlMs, rows });
   return { error: null, rows };
 }
@@ -1315,6 +1320,7 @@ async function loadTaskLineRecords(admin: ReturnType<typeof createAdminClient>, 
   const batchCount = Math.max(1, Math.ceil(total / fetchBatchSize));
 
   console.time(`taskline:loadRecords:fetch(${total} rows, ${batchCount} batches)`);
+  const gstatPromise = registerKey === "all" ? loadGstatRecordsForOverview(admin, access) : null;
   const batchResults = await Promise.all(
     Array.from({ length: batchCount }, (_, index) => {
       const from = index * fetchBatchSize;
@@ -1337,7 +1343,14 @@ async function loadTaskLineRecords(admin: ReturnType<typeof createAdminClient>, 
     rows.push(...((data ?? []) as TaskRecord[]).filter((record) => isRegisterRecord(record, registerKey) && canAccessRecord(record, access)));
   }
 
-  // GSTAT appeal tasks are intentionally excluded from the TaskLine overview.
+  if (gstatPromise) {
+    const gstatRecords = await gstatPromise;
+    if (gstatRecords.error) {
+      return { data: null, error: gstatRecords.error };
+    }
+    rows.push(...(gstatRecords.data ?? []));
+  }
+
   return { data: rows, error: null };
 }
 
@@ -1636,6 +1649,16 @@ function gstatText(row: GstatAppealRow, column: string) {
   return text(row.data?.[column]);
 }
 
+// A GSTAT row is a personal-hearing task when any of its entered values reads as
+// "GSTAT-PH" / "GSTAT PH" (or "personal hearing"). Only these are surfaced in the
+// TaskLine overview; plain GSTAT appeal rows are excluded.
+function gstatRowIsPersonalHearing(row: GstatAppealRow) {
+  const joined = Object.values(row.data ?? {})
+    .map((value) => String(value ?? "").toLowerCase())
+    .join(" | ");
+  return joined.includes("gstat-ph") || joined.includes("gstat ph") || joined.includes("personal hearing");
+}
+
 function gstatAppealToTaskRecord(row: GstatAppealRow): TaskRecord {
   const tasklineData: TaskLineRow = {
     document_link: gstatText(row, "Document Link"),
@@ -1649,7 +1672,7 @@ function gstatAppealToTaskRecord(row: GstatAppealRow): TaskRecord {
     stage: "",
     state_name: gstatText(row, "State Name"),
     status_open_close: "Open",
-    task: "GSTAT Appeal",
+    task: "GSTAT-PH",
     task_code: gstatText(row, "Sno") || text(row.row_number),
     team: gstatText(row, "Person handling")
   };
@@ -1661,7 +1684,7 @@ function gstatAppealToTaskRecord(row: GstatAppealRow): TaskRecord {
     due_at: null,
     id: `gstat:${row.id}`,
     organisation_id: "",
-    title: tasklineData.entity || "GSTAT Appeal",
+    title: tasklineData.entity || "GSTAT-PH",
     updated_at: text(row.updated_at)
   };
 }
@@ -1677,6 +1700,7 @@ async function loadGstatRecordsForOverview(admin: ReturnType<typeof createAdminC
   }
   const rows = ((data ?? []) as GstatAppealRow[])
     .filter((row) => access.canViewAll || !access.team || gstatText(row, "Person handling") === access.team)
+    .filter(gstatRowIsPersonalHearing)
     .map(gstatAppealToTaskRecord);
   return { data: rows, error: null };
 }
