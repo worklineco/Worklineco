@@ -1,7 +1,8 @@
 "use client";
 
-import { ChevronLeft, ChevronRight, Pencil, Plus, Trash2, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Gavel, Pencil, Plus, Trash2, X } from "lucide-react";
 import { useMemo, useState } from "react";
+import { isPersonalHearingTask } from "@/lib/pendency";
 
 const weekDays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
@@ -28,8 +29,14 @@ export function MonthCalendar({
 }) {
   const today = new Date();
   const [monthDate, setMonthDate] = useState(() => new Date(today.getFullYear(), today.getMonth(), 1));
+  const [hearingsOnly, setHearingsOnly] = useState(false);
   const calendarCells = useMemo(() => buildCalendarCells(monthDate), [monthDate]);
-  const eventsByDay = useMemo(() => groupEventsByDay(events), [events]);
+  const hearingCount = useMemo(() => events.filter((event) => isPersonalHearingTask(event.task)).length, [events]);
+  const visibleEventList = useMemo(
+    () => (hearingsOnly ? events.filter((event) => isPersonalHearingTask(event.task)) : events),
+    [events, hearingsOnly]
+  );
+  const eventsByDay = useMemo(() => groupEventsByDay(visibleEventList), [visibleEventList]);
   const monthLabel = monthDate.toLocaleString("en-IN", { month: "long", year: "numeric" });
   const [selected, setSelected] = useState<{ dateKey: string; dateLabel: string } | null>(null);
   const [noteDraft, setNoteDraft] = useState("");
@@ -51,6 +58,26 @@ export function MonthCalendar({
       <div className="flex items-center justify-between gap-3">
         <h2 className="text-lg font-black text-slate-950">{monthLabel}</h2>
         <div className="flex items-center gap-2">
+          <label
+            className={`flex h-9 cursor-pointer select-none items-center gap-2 rounded-lg border px-3 text-xs font-bold transition ${
+              hearingsOnly
+                ? "border-navy-700 bg-navy-700 text-white"
+                : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+            }`}
+            title="Show only PH - Appeal and PH - SCN entries"
+          >
+            <input
+              checked={hearingsOnly}
+              className="size-4 accent-navy-700"
+              onChange={(event) => setHearingsOnly(event.target.checked)}
+              type="checkbox"
+            />
+            <Gavel className="size-3.5" />
+            Personal hearings only
+            <span className={`rounded px-1.5 py-0.5 text-[10px] font-black ${hearingsOnly ? "bg-white/20" : "bg-slate-100 text-slate-600"}`}>
+              {hearingCount}
+            </span>
+          </label>
           <button aria-label="Previous month" className="flex size-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-800 transition hover:bg-slate-50" onClick={() => changeMonth(-1)} type="button">
             <ChevronLeft className="size-4" />
           </button>
@@ -59,6 +86,12 @@ export function MonthCalendar({
           </button>
         </div>
       </div>
+
+      {hearingsOnly && !hearingCount ? (
+        <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800">
+          No personal hearings found in the loaded tasks.
+        </p>
+      ) : null}
 
       <div className="mt-4 overflow-hidden rounded-xl border border-slate-200 bg-white">
         <div className="grid grid-cols-7 border-b border-slate-200 bg-navy-700 text-white">

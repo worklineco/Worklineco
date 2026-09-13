@@ -3,11 +3,21 @@
 import { ArrowDown, ArrowUp, Bookmark, CalendarDays, Check, ChevronDown, CircleDot, Star, Download, Filter, History, ListChecks, Menu, Pencil, Pin, Plus, ReceiptText, RotateCcw, Scale, Search, Settings2, Trash2, Upload, Workflow, X } from "lucide-react";
 import Link from "next/link";
 import type { ComponentType, PointerEvent as ReactPointerEvent } from "react";
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import * as XLSX from "xlsx-js-style";
 import { clearCached, getCached, setCached } from "@/lib/data-cache";
 import { useRegisterEditAccess, viewOnlyRegisterMessage as sharedViewOnlyRegisterMessage } from "@/lib/use-register-access";
+import {
+  classifyPendencyKind,
+  dueSoonCutoffKey,
+  isDueThisMonth,
+  isPendingMatter,
+  pendencyDueState,
+  pendencyKindShortLabels,
+  todayKey,
+  type PendencyKind
+} from "@/lib/pendency";
 import { ViewOnlyAccessDialog } from "@/components/shared/view-only-access-dialog";
 
 type TaskLineColumn = {
@@ -309,6 +319,7 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
   const [viewNameDraft, setViewNameDraft] = useState("");
   const [activeViewId, setActiveViewId] = useState<string | null>(null);
   const [tablePage, setTablePage] = useState(1);
+  const [pendencyFocus, setPendencyFocus] = useState<PendencyFocus | null>(null);
   const [viewMode, setViewMode] = useState<TaskLineView>("register");
   const [taskMasters, setTaskMasters] = useState<{ id: string; name: string }[]>([]);
   const [isMasterOpen, setIsMasterOpen] = useState(false);
@@ -505,9 +516,24 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
       return row;
     });
   }, [rows, entityGroupByName]);
+  const deferredSearch = useDeferredValue(search);
+  const deferredColumnFilters = useDeferredValue(columnFilters);
+  const deferredValueFilters = useDeferredValue(valueFilters);
+  const focusedRows = useMemo(
+    () => (pendencyFocus ? resolvedRows.filter((row) => matchesPendencyFocus(row, pendencyFocus)) : resolvedRows),
+    [pendencyFocus, resolvedRows]
+  );
   const filteredRows = useMemo(
-    () => applyTaskLineFilters(resolvedRows, { columnFilters, dueColorFilter, dueRange, search, sortState, statusFilter, valueFilters }),
-    [resolvedRows, columnFilters, dueColorFilter, dueRange, search, sortState, statusFilter, valueFilters]
+    () => applyTaskLineFilters(focusedRows, {
+      columnFilters: deferredColumnFilters,
+      dueColorFilter,
+      dueRange,
+      search: deferredSearch,
+      sortState,
+      statusFilter,
+      valueFilters: deferredValueFilters
+    }),
+    [focusedRows, deferredColumnFilters, dueColorFilter, dueRange, deferredSearch, sortState, statusFilter, deferredValueFilters]
   );
   const hasActiveColumnFilters = Object.values(columnFilters).some((value) => value.trim());
   const hasActiveDataQuery = Boolean(
@@ -537,8 +563,22 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
   }, [filteredRows, tablePage]);
 
   useEffect(() => {
+    // Deep link from the partner dashboard:
+    // /taskline?pendency=1&team=..&kind=..&due=..
+    // It must show exactly the matters counted there, so it takes precedence
+    // over the user's default saved view instead of stacking on top of it.
+    const focus = readPendencyFocus(window.location.search);
+
+    if (focus) {
+      setPendencyFocus(focus);
+      // Newest due date first, so the most recent deadlines lead and rows with
+      // no due date fall to the bottom.
+      setSortState({ dir: "desc", key: "due_date" });
+      window.history.replaceState(null, "", window.location.pathname);
+    }
+
     void loadAllTaskLine();
-    void loadViews(true);
+    void loadViews(!focus);
   }, []);
 
   useEffect(() => {
@@ -959,6 +999,10 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
     }
   }
 
+  const loadDropdownOptionsRef = useRef(loadDropdownOptions);
+  loadDropdownOptionsRef.current = loadDropdownOptions;
+  const handleDropdownOpen = useCallback((columnKey: string) => loadDropdownOptionsRef.current(columnKey), []);
+
   function loadEditorOptions() {
     void Promise.all([loadMasters(), loadStageMasters(), loadTeamMembers(), loadEntityMasters()]);
   }
@@ -1238,6 +1282,11 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
     clearCached(taskLineRowsCacheKey);
     return loadAllTaskLine(false);
   }
+
+  const clearPendencyFocus = useCallback(() => {
+    setPendencyFocus(null);
+    setSortState(null);
+  }, []);
 
   function goToPage(nextPage: number) {
     setTablePage(Math.max(1, Math.min(pageCount, nextPage)));
@@ -2075,6 +2124,25 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
         <p className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-bold text-emerald-900">{message}</p>
       ) : null}
 
+      {pendencyFocus ? (
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-navy-200 bg-navy-50 px-3 py-2">
+          <p className="text-sm font-bold text-navy-800">
+            {pendencyFocusLabel(pendencyFocus)}
+            <span className="ml-2 font-semibold text-navy-600">
+              {filteredRows.length.toLocaleString("en-IN")} {filteredRows.length === 1 ? "matter" : "matters"}
+            </span>
+          </p>
+          <button
+            className="inline-flex h-8 items-center gap-1 rounded-md border border-navy-200 bg-white px-2.5 text-xs font-bold text-navy-700 transition hover:bg-navy-50"
+            onClick={clearPendencyFocus}
+            type="button"
+          >
+            <X className="size-3.5" />
+            Show all rows
+          </button>
+        </div>
+      ) : null}
+
       {viewMode === "register" ? (
       <div className="mt-3">
         <div className="mb-2 flex flex-wrap gap-1.5">
@@ -2314,7 +2382,7 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
                         key={`${row.__id}-${column.key}`}
                         nameOptions={rowNameOptions}
                         onCellChange={updateRow}
-                        onDropdownOpen={loadDropdownOptions}
+                        onDropdownOpen={handleDropdownOpen}
                         resourceOptions={rowResourceOptions}
                         row={row}
                         sectionOptions={sectionOptions}
@@ -2714,7 +2782,10 @@ const TaskLineCell = memo(function TaskLineCell({
   taskMasterNames: string[];
 }) {
   const frozenStyle = isFrozen ? { left: frozenLeft } : undefined;
-  const onChange = (value: string) => onCellChange(row.__id, column.key, value);
+  const rowId = row.__id;
+  const columnKey = column.key;
+  const onChange = useCallback((value: string) => onCellChange(rowId, columnKey, value), [columnKey, onCellChange, rowId]);
+  const onOpen = useCallback(() => onDropdownOpen(columnKey), [columnKey, onDropdownOpen]);
 
   if (column.key === "serial_no") {
     return (
@@ -2751,14 +2822,14 @@ const TaskLineCell = memo(function TaskLineCell({
     const options = column.key === "entity"
       ? entityOptions
       : column.key === "state_name"
-        ? gstinStateOptions.map(([, state]) => state)
+        ? gstinStateNameOptions
         : sectionOptions;
     return (
       <td className={`border-r border-slate-100 px-3 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
         <LazyTaskLineSelect
           current={current}
           onChange={onChange}
-          onOpen={() => onDropdownOpen(column.key)}
+          onOpen={onOpen}
           options={options}
           placeholder={column.key === "section" ? "Select Section" : `Select ${column.label}`}
         />
@@ -2787,7 +2858,7 @@ const TaskLineCell = memo(function TaskLineCell({
     const current = row[column.key] ?? "";
     return (
       <td className={`border-r border-slate-100 px-3 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
-        <LazyTaskLineSelect current={current} matchNames onChange={onChange} onOpen={() => onDropdownOpen(column.key)} options={nameOptions} placeholder="Select" />
+        <LazyTaskLineSelect current={current} matchNames onChange={onChange} onOpen={onOpen} options={nameOptions} placeholder="Select" />
       </td>
     );
   }
@@ -2796,7 +2867,7 @@ const TaskLineCell = memo(function TaskLineCell({
     const current = row[column.key] ?? "";
     return (
       <td className={`border-r border-slate-100 px-3 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
-        <LazyTaskLineSelect current={current} matchNames onChange={onChange} onOpen={() => onDropdownOpen(column.key)} options={resourceOptions} placeholder="Select" />
+        <LazyTaskLineSelect current={current} matchNames onChange={onChange} onOpen={onOpen} options={resourceOptions} placeholder="Select" />
       </td>
     );
   }
@@ -2805,7 +2876,7 @@ const TaskLineCell = memo(function TaskLineCell({
     const current = row[column.key] ?? "";
     return (
       <td className={`border-r border-slate-100 px-3 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
-        <LazyTaskLineSelect current={current} onChange={onChange} onOpen={() => onDropdownOpen(column.key)} options={taskMasterNames} placeholder="Select task" />
+        <LazyTaskLineSelect current={current} onChange={onChange} onOpen={onOpen} options={taskMasterNames} placeholder="Select task" />
       </td>
     );
   }
@@ -2814,7 +2885,7 @@ const TaskLineCell = memo(function TaskLineCell({
     const current = row[column.key] ?? "";
     return (
       <td className={`border-r border-slate-100 px-3 py-1 last:border-r-0 ${isFrozen ? "sticky z-[5] bg-white" : ""}`} style={frozenStyle}>
-        <LazyTaskLineSelect current={current} onChange={onChange} onOpen={() => onDropdownOpen(column.key)} options={stageMasterNames} placeholder="Select stage" />
+        <LazyTaskLineSelect current={current} onChange={onChange} onOpen={onOpen} options={stageMasterNames} placeholder="Select stage" />
       </td>
     );
   }
@@ -2878,13 +2949,13 @@ function LazyTaskLineSelect({
   placeholder: string;
 }) {
   const [isActive, setIsActive] = useState(false);
-  const normalizedOptions = matchNames
-    ? Array.from(new Set(options.map(canonicalTaskLineName).filter(Boolean)))
-    : options;
+  const normalizedOptions = matchNames ? canonicalTaskLineNameOptions(options) : options;
   const resolved = matchNames ? resolvePersonOption(current, normalizedOptions) : current;
 
   function activate() {
-    setIsActive(true);
+    if (!isActive) {
+      setIsActive(true);
+    }
     onOpen?.();
   }
 
@@ -3610,6 +3681,86 @@ function TaskLineDateInput({ compact = false, onChange, value }: { compact?: boo
       </label>
     </div>
   );
+}
+
+type PendencyFocus = { due: "month" | "overdue" | "soon" | null; kind: PendencyKind | null; team: string };
+
+function readPendencyFocus(search: string): PendencyFocus | null {
+  const params = new URLSearchParams(search);
+
+  if (params.get("pendency") !== "1") {
+    return null;
+  }
+
+  const kind = params.get("kind");
+  const due = params.get("due");
+
+  return {
+    due: due === "overdue" || due === "soon" || due === "month" ? due : null,
+    kind: kind === "scn" || kind === "appeal" ? kind : null,
+    team: text(params.get("team"))
+  };
+}
+
+/**
+ * Rows behind a pendency figure on the partner dashboard. Kept in step with
+ * lib/pendency.ts so the count there and the list here always agree.
+ */
+function matchesPendencyFocus(row: TaskLineRow, focus: PendencyFocus) {
+  const kind = classifyPendencyKind(row.task);
+
+  if (!kind || !isPendingMatter(row.stage, row.status_open_close)) {
+    return false;
+  }
+
+  if (focus.kind && kind !== focus.kind) {
+    return false;
+  }
+
+  if (focus.team && teamMatchKey(row.team) !== teamMatchKey(focus.team)) {
+    return false;
+  }
+
+  if (focus.due) {
+    const today = todayKey();
+
+    if (focus.due === "month") {
+      return isDueThisMonth(row.due_date, today);
+    }
+
+    const state = pendencyDueState(row.due_date, today, dueSoonCutoffKey(today));
+    return focus.due === "overdue" ? state === "overdue" : state === "dueSoon";
+  }
+
+  return true;
+}
+
+function pendencyFocusLabel(focus: PendencyFocus) {
+  const kind = focus.kind ? pendencyKindShortLabels[focus.kind] : "SCNs and appeals";
+  const team = focus.team ? ` for ${focus.team}` : " across all teams";
+  const due =
+    focus.due === "overdue"
+      ? ", overdue"
+      : focus.due === "soon"
+        ? ", due within 7 days"
+        : focus.due === "month"
+          ? ", due this month"
+          : "";
+
+  return `Pending ${kind}${team}${due}`;
+}
+
+const gstinStateNameOptions = gstinStateOptions.map(([, state]) => state);
+const canonicalOptionsCache = new WeakMap<readonly string[], string[]>();
+
+function canonicalTaskLineNameOptions(options: readonly string[]) {
+  const cached = canonicalOptionsCache.get(options);
+  if (cached) {
+    return cached;
+  }
+  const normalized = Array.from(new Set(options.map(canonicalTaskLineName).filter(Boolean)));
+  canonicalOptionsCache.set(options, normalized);
+  return normalized;
 }
 
 const compactSelectClass = "h-7 w-full rounded-md border border-slate-200 bg-white pl-2 pr-7 text-xs font-bold outline-none focus:border-rose-300 focus:ring-2 focus:ring-rose-100";
