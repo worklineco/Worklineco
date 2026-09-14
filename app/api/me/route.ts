@@ -1,6 +1,7 @@
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
+import { readPrimaryTeam, readUserTeams } from "@/lib/user-teams";
 
 type CookieToSet = { name: string; options: CookieOptions; value: string };
 
@@ -49,6 +50,7 @@ export async function GET() {
     isWorklineAdmin,
     name: String(profileMetadata.full_name ?? profileMetadata.name ?? "").trim(),
     role: trustedRole || String(profileMetadata.role ?? profileMetadata.designation ?? "").trim(),
-    team: String(profileMetadata.team ?? "").trim()
+    team: readPrimaryTeam(user),
+    teams: readUserTeams(user)
   });
 }

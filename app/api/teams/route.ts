@@ -2,6 +2,7 @@ import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
+import { normalizeTeam, readPrimaryTeam, readUserTeams } from "@/lib/user-teams";
 
 type CookieToSet = { name: string; options: CookieOptions; value: string };
 type TeamMember = {
@@ -13,6 +14,7 @@ type TeamMember = {
   leaving_date: string;
   name: string;
   team: string;
+  teams: string[];
 };
 
 const editorRoles = ["partner", "others"];
@@ -105,7 +107,8 @@ export async function GET() {
             joining_date: String(metadata.joining_date ?? "").trim(),
             leaving_date: String(metadata.leaving_date ?? "").trim(),
             name: name || "WorkLine User",
-            team: String(metadata.team ?? "").trim()
+            team: readPrimaryTeam(user),
+            teams: readUserTeams(user)
           };
         })
     );
@@ -124,7 +127,8 @@ export async function GET() {
     id: auth.user.id,
     name: String(meMetadata.full_name ?? meMetadata.name ?? "").trim(),
     role: String(meMetadata.role ?? meMetadata.designation ?? "").trim(),
-    team: String(meMetadata.team ?? "").trim()
+    team: readPrimaryTeam(auth.user),
+    teams: readUserTeams(auth.user)
   };
 
   return NextResponse.json({ members, me });
@@ -192,7 +196,15 @@ export async function PATCH(request: Request) {
     nextMetadata.full_name = String(body.name).trim();
   }
   if (body.team !== undefined) {
-    nextMetadata.team = String(body.team).trim();
+    const nextPrimaryTeam = String(body.team).trim();
+    const existingTeams = readUserTeams(target.user);
+    const nextTeams = [nextPrimaryTeam, ...existingTeams].filter(
+      (team, index, values) =>
+        Boolean(team) && values.findIndex((candidate) => normalizeTeam(candidate) === normalizeTeam(team)) === index
+    );
+    nextMetadata.team = nextPrimaryTeam;
+    nextMetadata.teams = nextTeams;
+    nextAccessMetadata.workline_teams = nextTeams;
   }
   if (body.designation !== undefined) {
     const designation = String(body.designation).trim();

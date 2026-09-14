@@ -12,6 +12,7 @@ type TeamMember = {
   leaving_date: string;
   name: string;
   team: string;
+  teams?: string[];
 };
 type AdminRoleArticle = {
   email: string;
@@ -227,7 +228,7 @@ export function TeamsPanel() {
                   {isEditing ? (
                     <input className={editInputClass} onChange={(event) => setDraft((current) => ({ ...current, team: event.target.value }))} placeholder="Team / Partner" value={draft.team} />
                   ) : (
-                    <p className="truncate font-bold text-slate-600">{member.team || "-"}</p>
+                    <p className="font-bold text-slate-600">{formatMemberTeams(member)}</p>
                   )}
                 </div>
 
@@ -520,7 +521,13 @@ function getSortValue(member: TeamMember, originalIndex: number, key: SortKey) {
   if (key === "serial") return originalIndex;
   if (key === "joining_date") return toTimestamp(member.joining_date);
   if (key === "leaving_date") return toTimestamp(getLeavingDate(member));
+  if (key === "team") return formatMemberTeams(member).trim().toLocaleLowerCase();
   return member[key].trim().toLocaleLowerCase();
+}
+
+function formatMemberTeams(member: Pick<TeamMember, "team" | "teams">) {
+  const teams = Array.from(new Set([...(member.teams ?? []), member.team].map((team) => team.trim()).filter(Boolean)));
+  return teams.join(", ") || "-";
 }
 
 function compareSortValues(left: number | string, right: number | string) {

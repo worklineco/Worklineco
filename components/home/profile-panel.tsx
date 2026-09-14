@@ -3,6 +3,7 @@
 import { supabase } from "@/lib/supabase/client";
 import { clearWorkspaceCache, getCurrentUser } from "@/lib/supabase/session";
 import { clearDataCache } from "@/lib/data-cache";
+import { readUserTeams } from "@/lib/user-teams";
 import { ChevronDown, LogOut, UserRound } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useWorklineEscape } from "@/components/layout/global-escape-closer";
@@ -34,7 +35,7 @@ export function ProfilePanel() {
         email: user?.email ?? "",
         name: String(metadata.full_name ?? metadata.name ?? ""),
         role: String(metadata.role ?? ""),
-        team: String(metadata.team ?? "")
+        team: user ? readUserTeams(user).join(", ") : String(metadata.team ?? "")
       });
     });
   }, []);

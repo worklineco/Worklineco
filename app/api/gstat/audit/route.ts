@@ -2,6 +2,7 @@ import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
+import { readUserTeams, teamIsAllowed } from "@/lib/user-teams";
 
 type CookieToSet = { name: string; options: CookieOptions; value: string };
 type AuditLog = {
@@ -18,7 +19,7 @@ type AuditLog = {
 };
 type AccessScope = {
   isPartner: boolean;
-  team: string;
+  teams: string[];
 };
 
 const organisationCode = "DCO1433";
@@ -55,7 +56,7 @@ export async function GET() {
 }
 
 function filterLogsForAccess(logs: AuditLog[], access: AccessScope) {
-  if (access.isPartner || !access.team) {
+  if (access.isPartner || !access.teams.length) {
     return logs;
   }
 
@@ -64,7 +65,7 @@ function filterLogsForAccess(logs: AuditLog[], access: AccessScope) {
     const oldTeam = valueTeam(log.old_value);
     const newTeam = valueTeam(log.new_value);
 
-    return [appealTeam, oldTeam, newTeam].includes(access.team);
+    return [appealTeam, oldTeam, newTeam].some((team) => teamIsAllowed(team, access.teams));
   });
 }
 
@@ -120,13 +121,12 @@ async function getActorNames(admin: ReturnType<typeof createAdminClient>, logs: 
   return actorNames;
 }
 
-function getAccessScope(user: { user_metadata?: Record<string, unknown> }): AccessScope {
+function getAccessScope(user: { app_metadata?: Record<string, unknown>; user_metadata?: Record<string, unknown> }): AccessScope {
   const role = String(user.user_metadata?.role ?? "").trim().toLowerCase();
-  const team = String(user.user_metadata?.team ?? "").trim();
 
   return {
     isPartner: role === "partner",
-    team
+    teams: readUserTeams(user)
   };
 }
 
