@@ -30,6 +30,8 @@ type ReminderAuditValue = {
 
 const moduleKey = "taskline";
 const fetchBatchSize = 1000;
+// Furthest-out advance reminder we support (in days) via the Reminder Days column.
+const maxReminderWindowDays = 90;
 const appUrl = (process.env.NEXT_PUBLIC_SITE_URL ?? process.env.NEXT_PUBLIC_APP_URL ?? "https://www.worklineco.com").replace(/\/+$/, "");
 
 export async function GET(request: Request) {
@@ -50,8 +52,11 @@ export async function GET(request: Request) {
   // about to start"; any other time means "the day that already started".
   const dayOffset = indiaHourNow() >= 18 ? 1 : 0;
   const dueDateKey = indiaDateKey(dayOffset);
-  const followingDateKey = indiaDateKey(dayOffset + 1);
-  const dueTasks = await loadDueTasks(admin, dueDateKey, followingDateKey);
+  // Load a forward window so advance reminders work too: a task due N days out
+  // is reminded today when N equals its "Reminder Days" value. Tasks due today
+  // (N = 0) keep firing as before.
+  const windowEndKey = indiaDateKey(dayOffset + maxReminderWindowDays + 1);
+  const dueTasks = await loadDueTasks(admin, dueDateKey, windowEndKey);
 
   if ("error" in dueTasks) {
     return NextResponse.json({ error: dueTasks.error }, { status: 500 });
@@ -103,6 +108,16 @@ export async function GET(request: Request) {
       continue;
     }
 
+    // Fire today only when the task is due today, or when today is exactly the
+    // task's "Reminder Days" value ahead of its due date (advance reminder).
+    const daysUntilDue = daysBetweenKeys(dueDateKey, text(task.due_at).slice(0, 10));
+    const reminderDaysBefore = parseReminderDays(row.reminder_days);
+    const shouldRemind = daysUntilDue === 0 || (reminderDaysBefore > 0 && daysUntilDue === reminderDaysBefore);
+    if (!shouldRemind) {
+      skipped += 1;
+      continue;
+    }
+
     const recipients = reminderRecipients(
       row,
       membersByOrganisation.get(task.organisation_id) ?? [],
@@ -125,9 +140,9 @@ export async function GET(request: Request) {
       try {
         await transporter.sendMail({
           from: smtp.from,
-          html: reminderHtml(row, dueDateKey),
-          subject: reminderSubject(row),
-          text: reminderText(row, dueDateKey),
+          html: reminderHtml(row, dueDateKey, daysUntilDue),
+          subject: reminderSubject(row, daysUntilDue),
+          text: reminderText(row, dueDateKey, daysUntilDue),
           to: recipient
         });
 
@@ -367,18 +382,48 @@ function taskIsClosed(row: TaskLineRow) {
   return status === "close" || status === "closed";
 }
 
-function reminderSubject(row: TaskLineRow) {
+function dueLabel(daysUntilDue: number) {
+  if (daysUntilDue <= 0) {
+    return "Due today";
+  }
+  if (daysUntilDue === 1) {
+    return "Due tomorrow";
+  }
+  return `Due in ${daysUntilDue} days`;
+}
+
+function parseReminderDays(value: unknown) {
+  const days = Number.parseInt(String(value ?? "").trim(), 10);
+  return Number.isFinite(days) && days > 0 ? days : 0;
+}
+
+function keyToUtcMs(key: string) {
+  const match = key.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return match ? Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])) : null;
+}
+
+function daysBetweenKeys(fromKey: string, toKey: string) {
+  const from = keyToUtcMs(fromKey);
+  const to = keyToUtcMs(toKey);
+  if (from === null || to === null) {
+    return -1;
+  }
+  return Math.round((to - from) / 86400000);
+}
+
+function reminderSubject(row: TaskLineRow, daysUntilDue: number) {
   const entity = text(row.entity) || "TaskLine task";
   const taskCode = text(row.task_code);
   const task = text(row.task) || "Task";
+  const label = dueLabel(daysUntilDue);
   return taskCode
-    ? `Due today: ${taskCode} — ${entity} — ${task}`
-    : `Due today: ${entity} — ${task}`;
+    ? `${label}: ${taskCode} — ${entity} — ${task}`
+    : `${label}: ${entity} — ${task}`;
 }
 
-function reminderText(row: TaskLineRow, dueDateKey: string) {
+function reminderText(row: TaskLineRow, dueDateKey: string, daysUntilDue: number) {
   return [
-    "TASK DUE TODAY",
+    `TASK ${dueLabel(daysUntilDue).toUpperCase()}`,
     "",
     text(row.entity) || "Entity not specified",
     `Task Code: ${text(row.task_code) || "-"}`,
@@ -393,7 +438,8 @@ function reminderText(row: TaskLineRow, dueDateKey: string) {
   ].join("\n");
 }
 
-function reminderHtml(row: TaskLineRow, dueDateKey: string) {
+function reminderHtml(row: TaskLineRow, dueDateKey: string, daysUntilDue: number) {
+  const label = dueLabel(daysUntilDue);
   const entity = escapeHtml(text(row.entity) || "Entity not specified");
   const taskCode = escapeHtml(text(row.task_code) || "-");
   const task = escapeHtml(text(row.task) || "Not specified");
@@ -407,7 +453,7 @@ function reminderHtml(row: TaskLineRow, dueDateKey: string) {
   return `<!doctype html>
 <html>
   <body style="margin:0;background:#f4f6fa;font-family:Arial,Helvetica,sans-serif;color:#0f172a;">
-    <div style="display:none;max-height:0;overflow:hidden;">${entity} is due today.</div>
+    <div style="display:none;max-height:0;overflow:hidden;">${entity} — ${escapeHtml(label.toLowerCase())}.</div>
     <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f4f6fa;padding:28px 12px;">
       <tr>
         <td align="center">
@@ -420,7 +466,7 @@ function reminderHtml(row: TaskLineRow, dueDateKey: string) {
                       <div style="width:44px;height:44px;border-radius:14px;background:#fef3c7;color:#b45309;text-align:center;line-height:44px;font-size:21px;">&#128197;</div>
                     </td>
                     <td style="padding-left:14px;">
-                      <div style="font-size:12px;line-height:18px;font-weight:700;letter-spacing:1.2px;color:#b45309;">TASK DUE TODAY</div>
+                      <div style="font-size:12px;line-height:18px;font-weight:700;letter-spacing:1.2px;color:#b45309;">TASK ${escapeHtml(label.toUpperCase())}</div>
                       <div style="margin-top:6px;font-size:17px;line-height:24px;font-weight:700;color:#172033;">${entity}</div>
                       <table role="presentation" cellspacing="0" cellpadding="0" style="margin-top:12px;font-size:14px;line-height:22px;">
                         <tr>

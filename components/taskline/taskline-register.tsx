@@ -94,14 +94,14 @@ const taskLineImportRequestTimeoutMs = 90_000;
 const taskLineImportRetryDelayMs = 1_000;
 const taskLinePageSize = 200;
 const taskLineColumnGroups: { columns: string[] | null; key: string; label: string }[] = [
-  { key: "core", label: "Core", columns: ["team", "task_code", "name", "resource", "entity_group", "entity", "state_name", "task", "due_date", "stage", "status_open_close", "remarks", "document_link"] },
-  { key: "legal", label: "Legal / Order", columns: ["task_code", "name", "entity", "task", "ref_date", "ref_no", "period", "section", "issue", "refer_other_task", "appeal_no", "order_type", "court_location", "engaged_counsel", "printing", "due_date", "stage"] },
-  { key: "billing", label: "Billing / Fees", columns: ["task_code", "name", "entity", "gstin", "task", "billable", "billing_status", "total_agreed_fee", "amount_raised", "amount_realised", "counsel_fee", "referral_fee", "fee_comments"] },
+  { key: "core", label: "Core", columns: ["team", "task_code", "name", "resource", "entity_group", "entity", "state_name", "task", "due_date", "reminder_days", "stage", "status_open_close", "remarks", "document_link"] },
+  { key: "legal", label: "Legal / Order", columns: ["task_code", "name", "entity", "task", "ref_date", "ref_no", "period", "section", "issue", "refer_other_task", "appeal_no", "order_type", "court_location", "engaged_counsel", "printing", "due_date", "reminder_days", "stage"] },
+  { key: "billing", label: "Billing / Fees", columns: ["task_code", "name", "entity", "gstin", "task", "billable", "billing_status", "total_agreed_fee", "amount_raised", "amount_realised", "counsel_fee", "referral_fee", "fee_comments", "reminder_days"] },
   { key: "all", label: "All", columns: null }
 ];
 
 const taskLineFormSections: { columns: string[]; key: string; label: string }[] = [
-  { key: "core", label: "Core", columns: ["team", "name", "resource", "entity_group", "entity", "state_name", "gstin", "task", "gstat_task_code", "due_date", "stage", "status_open_close", "billable", "remarks", "document_link"] },
+  { key: "core", label: "Core", columns: ["team", "name", "resource", "entity_group", "entity", "state_name", "gstin", "task", "gstat_task_code", "due_date", "reminder_days", "stage", "status_open_close", "billable", "remarks", "document_link"] },
   { key: "legal", label: "Legal / Order", columns: ["ref_date", "ref_no", "period", "section", "issue", "refer_other_task", "appeal_no", "order_type", "court_location", "engaged_counsel", "printing"] },
   { key: "billing", label: "Billing / Fees", columns: ["billing_status", "total_agreed_fee", "amount_raised", "amount_realised", "counsel_fee", "referral_fee", "fee_comments"] },
   { key: "other", label: "Other", columns: ["any_other", "any_other_1"] }
@@ -130,6 +130,7 @@ const taskLineColumns: TaskLineColumn[] = [
   { key: "billable", label: "Billable", type: "select", width: 108 },
   { key: "remarks", label: "Remarks", width: 200 },
   { key: "document_link", label: "Document Link", width: 220 },
+  { key: "reminder_days", label: "Reminder Days", type: "number", width: 130 },
   { key: "ref_date", label: "Order/SCN,etc. Ref. Date", type: "date", width: 180 },
   { key: "ref_no", label: "Order/SCN,etc. Ref. No", width: 180 },
   { key: "period", label: "Period", width: 140 },
