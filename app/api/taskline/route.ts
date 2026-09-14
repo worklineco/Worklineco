@@ -17,6 +17,7 @@ import {
   type PendencyTeamRow
 } from "@/lib/pendency";
 import { extraDueRecipientsByTeam, indiaTodayDisplayDate, indiaTodayKey, isEmail, isManagerRoleText, parseEmailAddresses, teamMatchKey } from "@/lib/taskline-reminder-shared";
+import { readPrimaryTeam, readUserTeams, teamIsAllowed, userHasTeam } from "@/lib/user-teams";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
@@ -59,6 +60,7 @@ type AccessScope = {
   canViewAll: boolean;
   role: string;
   team: string;
+  teams: string[];
 };
 type TaskLineQuery = {
   columnFilters: Record<string, string>;
@@ -90,7 +92,7 @@ function trimToOverviewRow(row: TaskLineRow): TaskLineRow {
 }
 
 function overviewCacheKey(organisationId: string, access: AccessScope) {
-  return `${organisationId}|${access.canViewAll ? "all" : access.team}`;
+  return `${organisationId}|${access.canViewAll ? "all" : access.teams.join(",")}`;
 }
 
 const overviewTaskFields = ["register_key", "team", "task_code", "name", "resource", "entity_group", "entity", "state_name", "gstin", "task", "due_date", "stage", "status_open_close", "remarks", "document_link"];
@@ -127,7 +129,7 @@ function overviewTaskQuery(admin: ReturnType<typeof createAdminClient>, organisa
     .in("custom_values->>workline_module", modulesForRegister("all"))
     .order("created_at", { ascending: true });
   if (!access.canViewAll) {
-    const teamValues = taskLineTeamVariants(access.team);
+    const teamValues = Array.from(new Set(access.teams.flatMap(taskLineTeamVariants)));
     query = teamValues.length ? query.in("custom_values->taskline_data->>team", teamValues) : query.eq("id", "00000000-0000-0000-0000-000000000000");
   }
   return query;
@@ -584,7 +586,7 @@ async function handlePost(request: Request) {
   }
   const access = getAccess(auth.user);
 
-  if (!access.canViewAll && !access.team) {
+  if (!access.canViewAll && !access.teams.length) {
     return NextResponse.json({ error: "Your profile does not have a team assigned for TaskLine access." }, { status: 403 });
   }
 
@@ -1370,7 +1372,7 @@ async function loadTaskLineRecordWindow(
     .order("created_at", { ascending: true });
 
   if (!access.canViewAll) {
-    const teamValues = taskLineTeamVariants(access.team);
+    const teamValues = Array.from(new Set(access.teams.flatMap(taskLineTeamVariants)));
 
     if (!teamValues.length) {
       return { count: 0, data: [] as TaskRecord[], error: null };
@@ -1408,7 +1410,7 @@ async function loadAuditLogs(admin: ReturnType<typeof createAdminClient>, organi
 
   const visibleLogs = access.canViewAll
     ? taskLineLogs
-    : !access.team
+    : !access.teams.length
       ? []
       : taskLineLogs.filter(
           (log) => canAccessAuditValue(log.old_value, access) || canAccessAuditValue(log.new_value, access)
@@ -1517,10 +1519,10 @@ async function validateGstatLink(
   }
 
   const role = text(user.user_metadata?.role).toLowerCase();
-  const team = text(user.user_metadata?.team);
+  const teams = readUserTeams(user);
   const personHandling = text(linked.data.data?.["Person handling"]);
 
-  if (role !== "partner" && team && personHandling !== team) {
+  if (role !== "partner" && teams.length && !teamIsAllowed(personHandling, teams)) {
     return { message: "The selected GSTAT appeal is outside your team access.", status: 403 };
   }
 
@@ -1569,7 +1571,7 @@ function hasValue(row: TaskLineRow) {
 }
 
 function applyTeamAccess(row: TaskLineRow, access: AccessScope) {
-  if (access.canViewAll || !access.team) {
+  if (access.canViewAll || !access.teams.length || teamIsAllowed(row.team, access.teams)) {
     return row;
   }
 
@@ -1588,7 +1590,7 @@ function canAccessAuditValue(value: unknown, access: AccessScope) {
     return true;
   }
 
-  if (!access.team) {
+  if (!access.teams.length) {
     return false;
   }
 
@@ -1605,11 +1607,11 @@ function canAccessTaskLineRow(row: TaskLineRow, access: AccessScope) {
     return true;
   }
 
-  if (!access.team) {
+  if (!access.teams.length) {
     return false;
   }
 
-  return normalizeTeam(row.team) === normalizeTeam(access.team);
+  return teamIsAllowed(row.team, access.teams);
 }
 
 function isUuid(value: string) {
@@ -1699,7 +1701,7 @@ async function loadGstatRecordsForOverview(admin: ReturnType<typeof createAdminC
     return { data: null, error };
   }
   const rows = ((data ?? []) as GstatAppealRow[])
-    .filter((row) => access.canViewAll || !access.team || gstatText(row, "Person handling") === access.team)
+    .filter((row) => access.canViewAll || !access.teams.length || teamIsAllowed(gstatText(row, "Person handling"), access.teams))
     .filter(gstatRowIsPersonalHearing)
     .map(gstatAppealToTaskRecord);
   return { data: rows, error: null };
@@ -1925,13 +1927,15 @@ function createAdminClient() {
 
 function getAccess(user: User): AccessScope {
   const role = text(user.user_metadata?.role).toLowerCase();
-  const team = text(user.user_metadata?.team);
+  const team = readPrimaryTeam(user);
+  const teams = readUserTeams(user);
   const canViewAll = role === "partner" || role.includes("partner") || role === "owner" || role === "admin";
 
   return {
     canViewAll,
     role,
-    team
+    team,
+    teams
   };
 }
 
@@ -2407,7 +2411,7 @@ async function sendDueTodayReminderNow(
       const roleText = `${text(user?.user_metadata?.role)} ${text(user?.user_metadata?.designation)}`;
       const isResource = Boolean(memberName) && resourceNames.includes(memberName);
       const isTeamManager =
-        isManagerRoleText(roleText) && Boolean(rowTeamKey) && teamMatchKey(user?.user_metadata?.team) === rowTeamKey;
+        isManagerRoleText(roleText) && Boolean(rowTeamKey) && userHasTeam(user, row.team);
 
       if (!isResource && !isTeamManager) {
         continue;
