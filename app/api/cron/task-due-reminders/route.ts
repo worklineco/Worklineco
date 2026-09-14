@@ -2,6 +2,7 @@ import { createClient, type User } from "@supabase/supabase-js";
 import { createTransport } from "nodemailer";
 import { NextResponse } from "next/server";
 import { extraDueRecipientsByTeam, isEmail, isManagerRoleText, normalizeName, parseEmailAddresses, splitNames, teamMatchKey } from "@/lib/taskline-reminder-shared";
+import { userHasTeam } from "@/lib/user-teams";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -373,7 +374,7 @@ function isTeamManagerFor(row: TaskLineRow, user: User) {
   }
 
   const rowTeam = teamMatchKey(row.team);
-  return Boolean(rowTeam) && teamMatchKey(user.user_metadata?.team) === rowTeam;
+  return Boolean(rowTeam) && userHasTeam(user, row.team);
 }
 
 
