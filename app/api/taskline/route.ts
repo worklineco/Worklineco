@@ -2034,8 +2034,10 @@ function taskLineTeamVariants(value: unknown) {
   return Array.from(new Set([
     current,
     `Team-${padded}`,
+    `Team -${padded}`,
     `Team ${padded}`,
     `Team-${teamNumber}`,
+    `Team -${teamNumber}`,
     `Team ${teamNumber}`
   ]));
 }
