@@ -2,6 +2,7 @@ import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { createClient, type User } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
+import { readPrimaryTeam, readUserTeams, teamIsAllowed } from "@/lib/user-teams";
 
 type CookieToSet = { name: string; options: CookieOptions; value: string };
 type BillingRecord = {
@@ -69,6 +70,7 @@ type AccessScope = {
   canViewAll: boolean;
   role: string;
   team: string;
+  teams: string[];
 };
 
 const defaultOrganisationCode = "DCO1433";
@@ -721,8 +723,8 @@ async function selectBillingRecordsPage(
 ) {
   let query = admin.from(tableName).select(columns).eq("organisation_id", organisationId);
 
-  if (!access.canViewAll && access.team) {
-    query = query.eq("owner_team", access.team);
+  if (!access.canViewAll && access.teams.length) {
+    query = query.in("owner_team", access.teams);
   }
 
   const orderedQuery = columns.includes("serial_no")
@@ -739,8 +741,8 @@ function loadGstatMatters(admin: ReturnType<typeof createAdminClient>, access: A
     .eq("organisation_code", defaultOrganisationCode)
     .order("row_number", { ascending: true });
 
-  if (!access.canViewAll && access.team) {
-    query = query.eq("data->>Person handling", access.team);
+  if (!access.canViewAll && access.teams.length) {
+    query = query.in("data->>Person handling", access.teams);
   }
 
   return query;
@@ -778,14 +780,14 @@ async function loadAuditLogs(
 
   const logs = await attachActorNames(admin, data ?? []);
 
-  if (access.canViewAll || !access.team) {
+  if (access.canViewAll || !access.teams.length) {
     return logs;
   }
 
   return logs.filter((log) => {
     const oldTeam = readTeam(log.old_value);
     const newTeam = readTeam(log.new_value);
-    return oldTeam === access.team || newTeam === access.team;
+    return teamIsAllowed(oldTeam, access.teams) || teamIsAllowed(newTeam, access.teams);
   });
 }
 
@@ -898,11 +900,11 @@ async function loadTrashRecords(
       };
     });
 
-  if (access.canViewAll || !access.team) {
+  if (access.canViewAll || !access.teams.length) {
     return rows;
   }
 
-  return rows.filter((row) => readTeam(row.data) === access.team);
+  return rows.filter((row) => teamIsAllowed(readTeam(row.data), access.teams));
 }
 
 async function writeAuditLog(
@@ -942,7 +944,12 @@ function cleanRecord(
   const sgst = tax.sgst;
   const igst = tax.igst;
   const total = amount + cgst + sgst + igst + ope;
-  const ownerTeam = access.canViewAll ? text(record.owner_team) || access.team : access.team;
+  const requestedOwnerTeam = text(record.owner_team);
+  const ownerTeam = access.canViewAll
+    ? requestedOwnerTeam || access.team
+    : teamIsAllowed(requestedOwnerTeam, access.teams)
+      ? requestedOwnerTeam
+      : access.team;
   const linkedMatterId = text(record.gstat_appeal_id);
 
   const cleaned = {
@@ -1050,7 +1057,7 @@ function formatMatter(matter: GstatMatter) {
 }
 
 function canAccessRecord(record: StoredBillingRecord, access: AccessScope) {
-  return access.canViewAll || !access.team || record.owner_team === access.team;
+  return access.canViewAll || !access.teams.length || teamIsAllowed(record.owner_team, access.teams);
 }
 
 async function assignSerialNumbers<T extends Record<string, unknown>>(
@@ -1115,7 +1122,8 @@ function preserveAccountsOnlyFields<T extends Record<string, unknown>>(
 
 function getAccessScope(user: User): AccessScope {
   const role = text(user.user_metadata?.role).toLowerCase();
-  const team = text(user.user_metadata?.team);
+  const team = readPrimaryTeam(user);
+  const teams = readUserTeams(user);
   const canViewAll = role === "partner" || role === "accounts" || role === "owner" || role === "admin";
   const canEditAccountsFields = role === "partner" || role.includes("partner") || role === "accounts" || role.includes("account");
 
@@ -1124,7 +1132,8 @@ function getAccessScope(user: User): AccessScope {
     canManageMasters: canViewAll || role.includes("account"),
     canViewAll,
     role,
-    team
+    team,
+    teams
   };
 }
 
