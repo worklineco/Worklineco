@@ -2,6 +2,7 @@ import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
+import { readUserTeams, teamIsAllowed } from "@/lib/user-teams";
 
 type CookieToSet = { name: string; options: CookieOptions; value: string };
 type TrashRow = {
@@ -17,7 +18,7 @@ type TrashRow = {
 };
 type AccessScope = {
   isPartner: boolean;
-  team: string;
+  teams: string[];
 };
 
 const organisationCode = "DCO1433";
@@ -146,11 +147,11 @@ export async function POST(request: Request) {
 }
 
 function filterRowsForAccess<T extends TrashRow>(rows: T[], access: AccessScope) {
-  if (access.isPartner || !access.team) {
+  if (access.isPartner || !access.teams.length) {
     return rows;
   }
 
-  return rows.filter((row) => String(row.data?.["Person handling"] ?? "") === access.team);
+  return rows.filter((row) => teamIsAllowed(row.data?.["Person handling"], access.teams));
 }
 
 function isMissingTrashTableError(error: { code?: string; message?: string }) {
@@ -161,13 +162,12 @@ function isMissingTrashTableError(error: { code?: string; message?: string }) {
   );
 }
 
-function getAccessScope(user: { user_metadata?: Record<string, unknown> }): AccessScope {
+function getAccessScope(user: { app_metadata?: Record<string, unknown>; user_metadata?: Record<string, unknown> }): AccessScope {
   const role = String(user.user_metadata?.role ?? "").trim().toLowerCase();
-  const team = String(user.user_metadata?.team ?? "").trim();
 
   return {
     isPartner: role === "partner",
-    team
+    teams: readUserTeams(user)
   };
 }
 
