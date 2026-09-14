@@ -655,7 +655,7 @@ function changedFields(
 }
 
 function applyAccessToRowData(data: Record<string, string | number>, access: AccessScope) {
-  if (access.isPartner || !access.teams.length) {
+  if (access.isPartner || !access.teams.length || teamIsAllowed(data["Person handling"], access.teams)) {
     return data;
   }
 
@@ -663,7 +663,7 @@ function applyAccessToRowData(data: Record<string, string | number>, access: Acc
 }
 
 function canAccessRow(row: AppealRow, access: AccessScope) {
-  return access.isPartner || !access.teams.length || String(row.data?.["Person handling"] ?? "") === access.team;
+  return access.isPartner || !access.teams.length || teamIsAllowed(row.data?.["Person handling"], access.teams);
 }
 
 function filterRowsForAccess<T extends AppealRow>(rows: T[], access: AccessScope) {
