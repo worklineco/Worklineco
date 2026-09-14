@@ -5,6 +5,7 @@ import { getCurrentUser } from "@/lib/supabase/session";
 import { getCached, setCached } from "@/lib/data-cache";
 import { useRegisterEditAccess, viewOnlyRegisterMessage } from "@/lib/use-register-access";
 import { ViewOnlyAccessDialog } from "@/components/shared/view-only-access-dialog";
+import { readPrimaryTeam, readUserTeams, teamIsAllowed } from "@/lib/user-teams";
 import { ArrowDown, ArrowLeft, ArrowUp, Check, ChevronDown, Pin, ChevronUp, Download, Expand, ExternalLink, FileSpreadsheet, FileText, Filter, History, Menu, Pencil, Plus, ReceiptText, Search, Settings2, Trash2, Upload, X } from "lucide-react";
 import Link from "next/link";
 import { ChangeEvent, memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, useTransition } from "react";
@@ -39,7 +40,7 @@ type BillingDraft = {
   voucher_type: string;
 };
 type ClientRegisterRow = Record<string, string | number>;
-type UserAccess = { isPartner: boolean; team: string };
+type UserAccess = { isPartner: boolean; team: string; teams: string[] };
 type CellStyle = NonNullable<XLSX.CellObject["s"]>;
 type SortDirection = "asc" | "desc";
 type SortState = { columnKey: string; direction: SortDirection } | null;
@@ -334,7 +335,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
   const [message, setMessage] = useState("");
   const [isSummaryOpen, setIsSummaryOpen] = useState(false);
   const [showNtbdRows, setShowNtbdRows] = useState(false);
-  const [userAccess, setUserAccess] = useState<UserAccess>({ isPartner: false, team: "" });
+  const [userAccess, setUserAccess] = useState<UserAccess>({ isPartner: false, team: "", teams: [] });
   const [sortState, setSortState] = useState<SortState>(null);
   const [selectedRowKeys, setSelectedRowKeys] = useState<Set<string>>(() => new Set());
   const [, startRowsTransition] = useTransition();
@@ -786,7 +787,8 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
 
     setUserAccess({
       isPartner: role === "partner",
-      team: String(metadata.team ?? "").trim()
+      team: readPrimaryTeam(user),
+      teams: readUserTeams(user)
     });
   }
 
@@ -2501,7 +2503,7 @@ function normalizeRow(row: AppealRow, index: number): AppealRow {
 }
 
 function isPersonHandlingLocked(access: UserAccess) {
-  return !access.isPartner && Boolean(access.team);
+  return !access.isPartner && access.teams.length <= 1 && Boolean(access.team);
 }
 
 function canInlineEdit(field: string, _access: UserAccess) {
@@ -2509,7 +2511,7 @@ function canInlineEdit(field: string, _access: UserAccess) {
 }
 
 function applyPersonHandlingForAccess(data: RowData, access: UserAccess): RowData {
-  if (!isPersonHandlingLocked(access)) {
+  if (access.isPartner || !access.teams.length || teamIsAllowed(data["Person handling"], access.teams)) {
     return { ...data };
   }
 
