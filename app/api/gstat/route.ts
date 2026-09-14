@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { isViewOnlyRegisterUser, viewOnlyRegisterResponse } from "@/lib/register-access";
+import { readPrimaryTeam, readUserTeams, teamIsAllowed } from "@/lib/user-teams";
 
 type CookieToSet = { name: string; options: CookieOptions; value: string };
 type AppealRow = {
@@ -15,6 +16,7 @@ type ExistingAppealRow = AppealRow & { id: string };
 type AccessScope = {
   isPartner: boolean;
   team: string;
+  teams: string[];
 };
 
 const organisationCode = "DCO1433";
@@ -147,7 +149,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const shouldRenumberRows = access.isPartner || !access.team;
+    const shouldRenumberRows = access.isPartner || !access.teams.length;
     const fallbackRow = { data: {}, row_number: shouldRenumberRows ? 1 : await getNextRowNumber(admin) };
     const insertedRow = { data: {}, row_number: shouldRenumberRows ? (rowIndex ?? -1) + 2 : await getNextRowNumber(admin) };
     const insertedRows =
@@ -362,8 +364,8 @@ async function replaceRows(
     .delete()
     .eq("organisation_code", organisationCode);
 
-  if (!access.isPartner && access.team) {
-    deleteQuery = deleteQuery.eq("data->>Person handling", access.team);
+  if (!access.isPartner && access.teams.length) {
+    deleteQuery = deleteQuery.in("data->>Person handling", access.teams);
   }
 
   const { error: deleteError } = await deleteQuery;
@@ -653,7 +655,7 @@ function changedFields(
 }
 
 function applyAccessToRowData(data: Record<string, string | number>, access: AccessScope) {
-  if (access.isPartner || !access.team) {
+  if (access.isPartner || !access.teams.length) {
     return data;
   }
 
@@ -661,11 +663,11 @@ function applyAccessToRowData(data: Record<string, string | number>, access: Acc
 }
 
 function canAccessRow(row: AppealRow, access: AccessScope) {
-  return access.isPartner || !access.team || String(row.data?.["Person handling"] ?? "") === access.team;
+  return access.isPartner || !access.teams.length || String(row.data?.["Person handling"] ?? "") === access.team;
 }
 
 function filterRowsForAccess<T extends AppealRow>(rows: T[], access: AccessScope) {
-  if (access.isPartner || !access.team) {
+  if (access.isPartner || !access.teams.length) {
     return rows;
   }
 
@@ -734,13 +736,15 @@ function markBillRaised<T extends AppealRow>(rows: T[], billRaisedAppealIds: Set
   }));
 }
 
-function getAccessScope(user: { user_metadata?: Record<string, unknown> }): AccessScope {
+function getAccessScope(user: { app_metadata?: Record<string, unknown>; user_metadata?: Record<string, unknown> }): AccessScope {
   const role = String(user.user_metadata?.role ?? "").trim().toLowerCase();
-  const team = String(user.user_metadata?.team ?? "").trim();
+  const team = readPrimaryTeam(user);
+  const teams = readUserTeams(user);
 
   return {
     isPartner: role === "partner",
-    team
+    team,
+    teams
   };
 }
 
