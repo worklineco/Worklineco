@@ -350,7 +350,7 @@ async function replaceRows(
   rows: AppealRow[],
   auditAction: string,
   previousRowCount: number,
-  access: AccessScope = { isPartner: true, team: "" },
+  access: AccessScope = { isPartner: true, team: "", teams: [] },
   trashRows: ExistingAppealRow[] = []
 ) {
   const trashError = await saveRowsToTrash(admin, userId, auditAction, trashRows);
