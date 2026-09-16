@@ -297,6 +297,7 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
   const [columnOrder, setColumnOrder] = useState(() => getSavedTaskLineColumnLayout().order);
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>(getSavedTaskLineColumnWidths);
   const [auditLogs, setAuditLogs] = useState<TaskLineAuditLog[]>([]);
+  const [selectedAuditRow, setSelectedAuditRow] = useState<TaskLineRow | null>(null);
   const [isAuditLoading, setIsAuditLoading] = useState(false);
   const [formDraft, setFormDraft] = useState<TaskLineRow | null>(null);
   const [hiddenColumnKeys, setHiddenColumnKeys] = useState<Set<string>>(() => new Set(getSavedTaskLineColumnLayout().hiddenColumnKeys));
@@ -1295,21 +1296,30 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
 
   async function showAuditTrail(selectedRow?: TaskLineRow) {
     setViewMode("audit");
+    setSelectedAuditRow(selectedRow ?? null);
+
     if (selectedRow) {
-      setMessage(`Showing audit trail. Row selected: ${getRowLabel(selectedRow, rows) || "TaskLine row"}.`);
+      setAuditLogs([]);
+      setMessage(`Showing complete history for ${getRowLabel(selectedRow, rows) || "TaskLine task"}.`);
+    } else if (auditLoadedRef.current || isAuditLoading) {
+      return;
     }
-    if (auditLoadedRef.current || isAuditLoading) return;
 
     setIsAuditLoading(true);
     try {
-      const response = await fetch(taskLineApiQuery("view=audit"), { cache: "no-store" });
+      const auditQuery = selectedRow
+        ? `view=audit&entityId=${encodeURIComponent(selectedRow.__id)}`
+        : "view=audit";
+      const response = await fetch(taskLineApiQuery(auditQuery), { cache: "no-store" });
       const result = (await response.json()) as { auditLogs?: Array<Record<string, unknown>>; error?: string };
       if (!response.ok) {
         setMessage(result.error ?? "Could not load TaskLine audit trail.");
         return;
       }
       setAuditLogs((result.auditLogs ?? []).map(formatServerAuditLog));
-      auditLoadedRef.current = true;
+      if (!selectedRow) {
+        auditLoadedRef.current = true;
+      }
     } catch (error) {
       console.error("TaskLine audit load error:", error);
       setMessage("Could not load TaskLine audit trail.");
@@ -2407,7 +2417,7 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
       {viewMode === "audit" ? (
         isAuditLoading
           ? <p className="mt-4 rounded-md border border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm font-bold text-slate-500">Loading audit trail...</p>
-          : <TaskLineAuditTable logs={auditLogs} rows={rows} />
+          : <TaskLineAuditTable logs={auditLogs} rows={rows} selectedRow={selectedAuditRow} />
       ) : null}
 
       {formDraft ? (
@@ -3948,7 +3958,15 @@ function TaskLineColumnOptionsPanel({
   );
 }
 
-function TaskLineAuditTable({ logs, rows }: { logs: TaskLineAuditLog[]; rows: TaskLineRow[] }) {
+function TaskLineAuditTable({
+  logs,
+  rows,
+  selectedRow
+}: {
+  logs: TaskLineAuditLog[];
+  rows: TaskLineRow[];
+  selectedRow: TaskLineRow | null;
+}) {
   const serialByRowId = useMemo(() => {
     const map = new Map<string, number>();
     rows.forEach((row, index) => map.set(row.__id, index + 1));
@@ -3962,9 +3980,18 @@ function TaskLineAuditTable({ logs, rows }: { logs: TaskLineAuditLog[]; rows: Ta
 
   return (
     <section className="mt-4 overflow-hidden rounded-md border border-slate-200 bg-white">
-      <div className="flex items-center gap-2 border-b border-slate-200 px-4 py-3">
+      <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 px-4 py-3">
         <History className="size-4 text-rose-700" />
-        <h3 className="text-sm font-black uppercase tracking-[0.14em] text-slate-700">Edit History</h3>
+        <div className="min-w-0">
+          <h3 className="text-sm font-black uppercase tracking-[0.14em] text-slate-700">
+            {selectedRow ? "Task Audit Trail" : "Edit History"}
+          </h3>
+          {selectedRow ? (
+            <p className="mt-0.5 truncate text-xs font-bold text-slate-500">
+              {[text(selectedRow.task_code), text(selectedRow.entity), text(selectedRow.task)].filter(Boolean).join(" · ")}
+            </p>
+          ) : null}
+        </div>
       </div>
       <div className="max-h-[calc(100vh-130px)] overflow-auto">
         <table className="w-full min-w-[860px] border-collapse text-left text-sm">
@@ -3992,7 +4019,7 @@ function TaskLineAuditTable({ logs, rows }: { logs: TaskLineAuditLog[]; rows: Ta
               </tr>
             )) : (
               <tr>
-                <td className="px-4 py-8 text-center font-bold text-slate-500" colSpan={7}>No TaskLine edit history yet.</td>
+                <td className="px-4 py-8 text-center font-bold text-slate-500" colSpan={7}>{selectedRow ? "No history is available for this task." : "No TaskLine edit history yet."}</td>
               </tr>
             )}
           </tbody>
