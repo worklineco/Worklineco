@@ -15,9 +15,17 @@ export const maxDuration = 300;
  *
  *   WorkLine Backup 2026-08-10/
  *     workline-taskline-2026-08-10.xlsx
+ *     workline-high-court-2026-08-10.xlsx
+ *     workline-cestat-2026-08-10.xlsx
+ *     workline-non-litigation-2026-08-10.xlsx
  *     workline-client-records-2026-08-10.xlsx
- *     workline-gstat-2026-08-10.xlsx
+ *     workline-gstat-2026-08-10.xlsx        (appeals + trash)
  *     workline-billing-2026-08-10.xlsx
+ *     workline-gst-tracker-2026-08-10.xlsx  (registrations + litigation)
+ *     workline-gstr-9-9c-2026-08-10.xlsx
+ *     workline-sj-appointments-2026-08-10.xlsx
+ *     workline-meeting-room-2026-08-10.xlsx
+ *     workline-engagement-letters-2026-08-10.xlsx
  *
  * Uploads authenticate as a Google service account (free) - see
  * docs/drive-backup-runbook.md for the one-time setup. The target folder can
@@ -66,11 +74,54 @@ export async function GET(request: Request) {
     );
   }
 
+  const taskRegisterSheet = (module: string, sheet: string): SheetSpec => ({
+    filter: { column: "custom_values->>workline_module", value: module },
+    jsonColumn: "custom_values",
+    sheet,
+    table: "tasks"
+  });
+  const clientSourceSheet = (source: string, sheet: string): SheetSpec => ({
+    filter: { column: "custom_values->>source", value: source },
+    jsonColumn: "custom_values",
+    sheet,
+    table: "clients"
+  });
+
   const workbooks: { error?: string; name: string; sheets?: { name: string; rows: FlatRow[] }[] }[] = await Promise.all([
-    buildTasklineWorkbook(admin.client, dateKey),
-    buildClientRecordsWorkbook(admin.client, dateKey),
-    buildTableWorkbook(admin.client, "gstat_appeals", "data", `workline-gstat-${dateKey}`, "GSTAT"),
-    buildTableWorkbook(admin.client, "firm_billing_records", "custom_values", `workline-billing-${dateKey}`, "Billing"),
+    buildWorkbook(admin.client, `workline-taskline-${dateKey}`, [taskRegisterSheet("taskline", "TaskLine")]),
+    buildWorkbook(admin.client, `workline-high-court-${dateKey}`, [taskRegisterSheet("high_court", "High Court")]),
+    buildWorkbook(admin.client, `workline-cestat-${dateKey}`, [taskRegisterSheet("cestat", "CESTAT")]),
+    buildWorkbook(admin.client, `workline-non-litigation-${dateKey}`, [taskRegisterSheet("non_litigation", "Non-Litigation")]),
+    buildWorkbook(admin.client, `workline-client-records-${dateKey}`, [
+      clientSourceSheet("client_records_register", "Client Records"),
+      clientSourceSheet("client_records_trash", "Trash")
+    ]),
+    buildWorkbook(admin.client, `workline-gstat-${dateKey}`, [
+      { jsonColumn: "data", sheet: "GSTAT", table: "gstat_appeals" },
+      { jsonColumn: "data", sheet: "Trash", table: "gstat_deleted_appeals" }
+    ]),
+    buildWorkbook(admin.client, `workline-billing-${dateKey}`, [
+      { jsonColumn: "custom_values", sheet: "Billing", table: "firm_billing_records" }
+    ]),
+    buildWorkbook(admin.client, `workline-gst-tracker-${dateKey}`, [
+      { sheet: "GST Registrations", table: "gst_registrations" },
+      { sheet: "Litigation Cases", table: "gst_litigation_cases" }
+    ]),
+    buildWorkbook(admin.client, `workline-gstr-9-9c-${dateKey}`, [
+      clientSourceSheet("gstr_9_9c_row", "Rows"),
+      clientSourceSheet("gstr_9_9c_override", "Cell Overrides")
+    ]),
+    buildWorkbook(admin.client, `workline-sj-appointments-${dateKey}`, [
+      { sheet: "Appointments", table: "sj_appointments" },
+      { sheet: "Logs", table: "sj_appointment_logs" }
+    ]),
+    buildWorkbook(admin.client, `workline-meeting-room-${dateKey}`, [
+      { sheet: "Bookings", table: "meeting_room_bookings" },
+      { sheet: "Logs", table: "meeting_room_booking_logs" }
+    ]),
+    buildWorkbook(admin.client, `workline-engagement-letters-${dateKey}`, [
+      { sheet: "Engagement Letters", table: "engagement_letter_log" }
+    ]),
   ]);
 
   let folderId: string;
@@ -193,54 +244,40 @@ function cellValue(value: unknown): string | number {
   return String(value);
 }
 
-async function buildTasklineWorkbook(
-  admin: NonNullable<Extract<ReturnType<typeof createAdminClient>, { client: unknown }>>["client"],
-  dateKey: string
-) {
-  const name = `workline-taskline-${dateKey}`;
-  try {
-    const rows = await fetchAllRows(admin, "tasks", { column: "custom_values->>workline_module", value: "taskline" });
-    return { name, sheets: [{ name: "TaskLine", rows: rows.map((row) => flattenRow(row, "custom_values")) }] };
-  } catch (error) {
-    return { error: message(error), name };
-  }
-}
+type SheetSpec = {
+  filter?: { column: string; value: string };
+  jsonColumn?: string;
+  sheet: string;
+  table: string;
+};
 
-async function buildClientRecordsWorkbook(
+/**
+ * Builds one workbook from one or more table queries. A sheet that fails to
+ * load (e.g. its table does not exist yet) becomes an error-note sheet instead
+ * of sinking the whole workbook; the workbook only fails when every sheet does.
+ */
+async function buildWorkbook(
   admin: NonNullable<Extract<ReturnType<typeof createAdminClient>, { client: unknown }>>["client"],
-  dateKey: string
-) {
-  const name = `workline-client-records-${dateKey}`;
-  try {
-    const [active, trash] = await Promise.all([
-      fetchAllRows(admin, "clients", { column: "custom_values->>source", value: "client_records_register" }),
-      fetchAllRows(admin, "clients", { column: "custom_values->>source", value: "client_records_trash" })
-    ]);
-    return {
-      name,
-      sheets: [
-        { name: "Client Records", rows: active.map((row) => flattenRow(row, "custom_values")) },
-        { name: "Trash", rows: trash.map((row) => flattenRow(row, "custom_values")) }
-      ]
-    };
-  } catch (error) {
-    return { error: message(error), name };
-  }
-}
-
-async function buildTableWorkbook(
-  admin: NonNullable<Extract<ReturnType<typeof createAdminClient>, { client: unknown }>>["client"],
-  table: string,
-  jsonColumn: string,
   name: string,
-  sheetName: string
+  specs: SheetSpec[]
 ) {
-  try {
-    const rows = await fetchAllRows(admin, table);
-    return { name, sheets: [{ name: sheetName, rows: rows.map((row) => flattenRow(row, jsonColumn)) }] };
-  } catch (error) {
-    return { error: message(error), name };
+  const errors: string[] = [];
+  const sheets = await Promise.all(
+    specs.map(async (spec) => {
+      try {
+        const rows = await fetchAllRows(admin, spec.table, spec.filter);
+        return { name: spec.sheet, rows: rows.map((row) => flattenRow(row, spec.jsonColumn)) };
+      } catch (error) {
+        errors.push(`${spec.sheet}: ${message(error)}`);
+        return { name: spec.sheet, rows: [{ error: `Could not export ${spec.table}: ${message(error)}` }] as FlatRow[] };
+      }
+    })
+  );
+
+  if (errors.length === specs.length) {
+    return { error: errors.join("; "), name };
   }
+  return { name, sheets };
 }
 
 function workbookBuffer(sheets: { name: string; rows: FlatRow[] }[]) {
