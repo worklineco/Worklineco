@@ -640,9 +640,31 @@ async function handlePost(request: Request) {
   const existingId = isUuid(rawId) ? rawId : "";
   const cleaned = applyTeamAccess(cleanRecord(record), access);
 
-  // Entity Group is mandatory: no TaskLine row may be created without it.
-  if (!existingId && !text(cleaned.entity_group)) {
-    return NextResponse.json({ error: "Entity Group is required to add a TaskLine task." }, { status: 400 });
+  if (!existingId) {
+    const requiredAddFields: Array<[keyof TaskLineRow, string]> = [
+      ["team", "Team"],
+      ["entity_group", "Entity Group"],
+      ["entity", "Entity"],
+      ["state_name", "State Name"],
+      ["task", "Task"],
+      ["due_date", "Due Date"],
+      ["stage", "Stage"],
+      ["status_open_close", "Status Open/Close"],
+      ["billable", "Billable"],
+      ["document_link", "Document Link"],
+      ["total_agreed_fee", "Total Agreed Fee"],
+      ["fee_comments", "Fee Comments"]
+    ];
+    const missingFields = requiredAddFields
+      .filter(([key]) => !text(cleaned[key]))
+      .map(([, label]) => label);
+
+    if (missingFields.length) {
+      return NextResponse.json(
+        { error: `Complete the required fields before adding this task: ${missingFields.join(", ")}.` },
+        { status: 400 }
+      );
+    }
   }
 
   const gstatLinkError = await validateGstatLink(admin, auth.user, cleaned);
