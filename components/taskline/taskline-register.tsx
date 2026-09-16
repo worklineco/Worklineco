@@ -343,7 +343,6 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
   const [currentUserTeam, setCurrentUserTeam] = useState("");
   const [entityMasters, setEntityMasters] = useState<EntityMasterOption[]>([]);
   const rowsRef = useRef<TaskLineRow[]>([]);
-  const auditLoadedRef = useRef(false);
   const taskLineRequestIdRef = useRef(0);
   const fullRowsCacheRef = useRef<TaskLineRow[] | null>(null);
   const filterOptionsRequestIdRef = useRef(0);
@@ -1300,11 +1299,15 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
     setSelectedAuditRow(selectedRow ?? null);
 
     if (selectedRow) {
-      setAuditLogs([]);
       setMessage(`Showing audit trail for Task Code ${text(selectedRow.task_code) || "-"}.`);
-    } else if (auditLoadedRef.current || isAuditLoading) {
+    } else if (isAuditLoading) {
       return;
     }
+
+    // Always fetch fresh for the requested scope: the full Edit History and a
+    // single task's trail share this state, so reusing the previous fetch
+    // would show one view's rows under the other's heading.
+    setAuditLogs([]);
 
     setIsAuditLoading(true);
     try {
@@ -1318,9 +1321,6 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
         return;
       }
       setAuditLogs((result.auditLogs ?? []).map(formatServerAuditLog));
-      if (!selectedRow) {
-        auditLoadedRef.current = true;
-      }
     } catch (error) {
       console.error("TaskLine audit load error:", error);
       setMessage("Could not load TaskLine audit trail.");
