@@ -1300,7 +1300,7 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
 
     if (selectedRow) {
       setAuditLogs([]);
-      setMessage(`Showing complete history for ${getRowLabel(selectedRow, rows) || "TaskLine task"}.`);
+      setMessage(`Showing audit trail for Task Code ${text(selectedRow.task_code) || "-"}.`);
     } else if (auditLoadedRef.current || isAuditLoading) {
       return;
     }
@@ -2425,7 +2425,7 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
       {viewMode === "audit" ? (
         isAuditLoading
           ? <p className="mt-4 rounded-md border border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm font-bold text-slate-500">Loading audit trail...</p>
-          : <TaskLineAuditTable logs={auditLogs} rows={rows} selectedRow={selectedAuditRow} />
+          : <TaskLineAuditTable logs={auditLogs} selectedRow={selectedAuditRow} />
       ) : null}
 
       {formDraft ? (
@@ -3975,24 +3975,11 @@ function TaskLineColumnOptionsPanel({
 
 function TaskLineAuditTable({
   logs,
-  rows,
   selectedRow
 }: {
   logs: TaskLineAuditLog[];
-  rows: TaskLineRow[];
   selectedRow: TaskLineRow | null;
 }) {
-  const serialByRowId = useMemo(() => {
-    const map = new Map<string, number>();
-    rows.forEach((row, index) => map.set(row.__id, index + 1));
-    return map;
-  }, [rows]);
-
-  function rowNumber(log: TaskLineAuditLog) {
-    const serial = log.entityId ? serialByRowId.get(log.entityId) : undefined;
-    return serial ? String(serial) : "-";
-  }
-
   return (
     <section className="mt-4 overflow-hidden rounded-md border border-slate-200 bg-white">
       <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 px-4 py-3">
@@ -4009,13 +3996,12 @@ function TaskLineAuditTable({
         </div>
       </div>
       <div className="max-h-[calc(100vh-130px)] overflow-auto">
-        <table className="w-full min-w-[860px] border-collapse text-left text-sm">
+        <table className="w-full min-w-[760px] border-collapse text-left text-sm">
           <thead className="sticky top-0 z-10 bg-slate-100 text-[11px] font-semibold uppercase tracking-wide text-slate-600 [&_th]:border-b [&_th]:border-slate-200">
             <tr>
               <th className="px-3 py-2">Time</th>
               <th className="px-3 py-2">Action</th>
               <th className="px-3 py-2">Changed By</th>
-              <th className="px-3 py-2">Row</th>
               <th className="px-3 py-2">Field</th>
               <th className="px-3 py-2">Old Value</th>
               <th className="px-3 py-2">New Value</th>
@@ -4027,14 +4013,13 @@ function TaskLineAuditTable({
                 <td className="px-3 py-2 text-xs font-bold text-slate-500">{formatAuditTime(log.createdAt)}</td>
                 <td className="px-3 py-2 font-black text-slate-900">{formatAuditAction(log.action)}</td>
                 <td className="px-3 py-2 font-bold text-slate-700">{log.actorName || "-"}</td>
-                <td className="px-3 py-2 font-bold text-slate-700">{rowNumber(log)}</td>
                 <td className="px-3 py-2 font-semibold text-slate-700">{log.field || "-"}</td>
                 <td className="max-w-[280px] whitespace-normal px-3 py-2 font-semibold leading-5 text-slate-500" title={log.oldValue || ""}>{log.oldValue || "-"}</td>
                 <td className="max-w-[280px] whitespace-normal px-3 py-2 font-semibold leading-5 text-slate-900" title={log.newValue || ""}>{log.newValue || "-"}</td>
               </tr>
             )) : (
               <tr>
-                <td className="px-4 py-8 text-center font-bold text-slate-500" colSpan={7}>{selectedRow ? "No history is available for this task." : "No TaskLine edit history yet."}</td>
+                <td className="px-4 py-8 text-center font-bold text-slate-500" colSpan={6}>{selectedRow ? "No history is available for this task." : "No TaskLine edit history yet."}</td>
               </tr>
             )}
           </tbody>
