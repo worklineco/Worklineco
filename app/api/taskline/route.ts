@@ -19,7 +19,7 @@ import {
 import { extraDueRecipientsByTeam, indiaTodayDisplayDate, indiaTodayKey, isEmail, isManagerRoleText, parseEmailAddresses, teamMatchKey } from "@/lib/taskline-reminder-shared";
 import { readPrimaryTeam, readUserTeams, teamIsAllowed, userHasTeam } from "@/lib/user-teams";
 import { cookies } from "next/headers";
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 
 type CookieToSet = { name: string; options: CookieOptions; value: string };
 type TaskLineRow = Record<string, string>;
@@ -712,28 +712,40 @@ async function handlePost(request: Request) {
         auditValue(saved.data as TaskRecord)
       );
 
-      // Allocation email: when the Resource changes, notify the newly
-      // allocated resource (and only the resource).
+      // Notification mails (allocation, name-tag, due-today) involve slow
+      // auth-user listing and SMTP calls, so they run AFTER the response is
+      // sent - the UI gets the saved row immediately.
       const previousResource = text((existing.data as TaskRecord).custom_values?.taskline_data?.resource);
-      if (registerKey === "taskline" && resourceAllocationChanged(previousResource, text(cleaned.resource))) {
-        await sendResourceAllocationMail(admin, organisation.organisationId, saved.data as TaskRecord);
-      }
-
-      // Name-tag email: when the Name (manager/owner) changes, notify the
-      // newly tagged person the same way a resource allocation does.
       const previousName = text((existing.data as TaskRecord).custom_values?.taskline_data?.name);
-      if (registerKey === "taskline" && resourceAllocationChanged(previousName, text(cleaned.name))) {
-        await sendResourceAllocationMail(admin, organisation.organisationId, saved.data as TaskRecord, "name");
-      }
-
-      // Instant due-today reminder: if the daily 09:00 IST mail for today has
-      // already gone out, a due date set/changed TO today would otherwise
-      // never get its reminder. Send it immediately instead (the audit-log
-      // dedupe keys stop double sends either way).
       const previousDueDate = text((existing.data as TaskRecord).custom_values?.taskline_data?.due_date);
-      if (registerKey === "taskline" && text(cleaned.due_date) === indiaTodayDisplayDate() && previousDueDate !== text(cleaned.due_date)) {
-        await sendDueTodayReminderNow(admin, organisation.organisationId, saved.data as TaskRecord);
-      }
+      const savedRecord = saved.data as TaskRecord;
+
+      after(async () => {
+        try {
+          // Allocation email: when the Resource changes, notify the newly
+          // allocated resource (and only the resource).
+          if (registerKey === "taskline" && resourceAllocationChanged(previousResource, text(cleaned.resource))) {
+            await sendResourceAllocationMail(admin, organisation.organisationId, savedRecord);
+          }
+
+          // Name-tag email: when the Name (manager/owner) changes, notify the
+          // newly tagged person the same way a resource allocation does.
+          if (registerKey === "taskline" && resourceAllocationChanged(previousName, text(cleaned.name))) {
+            await sendResourceAllocationMail(admin, organisation.organisationId, savedRecord, "name");
+          }
+
+          // Instant due-today reminder: if the daily 09:00 IST mail for today
+          // has already gone out, a due date set/changed TO today would
+          // otherwise never get its reminder. Send it immediately instead (the
+          // audit-log dedupe keys stop double sends either way).
+          if (registerKey === "taskline" && text(cleaned.due_date) === indiaTodayDisplayDate() && previousDueDate !== text(cleaned.due_date)) {
+            await sendDueTodayReminderNow(admin, organisation.organisationId, savedRecord);
+          }
+        } catch (error) {
+          console.error("TaskLine post-save notifications failed:", error);
+        }
+      });
+
 
       return NextResponse.json({ record: formatRecord(saved.data as TaskRecord) });
     } else if (existing.data) {
@@ -773,21 +785,32 @@ async function handlePost(request: Request) {
 
   await writeAuditLog(admin, organisation.organisationId, auth.user.id, "taskline.create", null, auditValue(saved.data as TaskRecord));
 
-  // Allocation email: a brand-new row created with a Resource selected
-  // notifies that resource straight away.
-  if (registerKey === "taskline" && text(cleaned.resource)) {
-    await sendResourceAllocationMail(admin, organisation.organisationId, saved.data as TaskRecord);
-  }
+  // Notification mails run AFTER the response is sent (see the update path) -
+  // creating a task feels instant while the mails go out in the background.
+  const createdRecord = saved.data as TaskRecord;
 
-  if (registerKey === "taskline" && text(cleaned.name)) {
-    await sendResourceAllocationMail(admin, organisation.organisationId, saved.data as TaskRecord, "name");
-  }
+  after(async () => {
+    try {
+      // Allocation email: a brand-new row created with a Resource selected
+      // notifies that resource straight away.
+      if (registerKey === "taskline" && text(cleaned.resource)) {
+        await sendResourceAllocationMail(admin, organisation.organisationId, createdRecord);
+      }
 
-  // Instant due-today reminder for rows created with today's due date
-  // (the daily 09:00 IST mail for today may have already gone out).
-  if (registerKey === "taskline" && text(cleaned.due_date) === indiaTodayDisplayDate()) {
-    await sendDueTodayReminderNow(admin, organisation.organisationId, saved.data as TaskRecord);
-  }
+      if (registerKey === "taskline" && text(cleaned.name)) {
+        await sendResourceAllocationMail(admin, organisation.organisationId, createdRecord, "name");
+      }
+
+      // Instant due-today reminder for rows created with today's due date
+      // (the daily 09:00 IST mail for today may have already gone out).
+      if (registerKey === "taskline" && text(cleaned.due_date) === indiaTodayDisplayDate()) {
+        await sendDueTodayReminderNow(admin, organisation.organisationId, createdRecord);
+      }
+    } catch (error) {
+      console.error("TaskLine post-create notifications failed:", error);
+    }
+  });
+
 
   return NextResponse.json({ record: formatRecord(saved.data as TaskRecord) });
 }
