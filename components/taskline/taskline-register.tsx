@@ -106,7 +106,7 @@ const taskLineFormSections: { columns: string[]; key: string; label: string }[] 
   { key: "billing", label: "Billing / Fees", columns: ["billing_status", "total_agreed_fee", "amount_raised", "amount_realised", "counsel_fee", "referral_fee", "fee_comments"] },
   { key: "other", label: "Other", columns: ["any_other", "any_other_1"] }
 ];
-const requiredTaskLineFormKeys = ["team", "entity_group", "entity", "state_name", "task", "due_date", "stage", "status_open_close", "billable"];
+const requiredTaskLineFormKeys = ["team", "entity_group", "entity", "state_name", "task", "due_date", "stage", "status_open_close", "billable", "document_link", "total_agreed_fee", "fee_comments"];
 const taskLineColumnLayoutStorageKey = "workline:taskline-column-layout:v5";
 const taskLineColumnWidthsStorageKey = "workline:taskline-column-widths:v1";
 const minimumTaskLineColumnWidth = 80;
@@ -1328,12 +1328,19 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
     }
   }
 
+  function queueEditorOptionsLoad() {
+    if (typeof window === "undefined") {
+      loadEditorOptions();
+      return;
+    }
+    window.setTimeout(loadEditorOptions, 0);
+  }
+
   function addRow() {
     if (!canEditRegisterRef.current) {
       setMessage(viewOnlyRegisterMessage);
       return;
     }
-    loadEditorOptions();
     setEditingRowId(null);
     const draft = createEmptyRow(`draft-${crypto.randomUUID()}`);
     if (currentUserTeam) {
@@ -1342,6 +1349,7 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
     draft.status_open_close = "Open";
     draft.stage = "Open";
     setFormDraft(draft);
+    queueEditorOptionsLoad();
   }
 
   function openEditForm(row: TaskLineRow) {
@@ -1349,9 +1357,9 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
       setIsViewOnlyDialogOpen(true);
       return;
     }
-    loadEditorOptions();
     setEditingRowId(row.__id);
     setFormDraft({ ...row });
+    queueEditorOptionsLoad();
   }
 
   function updateFormDraft(key: string, value: string) {
@@ -3209,13 +3217,15 @@ function TaskLineForm({
           <TaskLineSearchableSelect
             allowCustom={column.key === "entity"}
             onChange={(value) => onChange(column.key, value)}
-            options={withCurrentValue(
+            options={
               column.key === "entity"
                 ? entityOptions
-                : column.key === "state_name"
-                  ? gstinStateOptions.map(([, state]) => state)
-                  : sectionOptions
-            )}
+                : withCurrentValue(
+                    column.key === "state_name"
+                      ? gstinStateOptions.map(([, state]) => state)
+                      : sectionOptions
+                  )
+            }
             placeholder={column.key === "section" ? "Select Section" : `Select ${column.label}`}
             value={currentValue}
           />
@@ -3481,8 +3491,13 @@ function TaskLineSearchableSelect({
   const [query, setQuery] = useState("");
   const [menuPosition, setMenuPosition] = useState({ left: 0, maxHeight: 280, top: 0, width: 0 });
   const normalizedOptions = useMemo(
-    () => Array.from(new Set(options.map((option) => text(option)).filter(Boolean))),
-    [options]
+    () => {
+      if (!isOpen) {
+        return value ? [value] : [];
+      }
+      return Array.from(new Set(options.map((option) => text(option)).filter(Boolean)));
+    },
+    [isOpen, options, value]
   );
   const visibleOptions = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase();
