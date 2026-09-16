@@ -281,7 +281,39 @@ export async function GET(request: Request) {
   }
 
   if (view === "audit") {
-    return NextResponse.json({ auditLogs: await loadAuditLogs(admin, organisation.organisationId, access, registerKey) });
+    const entityId = text(searchParams.get("entityId"));
+
+    if (!entityId) {
+      return NextResponse.json({ auditLogs: await loadAuditLogs(admin, organisation.organisationId, access, registerKey) });
+    }
+
+    if (!isUuid(entityId)) {
+      return NextResponse.json({ error: "Invalid TaskLine task id." }, { status: 400 });
+    }
+
+    const selectedTask = await admin
+      .from("tasks")
+      .select("id,organisation_id,title,description,due_at,custom_values,created_by,created_at,updated_at")
+      .eq("id", entityId)
+      .eq("organisation_id", organisation.organisationId)
+      .maybeSingle();
+
+    if (selectedTask.error) {
+      return NextResponse.json({ error: selectedTask.error.message }, { status: 500 });
+    }
+
+    const task = selectedTask.data as TaskRecord | null;
+    if (!isRegisterRecord(task, registerKey)) {
+      return NextResponse.json({ error: "TaskLine task not found." }, { status: 404 });
+    }
+
+    if (!canAccessRecord(task, access)) {
+      return NextResponse.json({ error: "You do not have access to this task audit trail." }, { status: 403 });
+    }
+
+    return NextResponse.json({
+      auditLogs: await loadAuditLogs(admin, organisation.organisationId, access, registerKey, entityId, task)
+    });
   }
 
   if (view === "codes") {
@@ -608,9 +640,31 @@ async function handlePost(request: Request) {
   const existingId = isUuid(rawId) ? rawId : "";
   const cleaned = applyTeamAccess(cleanRecord(record), access);
 
-  // Entity Group is mandatory: no TaskLine row may be created without it.
-  if (!existingId && !text(cleaned.entity_group)) {
-    return NextResponse.json({ error: "Entity Group is required to add a TaskLine task." }, { status: 400 });
+  if (!existingId) {
+    const requiredAddFields: Array<[keyof TaskLineRow, string]> = [
+      ["team", "Team"],
+      ["entity_group", "Entity Group"],
+      ["entity", "Entity"],
+      ["state_name", "State Name"],
+      ["task", "Task"],
+      ["due_date", "Due Date"],
+      ["stage", "Stage"],
+      ["status_open_close", "Status Open/Close"],
+      ["billable", "Billable"],
+      ["document_link", "Document Link"],
+      ["total_agreed_fee", "Total Agreed Fee"],
+      ["fee_comments", "Fee Comments"]
+    ];
+    const missingFields = requiredAddFields
+      .filter(([key]) => !text(cleaned[key]))
+      .map(([, label]) => label);
+
+    if (missingFields.length) {
+      return NextResponse.json(
+        { error: `Complete the required fields before adding this task: ${missingFields.join(", ")}.` },
+        { status: 400 }
+      );
+    }
   }
 
   const gstatLinkError = await validateGstatLink(admin, auth.user, cleaned);
@@ -706,7 +760,7 @@ async function handlePost(request: Request) {
     .from("tasks")
     .insert({
       ...insertValues,
-      created_by: null,
+      created_by: auth.user.id,
       organisation_id: organisation.organisationId,
       priority: "normal"
     })
@@ -1001,7 +1055,7 @@ async function importRows(
       const cleaned = applyTeamAccess(cleanRecord(row), access);
       return {
         ...toTaskValues(cleaned, registerKey),
-        created_by: null,
+        created_by: user.id,
         organisation_id: organisationId,
         priority: "normal"
       };
@@ -1390,20 +1444,33 @@ async function loadTaskLineRecordWindow(
   };
 }
 
-async function loadAuditLogs(admin: ReturnType<typeof createAdminClient>, organisationId: string, access: AccessScope, registerKey: RegisterKey = "taskline") {
-  const logs = await admin
+async function loadAuditLogs(
+  admin: ReturnType<typeof createAdminClient>,
+  organisationId: string,
+  access: AccessScope,
+  registerKey: RegisterKey = "taskline",
+  entityId = "",
+  selectedTask: TaskRecord | null = null
+) {
+  let query = admin
     .from("audit_logs")
     .select("id,action,entity_id,old_value,new_value,created_at,actor_user_id")
     .eq("organisation_id", organisationId)
-    .eq("entity_type", "taskline_record")
-    .order("created_at", { ascending: false })
-    .limit(500);
+    .eq("entity_type", "taskline_record");
+
+  if (entityId) {
+    query = query.eq("entity_id", entityId);
+  }
+
+  const logs = await query
+    .order("created_at", { ascending: Boolean(entityId) })
+    .limit(entityId ? 2000 : 500);
 
   if (logs.error) {
     return [];
   }
 
-  const taskLineLogs = ((logs.data ?? []) as AuditLog[]).filter((log) => {
+  let taskLineLogs = ((logs.data ?? []) as AuditLog[]).filter((log) => {
     const value = (log.new_value ?? log.old_value) as { data?: TaskLineRow } | null;
     return matchesRegisterKey(getStoredRegisterKey(value?.data), registerKey);
   });
@@ -1416,15 +1483,38 @@ async function loadAuditLogs(admin: ReturnType<typeof createAdminClient>, organi
           (log) => canAccessAuditValue(log.old_value, access) || canAccessAuditValue(log.new_value, access)
         );
 
-  if (!visibleLogs.length) {
-    return visibleLogs;
+  taskLineLogs = visibleLogs;
+
+  if (
+    entityId &&
+    selectedTask &&
+    !taskLineLogs.some((log) => log.action === "taskline.create")
+  ) {
+    taskLineLogs = [
+      {
+        action: "taskline.create",
+        actor_user_id: selectedTask.created_by,
+        created_at: selectedTask.created_at,
+        entity_id: selectedTask.id,
+        id: `task-created-${selectedTask.id}`,
+        new_value: auditValue(selectedTask),
+        old_value: null
+      },
+      ...taskLineLogs
+    ];
+  }
+
+  if (!taskLineLogs.length) {
+    return taskLineLogs;
   }
 
   const actorNames = await loadActorNames(admin);
 
-  return visibleLogs.map((log) => ({
+  return taskLineLogs.map((log) => ({
     ...log,
-    actor_name: (log.actor_user_id && actorNames.get(log.actor_user_id)) || ""
+    actor_name:
+      (log.actor_user_id && actorNames.get(log.actor_user_id)) ||
+      (log.id.startsWith("task-created-") ? "Original creator not recorded" : "")
   }));
 }
 
