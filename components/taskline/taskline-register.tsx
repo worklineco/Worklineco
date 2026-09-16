@@ -1357,6 +1357,10 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
       setIsViewOnlyDialogOpen(true);
       return;
     }
+    if (text(row.__id).startsWith("draft-")) {
+      setMessage("This row is still saving - try editing it again in a moment.");
+      return;
+    }
     setEditingRowId(row.__id);
     setFormDraft({ ...row });
     queueEditorOptionsLoad();
@@ -1392,49 +1396,84 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
       return;
     }
 
-    const existingRow = editingRowId ? rows.find((row) => row.__id === editingRowId) : null;
-    setMessage(editingRowId ? "Saving TaskLine row..." : "Creating TaskLine row...");
+    // Optimistic save: apply the change to the table and close the form
+    // immediately, then reconcile with the server response in the background.
+    const draft = { ...formDraft };
+    const savedEditingRowId = editingRowId;
+    const existingRow = savedEditingRowId ? rows.find((row) => row.__id === savedEditingRowId) : null;
+    const snapshot = existingRow ? { ...existingRow } : null;
+    const tempId = savedEditingRowId ?? draft.__id ?? `draft-${crypto.randomUUID()}`;
+    const optimisticRow: TaskLineRow = { ...draft, __id: tempId };
+
+    if (savedEditingRowId) {
+      setRows((current) => current.map((row) => (row.__id === savedEditingRowId ? optimisticRow : row)));
+      setMessage("TaskLine row updated.");
+    } else {
+      setRows((current) => [optimisticRow, ...current]);
+      setMessage("TaskLine row added.");
+    }
+
+    setEditingRowId(null);
+    setFormDraft(null);
+
+    if (savedEditingRowId) {
+      addAuditLog({
+        action: "taskline.edit_row",
+        entityId: existingRow?.__id,
+        newValue: getChangedFields(existingRow ?? undefined, draft).join(", ") || "Row saved",
+        rowLabel: getRowLabel(existingRow ?? undefined, rows)
+      });
+    } else {
+      addAuditLog({ action: "taskline.add_row", newValue: getRowLabel(draft, [draft]) || "New row added" });
+    }
+
+    const revert = (errorMessage: string) => {
+      if (savedEditingRowId && snapshot) {
+        setRows((current) => current.map((row) => (row.__id === savedEditingRowId ? snapshot : row)));
+      } else {
+        setRows((current) => current.filter((row) => row.__id !== tempId));
+      }
+      // Reopen the form with the draft intact so nothing typed is lost.
+      setEditingRowId(savedEditingRowId);
+      setFormDraft(draft);
+      setMessage(errorMessage);
+    };
 
     try {
       const response = await fetch(taskLineApiPath, {
-        body: JSON.stringify({ action: "save", record: formDraft }),
+        body: JSON.stringify({ action: "save", record: draft }),
         headers: { "Content-Type": "application/json" },
         method: "POST"
       });
       const result = (await response.json()) as { error?: string; record?: TaskLineRow };
 
       if (!response.ok || !result.record) {
-        setMessage(result.error ?? "Could not save TaskLine row.");
+        revert(result.error ?? "Could not save TaskLine row.");
         return;
       }
 
-      if (editingRowId) {
-        setRows((current) => current.map((row) => (row.__id === editingRowId ? result.record! : row)));
-        setMessage("TaskLine row updated.");
-      } else {
-        setRows((current) => [result.record!, ...current]);
-        setMessage("TaskLine row added.");
+      const serverRecord = result.record;
+      // Keep any cells the user edited inline while the save was in flight,
+      // layered over the server's version of the row.
+      const rowNow = rowsRef.current.find((row) => row.__id === tempId);
+      const localEdits: Record<string, string> = {};
+      if (rowNow) {
+        for (const key of Object.keys(rowNow)) {
+          if (key !== "__id" && rowNow[key] !== optimisticRow[key]) {
+            localEdits[key] = rowNow[key];
+          }
+        }
       }
-
+      const reconciledRow = { ...serverRecord, ...localEdits, __id: serverRecord.__id };
+      setRows((current) => current.map((row) => (row.__id === tempId ? reconciledRow : row)));
+      if (Object.keys(localEdits).length && !savedEditingRowId) {
+        // Persist those in-flight edits now that the row has a real id.
+        void saveInlineRow(reconciledRow);
+      }
     } catch (error) {
       console.error("TaskLine save error:", error);
-      setMessage("Could not save TaskLine row.");
-      return;
+      revert("Could not save TaskLine row.");
     }
-
-    if (editingRowId) {
-      addAuditLog({
-        action: "taskline.edit_row",
-        entityId: existingRow?.__id,
-        newValue: getChangedFields(existingRow ?? undefined, formDraft).join(", ") || "Row saved",
-        rowLabel: getRowLabel(existingRow ?? undefined, rows)
-      });
-    } else {
-      addAuditLog({ action: "taskline.add_row", newValue: getRowLabel(formDraft, [formDraft]) || "New row added" });
-    }
-
-    setEditingRowId(null);
-    setFormDraft(null);
   }
 
   const updateRow = useCallback((rowId: string, key: string, value: string) => {
@@ -1473,6 +1512,14 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
   }, [entityGroupByName]);
 
   async function saveInlineRow(row: TaskLineRow) {
+    // A draft-/initial- id means the row's create request is still in flight;
+    // posting it would make the server create a duplicate. The reconciliation
+    // in saveFormDraft carries these in-flight cell edits over instead.
+    const rowId = text(row.__id);
+    if (!rowId || rowId.startsWith("draft-") || rowId.startsWith("initial-")) {
+      return;
+    }
+
     try {
       await fetch(taskLineApiPath, {
         body: JSON.stringify({ action: "save", record: row }),
