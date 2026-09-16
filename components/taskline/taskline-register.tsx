@@ -106,7 +106,7 @@ const taskLineFormSections: { columns: string[]; key: string; label: string }[] 
   { key: "billing", label: "Billing / Fees", columns: ["billing_status", "total_agreed_fee", "amount_raised", "amount_realised", "counsel_fee", "referral_fee", "fee_comments"] },
   { key: "other", label: "Other", columns: ["any_other", "any_other_1"] }
 ];
-const requiredTaskLineFormKeys: string[] = ["entity_group"];
+const requiredTaskLineFormKeys = ["team", "entity_group", "entity", "state_name", "task", "due_date", "stage", "status_open_close", "billable"];
 const taskLineColumnLayoutStorageKey = "workline:taskline-column-layout:v5";
 const taskLineColumnWidthsStorageKey = "workline:taskline-column-widths:v1";
 const minimumTaskLineColumnWidth = 80;
@@ -3210,7 +3210,13 @@ function TaskLineForm({
             value={currentValue}
           />
         ) : column.key === "entity_group" ? (
-          <input className={`${formControlClass} cursor-not-allowed bg-slate-50 text-slate-600`} readOnly title="Filled automatically from Entity" value={currentValue} />
+          <input
+            className={`${formControlClass} ${entityOptions.some((entity) => normalizeOptionKey(entity) === normalizeOptionKey(draft.entity)) ? "cursor-not-allowed bg-slate-50 text-slate-600" : ""}`}
+            onChange={(event) => onChange(column.key, event.target.value)}
+            readOnly={entityOptions.some((entity) => normalizeOptionKey(entity) === normalizeOptionKey(draft.entity))}
+            title={entityOptions.some((entity) => normalizeOptionKey(entity) === normalizeOptionKey(draft.entity)) ? "Filled automatically from Entity" : "Enter an Entity Group for this custom entity"}
+            value={currentValue}
+          />
         ) : column.key === "period" ? (
           <>
             <input
