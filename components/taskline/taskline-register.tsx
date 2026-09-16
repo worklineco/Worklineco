@@ -69,6 +69,7 @@ type TaskLineAuditLog = {
   newValue?: string;
   oldValue?: string;
   rowLabel?: string;
+  taskCode?: string;
 };
 type TaskLineView = "audit" | "register";
 type GstatLinkPreview = {
@@ -1421,10 +1422,11 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
         action: "taskline.edit_row",
         entityId: existingRow?.__id,
         newValue: getChangedFields(existingRow ?? undefined, draft).join(", ") || "Row saved",
-        rowLabel: getRowLabel(existingRow ?? undefined, rows)
+        rowLabel: getRowLabel(existingRow ?? undefined, rows),
+        taskCode: text(draft.task_code)
       });
     } else {
-      addAuditLog({ action: "taskline.add_row", newValue: getRowLabel(draft, [draft]) || "New row added" });
+      addAuditLog({ action: "taskline.add_row", newValue: getRowLabel(draft, [draft]) || "New row added", taskCode: text(draft.task_code) });
     }
 
     const revert = (errorMessage: string) => {
@@ -1476,6 +1478,43 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
     }
   }
 
+  // Typing in a cell fires updateRow once per keystroke. Batch those into ONE
+  // audit entry and ONE server save per completed edit: the pending edit is
+  // flushed after a short pause, when a different cell is edited, or on
+  // unmount - with the old value captured from before the first keystroke.
+  const pendingCellEditRef = useRef<{ key: string; oldValue: string; rowId: string; timer: number } | null>(null);
+
+  const flushPendingCellEdit = useCallback(() => {
+    const pending = pendingCellEditRef.current;
+    if (!pending) {
+      return;
+    }
+    pendingCellEditRef.current = null;
+    window.clearTimeout(pending.timer);
+
+    const row = rowsRef.current.find((item) => item.__id === pending.rowId);
+    if (!row) {
+      return;
+    }
+
+    const newValue = row[pending.key] ?? "";
+    if (pending.oldValue !== newValue) {
+      addAuditLog({
+        action: "taskline.update_cell",
+        entityId: pending.rowId,
+        field: taskLineColumnByKey.get(pending.key)?.label ?? pending.key,
+        newValue,
+        oldValue: pending.oldValue,
+        rowLabel: getRowLabel(row, rowsRef.current),
+        taskCode: text(row.task_code)
+      });
+    }
+    void saveInlineRow(row);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => () => flushPendingCellEdit(), [flushPendingCellEdit]);
+
   const updateRow = useCallback((rowId: string, key: string, value: string) => {
     if (!canEditRegisterRef.current) {
       setMessage(viewOnlyRegisterMessage);
@@ -1483,18 +1522,18 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
     }
     const currentRows = rowsRef.current;
     const existing = currentRows.find((item) => item.__id === rowId);
-    const oldValue = existing?.[key] ?? "";
 
-    if (existing && oldValue !== value) {
-      addAuditLog({
-        action: "taskline.update_cell",
-        entityId: rowId,
-        field: taskLineColumnByKey.get(key)?.label ?? key,
-        newValue: value,
-        oldValue,
-        rowLabel: getRowLabel(existing, currentRows)
-      });
+    // Editing a different cell completes any pending edit first.
+    const pending = pendingCellEditRef.current;
+    if (pending && (pending.rowId !== rowId || pending.key !== key)) {
+      flushPendingCellEdit();
     }
+    if (!pendingCellEditRef.current) {
+      pendingCellEditRef.current = { key, oldValue: existing?.[key] ?? "", rowId, timer: 0 };
+    } else {
+      window.clearTimeout(pendingCellEditRef.current.timer);
+    }
+    pendingCellEditRef.current.timer = window.setTimeout(flushPendingCellEdit, 1200);
 
     const changes: Record<string, string> = { [key]: value };
     if (key === "entity") {
@@ -1503,13 +1542,9 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
       setMessage(value && !group ? `No Entity Group mapping found for "${value}".` : "");
     }
 
-    const nextRow = existing ? { ...existing, ...changes } : null;
     setRows((current) => current.map((item) => (item.__id === rowId ? { ...item, ...changes } : item)));
-    if (nextRow) {
-      void saveInlineRow(nextRow);
-    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entityGroupByName]);
+  }, [entityGroupByName, flushPendingCellEdit]);
 
   async function saveInlineRow(row: TaskLineRow) {
     // A draft-/initial- id means the row's create request is still in flight;
@@ -2472,7 +2507,7 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
       {viewMode === "audit" ? (
         isAuditLoading
           ? <p className="mt-4 rounded-md border border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm font-bold text-slate-500">Loading audit trail...</p>
-          : <TaskLineAuditTable logs={auditLogs} selectedRow={selectedAuditRow} />
+          : <TaskLineAuditTable logs={auditLogs} onBack={() => { setViewMode("register"); setSelectedAuditRow(null); }} selectedRow={selectedAuditRow} />
       ) : null}
 
       {formDraft ? (
@@ -4022,11 +4057,19 @@ function TaskLineColumnOptionsPanel({
 
 function TaskLineAuditTable({
   logs,
+  onBack,
   selectedRow
 }: {
   logs: TaskLineAuditLog[];
+  onBack: () => void;
   selectedRow: TaskLineRow | null;
 }) {
+  // Rows where nothing actually changed (field/old/new all "-") say nothing -
+  // keep the trail focused on real changes.
+  const visibleLogs = logs.filter(
+    (log) => !((log.field ?? "-") === "-" && (log.oldValue ?? "-") === "-" && (log.newValue ?? "-") === "-")
+  );
+
   return (
     <section className="mt-4 overflow-hidden rounded-md border border-slate-200 bg-white">
       <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 px-4 py-3">
@@ -4041,6 +4084,14 @@ function TaskLineAuditTable({
             </p>
           ) : null}
         </div>
+        <button
+          className="ml-auto inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 transition hover:bg-slate-50"
+          onClick={onBack}
+          type="button"
+        >
+          <RotateCcw className="size-3.5" />
+          Back to register
+        </button>
       </div>
       <div className="max-h-[calc(100vh-130px)] overflow-auto">
         <table className="w-full min-w-[760px] border-collapse text-left text-sm">
@@ -4049,24 +4100,28 @@ function TaskLineAuditTable({
               <th className="px-3 py-2">Time</th>
               <th className="px-3 py-2">Action</th>
               <th className="px-3 py-2">Changed By</th>
+              {selectedRow ? null : <th className="px-3 py-2">Task Code</th>}
               <th className="px-3 py-2">Field</th>
               <th className="px-3 py-2">Old Value</th>
               <th className="px-3 py-2">New Value</th>
             </tr>
           </thead>
           <tbody>
-            {logs.length ? logs.map((log) => (
+            {visibleLogs.length ? visibleLogs.map((log) => (
               <tr className="border-b border-slate-100 last:border-b-0" key={log.id}>
                 <td className="px-3 py-2 text-xs font-bold text-slate-500">{formatAuditTime(log.createdAt)}</td>
                 <td className="px-3 py-2 font-black text-slate-900">{formatAuditAction(log.action)}</td>
                 <td className="px-3 py-2 font-bold text-slate-700">{log.actorName || "-"}</td>
+                {selectedRow ? null : (
+                  <td className="whitespace-nowrap px-3 py-2 font-black text-navy-700" title={log.rowLabel || ""}>{log.taskCode || "-"}</td>
+                )}
                 <td className="px-3 py-2 font-semibold text-slate-700">{log.field || "-"}</td>
                 <td className="max-w-[280px] whitespace-normal px-3 py-2 font-semibold leading-5 text-slate-500" title={log.oldValue || ""}>{log.oldValue || "-"}</td>
                 <td className="max-w-[280px] whitespace-normal px-3 py-2 font-semibold leading-5 text-slate-900" title={log.newValue || ""}>{log.newValue || "-"}</td>
               </tr>
             )) : (
               <tr>
-                <td className="px-4 py-8 text-center font-bold text-slate-500" colSpan={6}>{selectedRow ? "No history is available for this task." : "No TaskLine edit history yet."}</td>
+                <td className="px-4 py-8 text-center font-bold text-slate-500" colSpan={selectedRow ? 6 : 7}>{selectedRow ? "No history is available for this task." : "No TaskLine edit history yet."}</td>
               </tr>
             )}
           </tbody>
@@ -4341,7 +4396,8 @@ function formatServerAuditLog(log: Record<string, unknown>): TaskLineAuditLog {
     id: text(log.id) || crypto.randomUUID(),
     newValue: change.newValue,
     oldValue: change.oldValue,
-    rowLabel: getAuditRowLabel(oldValue || newValue)
+    rowLabel: getAuditRowLabel(oldValue || newValue),
+    taskCode: text((newValue ?? oldValue)?.task_code)
   };
 }
 
