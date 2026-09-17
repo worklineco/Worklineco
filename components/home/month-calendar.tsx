@@ -1,10 +1,16 @@
 "use client";
 
 import { ChevronLeft, ChevronRight, Gavel, Pencil, Plus, Trash2, X } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { isPersonalHearingTask } from "@/lib/pendency";
 
 const weekDays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const indiaDateFormatter = new Intl.DateTimeFormat("en-GB", {
+  day: "2-digit",
+  month: "2-digit",
+  timeZone: "Asia/Kolkata",
+  year: "numeric"
+});
 
 export type CalendarEvent = {
   due_date: string;
@@ -27,7 +33,7 @@ export function MonthCalendar({
   onDeleteNote?: (dateKey: string, index: number) => void;
   onEditNote?: (dateKey: string, index: number, text: string) => void;
 }) {
-  const today = new Date();
+  const [today, setToday] = useState(getIndiaCalendarDate);
   const [monthDate, setMonthDate] = useState(() => new Date(today.getFullYear(), today.getMonth(), 1));
   const [hearingsOnly, setHearingsOnly] = useState(false);
   const calendarCells = useMemo(() => buildCalendarCells(monthDate), [monthDate]);
@@ -40,6 +46,19 @@ export function MonthCalendar({
   const monthLabel = monthDate.toLocaleString("en-IN", { month: "long", year: "numeric" });
   const [selected, setSelected] = useState<{ dateKey: string; dateLabel: string } | null>(null);
   const [noteDraft, setNoteDraft] = useState("");
+
+  useEffect(() => {
+    function refreshIndiaDate() {
+      const nextToday = getIndiaCalendarDate();
+      setToday((currentToday) =>
+        formatDayKey(currentToday) === formatDayKey(nextToday) ? currentToday : nextToday
+      );
+    }
+
+    refreshIndiaDate();
+    const refreshTimer = window.setInterval(refreshIndiaDate, 60_000);
+    return () => window.clearInterval(refreshTimer);
+  }, []);
 
   function changeMonth(offset: number) {
     setMonthDate((current) => new Date(current.getFullYear(), current.getMonth() + offset, 1));
@@ -258,6 +277,13 @@ function groupEventsByDay(events: CalendarEvent[]) {
     }
   }
   return map;
+}
+
+function getIndiaCalendarDate(now = new Date()) {
+  const parts = indiaDateFormatter.formatToParts(now);
+  const readPart = (type: Intl.DateTimeFormatPartTypes) =>
+    Number(parts.find((part) => part.type === type)?.value ?? 0);
+  return new Date(readPart("year"), readPart("month") - 1, readPart("day"));
 }
 
 function formatDayKey(date: Date) {
