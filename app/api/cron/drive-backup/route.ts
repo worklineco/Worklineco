@@ -23,8 +23,6 @@ export const maxDuration = 300;
  *     workline-billing-2026-08-10.xlsx
  *     workline-gst-tracker-2026-08-10.xlsx  (registrations + litigation)
  *     workline-gstr-9-9c-2026-08-10.xlsx
- *     workline-sj-appointments-2026-08-10.xlsx
- *     workline-meeting-room-2026-08-10.xlsx
  *     workline-engagement-letters-2026-08-10.xlsx
  *
  * Uploads authenticate as a Google service account (free) - see
@@ -40,8 +38,8 @@ export const maxDuration = 300;
  *   GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY  (fallback) service account key (PEM;
  *                                       \n-escaped when stored in Vercel)
  *   DRIVE_BACKUP_FOLDER_ID              ID of the Drive folder (from its link)
- *   DRIVE_BACKUP_RETENTION_DAYS         optional; delete dated backup folders
- *                                       older than N days (0/unset = keep all)
+ *
+ * Retention: dated backup folders older than 90 days are deleted on each run.
  */
 
 const fetchBatchSize = 1000;
@@ -111,14 +109,6 @@ export async function GET(request: Request) {
       clientSourceSheet("gstr_9_9c_row", "Rows"),
       clientSourceSheet("gstr_9_9c_override", "Cell Overrides")
     ]),
-    buildWorkbook(admin.client, `workline-sj-appointments-${dateKey}`, [
-      { sheet: "Appointments", table: "sj_appointments" },
-      { sheet: "Logs", table: "sj_appointment_logs" }
-    ]),
-    buildWorkbook(admin.client, `workline-meeting-room-${dateKey}`, [
-      { sheet: "Bookings", table: "meeting_room_bookings" },
-      { sheet: "Logs", table: "meeting_room_booking_logs" }
-    ]),
     buildWorkbook(admin.client, `workline-engagement-letters-${dateKey}`, [
       { sheet: "Engagement Letters", table: "engagement_letter_log" }
     ]),
@@ -153,7 +143,9 @@ export async function GET(request: Request) {
   }
 
   let pruned = 0;
-  const retentionDays = Number(process.env.DRIVE_BACKUP_RETENTION_DAYS ?? 0);
+  // Old backups are kept for 90 days (fixed here; the
+  // DRIVE_BACKUP_RETENTION_DAYS env var is no longer consulted).
+  const retentionDays = 90;
   if (Number.isFinite(retentionDays) && retentionDays > 0) {
     try {
       pruned = await pruneOldBackups(accessToken, drive.folderId, retentionDays);
