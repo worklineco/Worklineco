@@ -7,14 +7,17 @@ import {
   dueSoonCutoffKey,
   emptyKindCounts,
   emptyKindUrgency,
+  emptyUrgencyCounts,
   isPendingMatter,
   monthEndKey,
   pendencyDueState,
   pendencyTeamLabel,
   pendencyUrgency,
+  teamFocusEmptyLabel,
   todayKey,
   type PendencySummary,
-  type PendencyTeamRow
+  type PendencyTeamRow,
+  type TeamFocusRow
 } from "@/lib/pendency";
 import { extraDueRecipientsByTeam, indiaTodayDisplayDate, indiaTodayKey, isEmail, isManagerRoleText, parseEmailAddresses, teamMatchKey } from "@/lib/taskline-reminder-shared";
 import { readPrimaryTeam, readUserTeams, teamIsAllowed, userHasTeam } from "@/lib/user-teams";
@@ -1921,6 +1924,7 @@ const pendencySelect = [
   "id",
   "workline_module:custom_values->>workline_module",
   "team:custom_values->taskline_data->>team",
+  "name:custom_values->taskline_data->>name",
   "task:custom_values->taskline_data->>task",
   "stage:custom_values->taskline_data->>stage",
   "status_open_close:custom_values->taskline_data->>status_open_close",
@@ -1928,6 +1932,18 @@ const pendencySelect = [
   "register_key:custom_values->taskline_data->>register_key"
 ].join(",");
 type PendencyLeanRow = Record<string, string | null>;
+
+/**
+ * The personal team board is a single partner's own view of their team's whole
+ * workload, so it is served only to that login. Swap the email to move it, or
+ * add entries to give another partner the same board for their team.
+ */
+const teamFocusBoards: { email: string; team: string }[] = [{ email: "shuchis.dco@gmail.com", team: "Team 03" }];
+
+function teamFocusBoardFor(user: User) {
+  const email = String(user.email ?? "").trim().toLowerCase();
+  return teamFocusBoards.find((board) => board.email === email) ?? null;
+}
 
 function isPartnerUser(user: User) {
   return String(user.app_metadata?.workline_role ?? "").trim().toLowerCase().includes("partner");
@@ -1970,15 +1986,41 @@ async function loadPendencySummary(admin: ReturnType<typeof createAdminClient>, 
   const soonCutoff = dueSoonCutoffKey(today);
   const monthEnd = monthEndKey(today);
   const byTeam = new Map<string, PendencyTeamRow>();
+  const board = teamFocusBoardFor(user);
+  const boardTeamKey = board ? teamMatchKey(board.team) : "";
+  const focusByTask = new Map<string, TeamFocusRow>();
+  const focusByName = new Map<string, TeamFocusRow>();
+
+  function addFocusRow(group: Map<string, TeamFocusRow>, rawLabel: string, dueDate: unknown) {
+    const label = text(rawLabel) || teamFocusEmptyLabel;
+    const entry = group.get(label) ?? { dueSoon: 0, label, total: 0, urgency: emptyUrgencyCounts() };
+
+    entry.total += 1;
+    entry.urgency[pendencyUrgency(dueDate, today, monthEnd)] += 1;
+
+    if (pendencyDueState(dueDate, today, soonCutoff) === "dueSoon") {
+      entry.dueSoon += 1;
+    }
+
+    group.set(label, entry);
+  }
 
   for (const row of rows) {
     if (getStoredRegisterKey({ register_key: text(row.register_key) }) !== "taskline") {
       continue;
     }
 
+    const isPending = isPendingMatter(row.stage, row.status_open_close);
+
+    // The personal board covers every task type, not just notices and appeals.
+    if (board && isPending && teamMatchKey(pendencyTeamLabel(row.team)) === boardTeamKey) {
+      addFocusRow(focusByTask, text(row.task), row.due_date);
+      addFocusRow(focusByName, text(row.name), row.due_date);
+    }
+
     const kind = classifyPendencyKind(row.task);
 
-    if (!kind || !isPendingMatter(row.stage, row.status_open_close)) {
+    if (!kind || !isPending) {
       continue;
     }
 
@@ -2001,8 +2043,20 @@ async function loadPendencySummary(admin: ReturnType<typeof createAdminClient>, 
     byTeam.set(key, entry);
   }
 
+  const byTotalThenLabel = (first: TeamFocusRow, second: TeamFocusRow) =>
+    second.total - first.total || first.label.localeCompare(second.label, undefined, { numeric: true });
+
   const summary: PendencySummary = {
     asOf: indiaTodayDisplayDate(),
+    ...(board
+      ? {
+          teamFocus: {
+            byName: Array.from(focusByName.values()).sort(byTotalThenLabel),
+            byTask: Array.from(focusByTask.values()).sort(byTotalThenLabel),
+            team: board.team
+          }
+        }
+      : {}),
     teams: Array.from(byTeam.values()).sort((first, second) => {
       const firstTotal = Object.values(first.counts).reduce((sum, value) => sum + value, 0);
       const secondTotal = Object.values(second.counts).reduce((sum, value) => sum + value, 0);

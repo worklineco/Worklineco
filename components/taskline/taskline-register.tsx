@@ -16,6 +16,8 @@ import {
   pendencyDueState,
   pendencyKinds,
   pendencyKindShortLabels,
+  pendencyUrgency,
+  teamFocusEmptyLabel,
   todayKey,
   type PendencyKind
 } from "@/lib/pendency";
@@ -3798,7 +3800,19 @@ function TaskLineDateInput({ compact = false, onChange, value }: { compact?: boo
   );
 }
 
-type PendencyFocus = { due: "month" | "overdue" | "soon" | null; kinds: PendencyKind[]; team: string };
+/**
+ * `scope: "all"` comes from the personal team board, which counts every kind of
+ * task rather than only notices and appeals, optionally narrowed to one task
+ * type or one person.
+ */
+type PendencyFocus = {
+  due: "month" | "overdue" | "soon" | "today" | null;
+  kinds: PendencyKind[];
+  name: string;
+  scope: "all" | "kinds";
+  task: string;
+  team: string;
+};
 
 function readPendencyFocus(search: string): PendencyFocus | null {
   const params = new URLSearchParams(search);
@@ -3813,10 +3827,19 @@ function readPendencyFocus(search: string): PendencyFocus | null {
     .filter((value): value is PendencyKind => pendencyKinds.includes(value as PendencyKind));
 
   return {
-    due: due === "overdue" || due === "soon" || due === "month" ? due : null,
+    due: due === "overdue" || due === "soon" || due === "month" || due === "today" ? due : null,
     kinds: Array.from(new Set(requested)),
+    name: text(params.get("name")),
+    scope: params.get("scope") === "all" ? "all" : "kinds",
+    task: text(params.get("task")),
     team: text(params.get("team"))
   };
+}
+
+/** A Task or Name cell against a board label, where "Not set" means blank. */
+function matchesFocusLabel(value: unknown, expected: string) {
+  const actual = String(value ?? "").trim();
+  return expected === teamFocusEmptyLabel ? !actual : actual.toLowerCase() === expected.toLowerCase();
 }
 
 /**
@@ -3824,13 +3847,23 @@ function readPendencyFocus(search: string): PendencyFocus | null {
  * lib/pendency.ts so the count there and the list here always agree.
  */
 function matchesPendencyFocus(row: TaskLineRow, focus: PendencyFocus) {
-  const kind = classifyPendencyKind(row.task);
-
-  if (!kind || !isPendingMatter(row.stage, row.status_open_close)) {
+  if (!isPendingMatter(row.stage, row.status_open_close)) {
     return false;
   }
 
-  if (focus.kinds.length && !focus.kinds.includes(kind)) {
+  if (focus.scope !== "all") {
+    const kind = classifyPendencyKind(row.task);
+
+    if (!kind || (focus.kinds.length && !focus.kinds.includes(kind))) {
+      return false;
+    }
+  }
+
+  if (focus.task && !matchesFocusLabel(row.task, focus.task)) {
+    return false;
+  }
+
+  if (focus.name && !matchesFocusLabel(row.name, focus.name)) {
     return false;
   }
 
@@ -3840,6 +3873,10 @@ function matchesPendencyFocus(row: TaskLineRow, focus: PendencyFocus) {
 
   if (focus.due) {
     const today = todayKey();
+
+    if (focus.due === "today") {
+      return pendencyUrgency(row.due_date, today) === "today";
+    }
 
     if (focus.due === "month") {
       return isDueThisMonth(row.due_date, today);
@@ -3853,7 +3890,16 @@ function matchesPendencyFocus(row: TaskLineRow, focus: PendencyFocus) {
 }
 
 function pendencyFocusLabel(focus: PendencyFocus) {
-  const kind = focus.kinds.length ? focus.kinds.map((item) => pendencyKindShortLabels[item]).join(" and ") : "matters";
+  const kind =
+    focus.scope === "all"
+      ? focus.task
+        ? focus.task
+        : focus.name
+          ? `tasks with ${focus.name}`
+          : "tasks"
+      : focus.kinds.length
+        ? focus.kinds.map((item) => pendencyKindShortLabels[item]).join(" and ")
+        : "matters";
   const team = focus.team ? ` for ${focus.team}` : " across all teams";
   const due =
     focus.due === "overdue"
@@ -3862,7 +3908,9 @@ function pendencyFocusLabel(focus: PendencyFocus) {
         ? ", due within 7 days"
         : focus.due === "month"
           ? ", due this month"
-          : "";
+          : focus.due === "today"
+            ? ", due today"
+            : "";
 
   return `Pending ${kind}${team}${due}`;
 }

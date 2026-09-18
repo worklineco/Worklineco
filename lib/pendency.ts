@@ -277,10 +277,55 @@ export type PendencyTeamRow = {
   urgency: Record<PendencyKind, PendencyUrgencyCounts>;
 };
 
+/**
+ * One line of the personal team board: every pending task of a single team,
+ * grouped either by what the task is or by who is carrying it.
+ */
+export type TeamFocusRow = {
+  dueSoon: number;
+  label: string;
+  total: number;
+  urgency: PendencyUrgencyCounts;
+};
+
+/** Shown in place of a blank Task or Name on the personal team board. */
+export const teamFocusEmptyLabel = "Not set";
+
+export type TeamFocusGrouping = "name" | "task";
+
+export const teamFocusGroupings: { key: TeamFocusGrouping; label: string }[] = [
+  { key: "task", label: "By task" },
+  { key: "name", label: "By person" }
+];
+
+export type TeamFocus = {
+  byName: TeamFocusRow[];
+  byTask: TeamFocusRow[];
+  team: string;
+};
+
 export type PendencySummary = {
   asOf: string;
+  teamFocus?: TeamFocus;
   teams: PendencyTeamRow[];
 };
+
+/** Roll a set of team-focus rows up to one headline. */
+export function teamFocusTotals(rows: TeamFocusRow[]) {
+  const urgency = emptyUrgencyCounts();
+  let dueSoon = 0;
+  let total = 0;
+
+  for (const row of rows) {
+    total += row.total;
+    dueSoon += row.dueSoon;
+    for (const band of pendencyUrgencies) {
+      urgency[band] += row.urgency[band] ?? 0;
+    }
+  }
+
+  return { dueSoon, dueThisMonth: urgency.today + urgency.thisMonth, overdue: urgency.overdue, total, urgency };
+}
 
 export function emptyKindCounts(): Record<PendencyKind, number> {
   return { appeal: 0, gstatAppeal: 0, gstatPh: 0, scn: 0 };
