@@ -1,38 +1,66 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowRight, Scale, TriangleAlert } from "lucide-react";
+import { ArrowRight, Gavel, Landmark, Scale, TriangleAlert } from "lucide-react";
 import { useEffect, useState } from "react";
 import { getCached, setCached } from "@/lib/data-cache";
 import {
   pendencyKindShortLabels,
+  pendencySectionKinds,
   pendencyUrgencies,
   pendencyUrgencyColors,
   pendencyUrgencyLabels,
+  sectionTotals,
   type PendencyKind,
+  type PendencySectionKey,
   type PendencySummary,
   type PendencyTeamRow
 } from "@/lib/pendency";
 
 /**
- * Partner-only report: pending show cause notices and appeals in the Litigation
- * register, broken down by team. Every number is a link into TaskLine filtered
- * to exactly the matters behind it.
+ * Partner-only report. One chart per stream: show cause notices and appeals in
+ * Litigation, GSTAT appeals, and GSTAT personal hearings. All three read from a
+ * single summary call, and every number links into TaskLine filtered to exactly
+ * the matters behind it.
  */
 
-const cacheKey = "partner:pendency:v3";
+const cacheKey = "partner:pendency:v4";
 
-// Validated against the white card: worst pair dE 23.7 normal, 16.6 protan.
+// Validated against the white card: every pair clears the normal-vision floor
+// (worst 18.5) and the colour-vision floor (worst 8.9 deutan).
 const kindColors: Record<PendencyKind, string> = {
   appeal: "#b6654f",
+  gstatAppeal: "#7c3aed",
+  gstatPh: "#0d9488",
   scn: "#3a5590"
 };
 
-function taskLineHref(params: { due?: "month" | "overdue" | "soon"; kind?: PendencyKind; team?: string }) {
+const sectionMeta: Record<PendencySectionKey, { description: string; icon: typeof Scale; title: string }> = {
+  gstatAppeal: {
+    description: "GSTAT appeals still to be filed. Cancelled, on-hold and closed matters are left out.",
+    icon: Landmark,
+    title: "GSTAT appeals by team"
+  },
+  gstatPh: {
+    description: "GSTAT personal hearings still open. Cancelled, on-hold and closed matters are left out.",
+    icon: Gavel,
+    title: "GSTAT personal hearings by team"
+  },
+  litigation: {
+    description:
+      "Show cause notices and appeals in Litigation still to be submitted or filed. GSTAT work, cancelled, on-hold and closed matters are left out.",
+    icon: Scale,
+    title: "Pendency by team"
+  }
+};
+
+function taskLineHref(params: { due?: "month" | "overdue" | "soon"; kind?: PendencyKind; kinds?: PendencyKind[]; team?: string }) {
   const search = new URLSearchParams({ pendency: "1" });
+  const kind = params.kind ?? (params.kinds?.length === 1 ? params.kinds[0] : undefined);
 
   if (params.team) search.set("team", params.team);
-  if (params.kind) search.set("kind", params.kind);
+  if (kind) search.set("kind", kind);
+  if (!kind && params.kinds?.length) search.set("kinds", params.kinds.join(","));
   if (params.due) search.set("due", params.due);
 
   return `/taskline?${search.toString()}`;
@@ -102,14 +130,13 @@ function SummaryTile({
 }
 
 /**
- * One row per team: a bold bar split into SCNs and Appeals so team workloads
- * stay directly comparable, and beneath each half its own urgency strip in the
- * register's colour language. Keeping the strips separate means you can see at
- * a glance whether the lateness sits with the notices or the appeals.
+ * A team's bar for one kind, with its own urgency strip underneath in the
+ * register's colour language, so lateness can be read per kind rather than
+ * only for the team as a whole.
  */
 function KindColumn({ kind, row }: { kind: PendencyKind; row: PendencyTeamRow }) {
   const counts = row.urgency?.[kind];
-  const total = row[kind];
+  const total = row.counts[kind] ?? 0;
 
   return (
     <div className="flex min-w-0 flex-col" style={{ flexGrow: total, flexBasis: 0 }}>
@@ -123,10 +150,7 @@ function KindColumn({ kind, row }: { kind: PendencyKind; row: PendencyTeamRow })
         <span className="text-[10px] font-black tabular-nums text-white/90">{total}</span>
       </Link>
 
-      <div
-        className="mt-[3px] flex h-[6px] items-stretch gap-[2px]"
-        title={`${row.team} · ${pendencyKindShortLabels[kind]} by due date`}
-      >
+      <div className="mt-[3px] flex h-[6px] items-stretch gap-[2px]">
         {pendencyUrgencies.map((urgency) => {
           const value = counts?.[urgency] ?? 0;
           if (!value) return null;
@@ -144,9 +168,9 @@ function KindColumn({ kind, row }: { kind: PendencyKind; row: PendencyTeamRow })
   );
 }
 
-function TeamRow({ row, scale }: { row: PendencyTeamRow; scale: number }) {
-  const widthPercent = `${Math.max((row.total / scale) * 100, 2)}%`;
-  const kinds: PendencyKind[] = ["scn", "appeal"];
+function TeamRow({ kinds, row, scale }: { kinds: PendencyKind[]; row: PendencyTeamRow; scale: number }) {
+  const total = sectionTotals(row, kinds).total;
+  const widthPercent = `${Math.max((total / scale) * 100, 2)}%`;
 
   return (
     <div className="flex items-center gap-3 py-1.5">
@@ -156,12 +180,202 @@ function TeamRow({ row, scale }: { row: PendencyTeamRow; scale: number }) {
 
       <div className="min-w-0 flex-1">
         <div className="flex items-start gap-[3px]" style={{ width: widthPercent }}>
-          {kinds.map((kind) => (row[kind] ? <KindColumn key={kind} kind={kind} row={row} /> : null))}
+          {kinds.map((kind) => (row.counts[kind] ? <KindColumn key={kind} kind={kind} row={row} /> : null))}
         </div>
       </div>
 
-      <span className="w-9 shrink-0 text-right text-sm font-black tabular-nums text-slate-800">{row.total}</span>
+      <span className="w-9 shrink-0 text-right text-sm font-black tabular-nums text-slate-800">{total}</span>
     </div>
+  );
+}
+
+function PendencySection({ asOf, section, teams }: { asOf: string; section: PendencySectionKey; teams: PendencyTeamRow[] }) {
+  const kinds = pendencySectionKinds[section];
+  const meta = sectionMeta[section];
+  const Icon = meta.icon;
+
+  const rows = teams
+    .map((row) => ({ row, totals: sectionTotals(row, kinds) }))
+    .filter(({ totals }) => totals.total > 0)
+    .sort((first, second) => second.totals.total - first.totals.total);
+
+  const grand = rows.reduce(
+    (sum, { totals }) => ({
+      dueSoon: sum.dueSoon + totals.dueSoon,
+      dueThisMonth: sum.dueThisMonth + totals.dueThisMonth,
+      overdue: sum.overdue + totals.overdue,
+      total: sum.total + totals.total
+    }),
+    { dueSoon: 0, dueThisMonth: 0, overdue: 0, total: 0 }
+  );
+
+  const scale = Math.max(1, ...rows.map(({ totals }) => totals.total));
+  const showKindSplit = kinds.length > 1;
+
+  return (
+    <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="flex items-center gap-2">
+            <Icon className="size-5 text-navy-700" />
+            <h3 className="text-base font-black text-slate-950">{meta.title}</h3>
+          </div>
+          <p className="mt-1 text-xs font-semibold text-slate-500">
+            {meta.description} Click any number to open those matters in TaskLine.
+          </p>
+        </div>
+        <span className="text-[11px] font-bold text-slate-400">As on {asOf}</span>
+      </div>
+
+      {!grand.total ? (
+        <p className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-6 text-center text-sm font-bold text-emerald-700">
+          Nothing pending here.
+        </p>
+      ) : (
+        <>
+          <div className={`mt-3 grid gap-2 ${showKindSplit ? "grid-cols-2 sm:grid-cols-4" : "grid-cols-2 sm:grid-cols-3"}`}>
+            <SummaryTile href={taskLineHref({ kinds })} label="Total pending" value={grand.total} />
+            {showKindSplit ? (
+              kinds.map((kind) => (
+                <SummaryTile
+                  href={taskLineHref({ kind })}
+                  key={kind}
+                  label={pendencyKindShortLabels[kind]}
+                  value={rows.reduce((sum, { row }) => sum + (row.counts[kind] ?? 0), 0)}
+                />
+              ))
+            ) : (
+              <SummaryTile
+                href={taskLineHref({ due: "month", kinds })}
+                label="Due this month"
+                value={grand.dueThisMonth}
+              />
+            )}
+            <SummaryTile
+              hint={grand.dueThisMonth ? `${grand.dueThisMonth} due this month` : undefined}
+              href={taskLineHref({ due: "overdue", kinds })}
+              label="Overdue"
+              tone={grand.overdue ? "danger" : "default"}
+              value={grand.overdue}
+            />
+          </div>
+
+          <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1.5 border-b border-slate-100 pb-2">
+            {kinds.map((kind) => (
+              <span className="flex items-center gap-1.5 text-[11px] font-black text-slate-700" key={kind}>
+                <span className="h-3 w-3 rounded-[3px]" style={{ backgroundColor: kindColors[kind] }} />
+                {pendencyKindShortLabels[kind]}
+              </span>
+            ))}
+            <span className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1">
+              <span className="text-[10px] font-black uppercase tracking-wide text-slate-400">Due</span>
+              {pendencyUrgencies.map((urgency) => (
+                <span className="flex items-center gap-1 text-[11px] font-bold text-slate-600" key={urgency}>
+                  <span className="h-[6px] w-4 rounded-[2px]" style={{ backgroundColor: pendencyUrgencyColors[urgency] }} />
+                  {pendencyUrgencyLabels[urgency]}
+                </span>
+              ))}
+            </span>
+          </div>
+
+          <div className="mt-1 divide-y divide-slate-50">
+            {rows.slice(0, 8).map(({ row }) => (
+              <TeamRow key={row.team} kinds={kinds} row={row} scale={scale} />
+            ))}
+          </div>
+
+          <div className="mt-4 overflow-x-auto">
+            <table className="w-full min-w-[520px] border-collapse text-left text-xs">
+              <thead>
+                <tr className="border-b border-slate-200 text-[11px] font-black uppercase tracking-wide text-slate-500">
+                  <th className="py-2 pr-3">Team</th>
+                  {showKindSplit
+                    ? kinds.map((kind) => (
+                        <th className="py-2 pr-3 text-right" key={kind}>
+                          {pendencyKindShortLabels[kind]}
+                        </th>
+                      ))
+                    : null}
+                  <th className="py-2 pr-3 text-right">Total</th>
+                  <th className="py-2 pr-3 text-right">Overdue</th>
+                  <th className="py-2 pr-3 text-right">Due ≤ 7d</th>
+                  <th className="py-2 pr-3 text-right">Due this month</th>
+                  <th className="py-2" />
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map(({ row, totals }) => (
+                  <tr className="border-b border-slate-100 last:border-b-0" key={row.team}>
+                    <td className="py-1.5 pr-3 font-bold text-slate-800">{row.team}</td>
+                    {showKindSplit
+                      ? kinds.map((kind) => (
+                          <td className="py-1.5 pr-3 text-right" key={kind}>
+                            <CountLink href={taskLineHref({ kind, team: row.team })} muted={!row.counts[kind]}>
+                              {row.counts[kind] ?? 0}
+                            </CountLink>
+                          </td>
+                        ))
+                      : null}
+                    <td className="py-1.5 pr-3 text-right">
+                      <CountLink href={taskLineHref({ kinds, team: row.team })}>{totals.total}</CountLink>
+                    </td>
+                    <td className="py-1.5 pr-3 text-right">
+                      <CountLink
+                        href={taskLineHref({ due: "overdue", kinds, team: row.team })}
+                        muted={!totals.overdue}
+                        tone="danger"
+                      >
+                        <span className="inline-flex items-center gap-1">
+                          <TriangleAlert className="size-3" />
+                          {totals.overdue}
+                        </span>
+                      </CountLink>
+                    </td>
+                    <td className="py-1.5 pr-3 text-right">
+                      <CountLink href={taskLineHref({ due: "soon", kinds, team: row.team })} muted={!totals.dueSoon} tone="warning">
+                        {totals.dueSoon}
+                      </CountLink>
+                    </td>
+                    <td className="py-1.5 pr-3 text-right">
+                      <CountLink href={taskLineHref({ due: "month", kinds, team: row.team })} muted={!totals.dueThisMonth}>
+                        {totals.dueThisMonth}
+                      </CountLink>
+                    </td>
+                    <td className="py-1.5 text-right">
+                      <Link
+                        aria-label={`Open all pending matters for ${row.team} in TaskLine`}
+                        className="inline-flex size-7 items-center justify-center rounded border border-slate-200 text-slate-500 transition hover:bg-navy-50 hover:text-navy-700"
+                        href={taskLineHref({ kinds, team: row.team })}
+                        title={`Open ${row.team} in TaskLine`}
+                      >
+                        <ArrowRight className="size-3.5" />
+                      </Link>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="border-t-2 border-slate-200 text-slate-950">
+                  <td className="py-2 pr-3 text-[11px] font-black uppercase tracking-wide">All teams</td>
+                  {showKindSplit
+                    ? kinds.map((kind) => (
+                        <td className="py-2 pr-3 text-right font-black tabular-nums" key={kind}>
+                          {rows.reduce((sum, { row }) => sum + (row.counts[kind] ?? 0), 0)}
+                        </td>
+                      ))
+                    : null}
+                  <td className="py-2 pr-3 text-right font-black tabular-nums">{grand.total}</td>
+                  <td className="py-2 pr-3 text-right font-black tabular-nums text-rose-700">{grand.overdue}</td>
+                  <td className="py-2 pr-3 text-right font-black tabular-nums text-amber-700">{grand.dueSoon}</td>
+                  <td className="py-2 pr-3 text-right font-black tabular-nums">{grand.dueThisMonth}</td>
+                  <td className="py-2" />
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </>
+      )}
+    </section>
   );
 }
 
@@ -201,151 +415,22 @@ export function PendencyReport() {
     return null;
   }
 
+  if (isLoading && !summary) {
+    return (
+      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <p className="text-sm font-bold text-slate-400">Loading pendency…</p>
+      </section>
+    );
+  }
+
   const teams = summary?.teams ?? [];
-  const totals = summary?.totals;
-  const scale = Math.max(1, ...teams.map((row) => row.total));
+  const sections: PendencySectionKey[] = ["litigation", "gstatAppeal", "gstatPh"];
 
   return (
-    <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <div className="flex items-center gap-2">
-            <Scale className="size-5 text-navy-700" />
-            <h3 className="text-base font-black text-slate-950">Pendency by team</h3>
-          </div>
-          <p className="mt-1 text-xs font-semibold text-slate-500">
-            Show cause notices and appeals in Litigation still to be submitted. Cancelled, on-hold and closed matters are
-            left out. Click any number to open those matters in TaskLine.
-          </p>
-        </div>
-        {summary ? <span className="text-[11px] font-bold text-slate-400">As on {summary.asOf}</span> : null}
-      </div>
-
-      {isLoading && !summary ? (
-        <p className="mt-4 text-sm font-bold text-slate-400">Loading pendency…</p>
-      ) : !totals || !totals.total ? (
-        <p className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-6 text-center text-sm font-bold text-emerald-700">
-          Nothing pending. Every show cause notice and appeal is submitted, cancelled, on hold or closed.
-        </p>
-      ) : (
-        <>
-          <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
-            <SummaryTile href={taskLineHref({})} label="Total pending" value={totals.total} />
-            <SummaryTile href={taskLineHref({ kind: "scn" })} label="SCNs" value={totals.scn} />
-            <SummaryTile href={taskLineHref({ kind: "appeal" })} label="Appeals" value={totals.appeal} />
-            <SummaryTile
-              hint={totals.dueThisMonth ? `${totals.dueThisMonth} due this month` : undefined}
-              href={taskLineHref({ due: "overdue" })}
-              label="Overdue"
-              tone={totals.overdue ? "danger" : "default"}
-              value={totals.overdue}
-            />
-          </div>
-
-          <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1.5 border-b border-slate-100 pb-2">
-            {(["scn", "appeal"] as PendencyKind[]).map((kind) => (
-              <span className="flex items-center gap-1.5 text-[11px] font-black text-slate-700" key={kind}>
-                <span className="h-3 w-3 rounded-[3px]" style={{ backgroundColor: kindColors[kind] }} />
-                {pendencyKindShortLabels[kind]}
-              </span>
-            ))}
-            <span className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1">
-              <span className="text-[10px] font-black uppercase tracking-wide text-slate-400">Due</span>
-              {pendencyUrgencies.map((urgency) => (
-                <span className="flex items-center gap-1 text-[11px] font-bold text-slate-600" key={urgency}>
-                  <span className="h-[6px] w-4 rounded-[2px]" style={{ backgroundColor: pendencyUrgencyColors[urgency] }} />
-                  {pendencyUrgencyLabels[urgency]}
-                </span>
-              ))}
-            </span>
-          </div>
-
-          <div className="mt-1 divide-y divide-slate-50">
-            {teams.slice(0, 8).map((row) => (
-              <TeamRow key={row.team} row={row} scale={scale} />
-            ))}
-          </div>
-
-          <div className="mt-4 overflow-x-auto">
-            <table className="w-full min-w-[600px] border-collapse text-left text-xs">
-              <thead>
-                <tr className="border-b border-slate-200 text-[11px] font-black uppercase tracking-wide text-slate-500">
-                  <th className="py-2 pr-3">Team</th>
-                  <th className="py-2 pr-3 text-right">SCNs</th>
-                  <th className="py-2 pr-3 text-right">Appeals</th>
-                  <th className="py-2 pr-3 text-right">Total</th>
-                  <th className="py-2 pr-3 text-right">Overdue</th>
-                  <th className="py-2 pr-3 text-right">Due ≤ 7d</th>
-                  <th className="py-2 pr-3 text-right" title="Falling due between today and the end of this month">
-                    Due this month
-                  </th>
-                  <th className="py-2" />
-                </tr>
-              </thead>
-              <tbody>
-                {teams.map((row) => (
-                  <tr className="border-b border-slate-100 last:border-b-0" key={row.team}>
-                    <td className="py-1.5 pr-3 font-bold text-slate-800">{row.team}</td>
-                    <td className="py-1.5 pr-3 text-right">
-                      <CountLink href={taskLineHref({ kind: "scn", team: row.team })} muted={!row.scn}>
-                        {row.scn}
-                      </CountLink>
-                    </td>
-                    <td className="py-1.5 pr-3 text-right">
-                      <CountLink href={taskLineHref({ kind: "appeal", team: row.team })} muted={!row.appeal}>
-                        {row.appeal}
-                      </CountLink>
-                    </td>
-                    <td className="py-1.5 pr-3 text-right">
-                      <CountLink href={taskLineHref({ team: row.team })}>{row.total}</CountLink>
-                    </td>
-                    <td className="py-1.5 pr-3 text-right">
-                      <CountLink href={taskLineHref({ due: "overdue", team: row.team })} muted={!row.overdue} tone="danger">
-                        <span className="inline-flex items-center gap-1">
-                          <TriangleAlert className="size-3" />
-                          {row.overdue}
-                        </span>
-                      </CountLink>
-                    </td>
-                    <td className="py-1.5 pr-3 text-right">
-                      <CountLink href={taskLineHref({ due: "soon", team: row.team })} muted={!row.dueSoon} tone="warning">
-                        {row.dueSoon}
-                      </CountLink>
-                    </td>
-                    <td className="py-1.5 pr-3 text-right">
-                      <CountLink href={taskLineHref({ due: "month", team: row.team })} muted={!row.dueThisMonth}>
-                        {row.dueThisMonth}
-                      </CountLink>
-                    </td>
-                    <td className="py-1.5 text-right">
-                      <Link
-                        aria-label={`Open all pending matters for ${row.team} in TaskLine`}
-                        className="inline-flex size-7 items-center justify-center rounded border border-slate-200 text-slate-500 transition hover:bg-navy-50 hover:text-navy-700"
-                        href={taskLineHref({ team: row.team })}
-                        title={`Open ${row.team} in TaskLine`}
-                      >
-                        <ArrowRight className="size-3.5" />
-                      </Link>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-              <tfoot>
-                <tr className="border-t-2 border-slate-200 text-slate-950">
-                  <td className="py-2 pr-3 text-[11px] font-black uppercase tracking-wide">All teams</td>
-                  <td className="py-2 pr-3 text-right font-black tabular-nums">{totals.scn}</td>
-                  <td className="py-2 pr-3 text-right font-black tabular-nums">{totals.appeal}</td>
-                  <td className="py-2 pr-3 text-right font-black tabular-nums">{totals.total}</td>
-                  <td className="py-2 pr-3 text-right font-black tabular-nums text-rose-700">{totals.overdue}</td>
-                  <td className="py-2 pr-3 text-right font-black tabular-nums text-amber-700">{totals.dueSoon}</td>
-                  <td className="py-2 pr-3 text-right font-black tabular-nums">{totals.dueThisMonth}</td>
-                  <td className="py-2" />
-                </tr>
-              </tfoot>
-            </table>
-          </div>
-        </>
-      )}
-    </section>
+    <>
+      {sections.map((section) => (
+        <PendencySection asOf={summary?.asOf ?? ""} key={section} section={section} teams={teams} />
+      ))}
+    </>
   );
 }

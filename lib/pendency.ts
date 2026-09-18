@@ -9,18 +9,31 @@
  * can never drift apart.
  */
 
-export type PendencyKind = "appeal" | "scn";
+export type PendencyKind = "appeal" | "gstatAppeal" | "gstatPh" | "scn";
 
-export const pendencyKinds: PendencyKind[] = ["scn", "appeal"];
+export const pendencyKinds: PendencyKind[] = ["scn", "appeal", "gstatAppeal", "gstatPh"];
 
 export const pendencyKindLabels: Record<PendencyKind, string> = {
   appeal: "Appeals",
+  gstatAppeal: "GSTAT Appeals",
+  gstatPh: "GSTAT Personal Hearings",
   scn: "Show Cause Notices"
 };
 
 export const pendencyKindShortLabels: Record<PendencyKind, string> = {
   appeal: "Appeals",
+  gstatAppeal: "GSTAT Appeals",
+  gstatPh: "GSTAT PH",
   scn: "SCNs"
+};
+
+/** Each chart on the partner dashboard, and the kinds it counts. */
+export type PendencySectionKey = "gstatAppeal" | "gstatPh" | "litigation";
+
+export const pendencySectionKinds: Record<PendencySectionKey, PendencyKind[]> = {
+  gstatAppeal: ["gstatAppeal"],
+  gstatPh: ["gstatPh"],
+  litigation: ["scn", "appeal"]
 };
 
 export const unassignedTeamLabel = "Unassigned";
@@ -53,7 +66,18 @@ export function isPersonalHearingTask(task: unknown) {
 export function classifyPendencyKind(task: unknown): PendencyKind | null {
   const value = normalize(task);
 
-  if (!value || personalHearingPattern.test(value)) {
+  if (!value) {
+    return null;
+  }
+
+  // GSTAT work is tracked on its own charts, so it never joins the SCN and
+  // appeal figures even though the task wording mentions "appeal".
+  if (value.includes("gstat")) {
+    return personalHearingPattern.test(value) ? "gstatPh" : "gstatAppeal";
+  }
+
+  // Personal hearings elsewhere record an attendance, not work still to file.
+  if (personalHearingPattern.test(value)) {
     return null;
   }
 
@@ -68,9 +92,15 @@ export function classifyPendencyKind(task: unknown): PendencyKind | null {
   return null;
 }
 
-/** Stage wording that means the work has gone out and is no longer pending. */
+/**
+ * Stage wording that means the work has gone out and is no longer pending:
+ * submitted, or filed. "Filed" is matched as a whole word so wording such as
+ * "Filing in progress" still counts as pending.
+ */
+const completedStagePattern = /submit|\bfiled\b/;
+
 export function isSubmittedStage(stage: unknown) {
-  return normalize(stage).includes("submit");
+  return completedStagePattern.test(normalize(stage));
 }
 
 /**
@@ -241,18 +271,44 @@ export function pendencyDueState(dueDate: unknown, today = todayKey(), soonCutof
 }
 
 export type PendencyTeamRow = {
-  appeal: number;
-  dueSoon: number;
-  dueThisMonth: number;
-  overdue: number;
-  scn: number;
+  counts: Record<PendencyKind, number>;
+  dueSoon: Record<PendencyKind, number>;
   team: string;
-  total: number;
   urgency: Record<PendencyKind, PendencyUrgencyCounts>;
 };
 
 export type PendencySummary = {
   asOf: string;
   teams: PendencyTeamRow[];
-  totals: Omit<PendencyTeamRow, "team" | "urgency">;
 };
+
+export function emptyKindCounts(): Record<PendencyKind, number> {
+  return { appeal: 0, gstatAppeal: 0, gstatPh: 0, scn: 0 };
+}
+
+export function emptyKindUrgency(): Record<PendencyKind, PendencyUrgencyCounts> {
+  return { appeal: emptyUrgencyCounts(), gstatAppeal: emptyUrgencyCounts(), gstatPh: emptyUrgencyCounts(), scn: emptyUrgencyCounts() };
+}
+
+/** Roll a team's per-kind numbers up to the kinds one chart shows. */
+export function sectionTotals(row: PendencyTeamRow, kinds: PendencyKind[]) {
+  const urgency = emptyUrgencyCounts();
+  let dueSoon = 0;
+  let total = 0;
+
+  for (const kind of kinds) {
+    total += row.counts[kind] ?? 0;
+    dueSoon += row.dueSoon[kind] ?? 0;
+    for (const band of pendencyUrgencies) {
+      urgency[band] += row.urgency[kind]?.[band] ?? 0;
+    }
+  }
+
+  return {
+    dueSoon,
+    dueThisMonth: urgency.today + urgency.thisMonth,
+    overdue: urgency.overdue,
+    total,
+    urgency
+  };
+}

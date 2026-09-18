@@ -5,13 +5,13 @@ import { isViewOnlyRegisterUser, viewOnlyRegisterResponse } from "@/lib/register
 import {
   classifyPendencyKind,
   dueSoonCutoffKey,
-  emptyUrgencyCounts,
-  isDueThisMonth,
+  emptyKindCounts,
+  emptyKindUrgency,
   isPendingMatter,
   monthEndKey,
   pendencyDueState,
-  pendencyUrgency,
   pendencyTeamLabel,
+  pendencyUrgency,
   todayKey,
   type PendencySummary,
   type PendencyTeamRow
@@ -1970,7 +1970,6 @@ async function loadPendencySummary(admin: ReturnType<typeof createAdminClient>, 
   const soonCutoff = dueSoonCutoffKey(today);
   const monthEnd = monthEndKey(today);
   const byTeam = new Map<string, PendencyTeamRow>();
-  const totals = { appeal: 0, dueSoon: 0, dueThisMonth: 0, overdue: 0, scn: 0, total: 0 };
 
   for (const row of rows) {
     if (getStoredRegisterKey({ register_key: text(row.register_key) }) !== "taskline") {
@@ -1986,34 +1985,17 @@ async function loadPendencySummary(admin: ReturnType<typeof createAdminClient>, 
     const label = pendencyTeamLabel(row.team);
     const key = teamMatchKey(label) || label.toLowerCase();
     const entry = byTeam.get(key) ?? {
-      appeal: 0,
-      dueSoon: 0,
-      dueThisMonth: 0,
-      overdue: 0,
-      scn: 0,
+      counts: emptyKindCounts(),
+      dueSoon: emptyKindCounts(),
       team: label,
-      total: 0,
-      urgency: { appeal: emptyUrgencyCounts(), scn: emptyUrgencyCounts() }
+      urgency: emptyKindUrgency()
     };
-    const due = pendencyDueState(row.due_date, today, soonCutoff);
 
-    entry[kind] += 1;
-    entry.total += 1;
+    entry.counts[kind] += 1;
     entry.urgency[kind][pendencyUrgency(row.due_date, today, monthEnd)] += 1;
-    totals[kind] += 1;
-    totals.total += 1;
 
-    if (due === "overdue") {
-      entry.overdue += 1;
-      totals.overdue += 1;
-    } else if (due === "dueSoon") {
-      entry.dueSoon += 1;
-      totals.dueSoon += 1;
-    }
-
-    if (isDueThisMonth(row.due_date, today, monthEnd)) {
-      entry.dueThisMonth += 1;
-      totals.dueThisMonth += 1;
+    if (pendencyDueState(row.due_date, today, soonCutoff) === "dueSoon") {
+      entry.dueSoon[kind] += 1;
     }
 
     byTeam.set(key, entry);
@@ -2021,10 +2003,11 @@ async function loadPendencySummary(admin: ReturnType<typeof createAdminClient>, 
 
   const summary: PendencySummary = {
     asOf: indiaTodayDisplayDate(),
-    teams: Array.from(byTeam.values()).sort(
-      (first, second) => second.total - first.total || first.team.localeCompare(second.team, undefined, { numeric: true })
-    ),
-    totals
+    teams: Array.from(byTeam.values()).sort((first, second) => {
+      const firstTotal = Object.values(first.counts).reduce((sum, value) => sum + value, 0);
+      const secondTotal = Object.values(second.counts).reduce((sum, value) => sum + value, 0);
+      return secondTotal - firstTotal || first.team.localeCompare(second.team, undefined, { numeric: true });
+    })
   };
 
   return NextResponse.json(summary);

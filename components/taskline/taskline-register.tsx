@@ -14,6 +14,7 @@ import {
   isDueThisMonth,
   isPendingMatter,
   pendencyDueState,
+  pendencyKinds,
   pendencyKindShortLabels,
   todayKey,
   type PendencyKind
@@ -3797,7 +3798,7 @@ function TaskLineDateInput({ compact = false, onChange, value }: { compact?: boo
   );
 }
 
-type PendencyFocus = { due: "month" | "overdue" | "soon" | null; kind: PendencyKind | null; team: string };
+type PendencyFocus = { due: "month" | "overdue" | "soon" | null; kinds: PendencyKind[]; team: string };
 
 function readPendencyFocus(search: string): PendencyFocus | null {
   const params = new URLSearchParams(search);
@@ -3806,12 +3807,14 @@ function readPendencyFocus(search: string): PendencyFocus | null {
     return null;
   }
 
-  const kind = params.get("kind");
   const due = params.get("due");
+  const requested = [params.get("kind") ?? "", ...(params.get("kinds") ?? "").split(",")]
+    .map((value) => value.trim())
+    .filter((value): value is PendencyKind => pendencyKinds.includes(value as PendencyKind));
 
   return {
     due: due === "overdue" || due === "soon" || due === "month" ? due : null,
-    kind: kind === "scn" || kind === "appeal" ? kind : null,
+    kinds: Array.from(new Set(requested)),
     team: text(params.get("team"))
   };
 }
@@ -3827,7 +3830,7 @@ function matchesPendencyFocus(row: TaskLineRow, focus: PendencyFocus) {
     return false;
   }
 
-  if (focus.kind && kind !== focus.kind) {
+  if (focus.kinds.length && !focus.kinds.includes(kind)) {
     return false;
   }
 
@@ -3850,7 +3853,7 @@ function matchesPendencyFocus(row: TaskLineRow, focus: PendencyFocus) {
 }
 
 function pendencyFocusLabel(focus: PendencyFocus) {
-  const kind = focus.kind ? pendencyKindShortLabels[focus.kind] : "SCNs and appeals";
+  const kind = focus.kinds.length ? focus.kinds.map((item) => pendencyKindShortLabels[item]).join(" and ") : "matters";
   const team = focus.team ? ` for ${focus.team}` : " across all teams";
   const due =
     focus.due === "overdue"
