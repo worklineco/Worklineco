@@ -1282,8 +1282,14 @@ async function loadCalendarEvents(
   }
 
   const fullName = normalizeName(user.user_metadata?.full_name ?? user.user_metadata?.name ?? user.email);
-  const roleText = `${text(user.user_metadata?.role)} ${text(user.user_metadata?.designation)}`.toLowerCase();
+  const roleText = [
+    text(user.app_metadata?.workline_role),
+    text(user.app_metadata?.role),
+    text(user.user_metadata?.role),
+    text(user.user_metadata?.designation)
+  ].join(" ").toLowerCase();
   const isPartner = access.canViewAll || roleText.includes("partner") || roleText.includes("owner") || roleText.includes("admin");
+  const isTeamManager = isManagerRoleText(roleText) && !isPartner;
   const isArticle = roleText.includes("article");
   const events: Array<{ due_date: string; entity: string; name: string; stage: string; task: string }> = [];
 
@@ -1299,6 +1305,8 @@ async function loadCalendarEvents(
 
     if (isPartner) {
       include = true;
+    } else if (isTeamManager) {
+      include = teamIsAllowed(data.team, access.teams);
     } else if (isArticle) {
       include = splitNames(data.resource).includes(fullName);
     } else {
