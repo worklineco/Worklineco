@@ -293,9 +293,10 @@ export const teamFocusEmptyLabel = "Not set";
 
 export type TeamFocusGrouping = "name" | "task";
 
+/** "By person" first: it is the board's default reading. */
 export const teamFocusGroupings: { key: TeamFocusGrouping; label: string }[] = [
-  { key: "task", label: "By task" },
-  { key: "name", label: "By person" }
+  { key: "name", label: "By person" },
+  { key: "task", label: "By task" }
 ];
 
 export type TeamFocus = {

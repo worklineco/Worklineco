@@ -454,7 +454,7 @@ function TeamFocusBar({
 }
 
 function TeamFocusSection({ asOf, focus }: { asOf: string; focus: TeamFocus }) {
-  const [group, setGroup] = useState<TeamFocusGrouping>("task");
+  const [group, setGroup] = useState<TeamFocusGrouping>("name");
   const rows = group === "name" ? focus.byName : focus.byTask;
   const grand = useMemo(() => teamFocusTotals(rows), [rows]);
   const scale = Math.max(1, ...rows.map((row) => row.total));
