@@ -14,6 +14,7 @@ import {
   dueSoonCutoffKey,
   isDueThisMonth,
   isPendingMatter,
+  isPersonalHearingTask,
   pendencyDueState,
   pendencyKinds,
   pendencyKindShortLabels,
@@ -3847,7 +3848,12 @@ function matchesPendencyFocus(row: TaskLineRow, focus: PendencyFocus) {
     return false;
   }
 
-  if (focus.scope !== "all") {
+  if (focus.scope === "all") {
+    // The team board leaves personal hearings out, so its links must too.
+    if (isPersonalHearingTask(row.task)) {
+      return false;
+    }
+  } else {
     const kind = classifyPendencyKind(row.task);
 
     if (!kind || (focus.kinds.length && !focus.kinds.includes(kind))) {

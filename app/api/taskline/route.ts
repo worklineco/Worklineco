@@ -9,6 +9,7 @@ import {
   emptyKindUrgency,
   emptyUrgencyCounts,
   isPendingMatter,
+  isPersonalHearingTask,
   monthEndKey,
   pendencyDueState,
   pendencyTeamLabel,
@@ -2051,8 +2052,9 @@ async function loadPendencySummary(admin: ReturnType<typeof createAdminClient>, 
 
     const isPending = isPendingMatter(row.stage, row.status_open_close);
 
-    // The personal board covers every task type, not just notices and appeals.
-    if (board && isPending && teamMatchKey(pendencyTeamLabel(row.team)) === boardTeamKey) {
+    // The personal board covers every task type except personal hearings, which
+    // are an attendance to keep rather than work waiting on the team.
+    if (board && isPending && !isPersonalHearingTask(row.task) && teamMatchKey(pendencyTeamLabel(row.team)) === boardTeamKey) {
       const task = text(row.task) || teamFocusEmptyLabel;
       addFocusRow(focusByTask, task.toLowerCase(), task, row.due_date);
       addFocusName(text(row.name), row.due_date);

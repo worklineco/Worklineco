@@ -29,7 +29,7 @@ import {
  * the matters behind it.
  */
 
-const cacheKey = "partner:pendency:v6";
+const cacheKey = "partner:pendency:v7";
 
 // Validated against the white card: every pair clears the normal-vision floor
 // (worst 18.5) and the colour-vision floor (worst 8.9 deutan).
@@ -469,8 +469,9 @@ function TeamFocusSection({ asOf, focus }: { asOf: string; focus: TeamFocus }) {
             <h3 className="text-base font-black text-slate-950">{focus.team} · my team board</h3>
           </div>
           <p className="mt-1 text-xs font-semibold text-slate-500">
-            Every open task with {focus.team}, of every kind — not only notices and appeals. Submitted, filed, cancelled,
-            on-hold and closed tasks are left out. Click any bar or number to open those tasks in TaskLine.
+            Every open task with {focus.team}, of every kind — not only notices and appeals. Personal hearings, and
+            submitted, filed, cancelled, on-hold and closed tasks, are left out. Click any bar or number to open those
+            tasks in TaskLine.
           </p>
         </div>
         <span className="text-[11px] font-bold text-slate-400">As on {asOf}</span>
