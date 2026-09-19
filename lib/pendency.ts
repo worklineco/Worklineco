@@ -2,9 +2,9 @@
  * Shared pendency rules for the partner Pendency Report and for the TaskLine
  * deep link that opens the matching rows.
  *
- * A matter counts as PENDING when its Stage does not read as submitted, the
- * Stage does not read as cancelled or on hold, and the row is not marked Close
- * in Status Open/Close. Both the dashboard summary and the TaskLine focus
+ * A matter counts as PENDING when its Stage does not read as submitted, shared
+ * with the client, cancelled or on hold, and the row is not marked Close in
+ * Status Open/Close. Both the dashboard summary and the TaskLine focus
  * filter import these helpers, so the headline count and the drill-down list
  * can never drift apart.
  */
@@ -119,8 +119,19 @@ export function isClosedStatus(status: unknown) {
   return normalize(status).startsWith("close");
 }
 
+/**
+ * The draft has gone to the client and the next move is theirs, so it is not
+ * pending with the team. Matched on both words so an unrelated stage that only
+ * mentions sharing is not caught.
+ */
+const sharedWithClientPattern = /\bshared\b[\s\S]*\bclient/;
+
+export function isSharedWithClientStage(stage: unknown) {
+  return sharedWithClientPattern.test(normalize(stage));
+}
+
 export function isPendingMatter(stage: unknown, status: unknown) {
-  return !isSubmittedStage(stage) && !isDroppedStage(stage) && !isClosedStatus(status);
+  return !isSubmittedStage(stage) && !isDroppedStage(stage) && !isSharedWithClientStage(stage) && !isClosedStatus(status);
 }
 
 export function pendencyTeamLabel(team: unknown) {

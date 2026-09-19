@@ -29,7 +29,7 @@ import {
  * the matters behind it.
  */
 
-const cacheKey = "partner:pendency:v7";
+const cacheKey = "partner:pendency:v8";
 
 // Validated against the white card: every pair clears the normal-vision floor
 // (worst 18.5) and the colour-vision floor (worst 8.9 deutan).
@@ -42,18 +42,18 @@ const kindColors: Record<PendencyKind, string> = {
 
 const sectionMeta: Record<PendencySectionKey, { description: string; icon: typeof Scale; title: string }> = {
   gstatAppeal: {
-    description: "GSTAT appeals still to be filed. Cancelled, on-hold and closed matters are left out.",
+    description: "GSTAT appeals still to be filed. Shared with client, cancelled, on-hold and closed matters are left out.",
     icon: Landmark,
     title: "GSTAT appeals by team"
   },
   gstatPh: {
-    description: "GSTAT personal hearings still open. Cancelled, on-hold and closed matters are left out.",
+    description: "GSTAT personal hearings still open. Shared with client, cancelled, on-hold and closed matters are left out.",
     icon: Gavel,
     title: "GSTAT personal hearings by team"
   },
   litigation: {
     description:
-      "Show cause notices and appeals in Litigation still to be submitted or filed. GSTAT work, cancelled, on-hold and closed matters are left out.",
+      "Show cause notices and appeals in Litigation still to be submitted or filed. GSTAT work, matters shared with the client, and cancelled, on-hold and closed matters are left out.",
     icon: Scale,
     title: "Pendency by team"
   }
@@ -470,8 +470,8 @@ function TeamFocusSection({ asOf, focus }: { asOf: string; focus: TeamFocus }) {
           </div>
           <p className="mt-1 text-xs font-semibold text-slate-500">
             Every open task with {focus.team}, of every kind — not only notices and appeals. Personal hearings, and
-            submitted, filed, cancelled, on-hold and closed tasks, are left out. Click any bar or number to open those
-            tasks in TaskLine.
+            tasks that are submitted, filed, shared with the client, cancelled, on hold or closed, are left out. Click
+            any bar or number to open those tasks in TaskLine.
           </p>
         </div>
         <span className="text-[11px] font-bold text-slate-400">As on {asOf}</span>
