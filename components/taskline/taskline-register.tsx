@@ -8,6 +8,7 @@ import { createPortal } from "react-dom";
 import * as XLSX from "xlsx-js-style";
 import { clearCached, getCached, setCached } from "@/lib/data-cache";
 import { useRegisterEditAccess, viewOnlyRegisterMessage as sharedViewOnlyRegisterMessage } from "@/lib/use-register-access";
+import { isSamePersonName, normalizePersonName } from "@/lib/person-name";
 import {
   classifyPendencyKind,
   dueSoonCutoffKey,
@@ -195,23 +196,6 @@ function teamMatchKey(value: string) {
 
 function isArticleDesignation(value: string) {
   return String(value ?? "").toLowerCase().includes("article");
-}
-
-const personNameHonorifics = new Set(["ca", "cs", "cma", "adv", "advocate", "mr", "mrs", "ms", "dr", "shri", "smt", "sh"]);
-
-// Normalise a person's name for matching: lowercase, drop punctuation and any
-// leading honorific (CA / Adv / Mr ...). So "Shuchi Sethi" and "CA Shuchi Sethi"
-// resolve to the same key.
-function normalizePersonName(value: unknown) {
-  const parts = String(value ?? "")
-    .toLowerCase()
-    .replace(/[.,]/g, " ")
-    .split(/\s+/)
-    .filter(Boolean);
-  while (parts.length > 1 && personNameHonorifics.has(parts[0])) {
-    parts.shift();
-  }
-  return parts.join(" ");
 }
 
 function canonicalTaskLineName(value: unknown) {
@@ -3836,10 +3820,22 @@ function readPendencyFocus(search: string): PendencyFocus | null {
   };
 }
 
-/** A Task or Name cell against a board label, where "Not set" means blank. */
+/** A Task cell against a board label, where "Not set" means blank. */
 function matchesFocusLabel(value: unknown, expected: string) {
   const actual = String(value ?? "").trim();
   return expected === teamFocusEmptyLabel ? !actual : actual.toLowerCase() === expected.toLowerCase();
+}
+
+/**
+ * A Name cell against a board label. Matched on the normalised person key, so
+ * the link works whichever honorific spelling the row happens to carry.
+ */
+function matchesFocusName(value: unknown, expected: string) {
+  if (expected === teamFocusEmptyLabel) {
+    return !String(value ?? "").trim();
+  }
+
+  return isSamePersonName(value, expected);
 }
 
 /**
@@ -3863,7 +3859,7 @@ function matchesPendencyFocus(row: TaskLineRow, focus: PendencyFocus) {
     return false;
   }
 
-  if (focus.name && !matchesFocusLabel(row.name, focus.name)) {
+  if (focus.name && !matchesFocusName(row.name, focus.name)) {
     return false;
   }
 

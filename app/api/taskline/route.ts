@@ -20,6 +20,7 @@ import {
   type TeamFocusRow
 } from "@/lib/pendency";
 import { extraDueRecipientsByTeam, indiaTodayDisplayDate, indiaTodayKey, isEmail, isManagerRoleText, parseEmailAddresses, teamMatchKey } from "@/lib/taskline-reminder-shared";
+import { normalizePersonName } from "@/lib/person-name";
 import { readPrimaryTeam, readUserTeams, teamIsAllowed, userHasTeam } from "@/lib/user-teams";
 import { cookies } from "next/headers";
 import { after, NextResponse } from "next/server";
@@ -1991,9 +1992,18 @@ async function loadPendencySummary(admin: ReturnType<typeof createAdminClient>, 
   const focusByTask = new Map<string, TeamFocusRow>();
   const focusByName = new Map<string, TeamFocusRow>();
 
-  function addFocusRow(group: Map<string, TeamFocusRow>, rawLabel: string, dueDate: unknown) {
-    const label = text(rawLabel) || teamFocusEmptyLabel;
-    const entry = group.get(label) ?? { dueSoon: 0, label, total: 0, urgency: emptyUrgencyCounts() };
+  // Spellings seen for each person key, so the board can show the wording the
+  // firm uses most rather than whichever row happened to be read first.
+  const nameSpellings = new Map<string, Map<string, number>>();
+
+  /**
+   * @param key   what rows are grouped by. For people this is the normalised
+   *              person key, so "CA Shuchi Sethi" and "Shuchi Sethi" are one
+   *              row and the TaskLine link behind it finds both.
+   * @param label what that group is called on screen.
+   */
+  function addFocusRow(group: Map<string, TeamFocusRow>, key: string, label: string, dueDate: unknown) {
+    const entry = group.get(key) ?? { dueSoon: 0, label, total: 0, urgency: emptyUrgencyCounts() };
 
     entry.total += 1;
     entry.urgency[pendencyUrgency(dueDate, today, monthEnd)] += 1;
@@ -2002,7 +2012,36 @@ async function loadPendencySummary(admin: ReturnType<typeof createAdminClient>, 
       entry.dueSoon += 1;
     }
 
-    group.set(label, entry);
+    group.set(key, entry);
+  }
+
+  function addFocusName(rawName: string, dueDate: unknown) {
+    const spelling = text(rawName);
+    const key = normalizePersonName(spelling);
+
+    if (!key) {
+      addFocusRow(focusByName, teamFocusEmptyLabel, teamFocusEmptyLabel, dueDate);
+      return;
+    }
+
+    const seen = nameSpellings.get(key) ?? new Map<string, number>();
+    seen.set(spelling, (seen.get(spelling) ?? 0) + 1);
+    nameSpellings.set(key, seen);
+
+    addFocusRow(focusByName, key, spelling, dueDate);
+  }
+
+  /** The most-used spelling of a person's name, shortest wins a tie. */
+  function preferredSpelling(key: string, fallback: string) {
+    const seen = nameSpellings.get(key);
+
+    if (!seen) {
+      return fallback;
+    }
+
+    return Array.from(seen.entries()).sort(
+      (first, second) => second[1] - first[1] || first[0].length - second[0].length || first[0].localeCompare(second[0])
+    )[0][0];
   }
 
   for (const row of rows) {
@@ -2014,8 +2053,9 @@ async function loadPendencySummary(admin: ReturnType<typeof createAdminClient>, 
 
     // The personal board covers every task type, not just notices and appeals.
     if (board && isPending && teamMatchKey(pendencyTeamLabel(row.team)) === boardTeamKey) {
-      addFocusRow(focusByTask, text(row.task), row.due_date);
-      addFocusRow(focusByName, text(row.name), row.due_date);
+      const task = text(row.task) || teamFocusEmptyLabel;
+      addFocusRow(focusByTask, task.toLowerCase(), task, row.due_date);
+      addFocusName(text(row.name), row.due_date);
     }
 
     const kind = classifyPendencyKind(row.task);
@@ -2051,7 +2091,9 @@ async function loadPendencySummary(admin: ReturnType<typeof createAdminClient>, 
     ...(board
       ? {
           teamFocus: {
-            byName: Array.from(focusByName.values()).sort(byTotalThenLabel),
+            byName: Array.from(focusByName.entries())
+              .map(([key, row]) => ({ ...row, label: preferredSpelling(key, row.label) }))
+              .sort(byTotalThenLabel),
             byTask: Array.from(focusByTask.values()).sort(byTotalThenLabel),
             team: board.team
           }

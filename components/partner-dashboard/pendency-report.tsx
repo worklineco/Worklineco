@@ -29,7 +29,7 @@ import {
  * the matters behind it.
  */
 
-const cacheKey = "partner:pendency:v5";
+const cacheKey = "partner:pendency:v6";
 
 // Validated against the white card: every pair clears the normal-vision floor
 // (worst 18.5) and the colour-vision floor (worst 8.9 deutan).
