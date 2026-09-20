@@ -14,6 +14,15 @@
 
 html {
   min-width: 320px;
+  /* Render the whole app at 85% - full size takes too much space. Browsers
+     without zoom support (older Firefox) fall back to scaled rem sizing. */
+  zoom: 0.85;
+}
+
+@supports not (zoom: 0.85) {
+  html {
+    font-size: 85%;
+  }
 }
 
 body {
