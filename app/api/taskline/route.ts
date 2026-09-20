@@ -806,6 +806,12 @@ async function handlePost(request: Request) {
         await sendResourceAllocationMail(admin, organisation.organisationId, createdRecord, "name");
       }
 
+      // Senior Managers are notified of every newly added task, whether or
+      // not they appear in the Name or Resource columns.
+      if (registerKey === "taskline") {
+        await sendResourceAllocationMail(admin, organisation.organisationId, createdRecord, "senior_manager");
+      }
+
       // Instant due-today reminder for rows created with today's due date
       // (the daily 09:00 IST mail for today may have already gone out).
       if (registerKey === "taskline" && text(cleaned.due_date) === indiaTodayDisplayDate()) {
@@ -2127,10 +2133,34 @@ function createAdminClient() {
   });
 }
 
+// Cross-team visibility: members of the key team also see the mapped teams'
+// tasks (Team 8 members see Team 5 tasks as well). Keys and values are
+// matched on the team number, so any spelling (Team 8 / Team-08) works.
+const teamVisibilityExtensions: Record<string, string[]> = {
+  "team 8": ["Team 05"]
+};
+
+function teamVisibilityKey(value: unknown) {
+  const digits = text(value).match(/\d+/)?.[0];
+  return digits ? `team ${Number.parseInt(digits, 10)}` : text(value).toLowerCase();
+}
+
+function expandTeamVisibility(teams: string[]) {
+  const expanded = [...teams];
+  for (const team of teams) {
+    for (const extra of teamVisibilityExtensions[teamVisibilityKey(team)] ?? []) {
+      if (!expanded.some((existing) => teamVisibilityKey(existing) === teamVisibilityKey(extra))) {
+        expanded.push(extra);
+      }
+    }
+  }
+  return expanded;
+}
+
 function getAccess(user: User): AccessScope {
   const role = text(user.user_metadata?.role).toLowerCase();
   const team = readPrimaryTeam(user);
-  const teams = readUserTeams(user);
+  const teams = expandTeamVisibility(readUserTeams(user));
   const canViewAll = role === "partner" || role.includes("partner") || role === "owner" || role === "admin";
 
   return {
@@ -2331,14 +2361,14 @@ async function sendResourceAllocationMail(
   admin: ReturnType<typeof createAdminClient>,
   organisationId: string,
   record: TaskRecord,
-  field: "name" | "resource" = "resource"
+  field: "name" | "resource" | "senior_manager" = "resource"
 ) {
   try {
     const row = record.custom_values?.taskline_data ?? {};
     const targetValue = field === "name" ? row.name : row.resource;
     const targetNames = allocationSplitNames(targetValue);
 
-    if (!targetNames.length) {
+    if (field !== "senior_manager" && !targetNames.length) {
       return;
     }
 
@@ -2385,6 +2415,20 @@ async function sendResourceAllocationMail(
       }
 
       const user = authUsersById.get(member.id);
+
+      // Senior Managers receive the new-task mail regardless of the Name and
+      // Resource columns; the other modes match members by name.
+      if (field === "senior_manager") {
+        const role = `${text(user?.user_metadata?.role)} ${text(user?.app_metadata?.workline_role)}`.toLowerCase();
+        if (role.includes("senior manager")) {
+          const email = text(user?.email || member.email).toLowerCase();
+          if (allocationIsEmail(email) && !allocationEmailExcludedRecipients.has(email)) {
+            recipients.add(email);
+          }
+        }
+        continue;
+      }
+
       const name = allocationNormalizeName(
         user?.user_metadata?.full_name ?? user?.user_metadata?.name ?? member.full_name ?? user?.email
       );
@@ -2420,8 +2464,8 @@ async function sendResourceAllocationMail(
     const stage = text(row.stage) || "-";
     const period = text(row.period) || "-";
     const allocatedBy = text(row.name) || "-";
-    const heading = field === "name" ? "YOU HAVE BEEN TAGGED ON A TASK" : "NEW TASK ALLOCATED TO YOU";
-    const subject = field === "name" ? `You have been tagged: ${entity} — ${taskName}` : `New task allocated: ${entity} — ${taskName}`;
+    const heading = field === "senior_manager" ? "NEW TASK ADDED" : field === "name" ? "YOU HAVE BEEN TAGGED ON A TASK" : "NEW TASK ALLOCATED TO YOU";
+    const subject = field === "senior_manager" ? `New task added: ${entity} — ${taskName}` : field === "name" ? `You have been tagged: ${entity} — ${taskName}` : `New task allocated: ${entity} — ${taskName}`;
     const bodyText = [
       heading,
       "",
@@ -2445,7 +2489,7 @@ async function sendResourceAllocationMail(
     const bodyHtml = `<!doctype html>
 <html>
   <body style="margin:0;background:#f4f6fa;font-family:Arial,Helvetica,sans-serif;color:#0f172a;">
-    <div style="display:none;max-height:0;overflow:hidden;">${safeEntity}${field === "name" ? " — you have been tagged on this task." : " has been allocated to you."}</div>
+    <div style="display:none;max-height:0;overflow:hidden;">${safeEntity}${field === "senior_manager" ? " — a new task has been added." : field === "name" ? " — you have been tagged on this task." : " has been allocated to you."}</div>
     <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f4f6fa;padding:28px 12px;">
       <tr>
         <td align="center">
