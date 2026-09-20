@@ -1189,29 +1189,9 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
     }
 
     try {
-      if (isCombinedView) {
-        return await loadOverviewProgressively(requestId, cached?.rows ?? []);
-      }
-
-      const response = await fetch(taskLineApiPath, { cache: "no-store" });
-      const result = (await response.json()) as { error?: string; rows?: TaskLineRow[] };
-
-      if (!response.ok) {
-        if (requestId === taskLineRequestIdRef.current) {
-          setMessage(result.error ?? `Could not load ${registerName}.`);
-        }
-        return cached?.rows ?? [];
-      }
-
-      if (requestId !== taskLineRequestIdRef.current) {
-        return result.rows ?? [];
-      }
-
-      const nextRows = (result.rows ?? []).map(canonicalizeTaskLineRowName);
-      setCached(taskLineRowsCacheKey, { rows: nextRows });
-      setRows(nextRows);
-      setMessage("");
-      return nextRows;
+      // Every register loads progressively: a fast first page renders almost
+      // immediately while the full list streams in behind it.
+      return await loadOverviewProgressively(requestId, cached?.rows ?? [], useCache);
     } catch (error) {
       console.error("TaskLine load error:", error);
       if (requestId === taskLineRequestIdRef.current) {
@@ -1225,7 +1205,7 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
     }
   }
 
-  async function loadOverviewProgressively(requestId: number, fallbackRows: TaskLineRow[]) {
+  async function loadOverviewProgressively(requestId: number, fallbackRows: TaskLineRow[], useCache = true) {
     const firstPageSize = 100;
     const parseRows = async (response: Response) => {
       const result = (await response.json()) as { error?: string; rows?: TaskLineRow[] };
@@ -1235,7 +1215,7 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
       return (result.rows ?? []).map(canonicalizeTaskLineRowName);
     };
 
-    const fullRequest = fetch(taskLineApiPath, { cache: "no-store" });
+    const fullRequest = fetch(useCache ? taskLineApiPath : `${taskLineApiPath}&fresh=1`, { cache: "no-store" });
 
     if (!fallbackRows.length) {
       try {
