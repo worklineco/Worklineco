@@ -25,9 +25,67 @@ html {
   }
 }
 
+/* The zoom does not scale viewport units, so 100vh-based heights come up
+   ~15% short of the real window (dead strip under the sidebar, tables ending
+   early). These overrides restore full-height layout: 100vh / 0.85 is the
+   window's height measured in zoomed pixels. */
+.h-screen {
+  height: calc(100vh / 0.85);
+}
+
+.min-h-screen {
+  min-height: calc(100vh / 0.85);
+}
+
+.min-h-\[calc\(100vh-4rem\)\] {
+  min-height: calc(100vh / 0.85 - 4rem);
+}
+
+.min-h-\[calc\(100vh-1\.5rem\)\] {
+  min-height: calc(100vh / 0.85 - 1.5rem);
+}
+
+@media (min-width: 1024px) {
+  .lg\:h-\[calc\(100vh-1\.5rem\)\] {
+    height: calc(100vh / 0.85 - 1.5rem);
+  }
+}
+
+.max-h-\[calc\(100vh-82px\)\] {
+  max-height: calc(100vh / 0.85 - 82px);
+}
+
+.max-h-\[calc\(100vh-130px\)\] {
+  max-height: calc(100vh / 0.85 - 130px);
+}
+
+.max-h-\[calc\(100vh-135px\)\] {
+  max-height: calc(100vh / 0.85 - 135px);
+}
+
+.max-h-\[calc\(100vh-190px\)\] {
+  max-height: calc(100vh / 0.85 - 190px);
+}
+
+.max-h-\[calc\(100vh-200px\)\] {
+  max-height: calc(100vh / 0.85 - 200px);
+}
+
+.max-h-\[calc\(100vh-215px\)\] {
+  max-height: calc(100vh / 0.85 - 215px);
+}
+
+.max-h-\[calc\(100vh-245px\)\] {
+  max-height: calc(100vh / 0.85 - 245px);
+}
+
+.max-h-\[calc\(100vh-285px\)\] {
+  max-height: calc(100vh / 0.85 - 285px);
+}
+
 body {
   margin: 0;
-  min-height: 100vh;
+  min-height: calc(100vh / 0.85);
   background: #f4f6fa;
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
     "Helvetica Neue", Arial, sans-serif;
@@ -174,3 +232,4 @@ a {
 .wl-pop-in {
   animation: wl-pop-in 0.14s ease-out;
 }
+
