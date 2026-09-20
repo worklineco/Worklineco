@@ -88,6 +88,17 @@ const overviewColumns = ["__id", "register_name", "team", "task_code", "name", "
 const overviewCacheTtlMs = 60_000;
 const overviewCache = new Map<string, { expiresAt: number; rows: TaskLineRow[] }>();
 
+// Full register loads are expensive (count + batched fetches), so warm
+// instances keep the records briefly. Every TaskLine mutation clears these
+// caches (see writeAuditLog), and explicit client reloads send fresh=1.
+const registerRecordsCacheTtlMs = 60_000;
+const registerRecordsCache = new Map<string, { expiresAt: number; records: TaskRecord[] }>();
+
+function clearTaskLineCaches() {
+  overviewCache.clear();
+  registerRecordsCache.clear();
+}
+
 function trimToOverviewRow(row: TaskLineRow): TaskLineRow {
   const trimmed: TaskLineRow = {};
   for (const key of overviewColumns) {
@@ -153,9 +164,9 @@ async function loadOverviewFirstPage(admin: ReturnType<typeof createAdminClient>
   return { error: null, rows };
 }
 
-async function loadOverviewRows(admin: ReturnType<typeof createAdminClient>, organisationId: string, access: AccessScope) {
+async function loadOverviewRows(admin: ReturnType<typeof createAdminClient>, organisationId: string, access: AccessScope, skipCache = false) {
   const key = overviewCacheKey(organisationId, access);
-  const cached = overviewCache.get(key);
+  const cached = skipCache ? undefined : overviewCache.get(key);
   if (cached && cached.expiresAt > Date.now()) {
     return { error: null, rows: cached.rows };
   }
@@ -271,6 +282,7 @@ export async function GET(request: Request) {
   const access = getAccess(auth.user);
   const searchParams = new URL(request.url).searchParams;
   const registerKey = getRegisterKey(searchParams);
+  const skipCache = searchParams.get("fresh") === "1";
   const view = searchParams.get("view");
 
   if (view === "notifications") {
@@ -417,14 +429,14 @@ export async function GET(request: Request) {
   }
 
   if (registerKey === "all") {
-    const overview = await loadOverviewRows(admin, organisation.organisationId, access);
+    const overview = await loadOverviewRows(admin, organisation.organisationId, access, skipCache);
     if (overview.error) {
       return NextResponse.json({ error: overview.error.message }, { status: 500 });
     }
     return NextResponse.json({ rows: overview.rows ?? [] });
   }
 
-  const records = await loadTaskLineRecords(admin, organisation.organisationId, access, registerKey);
+  const records = await loadTaskLineRecords(admin, organisation.organisationId, access, registerKey, skipCache);
 
   if (records.error) {
     return NextResponse.json({ error: records.error.message }, { status: 500 });
@@ -1401,13 +1413,33 @@ function indiaDateKey(dayOffset: number) {
   return `${date.getUTCFullYear()}-${pad2(date.getUTCMonth() + 1)}-${pad2(date.getUTCDate())}`;
 }
 
-async function loadTaskLineRecords(admin: ReturnType<typeof createAdminClient>, organisationId: string, access: AccessScope, registerKey: RegisterKey = "taskline") {
-  console.time("taskline:loadRecords:count");
-  const countResult = await admin
+async function loadTaskLineRecords(admin: ReturnType<typeof createAdminClient>, organisationId: string, access: AccessScope, registerKey: RegisterKey = "taskline", skipCache = false) {
+  const cacheKey = `${organisationId}|${registerKey}|${access.canViewAll ? "all" : access.teams.join(",")}`;
+  const cached = skipCache ? undefined : registerRecordsCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return { data: cached.records, error: null };
+  }
+
+  const batchQuery = (from: number) => admin
     .from("tasks")
-    .select("id", { count: "exact", head: true })
+    .select("id,custom_values")
     .eq("organisation_id", organisationId)
-    .in("custom_values->>workline_module", modulesForRegister(registerKey));
+    .in("custom_values->>workline_module", modulesForRegister(registerKey))
+    .order("created_at", { ascending: true })
+    .range(from, from + fetchBatchSize - 1);
+
+  // The exact count and the first batch run in parallel; the remaining
+  // batches follow in one parallel burst once the total is known.
+  console.time("taskline:loadRecords:count");
+  const gstatPromise = registerKey === "all" ? loadGstatRecordsForOverview(admin, access) : null;
+  const [countResult, firstBatch] = await Promise.all([
+    admin
+      .from("tasks")
+      .select("id", { count: "exact", head: true })
+      .eq("organisation_id", organisationId)
+      .in("custom_values->>workline_module", modulesForRegister(registerKey)),
+    batchQuery(0)
+  ]);
   console.timeEnd("taskline:loadRecords:count");
 
   if (countResult.error) {
@@ -1418,19 +1450,10 @@ async function loadTaskLineRecords(admin: ReturnType<typeof createAdminClient>, 
   const batchCount = Math.max(1, Math.ceil(total / fetchBatchSize));
 
   console.time(`taskline:loadRecords:fetch(${total} rows, ${batchCount} batches)`);
-  const gstatPromise = registerKey === "all" ? loadGstatRecordsForOverview(admin, access) : null;
-  const batchResults = await Promise.all(
-    Array.from({ length: batchCount }, (_, index) => {
-      const from = index * fetchBatchSize;
-      return admin
-        .from("tasks")
-        .select("id,custom_values")
-        .eq("organisation_id", organisationId)
-        .in("custom_values->>workline_module", modulesForRegister(registerKey))
-        .order("created_at", { ascending: true })
-        .range(from, from + fetchBatchSize - 1);
-    })
-  );
+  const batchResults = [
+    firstBatch,
+    ...(await Promise.all(Array.from({ length: batchCount - 1 }, (_, index) => batchQuery((index + 1) * fetchBatchSize))))
+  ];
   console.timeEnd(`taskline:loadRecords:fetch(${total} rows, ${batchCount} batches)`);
 
   const rows: TaskRecord[] = [];
@@ -1449,6 +1472,7 @@ async function loadTaskLineRecords(admin: ReturnType<typeof createAdminClient>, 
     rows.push(...(gstatRecords.data ?? []));
   }
 
+  registerRecordsCache.set(cacheKey, { expiresAt: Date.now() + registerRecordsCacheTtlMs, records: rows });
   return { data: rows, error: null };
 }
 
@@ -1595,6 +1619,10 @@ async function writeAuditLog(
   oldValue: unknown,
   newValue: unknown
 ) {
+  // Every TaskLine mutation writes an audit log, so this doubles as the
+  // invalidation point for this instance's cached register rows.
+  clearTaskLineCaches();
+
   const entityId = readId(newValue) || readId(oldValue) || null;
 
   await admin.from("audit_logs").insert({
