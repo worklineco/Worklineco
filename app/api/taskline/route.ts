@@ -2452,10 +2452,11 @@ async function sendResourceAllocationMail(
       const user = authUsersById.get(member.id);
 
       // Senior Managers receive the new-task mail regardless of the Name and
-      // Resource columns; the other modes match members by name.
+      // Resource columns - but only for their own team's tasks; the other
+      // modes match members by name.
       if (field === "senior_manager") {
         const role = `${text(user?.user_metadata?.role)} ${text(user?.app_metadata?.workline_role)}`.toLowerCase();
-        if (role.includes("senior manager")) {
+        if (role.includes("senior manager") && userHasTeam(user, row.team)) {
           const email = text(user?.email || member.email).toLowerCase();
           if (allocationIsEmail(email) && !allocationEmailExcludedRecipients.has(email)) {
             recipients.add(email);
