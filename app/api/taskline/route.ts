@@ -741,13 +741,13 @@ async function handlePost(request: Request) {
         try {
           // Allocation email: when the Resource changes, notify the newly
           // allocated resource (and only the resource).
-          if (registerKey === "taskline" && resourceAllocationChanged(previousResource, text(cleaned.resource))) {
+          if (registerSendsMails(registerKey) && resourceAllocationChanged(previousResource, text(cleaned.resource))) {
             await sendResourceAllocationMail(admin, organisation.organisationId, savedRecord);
           }
 
           // Name-tag email: when the Name (manager/owner) changes, notify the
           // newly tagged person the same way a resource allocation does.
-          if (registerKey === "taskline" && resourceAllocationChanged(previousName, text(cleaned.name))) {
+          if (registerSendsMails(registerKey) && resourceAllocationChanged(previousName, text(cleaned.name))) {
             await sendResourceAllocationMail(admin, organisation.organisationId, savedRecord, "name");
           }
 
@@ -755,7 +755,7 @@ async function handlePost(request: Request) {
           // has already gone out, a due date set/changed TO today would
           // otherwise never get its reminder. Send it immediately instead (the
           // audit-log dedupe keys stop double sends either way).
-          if (registerKey === "taskline" && text(cleaned.due_date) === indiaTodayDisplayDate() && previousDueDate !== text(cleaned.due_date)) {
+          if (registerSendsMails(registerKey) && text(cleaned.due_date) === indiaTodayDisplayDate() && previousDueDate !== text(cleaned.due_date)) {
             await sendDueTodayReminderNow(admin, organisation.organisationId, savedRecord);
           }
         } catch (error) {
@@ -810,23 +810,23 @@ async function handlePost(request: Request) {
     try {
       // Allocation email: a brand-new row created with a Resource selected
       // notifies that resource straight away.
-      if (registerKey === "taskline" && text(cleaned.resource)) {
+      if (registerSendsMails(registerKey) && text(cleaned.resource)) {
         await sendResourceAllocationMail(admin, organisation.organisationId, createdRecord);
       }
 
-      if (registerKey === "taskline" && text(cleaned.name)) {
+      if (registerSendsMails(registerKey) && text(cleaned.name)) {
         await sendResourceAllocationMail(admin, organisation.organisationId, createdRecord, "name");
       }
 
       // Senior Managers are notified of every newly added task, whether or
       // not they appear in the Name or Resource columns.
-      if (registerKey === "taskline") {
+      if (registerSendsMails(registerKey)) {
         await sendResourceAllocationMail(admin, organisation.organisationId, createdRecord, "senior_manager");
       }
 
       // Instant due-today reminder for rows created with today's due date
       // (the daily 09:00 IST mail for today may have already gone out).
-      if (registerKey === "taskline" && text(cleaned.due_date) === indiaTodayDisplayDate()) {
+      if (registerSendsMails(registerKey) && text(cleaned.due_date) === indiaTodayDisplayDate()) {
         await sendDueTodayReminderNow(admin, organisation.organisationId, createdRecord);
       }
     } catch (error) {
@@ -1792,6 +1792,13 @@ function isRegisterRecord(record: TaskRecord | null, registerKey: RegisterKey): 
 
 function matchesRegisterKey(storedKey: RegisterKey, registerKey: RegisterKey) {
   return registerKey === "all" ? storedKey !== "all" : storedKey === registerKey;
+}
+
+// Allocation / tag / reminder mails go out for every task register
+// (Litigation, Non-Litigation, CESTAT, High Court), not just the original
+// TaskLine module.
+function registerSendsMails(registerKey: RegisterKey) {
+  return registerKey !== "all";
 }
 
 function moduleForRegister(registerKey: RegisterKey) {
