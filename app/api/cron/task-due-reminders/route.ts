@@ -33,9 +33,6 @@ const moduleKey = "taskline";
 // Due reminders cover every task register, not just the original TaskLine
 // module ("taskline" = Litigation).
 const reminderModules = [moduleKey, "non_litigation", "cestat", "high_court"];
-// Due reminders cover every task register, not just the original TaskLine
-// module ("taskline" = Litigation).
-const reminderModules = [moduleKey, "non_litigation", "cestat", "high_court"];
 const fetchBatchSize = 1000;
 // Furthest-out advance reminder we support (in days) via the Reminder Days column.
 const maxReminderWindowDays = 90;
