@@ -30,6 +30,12 @@ type ReminderAuditValue = {
 };
 
 const moduleKey = "taskline";
+// Due reminders cover every task register, not just the original TaskLine
+// module ("taskline" = Litigation).
+const reminderModules = [moduleKey, "non_litigation", "cestat", "high_court"];
+// Due reminders cover every task register, not just the original TaskLine
+// module ("taskline" = Litigation).
+const reminderModules = [moduleKey, "non_litigation", "cestat", "high_court"];
 const fetchBatchSize = 1000;
 // Furthest-out advance reminder we support (in days) via the Reminder Days column.
 const maxReminderWindowDays = 90;
@@ -224,7 +230,7 @@ async function loadDueTasks(
     const result = await admin
       .from("tasks")
       .select("id,organisation_id,due_at,custom_values")
-      .eq("custom_values->>workline_module", moduleKey)
+      .in("custom_values->>workline_module", reminderModules)
       .gte("due_at", `${dueDateKey}T00:00:00.000Z`)
       .lt("due_at", `${followingDateKey}T00:00:00.000Z`)
       .order("id", { ascending: true })
