@@ -116,7 +116,9 @@ export async function GET(request: Request) {
     // task's "Reminder Days" value ahead of its due date (advance reminder).
     const daysUntilDue = daysBetweenKeys(dueDateKey, text(task.due_at).slice(0, 10));
     const reminderDaysBefore = parseReminderDays(row.reminder_days);
-    const shouldRemind = daysUntilDue === 0 || (reminderDaysBefore > 0 && daysUntilDue === reminderDaysBefore);
+    // Remind every day within the window: from "Reminder Days" before the due
+    // date through the due date itself (not just the first and last day).
+    const shouldRemind = daysUntilDue === 0 || (reminderDaysBefore > 0 && daysUntilDue > 0 && daysUntilDue <= reminderDaysBefore);
     if (!shouldRemind) {
       skipped += 1;
       continue;
