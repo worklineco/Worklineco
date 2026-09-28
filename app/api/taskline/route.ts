@@ -2196,7 +2196,10 @@ function getAccess(user: User): AccessScope {
   const role = text(user.user_metadata?.role).toLowerCase();
   const team = readPrimaryTeam(user);
   const teams = expandTeamVisibility(readUserTeams(user));
-  const canViewAll = role === "partner" || role.includes("partner") || role === "owner" || role === "admin";
+  // Partners/owners/admins and the "Others" designation see the whole TaskLine
+  // (all teams); everyone else is scoped to their own team(s).
+  const canViewAll =
+    role === "partner" || role.includes("partner") || role === "owner" || role === "admin" || role.includes("other");
 
   return {
     canViewAll,
