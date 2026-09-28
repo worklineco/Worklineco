@@ -169,6 +169,36 @@ const taskLineFormColumnByKey = new Map<string, TaskLineColumn>([
 const defaultTaskLineColumnOrder = taskLineColumns.map((column) => column.key);
 const statusOptions = ["Open", "Close"];
 const billableOptions = ["Yes", "No", "Retainership"];
+const showBillablesSnoozeKey = "workline:taskline-billables-snooze";
+// Stages that mean the work is done and the task is ready to bill.
+const billableDoneStages = new Set([
+  "submitted",
+  "appeared",
+  "attended",
+  "shared with client",
+  "submitted both",
+  "submitted mail",
+  "submitted online",
+  "submitted physically"
+]);
+// A "pending billable" task: billable = Yes, task code starts with "W", the work
+// is done (a done stage or Closed status), and it is NOT yet in the Billing register.
+function isPendingBillableRow(row: TaskLineRow, billedCodes: Set<string>) {
+  if (text(row.billable).toLowerCase() !== "yes") {
+    return false;
+  }
+  const code = text(row.task_code).trim();
+  if (!code || code[0].toLowerCase() !== "w") {
+    return false;
+  }
+  const stage = text(row.stage).trim().toLowerCase();
+  const status = text(row.status_open_close).trim().toLowerCase();
+  const done = billableDoneStages.has(stage) || status === "close" || status === "closed";
+  if (!done) {
+    return false;
+  }
+  return !billedCodes.has(code.toUpperCase());
+}
 type TeamMemberLite = { designation: string; joining_date: string; name: string; team: string };
 type EntityMasterOption = { entity: string; group: string; gstin: string; state: string };
 const emptyOptions: string[] = [];
@@ -303,6 +333,10 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
   const [activeColumnGroup, setActiveColumnGroup] = useState("core");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  const [showBillablesOnly, setShowBillablesOnly] = useState(false);
+  const [billedTaskCodes, setBilledTaskCodes] = useState<Set<string>>(() => new Set());
+  const [billableReminderOpen, setBillableReminderOpen] = useState(false);
+  const billableReminderShownRef = useRef(false);
   const [dueRange, setDueRange] = useState<{ end: string; preset: string; start: string }>({ end: "", preset: "", start: "" });
   const [isDateRangeOpen, setIsDateRangeOpen] = useState(false);
   const [savedViews, setSavedViews] = useState<TaskLineSavedView[]>([]);
@@ -513,8 +547,16 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
     () => (pendencyFocus ? resolvedRows.filter((row) => matchesPendencyFocus(row, pendencyFocus)) : resolvedRows),
     [pendencyFocus, resolvedRows]
   );
+  const pendingBillableCount = useMemo(
+    () => resolvedRows.filter((row) => isPendingBillableRow(row, billedTaskCodes)).length,
+    [resolvedRows, billedTaskCodes]
+  );
+  const scopedRows = useMemo(
+    () => (showBillablesOnly ? focusedRows.filter((row) => isPendingBillableRow(row, billedTaskCodes)) : focusedRows),
+    [showBillablesOnly, focusedRows, billedTaskCodes]
+  );
   const filteredRows = useMemo(
-    () => applyTaskLineFilters(focusedRows, {
+    () => applyTaskLineFilters(scopedRows, {
       columnFilters: deferredColumnFilters,
       dueColorFilter,
       dueRange,
@@ -523,7 +565,7 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
       statusFilter,
       valueFilters: deferredValueFilters
     }),
-    [focusedRows, deferredColumnFilters, dueColorFilter, dueRange, deferredSearch, sortState, statusFilter, deferredValueFilters]
+    [scopedRows, deferredColumnFilters, dueColorFilter, dueRange, deferredSearch, sortState, statusFilter, deferredValueFilters]
   );
   const hasActiveColumnFilters = Object.values(columnFilters).some((value) => value.trim());
   const hasActiveDataQuery = Boolean(
@@ -569,7 +611,25 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
 
     void loadAllTaskLine();
     void loadViews(!focus);
+
+    fetch(taskLineApiQuery("view=billed-codes"), { cache: "no-store", credentials: "include" })
+      .then((response) => (response.ok ? response.json() : { taskCodes: [] }))
+      .then((data) => setBilledTaskCodes(new Set(((data?.taskCodes ?? []) as string[]).map((code) => String(code).toUpperCase()))))
+      .catch(() => undefined);
   }, []);
+
+  // Show the pending-billables reminder once per session (unless snoozed).
+  useEffect(() => {
+    if (billableReminderShownRef.current || pendingBillableCount <= 0) {
+      return;
+    }
+    const snoozeUntil = Number(window.localStorage.getItem(showBillablesSnoozeKey) ?? 0);
+    if (Number.isFinite(snoozeUntil) && Date.now() < snoozeUntil) {
+      return;
+    }
+    billableReminderShownRef.current = true;
+    setBillableReminderOpen(true);
+  }, [pendingBillableCount]);
 
   useEffect(() => {
     if (!gstatDetailsModal) {
@@ -2232,6 +2292,20 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
         </div>
         <div className="mb-1.5 flex items-center justify-end gap-1.5">
           {isLoading ? <span className="mr-auto text-xs font-bold text-slate-500">Loading {registerName} rows...</span> : null}
+          <label
+            className={`inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-md border px-3 text-xs font-bold transition ${
+              showBillablesOnly ? "border-amber-500 bg-amber-50 text-amber-700" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+            }`}
+            title="Show only billable, work-done tasks (W-codes) that are not yet in the Billing register"
+          >
+            <input checked={showBillablesOnly} className="accent-amber-600" onChange={(event) => setShowBillablesOnly(event.target.checked)} type="checkbox" />
+            Show Billables
+            {pendingBillableCount > 0 ? (
+              <span className="inline-flex min-w-5 items-center justify-center rounded-full bg-amber-500 px-1.5 text-[11px] font-black text-white">
+                {pendingBillableCount}
+              </span>
+            ) : null}
+          </label>
           {isCombinedView ? null : (
             <button
               className="inline-flex h-8 items-center gap-1 rounded-md border border-navy-700 bg-navy-700 px-3 text-xs font-bold text-white transition hover:bg-navy-800 disabled:cursor-not-allowed disabled:opacity-40"
@@ -2476,6 +2550,44 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
         isAuditLoading
           ? <p className="mt-4 rounded-md border border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm font-bold text-slate-500">Loading audit trail...</p>
           : <TaskLineAuditTable logs={auditLogs} onBack={() => { setViewMode("register"); setSelectedAuditRow(null); }} selectedRow={selectedAuditRow} />
+      ) : null}
+
+      {billableReminderOpen ? (
+        <div className="fixed inset-0 z-[85] flex items-center justify-center bg-navy-950/55 p-4" onClick={() => setBillableReminderOpen(false)}>
+          <div className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl" onClick={(event) => event.stopPropagation()}>
+            <div className="flex items-start gap-3">
+              <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-amber-100 text-lg text-amber-700">₹</div>
+              <div className="min-w-0">
+                <h3 className="text-base font-black text-navy-800">Pending billable tasks</h3>
+                <p className="mt-1 text-sm font-bold text-slate-500">
+                  {pendingBillableCount} task{pendingBillableCount === 1 ? "" : "s"} {pendingBillableCount === 1 ? "is" : "are"} done and billable but not yet in the Billing register.
+                </p>
+              </div>
+            </div>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                className="inline-flex h-9 items-center rounded-md border border-slate-200 bg-white px-3 text-sm font-bold text-slate-600 hover:bg-slate-50"
+                onClick={() => {
+                  window.localStorage.setItem(showBillablesSnoozeKey, String(Date.now() + 4 * 60 * 60 * 1000));
+                  setBillableReminderOpen(false);
+                }}
+                type="button"
+              >
+                Remind later
+              </button>
+              <button
+                className="inline-flex h-9 items-center rounded-md border border-amber-600 bg-amber-500 px-3 text-sm font-black text-white hover:bg-amber-600"
+                onClick={() => {
+                  setShowBillablesOnly(true);
+                  setBillableReminderOpen(false);
+                }}
+                type="button"
+              >
+                Show list
+              </button>
+            </div>
+          </div>
+        </div>
       ) : null}
 
       {formDraft ? (

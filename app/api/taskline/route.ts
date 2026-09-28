@@ -301,6 +301,10 @@ export async function GET(request: Request) {
     return loadTaskLineAging(admin, organisation.organisationId, access);
   }
 
+  if (view === "billed-codes") {
+    return loadBilledTaskCodes(admin, organisation.organisationId);
+  }
+
   if (view === "audit") {
     const entityId = text(searchParams.get("entityId"));
 
@@ -1290,6 +1294,38 @@ function agingTeamLabel(team: unknown) {
     return `Team ${String(parseInt(digits[0], 10)).padStart(2, "0")}`;
   }
   return raw || "Unassigned";
+}
+
+// Task codes that already exist in the Billing register (uppercased), so the
+// TaskLine "Show Billables" filter can exclude tasks that have already been billed.
+async function loadBilledTaskCodes(admin: ReturnType<typeof createAdminClient>, organisationId: string) {
+  const codes = new Set<string>();
+
+  for (let from = 0; ; from += fetchBatchSize) {
+    const { data, error } = await admin
+      .from("firm_billing_records")
+      .select("task_code")
+      .eq("organisation_id", organisationId)
+      .range(from, from + fetchBatchSize - 1);
+
+    if (error) {
+      // Billing table/column may be unavailable — fail soft with an empty set.
+      return NextResponse.json({ taskCodes: [] as string[] });
+    }
+
+    for (const row of (data ?? []) as { task_code?: string | null }[]) {
+      const code = text(row.task_code).trim().toUpperCase();
+      if (code) {
+        codes.add(code);
+      }
+    }
+
+    if ((data ?? []).length < fetchBatchSize) {
+      break;
+    }
+  }
+
+  return NextResponse.json({ taskCodes: Array.from(codes) });
 }
 
 // Aging report: open TaskLine tasks that have not started (stage blank / "Open"
