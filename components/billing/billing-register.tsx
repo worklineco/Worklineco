@@ -39,6 +39,8 @@ type BillingRecord = {
   poc_name: string;
   receiving_date: string | null;
   receiving_status: string;
+  amount_received: number;
+  pending_amount: number;
   registration_type: string;
   remarks: string;
   serial_no?: number;
@@ -128,6 +130,8 @@ const emptyRecord: BillingRecord = {
   poc_name: "",
   receiving_date: "",
   receiving_status: "Pending",
+  amount_received: 0,
+  pending_amount: 0,
   registration_type: "",
   remarks: "",
   serial_no: undefined,
@@ -220,6 +224,8 @@ const billingColumns: BillingColumn[] = [
   { field: "invoice_date", label: "Invoice Date", type: "date", width: 132 },
   { field: "receiving_status", label: "Receipt Status", type: "select", width: 150 },
   { field: "receiving_date", label: "Receiving Date", type: "date", width: 142 },
+  { field: "amount_received", label: "Amount Received", type: "money", width: 148 },
+  { field: "pending_amount", label: "Pending Amount", type: "money", width: 148 },
   { field: "remarks", label: "Remarks", type: "text", width: 220 },
   { field: "gstat_link", label: "GSTAT Link", width: 170 },
   { field: "actions", label: "Actions", width: 150 }
@@ -259,6 +265,8 @@ const importHeaders: Array<{ field: BillingField; label: string }> = [
   { field: "invoice_date", label: "Invoice Date" },
   { field: "receiving_status", label: "Receipt Status" },
   { field: "receiving_date", label: "Receiving Date" },
+  { field: "amount_received", label: "Amount Received" },
+  { field: "pending_amount", label: "Pending Amount" },
   { field: "remarks", label: "Remarks" }
 ];
 const importHeaderAliases: Partial<Record<BillingField, string[]>> = {
@@ -281,7 +289,8 @@ const accountsOnlyFields = new Set<BillingField>([
   "memo_date",
   "memo_no",
   "receiving_date",
-  "receiving_status"
+  "receiving_status",
+  "amount_received"
 ]);
 
 export function BillingRegister() {
@@ -891,6 +900,8 @@ export function BillingRegister() {
       "Invoice Date": formatDateForExport(record.invoice_date),
       "Receipt Status": record.receiving_status,
       "Receiving Date": formatDateForExport(record.receiving_date),
+      "Amount Received": record.amount_received,
+      "Pending Amount": record.pending_amount,
       Remarks: record.remarks,
       "GSTAT Link": getMatterLabel(record, matters)
     }));
@@ -1270,11 +1281,16 @@ function BillingCell({
   const isGstatLink = column.field === "gstat_link";
   const field = column.field as BillingField;
   const isAccountsOnly = accountsOnlyFields.has(field);
+  const receiptStatus = String(record.receiving_status ?? "").trim().toLowerCase();
+  const receiptIsAuto =
+    receiptStatus === "" || receiptStatus === "pending" || receiptStatus === "received" || receiptStatus === "realised" || receiptStatus === "realized";
   const isReadOnly =
     column.field === "serial_no" ||
     column.field === "source_module" ||
     column.field === "pushed_by" ||
     column.field === "total" ||
+    column.field === "pending_amount" ||
+    (column.field === "amount_received" && receiptIsAuto) ||
     (!access.canViewAll && column.field === "owner_team") ||
     (isAccountsOnly && !access.canEditAccountsFields);
   const isEditing = Boolean(inlineEditor && inlineEditor.recordId === record.id && inlineEditor.field === field);
@@ -1997,9 +2013,26 @@ function normalizeRecord(record: BillingRecord): BillingRecord {
 }
 
 function recalc(record: BillingRecord): BillingRecord {
+  const total = toNumber(record.amount) + toNumber(record.cgst) + toNumber(record.sgst) + toNumber(record.igst) + toNumber(record.ope);
+  const status = String(record.receiving_status ?? "").trim().toLowerCase();
+  let amountReceived: number;
+  let pendingAmount: number;
+  if (status === "received" || status === "realised" || status === "realized") {
+    amountReceived = total;
+    pendingAmount = 0;
+  } else if (status === "" || status === "pending") {
+    amountReceived = 0;
+    pendingAmount = total;
+  } else {
+    // Part Received / any other status: use the manually entered received amount.
+    amountReceived = Math.min(Math.max(0, toNumber(record.amount_received)), total);
+    pendingAmount = Math.max(0, total - amountReceived);
+  }
   return {
     ...record,
-    total: toNumber(record.amount) + toNumber(record.cgst) + toNumber(record.sgst) + toNumber(record.igst) + toNumber(record.ope)
+    amount_received: amountReceived,
+    pending_amount: pendingAmount,
+    total
   };
 }
 

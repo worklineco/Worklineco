@@ -118,6 +118,8 @@ const billingSelectColumns = [
   "ope_remarks",
   "receiving_status",
   "receiving_date",
+  "amount_received",
+  "pending_amount",
   "remarks",
   "version_no",
   "created_by",
@@ -1015,7 +1017,7 @@ function cleanRecord(
 function isMissingCompatibilityColumn(error: unknown) {
   const message = isRecord(error) ? String(error.message ?? "") : String(error ?? "");
 
-  return ["address", "escalation_1", "include_ope_in_fees", "is_retainer", "task_code", "place_of_supply", "registration_type", "receiving_date", "serial_no"].some((column) =>
+  return ["address", "escalation_1", "include_ope_in_fees", "is_retainer", "task_code", "place_of_supply", "registration_type", "receiving_date", "serial_no", "amount_received", "pending_amount"].some((column) =>
     message.includes(column)
   );
 }
@@ -1031,6 +1033,8 @@ function stripCompatibilityColumns<T extends Record<string, unknown>>(record: T)
     receiving_date: _receivingDate,
     registration_type: _registrationType,
     serial_no: _serialNo,
+    amount_received: _amountReceived,
+    pending_amount: _pendingAmount,
     ...compatibleRecord
   } = record;
 
