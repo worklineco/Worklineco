@@ -1280,6 +1280,18 @@ async function loadTaskLineNotifications(
   });
 }
 
+// Normalise inconsistent team spellings ("Team 03", "Team -03", "Team-03") into
+// one canonical "Team NN" label so they group together. Non-numeric team values
+// (e.g. a person's name) are kept as typed.
+function agingTeamLabel(team: unknown) {
+  const raw = text(team).trim();
+  const digits = raw.match(/\d+/);
+  if (digits) {
+    return `Team ${String(parseInt(digits[0], 10)).padStart(2, "0")}`;
+  }
+  return raw || "Unassigned";
+}
+
 // Aging report: open TaskLine tasks that have not started (stage blank / "Open"
 // / any "review" stage) and Status = Open, grouped by team into age buckets by
 // days since the task was added (created_at).
@@ -1334,7 +1346,7 @@ async function loadTaskLineAging(
     }
 
     const days = Math.max(0, Math.floor((now - created) / 86400000));
-    const teamLabel = text(data.team) || "Unassigned";
+    const teamLabel = agingTeamLabel(data.team);
     const entry = teams.get(teamLabel) ?? { b0_7: 0, b31_60: 0, b60plus: 0, b8_30: 0, oldest: 0, team: teamLabel, total: 0 };
 
     if (days <= 7) {
