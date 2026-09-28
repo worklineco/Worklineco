@@ -297,6 +297,10 @@ export async function GET(request: Request) {
     return loadPendencySummary(admin, organisation.organisationId, auth.user);
   }
 
+  if (view === "aging") {
+    return loadTaskLineAging(admin, organisation.organisationId, access);
+  }
+
   if (view === "audit") {
     const entityId = text(searchParams.get("entityId"));
 
@@ -1274,6 +1278,81 @@ async function loadTaskLineNotifications(
   return NextResponse.json({
     notifications: [...dueNotifications, ...assignedNotifications].slice(0, 40)
   });
+}
+
+// Aging report: open TaskLine tasks that have not started (stage blank / "Open"
+// / any "review" stage) and Status = Open, grouped by team into age buckets by
+// days since the task was added (created_at).
+async function loadTaskLineAging(
+  admin: ReturnType<typeof createAdminClient>,
+  organisationId: string,
+  access: AccessScope
+) {
+  const rows: TaskRecord[] = [];
+
+  for (let from = 0; ; from += fetchBatchSize) {
+    const to = from + fetchBatchSize - 1;
+    const { data, error } = await admin
+      .from("tasks")
+      .select("id,custom_values,created_at")
+      .eq("organisation_id", organisationId)
+      .eq("custom_values->>workline_module", moduleKey)
+      .order("id", { ascending: true })
+      .range(from, to);
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    rows.push(...((data ?? []) as TaskRecord[]).filter(isTaskLineRecord).filter((record) => canAccessRecord(record, access)));
+
+    if ((data ?? []).length < fetchBatchSize) {
+      break;
+    }
+  }
+
+  const now = Date.now();
+  type AgingTeam = { b0_7: number; b31_60: number; b60plus: number; b8_30: number; oldest: number; team: string; total: number };
+  const teams = new Map<string, AgingTeam>();
+
+  for (const record of rows) {
+    const data = record.custom_values?.taskline_data ?? {};
+
+    if (text(data.status_open_close).toLowerCase() !== "open") {
+      continue;
+    }
+
+    const stage = text(data.stage).toLowerCase();
+    const stageQualifies = stage === "" || stage === "open" || stage.includes("review");
+    if (!stageQualifies) {
+      continue;
+    }
+
+    const created = Date.parse(text(record.created_at));
+    if (!Number.isFinite(created)) {
+      continue;
+    }
+
+    const days = Math.max(0, Math.floor((now - created) / 86400000));
+    const teamLabel = text(data.team) || "Unassigned";
+    const entry = teams.get(teamLabel) ?? { b0_7: 0, b31_60: 0, b60plus: 0, b8_30: 0, oldest: 0, team: teamLabel, total: 0 };
+
+    if (days <= 7) {
+      entry.b0_7 += 1;
+    } else if (days <= 30) {
+      entry.b8_30 += 1;
+    } else if (days <= 60) {
+      entry.b31_60 += 1;
+    } else {
+      entry.b60plus += 1;
+    }
+    entry.total += 1;
+    entry.oldest = Math.max(entry.oldest, days);
+    teams.set(teamLabel, entry);
+  }
+
+  const list = Array.from(teams.values()).sort((a, b) => b.total - a.total || a.team.localeCompare(b.team));
+  return NextResponse.json({ asOf: new Date().toISOString(), teams: list });
 }
 
 async function loadCalendarEvents(

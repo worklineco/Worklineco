@@ -6,6 +6,7 @@ import { MonthCalendar, type CalendarEvent } from "@/components/home/month-calen
 import { TaskNotificationBell } from "@/components/home/task-notification-bell";
 import { clearPersistentDataCache, getCached, setCached } from "@/lib/data-cache";
 import { PendencyReport } from "@/components/partner-dashboard/pendency-report";
+import { TaskAgingReport } from "@/components/partner-dashboard/task-aging-report";
 import { useEffect, useRef, useState } from "react";
 
 type NoteTask = { color: string; done: boolean; id: string; targetDate: string; text: string };
@@ -464,6 +465,8 @@ export function PartnerDashboard() {
       </section>
 
       {isPartner ? <PendencyReport /> : null}
+
+      {isPartner ? <TaskAgingReport /> : null}
 
       <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="flex items-center gap-2">
