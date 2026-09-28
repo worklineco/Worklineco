@@ -184,8 +184,10 @@ const billableDoneStages = new Set([
 // A "pending billable" task: billable = Yes, task code starts with "W", the work
 // is done (a done stage or Closed status), and it is NOT yet in the Billing register.
 function isPendingBillableRow(row: TaskLineRow, billedCodes: Set<string>) {
+  // Billable counts as "Yes" or blank (blank shows as "Select" in the grid).
+  // Only explicit "No" / "Retainership" are excluded.
   const billable = text(row.billable).toLowerCase();
-  if (billable !== "yes" && billable !== "") {
+  if (billable === "no" || billable === "retainership") {
     return false;
   }
   const code = text(row.task_code).trim();
