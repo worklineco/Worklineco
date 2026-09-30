@@ -1300,23 +1300,30 @@ function agingTeamLabel(team: unknown) {
 // TaskLine "Show Billables" filter can exclude tasks that have already been billed.
 async function loadBilledTaskCodes(admin: ReturnType<typeof createAdminClient>, organisationId: string) {
   const codes = new Set<string>();
+  // First push date per task code, so the register can say when a task was
+  // already pushed to Billing.
+  const billedOn: Record<string, string> = {};
 
   for (let from = 0; ; from += fetchBatchSize) {
     const { data, error } = await admin
       .from("firm_billing_records")
-      .select("task_code")
+      .select("task_code,created_at")
       .eq("organisation_id", organisationId)
       .range(from, from + fetchBatchSize - 1);
 
     if (error) {
       // Billing table/column may be unavailable — fail soft with an empty set.
-      return NextResponse.json({ taskCodes: [] as string[] });
+      return NextResponse.json({ billedOn: {}, taskCodes: [] as string[] });
     }
 
-    for (const row of (data ?? []) as { task_code?: string | null }[]) {
+    for (const row of (data ?? []) as { created_at?: string | null; task_code?: string | null }[]) {
       const code = text(row.task_code).trim().toUpperCase();
       if (code) {
         codes.add(code);
+        const pushedOn = text(row.created_at).slice(0, 10);
+        if (pushedOn && (!billedOn[code] || pushedOn < billedOn[code])) {
+          billedOn[code] = pushedOn;
+        }
       }
     }
 
@@ -1325,7 +1332,7 @@ async function loadBilledTaskCodes(admin: ReturnType<typeof createAdminClient>, 
     }
   }
 
-  return NextResponse.json({ taskCodes: Array.from(codes) });
+  return NextResponse.json({ billedOn, taskCodes: Array.from(codes) });
 }
 
 // Aging report: open TaskLine tasks that have not started (stage blank / "Open"
