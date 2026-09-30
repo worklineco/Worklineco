@@ -326,11 +326,18 @@ export function ClientRecordsRegister() {
   }
 
   function exportExcel() {
-    const exportColumns = [importActionColumn, ...columns];
-    const exportRows = filteredRows.length
+    const sourceColumns = [importActionColumn, ...columns];
+    const exportColumns = sourceColumns.map(clientColumnLabel);
+    const exportRows: RegisterRow[] = filteredRows.length
       ? filteredRows.map((row) => ({ [importActionColumn]: "Update", ...stripInternalFields(row) }))
       : [createBlankRow()];
-    const worksheet = XLSX.utils.json_to_sheet(exportRows, { header: exportColumns });
+    const labelledExportRows = exportRows.map((row) =>
+      sourceColumns.reduce<RegisterRow>((result, column) => {
+        result[clientColumnLabel(column)] = row[column] ?? "";
+        return result;
+      }, {})
+    );
+    const worksheet = XLSX.utils.json_to_sheet(labelledExportRows, { header: exportColumns });
     worksheet["!cols"] = exportColumns.map((column) => ({ wch: Math.max(14, column.length + 3) }));
     worksheet["!autofilter"] = {
       ref: XLSX.utils.encode_range({ e: { c: exportColumns.length - 1, r: Math.max(exportRows.length, 1) }, s: { c: 0, r: 0 } })
@@ -681,18 +688,18 @@ export function ClientRecordsRegister() {
                 return (
                   <th className="border-b border-r border-slate-200 px-3 py-2" key={column}>
                     <div className="flex items-center gap-1">
-                      <button className="flex min-w-0 flex-1 items-center justify-between gap-1 text-left" onClick={() => toggleSort(column)} title={`Sort by ${column}`} type="button">
-                        <span className={`min-w-0 leading-tight ${column === "S.no." ? "whitespace-nowrap" : "whitespace-normal break-words"}`}>{column}</span>
+                      <button className="flex min-w-0 flex-1 items-center justify-between gap-1 text-left" onClick={() => toggleSort(column)} title={`Sort by ${clientColumnLabel(column)}`} type="button">
+                        <span className={`min-w-0 leading-tight ${column === "S.no." ? "whitespace-nowrap" : "whitespace-normal break-words"}`}>{clientColumnLabel(column)}</span>
                         <span className="flex shrink-0 flex-col leading-none">
                           <ArrowUp className={`size-3 ${sortState?.column === column && sortState.direction === "asc" ? "text-navy-700" : "text-slate-300"}`} />
                           <ArrowDown className={`-mt-1 size-3 ${sortState?.column === column && sortState.direction === "desc" ? "text-navy-700" : "text-slate-300"}`} />
                         </span>
                       </button>
-                      <button aria-label={`Filter ${column}`} className={`inline-flex size-5 shrink-0 items-center justify-center rounded border ${hasFilter ? "border-navy-600 bg-navy-600 text-white" : "border-slate-300 bg-white text-slate-500"}`} onClick={(event) => openColumnFilter(column, event.currentTarget)} title={`Filter ${column}`} type="button"><Filter className="size-3" /></button>
+                      <button aria-label={`Filter ${clientColumnLabel(column)}`} className={`inline-flex size-5 shrink-0 items-center justify-center rounded border ${hasFilter ? "border-navy-600 bg-navy-600 text-white" : "border-slate-300 bg-white text-slate-500"}`} onClick={(event) => openColumnFilter(column, event.currentTarget)} title={`Filter ${clientColumnLabel(column)}`} type="button"><Filter className="size-3" /></button>
                     </div>
                     {openFilterColumn === column && filterMenuPos ? (
                       <ClientFilterMenu
-                        columnLabel={column}
+                        columnLabel={clientColumnLabel(column)}
                         draft={filterDraft}
                         hasFilter={hasFilter}
                         menuPos={filterMenuPos}
@@ -716,8 +723,8 @@ export function ClientRecordsRegister() {
               <th className="border-b border-r border-slate-200 px-2 py-1" />
               <th className="border-b border-r border-slate-200 px-2 py-1" />
               {columns.map((column) => (
-                <th className="border-b border-r border-slate-200 px-3 py-1" key={`filter-${column}`}>
-                  {column === "S.no." ? null : <input aria-label={`Filter ${column}`} className="h-7 w-full rounded-md border border-slate-200 bg-white px-2 text-xs font-semibold normal-case text-slate-950 outline-none focus:border-navy-400" onChange={(event) => setColumnFilters((current) => ({ ...current, [column]: event.target.value }))} placeholder="Filter" value={columnFilters[column] ?? ""} />}
+                <th className="border-b border-r border-slate-200 px-3 py-1" key={`filter-${clientColumnLabel(column)}`}>
+                  {column === "S.no." ? null : <input aria-label={`Filter ${clientColumnLabel(column)}`} className="h-7 w-full rounded-md border border-slate-200 bg-white px-2 text-xs font-semibold normal-case text-slate-950 outline-none focus:border-navy-400" onChange={(event) => setColumnFilters((current) => ({ ...current, [column]: event.target.value }))} placeholder="Filter" value={columnFilters[column] ?? ""} />}
                 </th>
               ))}
             </tr>
@@ -838,7 +845,7 @@ export function ClientRecordsRegister() {
             <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
               {columns.filter((column) => column !== "S.no.").map((column) => (
                 <label className="block" key={column}>
-                  <span className="text-xs font-black uppercase text-slate-500">{column}</span>
+                  <span className="text-xs font-black uppercase text-slate-500">{clientColumnLabel(column)}</span>
                   {column === "Client Type" ? (
                     <select
                       className="input mt-2"
@@ -959,6 +966,11 @@ function ClientFilterMenu({
   );
 }
 
+// Keep the stored key stable so existing client emails and integrations remain intact.
+function clientColumnLabel(column: string) {
+  return column === "Email ID" ? "POC Email" : column;
+}
+
 function createBlankRow() {
   return [importActionColumn, ...columns].reduce<RegisterRow>((row, column) => {
     if (column === importActionColumn) {
@@ -1006,7 +1018,8 @@ function formatAuditValue(value: unknown) {
 }
 
 function normalizeHeader(value: string) {
-  return value.replace(/[^0-9a-z]/gi, "").toLowerCase();
+  const normalized = value.replace(/[^0-9a-z]/gi, "").toLowerCase();
+  return normalized === "pocemail" ? "emailid" : normalized;
 }
 
 function findMatchingClientRow(existingRows: RegisterRow[], incomingRow: RegisterRow) {
