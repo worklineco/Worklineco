@@ -35,14 +35,24 @@ type AuditLog = {
   new_value: unknown;
   old_value: unknown;
 };
-type EditorState = { row: RegisterRow; rowId?: string };
+type EditorState = { originalRow?: RegisterRow; row: RegisterRow; rowId?: string };
 type SortState = { column: string; direction: "asc" | "desc" } | null;
 type SaveActionResult = {
+  auditLog?: AuditLog;
   auditLogs?: AuditLog[];
   error?: string;
+  row?: RegisterRow;
   rows?: RegisterRow[];
-  summary?: { added?: number; deleted?: number; skipped?: number; unchanged?: number; updated?: number };
+  summary?: {
+    added?: number;
+    changedFields?: Record<string, number>;
+    deleted?: number;
+    skipped?: number;
+    unchanged?: number;
+    updated?: number;
+  };
   trashRows?: RegisterRow[];
+  unchanged?: boolean;
 };
 
 const columns = [
@@ -491,7 +501,11 @@ export function ClientRecordsRegister() {
       return;
     }
 
-    setEditor({ row: stripInternalFields(row), rowId: String(row.id) });
+    setEditor({
+      originalRow: stripInternalFields(row),
+      row: stripInternalFields(row),
+      rowId: String(row.id)
+    });
   }
 
   async function saveEditor(event: FormEvent<HTMLFormElement>) {
@@ -499,13 +513,78 @@ export function ClientRecordsRegister() {
 
     if (!editor) return;
 
-    const action = editor.rowId ? "update" : "add";
-    const saved = await saveAction(
-      { action, row: editor.row, rowId: editor.rowId },
-      editor.rowId ? "Updated client record." : "Added client record."
+    if (!editor.rowId) {
+      const saved = await saveAction(
+        { action: "add", row: editor.row },
+        "Added client record."
+      );
+
+      if (saved) setEditor(null);
+      return;
+    }
+
+    const rowId = editor.rowId;
+    const currentEditor = editor;
+    const previousRows = rows;
+    const previousRow =
+      rows.find((row) => String(row.id) === rowId) ??
+      currentEditor.originalRow ??
+      currentEditor.row;
+    const optimisticRow = {
+      ...previousRow,
+      ...currentEditor.row,
+      id: rowId
+    };
+    const optimisticRows = rows.map((row) =>
+      String(row.id) === rowId ? optimisticRow : row
     );
 
-    if (saved) setEditor(null);
+    setRows(optimisticRows);
+    setCached("client-records", { rows: optimisticRows, trashRows });
+    setEditor(null);
+    setMessage("Saving client record...");
+
+    try {
+      const response = await fetch("/api/client-records/managed", {
+        body: JSON.stringify({
+          action: "update",
+          row: currentEditor.row,
+          rowId: rowId
+        }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST"
+      });
+      const result = (await response.json()) as SaveActionResult;
+
+      if (!response.ok) {
+        setRows(previousRows);
+        setCached("client-records", { rows: previousRows, trashRows });
+        setEditor(currentEditor);
+        setMessage(result.error ?? "Could not save client record.");
+        return;
+      }
+
+      const savedRow = result.row
+        ? { ...optimisticRow, ...result.row, id: rowId }
+        : optimisticRow;
+      const savedRows = optimisticRows.map((row) =>
+        String(row.id) === rowId ? savedRow : row
+      );
+      setRows(savedRows);
+      setCached("client-records", { rows: savedRows, trashRows });
+
+      if (result.auditLog) {
+        setAuditLogs((current) => [result.auditLog!, ...current].slice(0, 50));
+      }
+
+      setMessage(result.unchanged ? "No changes to save." : "Updated client record.");
+    } catch (error) {
+      console.error("Client record save error:", error);
+      setRows(previousRows);
+      setCached("client-records", { rows: previousRows, trashRows });
+      setEditor(currentEditor);
+      setMessage("Could not save client record.");
+    }
   }
 
   return (
