@@ -1,8 +1,9 @@
 "use client";
 
-import { ArrowDown, ArrowUp, ChevronDown, Download, History, Link2, Maximize2, Menu, Pencil, Plus, RotateCcw, Search, Settings2, ShieldCheck, Trash2, Upload, X } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, Filter, ChevronDown, Download, History, Link2, Maximize2, Menu, Pencil, Plus, RotateCcw, Search, Settings2, ShieldCheck, Trash2, Upload, X } from "lucide-react";
 import type { ComponentType } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { BillingColumnFilter } from "@/components/billing/billing-column-filter";
 import { getCached, setCached } from "@/lib/data-cache";
 import * as XLSX from "xlsx-js-style";
 
@@ -324,6 +325,12 @@ export function BillingRegister() {
   const [isToolbarMenuOpen, setIsToolbarMenuOpen] = useState(false);
   const [filters, setFilters] = useState({ search: "", status: "", receiptStatus: "", team: "", source: "" });
   const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
+  const [valueFilters, setValueFilters] = useState<Record<string, string[]>>({});
+  const [sort, setSort] = useState<{ field: BillingColumn["field"]; direction: "asc" | "desc" } | null>(null);
+  const [filterMenu, setFilterMenu] = useState<{ column: BillingColumn; left: number; bottom: number } | null>(null);
+  const filterOptions = useMemo(() => filterMenu
+    ? Array.from(new Set(records.map((record) => getBillingFilterValue(record, filterMenu.column, matters)))).sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }))
+    : [], [filterMenu, records, matters]);
   const [masters, setMasters] = useState(defaultMasters);
 
   const mergedMasters = useMemo(
@@ -385,19 +392,53 @@ export function BillingRegister() {
       return (
         matchesSearch &&
         matchesColumnFilters &&
+        Object.entries(valueFilters).every(([field, values]) => {
+          const column = billingColumnByKey.get(field);
+          return !column || values.includes(getBillingFilterValue(record, column, matters));
+        }) &&
         (!filters.status || record.billing_status === filters.status) &&
         (!filters.receiptStatus || record.receiving_status === filters.receiptStatus) &&
         (!filters.team || record.owner_team === filters.team) &&
         (!filters.source || record.source_module === filters.source)
       );
+    }).sort((first, second) => {
+      if (!sort) return 0;
+      const column = billingColumnByKey.get(String(sort.field));
+      if (!column || column.field === "actions") return 0;
+      const a = getBillingFilterValue(first, column, matters);
+      const b = getBillingFilterValue(second, column, matters);
+      // Keep empty cells last in either direction.
+      if (!a || !b) return a ? -1 : b ? 1 : 0;
+      let compared: number;
+      if (column.field !== "gstat_link" && (column.type === "money" || column.field === "serial_no" || column.field === "version_no")) {
+        compared = toNumber(first[column.field]) - toNumber(second[column.field]);
+      } else if (column.type === "date" && column.field !== "gstat_link") {
+        compared = String(first[column.field] ?? "").localeCompare(String(second[column.field] ?? ""));
+      } else {
+        compared = a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
+      }
+      return sort.direction === "asc" ? compared : -compared;
     });
-  }, [columnFilters, filters, matters, records, visibleBillingColumns]);
+  }, [columnFilters, valueFilters, sort, filters, matters, records, visibleBillingColumns]);
+  function applyValueFilter(values: string[] | undefined) {
+    if (!filterMenu) return;
+    const field = String(filterMenu.column.field);
+    setValueFilters((current) => {
+      const next = { ...current };
+      if (values === undefined) delete next[field];
+      else next[field] = values;
+      return next;
+    });
+    setColumnFilters((current) => ({ ...current, [field]: "" }));
+    setFilterMenu(null);
+  }
+
   const selectedRecord = records.find((record) => record.id === selectedRecordId) ?? null;
   const selectedAuditLogs = selectedRecordId
     ? auditLogs.filter((log) => log.entity_id === selectedRecordId)
     : auditLogs.slice(0, 12);
   const billingSummary = useMemo(() => getBillingSummary(filteredRecords), [filteredRecords]);
-  const hasActiveColumnFilters = Object.values(columnFilters).some((value) => value.trim());
+  const hasActiveColumnFilters = Object.values(columnFilters).some((value) => value.trim()) || Object.keys(valueFilters).length > 0;
   const pageCount = Math.max(1, Math.ceil(filteredRecords.length / billingPageSize));
   const pagedRecords = useMemo(() => {
     const startIndex = (tablePage - 1) * billingPageSize;
@@ -432,7 +473,7 @@ export function BillingRegister() {
 
   useEffect(() => {
     setTablePage(1);
-  }, [columnFilters, filters.receiptStatus, filters.search, filters.source, filters.status, filters.team]);
+  }, [columnFilters, valueFilters, sort, filters.receiptStatus, filters.search, filters.source, filters.status, filters.team]);
 
   useEffect(() => {
     setTablePage((currentPage) => Math.min(currentPage, pageCount));
@@ -967,7 +1008,7 @@ export function BillingRegister() {
                 <BillingMenuItem icon={Upload} label="Import" onClick={() => { setIsToolbarMenuOpen(false); fileInputRef.current?.click(); }} />
                 <BillingMenuItem icon={Maximize2} label={isFullscreen ? "Exit fullscreen" : "Fullscreen"} onClick={() => { setIsToolbarMenuOpen(false); setIsFullscreen((current) => !current); }} />
                 {hasActiveColumnFilters ? (
-                  <BillingMenuItem icon={X} label="Clear column filters" onClick={() => { setIsToolbarMenuOpen(false); setColumnFilters({}); }} />
+                  <BillingMenuItem icon={X} label="Clear column filters" onClick={() => { setIsToolbarMenuOpen(false); setColumnFilters({}); setValueFilters({}); }} />
                 ) : null}
               </div>
             </>
@@ -1037,11 +1078,14 @@ export function BillingRegister() {
           onClick={() => {
             setFilters({ search: "", status: "", receiptStatus: "", team: "", source: "" });
             setColumnFilters({});
+            setValueFilters({});
+            setSort(null);
+            setFilterMenu(null);
           }}
           type="button"
         >
           <X className="size-4" />
-          Clear filters
+          Clear filters / sorting
         </button>
       </div>
       ) : null}
@@ -1080,6 +1124,16 @@ export function BillingRegister() {
             </button>
           </div>
         </div>
+        {filterMenu ? <BillingColumnFilter
+          key={String(filterMenu.column.field)}
+          label={filterMenu.column.label}
+          anchor={filterMenu}
+          options={filterOptions}
+          selected={valueFilters[String(filterMenu.column.field)]}
+          onApply={applyValueFilter}
+          onClose={() => setFilterMenu(null)}
+          onSort={(direction) => { setSort(direction ? { field: filterMenu.column.field, direction } : null); setFilterMenu(null); }}
+        /> : null}
         <div className={`overflow-auto rounded-md border border-slate-200 bg-white ${isFullscreen ? "min-h-0 flex-1" : "max-h-[calc(100vh-190px)]"}`}>
           <table className="table-fixed border-collapse text-left text-sm" style={{ minWidth: visibleTableWidth, width: visibleTableWidth }}>
             <colgroup>
@@ -1090,8 +1144,19 @@ export function BillingRegister() {
             <thead className="sticky top-0 z-10 bg-slate-100 text-[11px] font-semibold uppercase tracking-wide text-slate-600 [&_th]:border-b [&_th]:border-slate-200">
               <tr>
                 {visibleBillingColumns.map((column) => (
-                  <th className="border-r border-white/10 px-3 py-3 last:border-r-0" key={column.field}>
-                    {column.label}
+                  <th className="border-r border-white/10 px-3 py-3 last:border-r-0" key={column.field} aria-sort={sort?.field === column.field ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}>
+                    <div className="flex items-center justify-between gap-1">
+                      <span>{column.label}</span>
+                      {column.field !== "actions" ? <div className="flex shrink-0 items-center gap-1">
+                        <button type="button" aria-label={`Sort ${column.label}`} title="Click to cycle ascending, descending and default order" onClick={() => setSort((current) => current?.field !== column.field ? { field: column.field, direction: "asc" } : current.direction === "asc" ? { field: column.field, direction: "desc" } : null)}>
+                          {sort?.field === column.field ? (sort.direction === "asc" ? <ArrowUp className="size-4 text-navy-700" /> : <ArrowDown className="size-4 text-navy-700" />) : <ArrowUpDown className="size-4 text-slate-400" />}
+                        </button>
+                        <button type="button" aria-label={`Choose filter values for ${column.label}`} aria-haspopup="dialog" className={`rounded border p-0.5 ${valueFilters[String(column.field)] !== undefined ? "border-navy-500 bg-navy-100 text-navy-700" : "border-slate-200 bg-white text-slate-500"}`} onClick={(event) => {
+                          const rect = event.currentTarget.getBoundingClientRect();
+                          setFilterMenu({ column, left: rect.left, bottom: rect.bottom });
+                        }}><Filter className="size-3.5" /></button>
+                      </div> : null}
+                    </div>
                   </th>
                 ))}
               </tr>
@@ -2034,6 +2099,14 @@ function recalc(record: BillingRecord): BillingRecord {
     pending_amount: pendingAmount,
     total
   };
+}
+
+function getBillingFilterValue(record: BillingRecord, column: BillingColumn, matters: GstatMatter[]) {
+  if (column.field !== "gstat_link" && column.field !== "actions") {
+    const raw = record[column.field];
+    if (raw === null || raw === undefined || String(raw).trim() === "") return "";
+  }
+  return getDisplayValue(record, column, matters).trim();
 }
 
 function getDisplayValue(record: BillingRecord, column: BillingColumn, matters: GstatMatter[]) {
