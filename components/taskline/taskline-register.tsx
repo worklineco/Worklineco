@@ -288,9 +288,10 @@ const defaultRows = Array.from({ length: 8 }, (_, index) => createEmptyRow(`init
 type TaskLineRegisterProps = {
   registerKey?: "all" | "cestat" | "high_court" | "non_litigation" | "taskline";
   registerName?: string;
+  fillAvailableHeight?: boolean;
 };
 
-export function TaskLineRegister({ registerKey = "taskline", registerName = "TaskLine" }: TaskLineRegisterProps) {
+export function TaskLineRegister({ registerKey = "taskline", registerName = "TaskLine", fillAvailableHeight = false }: TaskLineRegisterProps) {
   const isCombinedView = registerKey === "all";
   const hiddenColumnGroupKeys = useMemo(
     () => new Set(isCombinedView ? ["legal", "billing", "all"] : registerKey === "non_litigation" ? ["legal"] : []),
@@ -2017,7 +2018,7 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
   }
 
   return (
-    <section className="w-full rounded-lg border border-slate-200 bg-white p-3 shadow-[0_18px_60px_rgba(15,23,42,0.10)]">
+    <section className={`w-full rounded-lg border border-slate-200 bg-white p-3 shadow-[0_18px_60px_rgba(15,23,42,0.10)] ${fillAvailableHeight ? "lg:flex lg:min-h-0 lg:flex-1 lg:flex-col" : ""}`}>
       <div className="flex flex-wrap items-center gap-3">
         <div className="shrink-0">
           <h2 className="text-lg font-black leading-tight text-slate-950">Task Register</h2>
@@ -2276,8 +2277,8 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
       ) : null}
 
       {viewMode === "register" ? (
-      <div className="mt-3">
-        <div className="mb-2 flex flex-wrap gap-1.5">
+      <div className={`mt-3 ${fillAvailableHeight ? "lg:flex lg:min-h-0 lg:flex-1 lg:flex-col" : ""}`}>
+        <div className="mb-2 flex shrink-0 flex-wrap gap-1.5">
           {visibleColumnGroups.map((group) => (
             <button
               className={`inline-flex h-8 items-center rounded-md border px-3 text-xs font-black transition ${
@@ -2293,7 +2294,7 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
             </button>
           ))}
         </div>
-        <div className="mb-1.5 flex items-center justify-end gap-1.5">
+        <div className="mb-1.5 flex shrink-0 items-center justify-end gap-1.5">
           {isLoading ? <span className="mr-auto text-xs font-bold text-slate-500">Loading {registerName} rows...</span> : null}
           <label
             className={`inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-md border px-3 text-xs font-bold transition ${
@@ -2341,7 +2342,7 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
             Next
           </button>
         </div>
-        <div className="max-h-[calc(100vh-135px)] overflow-auto rounded-md border border-slate-200 bg-white">
+        <div className={`max-h-[calc(100vh-135px)] overflow-auto rounded-md border border-slate-200 bg-white ${fillAvailableHeight ? "lg:min-h-0 lg:max-h-none lg:flex-1" : ""}`}>
           <table className="table-fixed border-separate border-spacing-0 text-left text-sm" style={{ minWidth: tableWidth, width: tableWidth }}>
             <colgroup>
               {actionColumnHidden ? null : <col style={{ width: actionColumnWidth }} />}
