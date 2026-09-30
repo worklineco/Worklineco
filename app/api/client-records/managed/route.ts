@@ -24,6 +24,8 @@ const columns = [
   "S.no.",
   "Group",
   "Particulars",
+  "GST-ID",
+  "GST-PASS",
   "Email ID",
   "POC Name",
   "POC Contact no.",
