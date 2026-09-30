@@ -42,8 +42,9 @@ type BillingDraft = {
   ope_remarks: string;
   owner_team: string;
   place_of_supply: string;
+  poc_email: string;
+  poc_email_options: string[];
   professional_fee: string;
-  registration_type: string;
   remarks: string;
   rowId: string;
   rowLabel: string;
@@ -170,20 +171,14 @@ const defaultTaskLineColumnOrder = taskLineColumns.map((column) => column.key);
 const statusOptions = ["Open", "Close"];
 const billableOptions = ["Yes", "No", "Retainership"];
 const showBillablesSnoozeKey = "workline:taskline-billables-snooze";
-// Stages that mean the work is done and the task is ready to bill.
-const billableDoneStages = new Set([
-  "submitted",
-  "appeared",
-  "attended",
-  "shared with client",
-  "submitted both",
-  "submitted mail",
-  "submitted online",
-  "submitted physically"
-]);
-// A "pending billable" task: billable = Yes, task code starts with "W", the work
-// is done (a done stage or Closed status), and it is NOT yet in the Billing register.
-function isPendingBillableRow(row: TaskLineRow, billedCodes: Set<string>) {
+// Stages that keep a task OUT of billing: a blank stage or any of these means
+// the work is not billable yet - unless the task's Status is Close/Closed,
+// which always makes it part of billing.
+const billableExcludedStages = new Set(["", "adjourned", "cancelled", "on hold", "open", "pending for review"]);
+// A "pending billable" task: billable = Yes, task code starts with "W", the
+// stage/status passes the billing conditions above, and it is NOT yet in the
+// Billing register.
+function isPendingBillableRow(row: TaskLineRow, billedCodes: Map<string, string>) {
   // Billable counts as "Yes" or blank (blank shows as "Select" in the grid).
   // Only explicit "No" / "Retainership" are excluded.
   const billable = text(row.billable).toLowerCase();
@@ -196,7 +191,7 @@ function isPendingBillableRow(row: TaskLineRow, billedCodes: Set<string>) {
   }
   const stage = text(row.stage).trim().toLowerCase();
   const status = text(row.status_open_close).trim().toLowerCase();
-  const done = billableDoneStages.has(stage) || status === "close" || status === "closed";
+  const done = status === "close" || status === "closed" || !billableExcludedStages.has(stage);
   if (!done) {
     return false;
   }
@@ -329,6 +324,7 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
   const [isLoading, setIsLoading] = useState(true);
   const [message, setMessage] = useState("");
   const [billingDraft, setBillingDraft] = useState<BillingDraft | null>(null);
+  const [billingDuplicateNotice, setBillingDuplicateNotice] = useState<{ code: string; date: string } | null>(null);
   const [billingMessage, setBillingMessage] = useState("");
   const [isSavingBilling, setIsSavingBilling] = useState(false);
   const [editingRowId, setEditingRowId] = useState<string | null>(null);
@@ -338,7 +334,7 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [showBillablesOnly, setShowBillablesOnly] = useState(false);
-  const [billedTaskCodes, setBilledTaskCodes] = useState<Set<string>>(() => new Set());
+  const [billedTaskCodes, setBilledTaskCodes] = useState<Map<string, string>>(() => new Map());
   const [billableReminderOpen, setBillableReminderOpen] = useState(false);
   const billableReminderShownRef = useRef(false);
   const [dueRange, setDueRange] = useState<{ end: string; preset: string; start: string }>({ end: "", preset: "", start: "" });
@@ -618,7 +614,15 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
 
     fetch(taskLineApiQuery("view=billed-codes"), { cache: "no-store", credentials: "include" })
       .then((response) => (response.ok ? response.json() : { taskCodes: [] }))
-      .then((data) => setBilledTaskCodes(new Set(((data?.taskCodes ?? []) as string[]).map((code) => String(code).toUpperCase()))))
+      .then((data) => {
+        const billedOn = (data?.billedOn ?? {}) as Record<string, string>;
+        setBilledTaskCodes(
+          new Map(((data?.taskCodes ?? []) as string[]).map((code) => {
+            const key = String(code).toUpperCase();
+            return [key, String(billedOn[key] ?? "")] as const;
+          }))
+        );
+      })
       .catch(() => undefined);
   }, []);
 
@@ -1614,7 +1618,15 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
     const gstin = text(row.gstin);
     const taskCode = text(row.task_code);
     const taskName = text(row.task);
-    const description = `Professional Fees for ${taskName || "TaskLine task"}${taskCode ? ` bearing Task Code ${taskCode}` : ""}`;
+    const refNo = text(row.ref_no);
+    const description = `Professional Fees for ${taskName || "TaskLine task"}${refNo ? ` in the matter of ${refNo}` : ""}${taskCode ? ` bearing Task Code ${taskCode}` : ""}`;
+
+    // A task can be pushed to Billing only once.
+    const billedOnDate = taskCode ? billedTaskCodes.get(taskCode.toUpperCase()) : undefined;
+    if (billedOnDate !== undefined) {
+      setBillingDuplicateNotice({ code: taskCode, date: billedOnDate });
+      return;
+    }
 
     setBillingMessage("");
     setBillingDraft({
@@ -1627,8 +1639,9 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
       ope_remarks: "",
       owner_team: text(row.team),
       place_of_supply: text(row.state_name) || stateFromGstin(gstin),
+      poc_email: "",
+      poc_email_options: [],
       professional_fee: text(row.total_agreed_fee),
-      registration_type: "",
       remarks: text(row.fee_comments),
       rowId,
       rowLabel: getRowLabel(row, rowsRef.current) || taskCode || "TaskLine row",
@@ -1640,23 +1653,30 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
       return;
     }
 
-    const matchedClient = await findClientByGstin(gstin);
+    const matchedClients = await findClientsByGstin(gstin);
 
-    if (matchedClient) {
+    if (matchedClients.length > 0) {
+      const emails = getClientEmails(matchedClients);
       setBillingDraft((currentDraft) =>
         currentDraft && currentDraft.rowId === rowId
           ? {
               ...currentDraft,
-              client: getClientName(matchedClient) || currentDraft.client,
-              registration_type: getRegistrationType(matchedClient) || currentDraft.registration_type
+              client: getClientName(matchedClients[0]) || currentDraft.client,
+              poc_email: emails[0] ?? currentDraft.poc_email,
+              poc_email_options: emails
             }
           : currentDraft
       );
     }
   }
 
-  async function saveBillingDraft({ openBilling }: { openBilling: boolean }) {
+  async function saveBillingDraft() {
     if (!billingDraft || isSavingBilling) {
+      return;
+    }
+
+    if (!text(billingDraft.gstin) || !text(billingDraft.poc_email)) {
+      setBillingMessage("GSTIN and POC Email are mandatory before creating the bill.");
       return;
     }
 
@@ -1681,7 +1701,7 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
             ope_remarks: billingDraft.ope_remarks,
             owner_team: billingDraft.owner_team,
             place_of_supply: billingDraft.place_of_supply,
-            registration_type: billingDraft.registration_type,
+            poc_email: billingDraft.poc_email,
             remarks: billingDraft.remarks,
             sgst: 0,
             source_module: "taskline",
@@ -1709,13 +1729,19 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
         void saveInlineRow(nextRow);
       }
 
-      setMessage(openBilling ? "Billing record created. Opening Billing..." : "Billing record created.");
+      if (billingDraft.task_code) {
+        const codeKey = billingDraft.task_code.toUpperCase();
+        const pushedToday = new Date().toISOString().slice(0, 10);
+        setBilledTaskCodes((current) => {
+          const next = new Map(current);
+          next.set(codeKey, pushedToday);
+          return next;
+        });
+      }
+
+      setMessage("Billing record created.");
       setBillingDraft(null);
       setIsSavingBilling(false);
-
-      if (openBilling) {
-        window.location.assign("/billing");
-      }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Could not create billing record.";
       setBillingMessage(errorMessage);
@@ -1724,11 +1750,11 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
     }
   }
 
-  async function findClientByGstin(gstin: string) {
+  async function findClientsByGstin(gstin: string) {
     const normalizedGstin = normalizeGstin(gstin);
 
     if (!normalizedGstin) {
-      return null;
+      return [];
     }
 
     try {
@@ -1736,13 +1762,13 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
       const result = (await response.json().catch(() => ({}))) as { rows?: ClientRegisterRow[] };
 
       if (!response.ok || !Array.isArray(result.rows)) {
-        return null;
+        return [];
       }
 
-      return result.rows.find((row) => normalizeGstin(row["GSTIN/UIN"]) === normalizedGstin) ?? null;
+      return result.rows.filter((row) => normalizeGstin(row["GSTIN/UIN"]) === normalizedGstin);
     } catch (error) {
       console.error("Client lookup for billing failed:", error);
-      return null;
+      return [];
     }
   }
 
@@ -1768,15 +1794,17 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
         : currentDraft
     );
 
-    const matchedClient = await findClientByGstin(value);
+    const matchedClients = await findClientsByGstin(value);
 
-    if (matchedClient) {
+    if (matchedClients.length > 0) {
+      const emails = getClientEmails(matchedClients);
       setBillingDraft((currentDraft) =>
         currentDraft
           ? {
               ...currentDraft,
-              client: getClientName(matchedClient) || currentDraft.client,
-              registration_type: getRegistrationType(matchedClient) || currentDraft.registration_type
+              client: getClientName(matchedClients[0]) || currentDraft.client,
+              poc_email: emails.includes(currentDraft.poc_email) ? currentDraft.poc_email : emails[0] ?? currentDraft.poc_email,
+              poc_email_options: emails
             }
           : currentDraft
       );
@@ -2669,7 +2697,9 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
             <div className="flex flex-col gap-3 border-b border-slate-200 pb-4 sm:flex-row sm:items-start sm:justify-between">
               <div>
                 <p className="text-xs font-black uppercase tracking-[0.14em] text-lime-700">Create billing record</p>
-                <h3 className="mt-1 text-xl font-black text-slate-950">TaskLine row {billingDraft.rowLabel}</h3>
+                <h3 className="mt-1 text-xl font-black text-slate-950">
+                  {billingDraft.task_code ? `Task Code ${billingDraft.task_code}` : `TaskLine row ${billingDraft.rowLabel}`}
+                </h3>
                 <p className="mt-1 text-sm font-semibold text-slate-500">
                   Review the billing details picked from TaskLine and client records before creating the bill.
                 </p>
@@ -2697,7 +2727,7 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
                 </select>
               </label>
               <BillingDraftInput
-                label="GSTIN"
+                label="GSTIN *"
                 onChange={(value) => void updateBillingGstin(value)}
                 value={billingDraft.gstin}
               />
@@ -2722,11 +2752,27 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
                 onChange={(value) => updateBillingDraft("place_of_supply", value)}
                 value={billingDraft.place_of_supply}
               />
-              <BillingDraftInput
-                label="Registration Type"
-                onChange={(value) => updateBillingDraft("registration_type", value)}
-                value={billingDraft.registration_type}
-              />
+              <label>
+                <span className="text-[10px] font-black uppercase text-slate-500">POC Email *</span>
+                {billingDraft.poc_email_options.length > 1 ? (
+                  <select
+                    className="mt-1 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-900 outline-none focus:border-navy-300 focus:ring-2 focus:ring-navy-100"
+                    onChange={(event) => updateBillingDraft("poc_email", event.target.value)}
+                    value={billingDraft.poc_email}
+                  >
+                    {billingDraft.poc_email_options.map((option) => (
+                      <option key={option}>{option}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    className="mt-1 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-900 outline-none focus:border-navy-300 focus:ring-2 focus:ring-navy-100"
+                    onChange={(event) => updateBillingDraft("poc_email", event.target.value)}
+                    type="email"
+                    value={billingDraft.poc_email}
+                  />
+                )}
+              </label>
               <BillingDraftInput
                 label="Professional fee"
                 onChange={(value) => updateBillingDraft("professional_fee", value)}
@@ -2770,30 +2816,42 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
 
             <div className="mt-5 flex justify-end gap-2 border-t border-slate-200 pt-4">
               <button
-                className="inline-flex h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-xs font-black uppercase text-slate-700"
+                className="inline-flex h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-xs font-black uppercase text-red-600 transition hover:bg-red-50"
                 onClick={() => setBillingDraft(null)}
                 type="button"
               >
-                Cancel
+                Back
               </button>
               <button
-                className="inline-flex h-10 items-center justify-center rounded-xl border border-lime-200 bg-white px-4 text-xs font-black uppercase text-lime-800 transition hover:bg-lime-50 disabled:opacity-50"
+                className="inline-flex h-10 items-center justify-center rounded-xl bg-navy-700 px-5 text-xs font-black uppercase text-white transition hover:bg-navy-800 disabled:opacity-50"
                 disabled={isSavingBilling}
-                onClick={() => void saveBillingDraft({ openBilling: false })}
+                onClick={() => void saveBillingDraft()}
                 type="button"
               >
                 {isSavingBilling ? "Creating..." : "Create"}
               </button>
-              <button
-                className="inline-flex h-10 items-center justify-center rounded-xl bg-lime-700 px-4 text-xs font-black uppercase text-white transition hover:bg-lime-800 disabled:opacity-50"
-                disabled={isSavingBilling}
-                onClick={() => void saveBillingDraft({ openBilling: true })}
-                type="button"
-              >
-                {isSavingBilling ? "Creating..." : "Create and open Billing"}
-              </button>
             </div>
           </form>
+        </div>
+      ) : null}
+
+      {billingDuplicateNotice ? (
+        <div className="fixed inset-0 z-[86] flex items-center justify-center bg-navy-700/40 p-4">
+          <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl">
+            <p className="text-xs font-black uppercase tracking-[0.14em] text-red-600">Already pushed to Billing</p>
+            <p className="mt-2 text-sm font-bold text-slate-900">
+              {`Task Code ${billingDuplicateNotice.code} was already pushed to Billing${billingDuplicateNotice.date ? ` on ${billingDuplicateNotice.date}` : ""}. It cannot be entered twice.`}
+            </p>
+            <div className="mt-4 flex justify-end">
+              <button
+                className="inline-flex h-10 items-center justify-center rounded-xl bg-navy-700 px-4 text-xs font-black uppercase text-white transition hover:bg-navy-800"
+                onClick={() => setBillingDuplicateNotice(null)}
+                type="button"
+              >
+                OK
+              </button>
+            </div>
+          </div>
         </div>
       ) : null}
       <ViewOnlyAccessDialog
@@ -4365,8 +4423,17 @@ function getClientName(row: ClientRegisterRow | null) {
   return String(row?.Particulars ?? row?.name ?? "").trim();
 }
 
-function getRegistrationType(row: ClientRegisterRow | null) {
-  return String(row?.["Registration Type"] ?? "").trim();
+function getClientEmails(rows: ClientRegisterRow[]) {
+  const emails: string[] = [];
+  for (const row of rows) {
+    for (const part of String(row?.["Email ID"] ?? "").split(/[,;\s]+/)) {
+      const email = part.trim();
+      if (email.includes("@") && !emails.includes(email)) {
+        emails.push(email);
+      }
+    }
+  }
+  return emails;
 }
 
 function hasTaskLineBillingRecord(value: unknown) {
