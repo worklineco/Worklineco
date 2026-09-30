@@ -194,9 +194,9 @@ const gstStateByCode: Record<string, string> = {
   "99": "Other Country"
 };
 const billingColumns: BillingColumn[] = [
-  { field: "serial_no", label: "S.No.", type: "text", width: 90 },
-  { field: "owner_team", label: "Team", type: "text", width: 128 },
+  { field: "serial_no", label: "S.No.", type: "text", width: 130 },
   { field: "task_code", label: "Task Code", type: "select", width: 140 },
+  { field: "owner_team", label: "Team", type: "text", width: 128 },
   { field: "source_module", label: "Pushed From Sheet", type: "select", width: 160 },
   { field: "pushed_by", label: "Pushed By", type: "text", width: 170 },
   { field: "voucher_type", label: "Voucher", type: "select", width: 145 },
@@ -1366,7 +1366,8 @@ function BillingCell({
   const isEditing = Boolean(inlineEditor && inlineEditor.recordId === record.id && inlineEditor.field === field);
   const isSaving = Boolean(savingCell && savingCell.recordId === record.id && savingCell.field === field);
   const editorValue = isEditing ? inlineEditor?.value ?? "" : "";
-  const displayValue = column.field === "serial_no" ? String(serialNumber) : getDisplayValue(record, column, matters);
+  const displayValue =
+    column.field === "serial_no" ? String(record.task_code ?? "").trim() || String(serialNumber) : getDisplayValue(record, column, matters);
 
   if (isActions) {
     return (
@@ -2448,20 +2449,20 @@ function normalizeBillingColumnLayout(layout: Partial<BillingColumnLayout>): Bil
   const savedOrder = Array.isArray(layout.order) ? layout.order.filter((key) => knownColumnKeys.has(key)) : [];
   const order = pinBillingColumnOrder([...savedOrder, ...defaultBillingColumnOrder.filter((key) => !savedOrder.includes(key))]);
   const hiddenColumnKeys = Array.isArray(layout.hiddenColumnKeys)
-    ? layout.hiddenColumnKeys.filter((key) => knownColumnKeys.has(key) && key !== "actions" && key !== "serial_no")
+    ? layout.hiddenColumnKeys.filter((key) => knownColumnKeys.has(key) && key !== "actions" && key !== "serial_no" && key !== "task_code")
     : [];
 
   return { hiddenColumnKeys, order };
 }
 
 function pinBillingColumnOrder(order: string[]) {
-  const withoutPinned = order.filter((key) => !["address", "place_of_supply", "serial_no"].includes(key));
+  const withoutPinned = order.filter((key) => !["address", "place_of_supply", "serial_no", "task_code"].includes(key));
   const clientIndex = withoutPinned.indexOf("client");
   const insertAt = clientIndex >= 0 ? clientIndex + 1 : 0;
 
   withoutPinned.splice(insertAt, 0, "place_of_supply", "address");
 
-  return ["serial_no", ...withoutPinned.filter((key) => key !== "serial_no")];
+  return ["serial_no", "task_code", ...withoutPinned];
 }
 
 function normalizeGstin(value: unknown) {
