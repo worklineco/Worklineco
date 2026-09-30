@@ -44,6 +44,7 @@ type BillingRecord = {
   pending_amount: number;
   registration_type: string;
   remarks: string;
+  accounts_remark: string;
   serial_no?: number;
   sgst: number;
   source_module: string;
@@ -135,6 +136,8 @@ const emptyRecord: BillingRecord = {
   pending_amount: 0,
   registration_type: "",
   remarks: "",
+  accounts_remark: "",
+  accounts_remark: "",
   serial_no: undefined,
   sgst: 0,
   source_module: "manual",
@@ -228,6 +231,7 @@ const billingColumns: BillingColumn[] = [
   { field: "amount_received", label: "Amount Received", type: "money", width: 148 },
   { field: "pending_amount", label: "Pending Amount", type: "money", width: 148 },
   { field: "remarks", label: "Remarks", type: "text", width: 220 },
+  { field: "accounts_remark", label: "Remark Accounts Team", type: "text", width: 220 },
   { field: "gstat_link", label: "GSTAT Link", width: 170 },
   { field: "actions", label: "Actions", width: 150 }
 ];
@@ -268,7 +272,8 @@ const importHeaders: Array<{ field: BillingField; label: string }> = [
   { field: "receiving_date", label: "Receiving Date" },
   { field: "amount_received", label: "Amount Received" },
   { field: "pending_amount", label: "Pending Amount" },
-  { field: "remarks", label: "Remarks" }
+  { field: "remarks", label: "Remarks" },
+  { field: "accounts_remark", label: "Remark Accounts Team" }
 ];
 const importHeaderAliases: Partial<Record<BillingField, string[]>> = {
   amount: ["Professional Fee", "Professional Fees", "Amount"],
@@ -291,7 +296,8 @@ const accountsOnlyFields = new Set<BillingField>([
   "memo_no",
   "receiving_date",
   "receiving_status",
-  "amount_received"
+  "amount_received",
+  "accounts_remark"
 ]);
 
 export function BillingRegister() {
@@ -1598,6 +1604,7 @@ function BillingAddForm({
             </label>
             <FormInput field="receiving_date" label="Receipt Date" onChange={onChange} placeholder="dd-mm-yyyy" readOnly={!access.canEditAccountsFields} value={formatDateForInput(draft.receiving_date)} />
             <FormInput field="remarks" label="Remarks" onChange={onChange} value={draft.remarks} wide />
+            <FormInput field="accounts_remark" label="Remark Accounts Team" onChange={onChange} readOnly={!access.canEditAccountsFields} value={draft.accounts_remark} wide />
           </div>
         </div>
 
@@ -2519,6 +2526,7 @@ const auditFields: BillingField[] = [
   "receiving_status",
   "receiving_date",
   "remarks",
+  "accounts_remark",
   "gstat_appeal_id"
 ];
 
