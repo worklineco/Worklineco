@@ -40,6 +40,7 @@ type BillingRecord = {
   receiving_status?: string;
   registration_type?: string;
   remarks?: string;
+  accounts_remark?: string;
   serial_no?: number | string | null;
   sgst?: number | string;
   source_module?: string;
@@ -121,6 +122,7 @@ const billingSelectColumns = [
   "amount_received",
   "pending_amount",
   "remarks",
+  "accounts_remark",
   "version_no",
   "created_by",
   "updated_by",
@@ -568,6 +570,30 @@ export async function POST(request: Request) {
     return NextResponse.json({ record: savedRecord ?? saved.data });
   }
 
+  // A task (or GSTAT matter) can be pushed to Billing only once.
+  const duplicateCode = text(cleaned.task_code);
+  const duplicateMatter = text(cleaned.gstat_appeal_id ?? "");
+  if (duplicateCode || duplicateMatter) {
+    const baseDuplicateQuery = admin
+      .from(tableName)
+      .select("id,created_at")
+      .eq("organisation_id", organisation.organisationId)
+      .limit(1);
+    const existingBill = await (duplicateCode
+      ? baseDuplicateQuery.ilike("task_code", duplicateCode)
+      : baseDuplicateQuery.eq("gstat_appeal_id", duplicateMatter)
+    ).maybeSingle();
+    if (!existingBill.error && existingBill.data) {
+      const pushedOn = text((existingBill.data as { created_at?: string }).created_at).slice(0, 10);
+      return NextResponse.json(
+        {
+          error: `${duplicateCode ? `Task Code ${duplicateCode}` : "This matter"} was already pushed to Billing${pushedOn ? ` on ${pushedOn}` : ""}. It cannot be entered twice.`
+        },
+        { status: 409 }
+      );
+    }
+  }
+
   const [createRecord] = await assignSerialNumbers(admin, organisation.organisationId, [cleaned]);
   let saved = await admin.from(tableName).insert(createRecord).select("*").single();
 
@@ -989,6 +1015,7 @@ function cleanRecord(
     receiving_status: text(record.receiving_status) || "Pending",
     registration_type: text(record.registration_type),
     remarks: text(record.remarks),
+    accounts_remark: text(record.accounts_remark),
     serial_no: record.id && record.serial_no ? Number(record.serial_no) : undefined,
     sgst,
     source_module: linkedMatterId ? "gstat" : text(record.source_module) || "manual",
@@ -1005,6 +1032,7 @@ function cleanRecord(
 
   return {
     ...cleaned,
+    accounts_remark: "",
     invoice_date: null,
     invoice_no: "",
     memo_date: null,
@@ -1017,7 +1045,7 @@ function cleanRecord(
 function isMissingCompatibilityColumn(error: unknown) {
   const message = isRecord(error) ? String(error.message ?? "") : String(error ?? "");
 
-  return ["address", "escalation_1", "include_ope_in_fees", "is_retainer", "task_code", "place_of_supply", "registration_type", "receiving_date", "serial_no", "amount_received", "pending_amount"].some((column) =>
+  return ["address", "escalation_1", "include_ope_in_fees", "is_retainer", "task_code", "place_of_supply", "registration_type", "receiving_date", "serial_no", "amount_received", "pending_amount", "accounts_remark"].some((column) =>
     message.includes(column)
   );
 }
@@ -1035,6 +1063,7 @@ function stripCompatibilityColumns<T extends Record<string, unknown>>(record: T)
     serial_no: _serialNo,
     amount_received: _amountReceived,
     pending_amount: _pendingAmount,
+    accounts_remark: _accountsRemark,
     ...compatibleRecord
   } = record;
 
@@ -1112,6 +1141,7 @@ function preserveAccountsOnlyFields<T extends Record<string, unknown>>(
 
   const cleaned = {
     ...nextRecord,
+    accounts_remark: text(existingRecord.accounts_remark),
     invoice_date: existingRecord.invoice_date ?? null,
     invoice_no: text(existingRecord.invoice_no),
     memo_date: existingRecord.memo_date ?? null,
