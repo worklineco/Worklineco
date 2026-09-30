@@ -137,7 +137,6 @@ const emptyRecord: BillingRecord = {
   registration_type: "",
   remarks: "",
   accounts_remark: "",
-  accounts_remark: "",
   serial_no: undefined,
   sgst: 0,
   source_module: "manual",
