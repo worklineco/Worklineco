@@ -115,6 +115,7 @@ const taskLineFormSections: { columns: string[]; key: string; label: string }[] 
 ];
 const requiredTaskLineFormKeys = ["team", "entity_group", "entity", "state_name", "task", "due_date", "stage", "status_open_close", "billable", "document_link", "total_agreed_fee", "fee_comments"];
 const taskLineColumnLayoutStorageKey = "workline:taskline-column-layout:v5";
+const billingClientRowsCacheKey = "client-records:billing-lookup:v1";
 const taskLineColumnWidthsStorageKey = "workline:taskline-column-widths:v1";
 const minimumTaskLineColumnWidth = 80;
 const maximumTaskLineColumnWidth = 600;
@@ -289,7 +290,7 @@ type TaskLineRegisterProps = {
 export function TaskLineRegister({ registerKey = "taskline", registerName = "TaskLine", fillAvailableHeight = false }: TaskLineRegisterProps) {
   const isCombinedView = registerKey === "all";
   const hiddenColumnGroupKeys = useMemo(
-    () => new Set(isCombinedView ? ["legal", "billing", "all"] : registerKey === "non_litigation" ? ["legal"] : []),
+    () => new Set(isCombinedView || registerKey === "non_litigation" ? ["legal"] : []),
     [isCombinedView, registerKey]
   );
   const visibleColumnGroups = useMemo(() => taskLineColumnGroups.filter((group) => !hiddenColumnGroupKeys.has(group.key)), [hiddenColumnGroupKeys]);
@@ -325,6 +326,7 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
   const [message, setMessage] = useState("");
   const [billingDraft, setBillingDraft] = useState<BillingDraft | null>(null);
   const [billingDuplicateNotice, setBillingDuplicateNotice] = useState<{ code: string; date: string } | null>(null);
+  const billingClientRowsFetchRef = useRef<Promise<ClientRegisterRow[]> | null>(null);
   const [billingMessage, setBillingMessage] = useState("");
   const [isSavingBilling, setIsSavingBilling] = useState(false);
   const [editingRowId, setEditingRowId] = useState<string | null>(null);
@@ -611,6 +613,8 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
 
     void loadAllTaskLine();
     void loadViews(!focus);
+    // Warm the Client Records cache so the push-to-billing form fills instantly.
+    void loadBillingClientRows(true);
 
     fetch(taskLineApiQuery("view=billed-codes"), { cache: "no-store", credentials: "include" })
       .then((response) => (response.ok ? response.json() : { taskCodes: [] }))
@@ -1751,6 +1755,36 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
     }
   }
 
+  function loadBillingClientRows(refresh = false): Promise<ClientRegisterRow[]> {
+    if (!refresh) {
+      const cached = getCached<{ rows?: ClientRegisterRow[] }>(billingClientRowsCacheKey);
+      if (cached && Array.isArray(cached.rows)) {
+        return Promise.resolve(cached.rows);
+      }
+    }
+
+    if (!billingClientRowsFetchRef.current) {
+      billingClientRowsFetchRef.current = fetch("/api/client-records/managed", { cache: "no-store" })
+        .then(async (response) => {
+          const result = (await response.json().catch(() => ({}))) as { rows?: ClientRegisterRow[] };
+          if (!response.ok || !Array.isArray(result.rows)) {
+            return [];
+          }
+          setCached(billingClientRowsCacheKey, { rows: result.rows });
+          return result.rows;
+        })
+        .catch((error) => {
+          console.error("Client lookup for billing failed:", error);
+          return [] as ClientRegisterRow[];
+        })
+        .finally(() => {
+          billingClientRowsFetchRef.current = null;
+        });
+    }
+
+    return billingClientRowsFetchRef.current;
+  }
+
   async function findBillingClients(gstin: string, clientName: string) {
     const normalizedGstin = normalizeGstin(gstin);
     const normalizedName = normalizeClientName(clientName);
@@ -1759,27 +1793,17 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
       return [];
     }
 
-    try {
-      const response = await fetch("/api/client-records/managed", { cache: "no-store" });
-      const result = (await response.json().catch(() => ({}))) as { rows?: ClientRegisterRow[] };
+    const rows = await loadBillingClientRows();
 
-      if (!response.ok || !Array.isArray(result.rows)) {
-        return [];
-      }
+    const matchedByGstin = normalizedGstin
+      ? rows.filter((row) => normalizeGstin(row["GSTIN/UIN"]) === normalizedGstin)
+      : [];
 
-      const matchedByGstin = normalizedGstin
-        ? result.rows.filter((row) => normalizeGstin(row["GSTIN/UIN"]) === normalizedGstin)
-        : [];
-
-      if (matchedByGstin.length > 0) {
-        return matchedByGstin;
-      }
-
-      return normalizedName ? result.rows.filter((row) => normalizeClientName(row.Particulars) === normalizedName) : [];
-    } catch (error) {
-      console.error("Client lookup for billing failed:", error);
-      return [];
+    if (matchedByGstin.length > 0) {
+      return matchedByGstin;
     }
+
+    return normalizedName ? rows.filter((row) => normalizeClientName(row.Particulars) === normalizedName) : [];
   }
 
   function updateBillingDraft(field: keyof BillingDraft, value: string) {
