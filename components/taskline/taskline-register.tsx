@@ -1649,24 +1649,25 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
       voucher_type: "Proforma Invoice"
     });
 
-    if (!gstin) {
-      return;
-    }
-
-    const matchedClients = await findClientsByGstin(gstin);
+    const matchedClients = await findBillingClients(gstin, text(row.entity));
 
     if (matchedClients.length > 0) {
       const emails = getClientEmails(matchedClients);
-      setBillingDraft((currentDraft) =>
-        currentDraft && currentDraft.rowId === rowId
-          ? {
-              ...currentDraft,
-              client: getClientName(matchedClients[0]) || currentDraft.client,
-              poc_email: emails[0] ?? currentDraft.poc_email,
-              poc_email_options: emails
-            }
-          : currentDraft
-      );
+      const matchedGstin = text(matchedClients[0]["GSTIN/UIN"]);
+      setBillingDraft((currentDraft) => {
+        if (!currentDraft || currentDraft.rowId !== rowId) {
+          return currentDraft;
+        }
+        const nextGstin = text(currentDraft.gstin) || matchedGstin;
+        return {
+          ...currentDraft,
+          client: getClientName(matchedClients[0]) || currentDraft.client,
+          gstin: nextGstin,
+          place_of_supply: currentDraft.place_of_supply || stateFromGstin(nextGstin),
+          poc_email: emails[0] ?? currentDraft.poc_email,
+          poc_email_options: emails
+        };
+      });
     }
   }
 
@@ -1750,10 +1751,11 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
     }
   }
 
-  async function findClientsByGstin(gstin: string) {
+  async function findBillingClients(gstin: string, clientName: string) {
     const normalizedGstin = normalizeGstin(gstin);
+    const normalizedName = normalizeClientName(clientName);
 
-    if (!normalizedGstin) {
+    if (!normalizedGstin && !normalizedName) {
       return [];
     }
 
@@ -1765,7 +1767,15 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
         return [];
       }
 
-      return result.rows.filter((row) => normalizeGstin(row["GSTIN/UIN"]) === normalizedGstin);
+      const matchedByGstin = normalizedGstin
+        ? result.rows.filter((row) => normalizeGstin(row["GSTIN/UIN"]) === normalizedGstin)
+        : [];
+
+      if (matchedByGstin.length > 0) {
+        return matchedByGstin;
+      }
+
+      return normalizedName ? result.rows.filter((row) => normalizeClientName(row.Particulars) === normalizedName) : [];
     } catch (error) {
       console.error("Client lookup for billing failed:", error);
       return [];
@@ -1794,7 +1804,7 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
         : currentDraft
     );
 
-    const matchedClients = await findClientsByGstin(value);
+    const matchedClients = await findBillingClients(value, "");
 
     if (matchedClients.length > 0) {
       const emails = getClientEmails(matchedClients);
@@ -4412,6 +4422,10 @@ function normalizeTaskCode(value: unknown) {
 
 function normalizeGstin(value: unknown) {
   return String(value ?? "").replace(/[^0-9a-z]/gi, "").toUpperCase();
+}
+
+function normalizeClientName(value: unknown) {
+  return String(value ?? "").trim().replace(/\s+/g, " ").toLowerCase();
 }
 
 function stateFromGstin(value: unknown) {
