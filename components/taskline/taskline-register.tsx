@@ -327,6 +327,7 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
   const [billingDraft, setBillingDraft] = useState<BillingDraft | null>(null);
   const [billingDuplicateNotice, setBillingDuplicateNotice] = useState<{ code: string; date: string } | null>(null);
   const billingClientRowsFetchRef = useRef<Promise<ClientRegisterRow[]> | null>(null);
+  const [billingFieldErrorsVisible, setBillingFieldErrorsVisible] = useState(false);
   const [billingMessage, setBillingMessage] = useState("");
   const [isSavingBilling, setIsSavingBilling] = useState(false);
   const [editingRowId, setEditingRowId] = useState<string | null>(null);
@@ -1633,6 +1634,7 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
     }
 
     setBillingMessage("");
+    setBillingFieldErrorsVisible(false);
     setBillingDraft({
       client: text(row.entity),
       group_name: text(row.entity_group),
@@ -1681,9 +1683,12 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
     }
 
     if (!text(billingDraft.gstin) || !text(billingDraft.poc_email)) {
+      setBillingFieldErrorsVisible(true);
       setBillingMessage("GSTIN and POC Email are mandatory before creating the bill.");
       return;
     }
+
+    setBillingFieldErrorsVisible(false);
 
     setIsSavingBilling(true);
     setBillingMessage("Creating billing record...");
@@ -2761,6 +2766,7 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
                 </select>
               </label>
               <BillingDraftInput
+                hasError={billingFieldErrorsVisible && !text(billingDraft.gstin)}
                 label="GSTIN *"
                 onChange={(value) => void updateBillingGstin(value)}
                 value={billingDraft.gstin}
@@ -2790,7 +2796,11 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
                 <span className="text-[10px] font-black uppercase text-slate-500">POC Email *</span>
                 {billingDraft.poc_email_options.length > 1 ? (
                   <select
-                    className="mt-1 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-900 outline-none focus:border-navy-300 focus:ring-2 focus:ring-navy-100"
+                    className={`mt-1 h-10 w-full rounded-xl border bg-white px-3 text-sm font-bold text-slate-900 outline-none focus:ring-2 ${
+                      billingFieldErrorsVisible && !text(billingDraft.poc_email)
+                        ? "border-red-400 ring-2 ring-red-100 focus:border-red-400 focus:ring-red-100"
+                        : "border-slate-200 focus:border-navy-300 focus:ring-navy-100"
+                    }`}
                     onChange={(event) => updateBillingDraft("poc_email", event.target.value)}
                     value={billingDraft.poc_email}
                   >
@@ -2800,7 +2810,11 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
                   </select>
                 ) : (
                   <input
-                    className="mt-1 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-900 outline-none focus:border-navy-300 focus:ring-2 focus:ring-navy-100"
+                    className={`mt-1 h-10 w-full rounded-xl border bg-white px-3 text-sm font-bold text-slate-900 outline-none focus:ring-2 ${
+                      billingFieldErrorsVisible && !text(billingDraft.poc_email)
+                        ? "border-red-400 ring-2 ring-red-100 focus:border-red-400 focus:ring-red-100"
+                        : "border-slate-200 focus:border-navy-300 focus:ring-navy-100"
+                    }`}
                     onChange={(event) => updateBillingDraft("poc_email", event.target.value)}
                     type="email"
                     value={billingDraft.poc_email}
@@ -2843,7 +2857,13 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
             </div>
 
             {billingMessage ? (
-              <p className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-900">
+              <p
+                className={`mt-4 rounded-xl border px-4 py-3 text-sm font-bold ${
+                  billingMessage.startsWith("Creating")
+                    ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+                    : "border-red-200 bg-red-50 text-red-800"
+                }`}
+              >
                 {billingMessage}
               </p>
             ) : null}
@@ -4416,11 +4436,13 @@ function rowFromImport(rawRow: Record<string, unknown>) {
 
 
 function BillingDraftInput({
+  hasError = false,
   label,
   onChange,
   type = "text",
   value
 }: {
+  hasError?: boolean;
   label: string;
   onChange: (value: string) => void;
   type?: "date" | "number" | "text";
@@ -4430,7 +4452,11 @@ function BillingDraftInput({
     <label>
       <span className="text-[10px] font-black uppercase text-slate-500">{label}</span>
       <input
-        className="mt-1 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-900 outline-none focus:border-navy-300 focus:ring-2 focus:ring-navy-100"
+        className={`mt-1 h-10 w-full rounded-xl border bg-white px-3 text-sm font-bold text-slate-900 outline-none focus:ring-2 ${
+          hasError
+            ? "border-red-400 ring-2 ring-red-100 focus:border-red-400 focus:ring-red-100"
+            : "border-slate-200 focus:border-navy-300 focus:ring-navy-100"
+        }`}
         min={type === "number" ? "0" : undefined}
         onChange={(event) => onChange(event.target.value)}
         type={type}
