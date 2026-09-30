@@ -523,19 +523,20 @@ export function ClientRecordsRegister() {
       return;
     }
 
+    const rowId = editor.rowId;
     const currentEditor = editor;
     const previousRows = rows;
     const previousRow =
-      rows.find((row) => String(row.id) === currentEditor.rowId) ??
+      rows.find((row) => String(row.id) === rowId) ??
       currentEditor.originalRow ??
       currentEditor.row;
     const optimisticRow = {
       ...previousRow,
       ...currentEditor.row,
-      id: currentEditor.rowId
+      id: rowId
     };
     const optimisticRows = rows.map((row) =>
-      String(row.id) === currentEditor.rowId ? optimisticRow : row
+      String(row.id) === rowId ? optimisticRow : row
     );
 
     setRows(optimisticRows);
@@ -548,7 +549,7 @@ export function ClientRecordsRegister() {
         body: JSON.stringify({
           action: "update",
           row: currentEditor.row,
-          rowId: currentEditor.rowId
+          rowId: rowId
         }),
         headers: { "Content-Type": "application/json" },
         method: "POST"
@@ -564,10 +565,10 @@ export function ClientRecordsRegister() {
       }
 
       const savedRow = result.row
-        ? { ...optimisticRow, ...result.row, id: currentEditor.rowId }
+        ? { ...optimisticRow, ...result.row, id: rowId }
         : optimisticRow;
       const savedRows = optimisticRows.map((row) =>
-        String(row.id) === currentEditor.rowId ? savedRow : row
+        String(row.id) === rowId ? savedRow : row
       );
       setRows(savedRows);
       setCached("client-records", { rows: savedRows, trashRows });
