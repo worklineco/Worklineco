@@ -328,7 +328,7 @@ export function ClientRecordsRegister() {
   function exportExcel() {
     const sourceColumns = [importActionColumn, ...columns];
     const exportColumns = sourceColumns.map(clientColumnLabel);
-    const exportRows = filteredRows.length
+    const exportRows: RegisterRow[] = filteredRows.length
       ? filteredRows.map((row) => ({ [importActionColumn]: "Update", ...stripInternalFields(row) }))
       : [createBlankRow()];
     const labelledExportRows = exportRows.map((row) =>
