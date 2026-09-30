@@ -146,7 +146,7 @@ const emptyRecord: BillingRecord = {
   voucher_type: "Proforma Invoice"
 };
 const defaultMasters: Record<string, string[]> = {
-  billing_status: ["Draft", "Memo Raised", "Invoice Raised", "Cancelled"],
+  billing_status: ["Draft", "Memo Raised", "Invoice Raised", "Marked for Review", "Marked for Changes", "Cancelled"],
   cost_center: [],
   group_name: [],
   income_head: [],
@@ -311,6 +311,7 @@ export function BillingRegister() {
   const [hiddenColumnKeys, setHiddenColumnKeys] = useState<Set<string>>(() => new Set());
   const [editDraft, setEditDraft] = useState<BillingRecord | null>(null);
   const [inlineEditor, setInlineEditor] = useState<InlineEditor | null>(null);
+  const inlineEditorValueRef = useRef<string>("");
   const [isAccessDenied, setIsAccessDenied] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isColumnOptionsOpen, setIsColumnOptionsOpen] = useState(false);
@@ -330,6 +331,8 @@ export function BillingRegister() {
   const [isToolbarMenuOpen, setIsToolbarMenuOpen] = useState(false);
   const [filters, setFilters] = useState({ search: "", status: "", receiptStatus: "", team: "", source: "" });
   const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
+  const [columnFilterResetKey, setColumnFilterResetKey] = useState(0);
+  const columnFilterTimersRef = useRef<Record<string, number>>({});
   const [valueFilters, setValueFilters] = useState<Record<string, string[]>>({});
   const [sort, setSort] = useState<{ field: BillingColumn["field"]; direction: "asc" | "desc" } | null>(null);
   const [filterMenu, setFilterMenu] = useState<{ column: BillingColumn; left: number; bottom: number } | null>(null);
@@ -455,9 +458,17 @@ export function BillingRegister() {
   useEffect(() => {
     void loadBilling();
     void loadBillingActivity();
+    const cachedTaskCodes = getCached<{ codes?: string[] }>("billing:task-codes:v1");
+    if (cachedTaskCodes && Array.isArray(cachedTaskCodes.codes)) {
+      setTaskCodes(cachedTaskCodes.codes);
+    }
     fetch("/api/taskline?view=codes", { cache: "no-store" })
       .then((response) => (response.ok ? response.json() : { codes: [] }))
-      .then((result: { codes?: { code: string }[] }) => setTaskCodes((result.codes ?? []).map((item) => item.code).filter(Boolean)))
+      .then((result: { codes?: { code: string }[] }) => {
+        const codes = (result.codes ?? []).map((item) => item.code).filter(Boolean);
+        setTaskCodes(codes);
+        setCached("billing:task-codes:v1", { codes });
+      })
       .catch(() => undefined);
     const savedLayout = getSavedBillingColumnLayout();
     setColumnOrder(savedLayout.order);
@@ -702,7 +713,7 @@ export function BillingRegister() {
       return;
     }
 
-    const rawValue = valueOverride ?? inlineEditor.value;
+    const rawValue = valueOverride ?? inlineEditorValueRef.current;
     const nextRecord = enrichBillingRecord(
       prepareRecordUpdate(record, inlineEditor.field, rawValue),
       clientRecords,
@@ -1013,7 +1024,7 @@ export function BillingRegister() {
                 <BillingMenuItem icon={Upload} label="Import" onClick={() => { setIsToolbarMenuOpen(false); fileInputRef.current?.click(); }} />
                 <BillingMenuItem icon={Maximize2} label={isFullscreen ? "Exit fullscreen" : "Fullscreen"} onClick={() => { setIsToolbarMenuOpen(false); setIsFullscreen((current) => !current); }} />
                 {hasActiveColumnFilters ? (
-                  <BillingMenuItem icon={X} label="Clear column filters" onClick={() => { setIsToolbarMenuOpen(false); setColumnFilters({}); setValueFilters({}); }} />
+                  <BillingMenuItem icon={X} label="Clear column filters" onClick={() => { setIsToolbarMenuOpen(false); setColumnFilters({}); setValueFilters({}); setColumnFilterResetKey((current) => current + 1); }} />
                 ) : null}
               </div>
             </>
@@ -1084,6 +1095,7 @@ export function BillingRegister() {
             setFilters({ search: "", status: "", receiptStatus: "", team: "", source: "" });
             setColumnFilters({});
             setValueFilters({});
+            setColumnFilterResetKey((current) => current + 1);
             setSort(null);
             setFilterMenu(null);
           }}
@@ -1172,14 +1184,17 @@ export function BillingRegister() {
                       <input
                         aria-label={`Filter ${column.label}`}
                         className="h-8 w-full rounded-md border border-slate-200 bg-white px-2 text-xs font-semibold normal-case text-slate-950 outline-none focus:border-navy-400"
-                        onChange={(event) =>
-                          setColumnFilters((current) => ({
-                            ...current,
-                            [String(column.field)]: event.target.value
-                          }))
-                        }
+                        defaultValue={columnFilters[String(column.field)] ?? ""}
+                        key={`${columnFilterResetKey}-${column.field}`}
+                        onChange={(event) => {
+                          const filterKey = String(column.field);
+                          const filterValue = event.target.value;
+                          window.clearTimeout(columnFilterTimersRef.current[filterKey]);
+                          columnFilterTimersRef.current[filterKey] = window.setTimeout(() => {
+                            setColumnFilters((current) => ({ ...current, [filterKey]: filterValue }));
+                          }, 250);
+                        }}
                         placeholder="Filter"
-                        value={columnFilters[String(column.field)] ?? ""}
                       />
                     )}
                   </th>
@@ -1201,11 +1216,14 @@ export function BillingRegister() {
                         masters={mergedMasters}
                         matters={matters}
                         onDelete={() => deleteRecord(record)}
-                        onEdit={(field, value) => setInlineEditor({ field, recordId: record.id!, value })}
+                        onEdit={(field, value) => {
+                          inlineEditorValueRef.current = value;
+                          setInlineEditor({ field, recordId: record.id!, value });
+                        }}
                         onEditForm={() => openEditForm(record)}
-                        onEditorChange={(value) =>
-                          setInlineEditor((currentEditor) => (currentEditor ? { ...currentEditor, value } : currentEditor))
-                        }
+                        onEditorChange={(value) => {
+                          inlineEditorValueRef.current = value;
+                        }}
                         onHistory={() => {
                           setSelectedRecordId(record.id ?? null);
                           void loadBillingActivity();
@@ -1433,11 +1451,11 @@ function BillingCell({
           autoFocus
           className="h-8 w-full rounded-md border border-navy-300 bg-white px-2 text-xs font-bold outline-none ring-2 ring-navy-100"
           onBlur={() => onSave()}
+          defaultValue={editorValue}
           onChange={(event) => {
             onEditorChange(event.target.value);
             onSave(event.target.value);
           }}
-          value={editorValue}
         >
           {selectOptions(field, masters).map((option) => (
             <option key={option} value={option}>{option || "-"}</option>
@@ -1460,15 +1478,15 @@ function BillingCell({
               onSave(String(record[field] ?? ""));
             }
           }}
+          defaultValue={editorValue}
           placeholder={column.type === "date" ? "dd-mm-yyyy" : undefined}
           type={column.type === "money" ? "number" : "text"}
-          value={editorValue}
         />
       ) : (
         <button
-          className={`block h-8 w-full min-w-0 truncate rounded px-1.5 text-left ${
-            isReadOnly ? "cursor-default" : "cursor-text hover:bg-slate-50 hover:ring-1 hover:ring-navy-200"
-          }`}
+          className={`block w-full min-w-0 rounded px-1.5 text-left ${
+            field === "client" ? "min-h-8 whitespace-normal break-words py-1 leading-tight" : "h-8 truncate"
+          } ${isReadOnly ? "cursor-default" : "cursor-text hover:bg-slate-50 hover:ring-1 hover:ring-navy-200"}`}
           disabled={isReadOnly || isSaving}
           onClick={() => {
             if (!isReadOnly && record.id) {
