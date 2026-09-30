@@ -110,23 +110,51 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: existing.error.message }, { status: 500 });
     }
 
+    const current = existing.data as ClientRecord;
     const row = normalizeIncomingRow(payload.row ?? {}, 0);
+    const patch = buildClientRecordPatch(current, row, false);
+
+    if (!Object.keys(patch).length) {
+      return NextResponse.json({
+        row: normalizeClientRow(current, 0),
+        unchanged: true
+      });
+    }
+
+    const nextValues = {
+      ...(current.custom_values ?? {}),
+      ...patch,
+      source: activeSourceKey
+    };
     const updated = await admin
       .from("clients")
       .update({
-        custom_values: { ...row, source: activeSourceKey },
-        name: getClientName(row),
+        custom_values: nextValues,
+        name: getClientName(nextValues),
         updated_at: new Date().toISOString()
       })
       .eq("id", payload.rowId)
-      .eq("organisation_id", organisation.organisationId);
+      .eq("organisation_id", organisation.organisationId)
+      .eq("custom_values->>source", activeSourceKey)
+      .select("id,name,custom_values,created_at,updated_at")
+      .single();
 
     if (updated.error) {
       return NextResponse.json({ error: updated.error.message }, { status: 500 });
     }
 
-    await writeAuditLog(admin, organisation.organisationId, auth.user.id, "client_record.edit", existing.data?.custom_values ?? null, row);
-    return loadResponse(admin, organisation.organisationId);
+    const audit = await writeAuditLog(
+      admin,
+      organisation.organisationId,
+      auth.user.id,
+      "client_record.edit",
+      current.custom_values ?? null,
+      patch
+    );
+    return NextResponse.json({
+      ...(audit.data ? { auditLog: audit.data } : {}),
+      row: normalizeClientRow(updated.data as ClientRecord, 0)
+    });
   }
 
   if (action === "delete") {
@@ -257,33 +285,32 @@ export async function POST(request: Request) {
       existing: findMatchingClientRecord(existingRows, item.row),
       row: item.row
     }));
-    const changedUpdates: Array<{ existing: ClientRecord; row: RegisterRow }> = [];
+    const changedFields: Record<string, number> = {};
+    const changedUpdates: Array<{ existing: ClientRecord; patch: RegisterRow }> = [];
     for (const item of resolvedUpdates) {
-      if (item.existing && !clientRecordMatches(item.existing, item.row)) {
-        changedUpdates.push({ existing: item.existing, row: item.row });
+      if (!item.existing) continue;
+      const patch = buildClientRecordPatch(item.existing, item.row, true);
+      if (!Object.keys(patch).length) continue;
+
+      changedUpdates.push({ existing: item.existing, patch });
+      for (const field of Object.keys(patch)) {
+        changedFields[field] = (changedFields[field] ?? 0) + 1;
       }
     }
-    const updateResults: Array<{ error: { message: string } | null }> = [];
-    for (let index = 0; index < changedUpdates.length; index += 25) {
-      const batchResults = await Promise.all(
-        changedUpdates.slice(index, index + 25).map(({ existing, row }) =>
-          admin
-            .from("clients")
-            .update({
-              custom_values: { ...row, source: activeSourceKey },
-              name: getClientName(row),
-              updated_at: new Date().toISOString()
-            })
-            .eq("id", existing.id)
-            .eq("organisation_id", organisation.organisationId)
-        )
-      );
-      updateResults.push(...batchResults.map((result) => ({ error: result.error })));
-    }
-    const updateError = updateResults.find((result) => result.error)?.error;
 
-    if (updateError) {
-      return NextResponse.json({ error: updateError.message }, { status: 500 });
+    for (let index = 0; index < changedUpdates.length; index += 500) {
+      const patches = changedUpdates.slice(index, index + 500).map(({ existing, patch }) => ({
+        id: existing.id,
+        patch
+      }));
+      const { error } = await admin.rpc("bulk_patch_client_records", {
+        p_organisation_id: organisation.organisationId,
+        p_patches: patches
+      });
+
+      if (error) {
+        return NextResponse.json({ error: error.message }, { status: 500 });
+      }
     }
 
     const deleteMatches = deleteItems
@@ -296,9 +323,12 @@ export async function POST(request: Request) {
     }
 
     const skippedUpdates = resolvedUpdates.filter((item) => !item.existing).length;
-    const unchangedUpdates = resolvedUpdates.filter((item) => item.existing && clientRecordMatches(item.existing, item.row)).length;
+    const unchangedUpdates = resolvedUpdates.filter(
+      (item) => item.existing && !Object.keys(buildClientRecordPatch(item.existing, item.row, true)).length
+    ).length;
     const summary = {
       added: addRows.length,
+      changedFields,
       deleted: deleteMatches.length,
       row_count: cleanedRows.length,
       skipped: skippedUpdates,
@@ -315,7 +345,7 @@ export async function POST(request: Request) {
 async function loadResponse(
   admin: ReturnType<typeof createAdminClient>,
   organisationId: string,
-  summary?: { added: number; deleted: number; row_count: number; skipped: number; unchanged: number; updated: number }
+  summary?: { added: number; changedFields: Record<string, number>; deleted: number; row_count: number; skipped: number; unchanged: number; updated: number }
 ) {
   const [active, trash, audit] = await Promise.all([
     loadClients(admin, organisationId, activeSourceKey, true),
@@ -476,14 +506,18 @@ async function writeAuditLog(
   oldValue: unknown,
   newValue: unknown
 ) {
-  await admin.from("audit_logs").insert({
-    action,
-    actor_user_id: userId,
-    entity_type: "client_record",
-    new_value: newValue,
-    old_value: oldValue,
-    organisation_id: organisationId
-  });
+  return admin
+    .from("audit_logs")
+    .insert({
+      action,
+      actor_user_id: userId,
+      entity_type: "client_record",
+      new_value: newValue,
+      old_value: oldValue,
+      organisation_id: organisationId
+    })
+    .select("id,action,actor_user_id,old_value,new_value,created_at")
+    .single();
 }
 
 function createAdminClient() {
@@ -686,11 +720,23 @@ function normalizeLookupValue(value: unknown) {
   return String(value ?? "").replace(/[^0-9a-z]/gi, "").toLowerCase();
 }
 
-function clientRecordMatches(existing: ClientRecord, incoming: RegisterRow) {
+function buildClientRecordPatch(existing: ClientRecord, incoming: RegisterRow, blankMeansKeep: boolean) {
   const values = existing.custom_values ?? {};
   return columns
     .filter((column) => column !== "S.no.")
-    .every((column) => normalizeCellValue(values[column]) === normalizeCellValue(incoming[column]));
+    .reduce<RegisterRow>((patch, column) => {
+      const next = normalizeCellValue(incoming[column]);
+
+      if (blankMeansKeep && !next) {
+        return patch;
+      }
+
+      if (normalizeCellValue(values[column]) !== next) {
+        patch[column] = incoming[column] ?? "";
+      }
+
+      return patch;
+    }, {});
 }
 
 function normalizeCellValue(value: unknown) {
