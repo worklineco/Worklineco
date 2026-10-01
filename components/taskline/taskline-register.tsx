@@ -1625,7 +1625,7 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
     const taskCode = text(row.task_code);
     const taskName = text(row.task);
     const refNo = text(row.ref_no);
-    const description = `Professional Fees for ${taskName || "TaskLine task"}${refNo ? ` in the matter of ${refNo}` : ""}${taskCode ? ` bearing Task Code ${taskCode}` : ""}`;
+    const description = `Professional Fees for ${taskName || "TaskLine task"}${refNo ? ` in the matter of ${refNo}` : ""}`;
 
     // A task can be pushed to Billing only once.
     const billedOnDate = taskCode ? billedTaskCodes.get(taskCode.toUpperCase()) : undefined;
