@@ -84,7 +84,7 @@ type RegisterKey = "all" | "cestat" | "high_court" | "non_litigation" | "tasklin
 const registerKeys = new Set<RegisterKey>(["taskline", "high_court", "cestat", "non_litigation", "all"]);
 const combinedRegisterKeys: Exclude<RegisterKey, "all">[] = ["taskline", "non_litigation", "cestat", "high_court"];
 const gstatModuleKey = "gstat";
-const overviewColumns = ["__id", "register_name", "team", "task_code", "name", "resource", "entity_group", "entity", "state_name", "gstin", "task", "due_date", "stage", "status_open_close", "remarks", "document_link"];
+const overviewColumns = ["__id", "register_name", "team", "task_code", "name", "resource", "entity_group", "entity", "state_name", "gstin", "task", "due_date", "stage", "status_open_close", "billable", "remarks", "document_link"];
 const overviewCacheTtlMs = 60_000;
 const overviewCache = new Map<string, { expiresAt: number; rows: TaskLineRow[] }>();
 
@@ -111,7 +111,7 @@ function overviewCacheKey(organisationId: string, access: AccessScope) {
   return `${organisationId}|${access.canViewAll ? "all" : access.teams.join(",")}`;
 }
 
-const overviewTaskFields = ["register_key", "team", "task_code", "name", "resource", "entity_group", "entity", "state_name", "gstin", "task", "due_date", "stage", "status_open_close", "remarks", "document_link"];
+const overviewTaskFields = ["register_key", "team", "task_code", "name", "resource", "entity_group", "entity", "state_name", "gstin", "task", "due_date", "stage", "status_open_close", "billable", "remarks", "document_link"];
 const overviewTaskSelect = [
   "id",
   "workline_module:custom_values->>workline_module",
@@ -262,6 +262,12 @@ const taskLineColumns = [
 ];
 
 export async function GET(request: Request) {
+  const resendSince = text(new URL(request.url).searchParams.get("resend_allocations_since"));
+
+  if (resendSince) {
+    return resendAllocationMails(request, resendSince);
+  }
+
   console.time("taskline:requireUser");
   const auth = await requireUser();
   console.timeEnd("taskline:requireUser");
@@ -743,6 +749,7 @@ async function handlePost(request: Request) {
       const previousResource = text((existing.data as TaskRecord).custom_values?.taskline_data?.resource);
       const previousName = text((existing.data as TaskRecord).custom_values?.taskline_data?.name);
       const previousDueDate = text((existing.data as TaskRecord).custom_values?.taskline_data?.due_date);
+      const previousStage = text((existing.data as TaskRecord).custom_values?.taskline_data?.stage);
       const savedRecord = saved.data as TaskRecord;
 
       after(async () => {
@@ -765,6 +772,12 @@ async function handlePost(request: Request) {
           // audit-log dedupe keys stop double sends either way).
           if (registerSendsMails(registerKey) && text(cleaned.due_date) === indiaTodayDisplayDate() && previousDueDate !== text(cleaned.due_date)) {
             await sendDueTodayReminderNow(admin, organisation.organisationId, savedRecord);
+          }
+
+          // Review mail: when a Team 03 task's Stage is set to "Pending for
+          // review", notify the review mailbox (only on the change into it).
+          if (registerSendsMails(registerKey) && isPendingReviewStage(cleaned.stage) && !isPendingReviewStage(previousStage)) {
+            await sendPendingReviewMail(admin, organisation.organisationId, savedRecord);
           }
         } catch (error) {
           console.error("TaskLine post-save notifications failed:", error);
@@ -836,6 +849,11 @@ async function handlePost(request: Request) {
       // (the daily 09:00 IST mail for today may have already gone out).
       if (registerSendsMails(registerKey) && text(cleaned.due_date) === indiaTodayDisplayDate()) {
         await sendDueTodayReminderNow(admin, organisation.organisationId, createdRecord);
+      }
+
+      // Review mail for rows created directly in "Pending for review".
+      if (registerSendsMails(registerKey) && isPendingReviewStage(cleaned.stage)) {
+        await sendPendingReviewMail(admin, organisation.organisationId, createdRecord);
       }
     } catch (error) {
       console.error("TaskLine post-create notifications failed:", error);
@@ -1300,23 +1318,30 @@ function agingTeamLabel(team: unknown) {
 // TaskLine "Show Billables" filter can exclude tasks that have already been billed.
 async function loadBilledTaskCodes(admin: ReturnType<typeof createAdminClient>, organisationId: string) {
   const codes = new Set<string>();
+  // First push date per task code, so the register can say when a task was
+  // already pushed to Billing.
+  const billedOn: Record<string, string> = {};
 
   for (let from = 0; ; from += fetchBatchSize) {
     const { data, error } = await admin
       .from("firm_billing_records")
-      .select("task_code")
+      .select("task_code,created_at")
       .eq("organisation_id", organisationId)
       .range(from, from + fetchBatchSize - 1);
 
     if (error) {
       // Billing table/column may be unavailable — fail soft with an empty set.
-      return NextResponse.json({ taskCodes: [] as string[] });
+      return NextResponse.json({ billedOn: {}, taskCodes: [] as string[] });
     }
 
-    for (const row of (data ?? []) as { task_code?: string | null }[]) {
+    for (const row of (data ?? []) as { created_at?: string | null; task_code?: string | null }[]) {
       const code = text(row.task_code).trim().toUpperCase();
       if (code) {
         codes.add(code);
+        const pushedOn = text(row.created_at).slice(0, 10);
+        if (pushedOn && (!billedOn[code] || pushedOn < billedOn[code])) {
+          billedOn[code] = pushedOn;
+        }
       }
     }
 
@@ -1325,7 +1350,7 @@ async function loadBilledTaskCodes(admin: ReturnType<typeof createAdminClient>, 
     }
   }
 
-  return NextResponse.json({ taskCodes: Array.from(codes) });
+  return NextResponse.json({ billedOn, taskCodes: Array.from(codes) });
 }
 
 // Aging report: open TaskLine tasks that have not started (stage blank / "Open"
@@ -2485,6 +2510,225 @@ function allocationNormalizeName(value: unknown) {
   }
 
   return parts.join(" ");
+}
+
+// "Pending for review" stage mail: Team 03 tasks only.
+const pendingReviewRecipient = "shuchis.dco@gmail.com";
+
+// One-off recovery: resend the task-creation mails (resource allocation,
+// name tag, senior-manager "new task added") for tasks created after the
+// given ISO time - used to backfill mails missed during an SMTP outage.
+// Guarded by CRON_SECRET; tasks whose allocation mails already went out
+// (per the audit log) are skipped, so re-running never duplicates.
+async function resendAllocationMails(request: Request, sinceRaw: string) {
+  const secret = process.env.CRON_SECRET;
+  const header = request.headers.get("authorization") ?? "";
+
+  if (!secret || header !== `Bearer ${secret}`) {
+    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+  }
+
+  const since = new Date(sinceRaw);
+
+  if (Number.isNaN(since.getTime()) || Date.now() - since.getTime() > 7 * 86400000) {
+    return NextResponse.json({ error: "Provide a valid ISO time within the last 7 days." }, { status: 400 });
+  }
+
+  const admin = createAdminClient();
+  const result = await admin
+    .from("tasks")
+    .select("id,organisation_id,title,description,due_at,custom_values,created_by,created_at,updated_at")
+    .in("custom_values->>workline_module", modulesForRegister("all"))
+    .gte("created_at", since.toISOString())
+    .order("created_at", { ascending: true })
+    .limit(200);
+
+  if (result.error) {
+    return NextResponse.json({ error: result.error.message }, { status: 500 });
+  }
+
+  const records = (result.data ?? []) as TaskRecord[];
+  const mailedIds = new Set<string>();
+
+  if (records.length) {
+    const sentLogs = await admin
+      .from("audit_logs")
+      .select("entity_id")
+      .eq("action", "taskline.allocation_email_sent")
+      .in("entity_id", records.map((record) => record.id))
+      .limit(2000);
+
+    for (const row of sentLogs.data ?? []) {
+      mailedIds.add(text((row as { entity_id?: string | null }).entity_id));
+    }
+  }
+
+  let sent = 0;
+  let skipped = 0;
+  const processed: string[] = [];
+
+  for (const record of records) {
+    if (mailedIds.has(record.id)) {
+      skipped += 1;
+      continue;
+    }
+
+    const row = record.custom_values?.taskline_data ?? {};
+
+    if (text(row.resource)) {
+      await sendResourceAllocationMail(admin, record.organisation_id, record);
+    }
+
+    if (text(row.name)) {
+      await sendResourceAllocationMail(admin, record.organisation_id, record, "name");
+    }
+
+    await sendResourceAllocationMail(admin, record.organisation_id, record, "senior_manager");
+    sent += 1;
+    processed.push(text(row.task_code) || text(row.entity) || record.id);
+  }
+
+  return NextResponse.json({ processed, sent, since: since.toISOString(), skipped, total: records.length });
+}
+
+function isPendingReviewStage(value: unknown) {
+  return text(value).trim().toLowerCase() === "pending for review";
+}
+
+async function sendPendingReviewMail(
+  admin: ReturnType<typeof createAdminClient>,
+  organisationId: string,
+  record: TaskRecord
+) {
+  try {
+    const row = record.custom_values?.taskline_data ?? {};
+
+    if (teamMatchKey(row.team) !== teamMatchKey("Team 03")) {
+      return;
+    }
+
+    const smtp = allocationSmtpConfiguration();
+
+    if ("error" in smtp) {
+      console.warn("Pending-review email skipped:", smtp.error);
+      return;
+    }
+
+    const transporter = createTransport({
+      auth: {
+        pass: smtp.password,
+        user: smtp.user
+      },
+      host: smtp.host,
+      port: smtp.port,
+      secure: smtp.port === 465
+    });
+
+    const entity = text(row.entity) || "TaskLine task";
+    const taskName = text(row.task) || "Task";
+    const taskCode = text(row.task_code) || "-";
+    const team = text(row.team) || "-";
+    const manager = text(row.name) || "-";
+    const resource = text(row.resource) || "-";
+    const dueDate = text(row.due_date) || "Not set";
+    const bodyText = [
+      "TASK PENDING FOR REVIEW",
+      "",
+      entity,
+      `Task: ${taskName}`,
+      `Task Code: ${taskCode}`,
+      `Team: ${team}`,
+      `Manager: ${manager}`,
+      `Resource: ${resource}`,
+      `Due date: ${dueDate}`,
+      "",
+      `Open TaskLine: ${allocationAppUrl}/taskline`
+    ].join("\n");
+    const safeEntity = allocationEscapeHtml(entity);
+    const bodyHtml = `<!doctype html>
+<html>
+  <body style="margin:0;background:#f4f6fa;font-family:Arial,Helvetica,sans-serif;color:#0f172a;">
+    <div style="display:none;max-height:0;overflow:hidden;">${safeEntity} — pending for review.</div>
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f4f6fa;padding:28px 12px;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:520px;background:#ffffff;border:1px solid #e2e8f0;border-radius:18px;overflow:hidden;">
+            <tr>
+              <td style="padding:24px;">
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+                  <tr>
+                    <td width="52" valign="top">
+                      <div style="width:44px;height:44px;border-radius:14px;background:#fef3c7;color:#b45309;text-align:center;line-height:44px;font-size:21px;">&#128269;</div>
+                    </td>
+                    <td style="padding-left:14px;">
+                      <div style="font-size:12px;line-height:18px;font-weight:700;letter-spacing:1.2px;color:#b45309;">TASK PENDING FOR REVIEW</div>
+                      <div style="margin-top:6px;font-size:17px;line-height:24px;font-weight:700;color:#172033;">${safeEntity}</div>
+                      <table role="presentation" cellspacing="0" cellpadding="0" style="margin-top:12px;font-size:14px;line-height:22px;">
+                        <tr>
+                          <td style="width:88px;color:#94a3b8;font-weight:600;">Task</td>
+                          <td style="color:#475569;font-weight:600;">${allocationEscapeHtml(taskName)}</td>
+                        </tr>
+                        <tr>
+                          <td style="color:#94a3b8;font-weight:600;">Task Code</td>
+                          <td style="color:#475569;font-weight:600;">${allocationEscapeHtml(taskCode)}</td>
+                        </tr>
+                        <tr>
+                          <td style="color:#94a3b8;font-weight:600;">Team</td>
+                          <td style="color:#475569;font-weight:600;">${allocationEscapeHtml(team)}</td>
+                        </tr>
+                        <tr>
+                          <td style="color:#94a3b8;font-weight:600;">Manager</td>
+                          <td style="color:#475569;font-weight:600;">${allocationEscapeHtml(manager)}</td>
+                        </tr>
+                        <tr>
+                          <td style="color:#94a3b8;font-weight:600;">Resource</td>
+                          <td style="color:#475569;font-weight:600;">${allocationEscapeHtml(resource)}</td>
+                        </tr>
+                        <tr>
+                          <td style="color:#94a3b8;font-weight:600;">Due date</td>
+                          <td style="color:#475569;font-weight:600;">${allocationEscapeHtml(dueDate)}</td>
+                        </tr>
+                      </table>
+                    </td>
+                  </tr>
+                </table>
+                <div style="margin-top:22px;text-align:center;">
+                  <a href="${allocationEscapeHtml(`${allocationAppUrl}/taskline`)}" style="display:inline-block;border-radius:10px;background:#1e3168;color:#ffffff;text-decoration:none;font-size:14px;font-weight:700;padding:12px 22px;">Open TaskLine</a>
+                </div>
+              </td>
+            </tr>
+          </table>
+          <div style="padding-top:12px;font-size:11px;line-height:18px;color:#94a3b8;">Automated notification from WorkLine Co</div>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>`;
+
+    await transporter.sendMail({
+      from: smtp.from,
+      html: bodyHtml,
+      subject: `Pending for review: ${entity} — ${taskName}`,
+      text: bodyText,
+      to: pendingReviewRecipient
+    });
+
+    await admin.from("audit_logs").insert({
+      action: "taskline.pending_review_email_sent",
+      actor_user_id: null,
+      entity_id: record.id,
+      entity_type: "taskline_email_pending_review",
+      new_value: {
+        recipient: pendingReviewRecipient,
+        task_code: taskCode,
+        sent_at: new Date().toISOString()
+      },
+      old_value: null,
+      organisation_id: organisationId
+    });
+  } catch (error) {
+    console.error("Pending-review email failed:", error);
+  }
 }
 
 function allocationIsEmail(value: string) {

@@ -40,6 +40,7 @@ type BillingRecord = {
   receiving_status?: string;
   registration_type?: string;
   remarks?: string;
+  accounts_remark?: string;
   serial_no?: number | string | null;
   sgst?: number | string;
   source_module?: string;
@@ -121,6 +122,7 @@ const billingSelectColumns = [
   "amount_received",
   "pending_amount",
   "remarks",
+  "accounts_remark",
   "version_no",
   "created_by",
   "updated_by",
@@ -568,6 +570,30 @@ export async function POST(request: Request) {
     return NextResponse.json({ record: savedRecord ?? saved.data });
   }
 
+  // A task (or GSTAT matter) can be pushed to Billing only once.
+  const duplicateCode = text(cleaned.task_code);
+  const duplicateMatter = text(cleaned.gstat_appeal_id ?? "");
+  if (duplicateCode || duplicateMatter) {
+    const baseDuplicateQuery = admin
+      .from(tableName)
+      .select("id,created_at")
+      .eq("organisation_id", organisation.organisationId)
+      .limit(1);
+    const existingBill = await (duplicateCode
+      ? baseDuplicateQuery.ilike("task_code", duplicateCode)
+      : baseDuplicateQuery.eq("gstat_appeal_id", duplicateMatter)
+    ).maybeSingle();
+    if (!existingBill.error && existingBill.data) {
+      const pushedOn = text((existingBill.data as { created_at?: string }).created_at).slice(0, 10);
+      return NextResponse.json(
+        {
+          error: `${duplicateCode ? `Task Code ${duplicateCode}` : "This matter"} was already pushed to Billing${pushedOn ? ` on ${pushedOn}` : ""}. It cannot be entered twice.`
+        },
+        { status: 409 }
+      );
+    }
+  }
+
   const [createRecord] = await assignSerialNumbers(admin, organisation.organisationId, [cleaned]);
   let saved = await admin.from(tableName).insert(createRecord).select("*").single();
 
@@ -678,13 +704,31 @@ async function loadBillingRecordsFast(
   organisationId: string,
   access: AccessScope
 ) {
-  const result = await selectBillingRecordsPage(admin, organisationId, access, billingSelectColumns, 0, fetchBatchSize - 1);
+  let columns = billingSelectColumns;
 
-  if (result.error && isMissingCompatibilityColumn(result.error)) {
-    return selectBillingRecordsPage(admin, organisationId, access, fallbackBillingSelectColumns, 0, fetchBatchSize - 1);
+  for (let attempt = 0; attempt < 16; attempt += 1) {
+    const result = await selectBillingRecordsPage(admin, organisationId, access, columns, 0, fetchBatchSize - 1);
+
+    if (!result.error) {
+      return result;
+    }
+
+    const trimmedColumns = removeMissingSelectColumn(columns, result.error);
+
+    if (trimmedColumns) {
+      columns = trimmedColumns;
+      continue;
+    }
+
+    if (isMissingCompatibilityColumn(result.error) && columns !== fallbackBillingSelectColumns) {
+      columns = fallbackBillingSelectColumns;
+      continue;
+    }
+
+    return result;
   }
 
-  return result;
+  return selectBillingRecordsPage(admin, organisationId, access, fallbackBillingSelectColumns, 0, fetchBatchSize - 1);
 }
 
 async function fetchAllBillingRecords(
@@ -699,11 +743,17 @@ async function fetchAllBillingRecords(
     const to = from + fetchBatchSize - 1;
     const result = await selectBillingRecordsPage(admin, organisationId, access, columns, from, to);
 
-    if (result.error && isMissingCompatibilityColumn(result.error) && columns !== fallbackBillingSelectColumns) {
-      return fetchAllBillingRecords(admin, organisationId, access, fallbackBillingSelectColumns);
-    }
-
     if (result.error) {
+      const trimmedColumns = removeMissingSelectColumn(columns, result.error);
+
+      if (trimmedColumns) {
+        return fetchAllBillingRecords(admin, organisationId, access, trimmedColumns);
+      }
+
+      if (isMissingCompatibilityColumn(result.error) && columns !== fallbackBillingSelectColumns) {
+        return fetchAllBillingRecords(admin, organisationId, access, fallbackBillingSelectColumns);
+      }
+
       return result;
     }
 
@@ -989,6 +1039,7 @@ function cleanRecord(
     receiving_status: text(record.receiving_status) || "Pending",
     registration_type: text(record.registration_type),
     remarks: text(record.remarks),
+    accounts_remark: text(record.accounts_remark),
     serial_no: record.id && record.serial_no ? Number(record.serial_no) : undefined,
     sgst,
     source_module: linkedMatterId ? "gstat" : text(record.source_module) || "manual",
@@ -1005,6 +1056,7 @@ function cleanRecord(
 
   return {
     ...cleaned,
+    accounts_remark: "",
     invoice_date: null,
     invoice_no: "",
     memo_date: null,
@@ -1014,10 +1066,37 @@ function cleanRecord(
   };
 }
 
+// When a SELECT fails because one column is missing (an unapplied migration),
+// drop just that column and try again instead of falling back to the minimal
+// compatibility column set, which would hide task codes and serial numbers.
+function removeMissingSelectColumn(columns: string, error: unknown) {
+  const message = isRecord(error) ? String(error.message ?? "") : String(error ?? "");
+  const match = /column\s+(?:"?[\w.]+"?\.)?"?([a-z0-9_]+)"?\s+does not exist/i.exec(message);
+
+  if (!match) {
+    return null;
+  }
+
+  const parts = columns.split(",");
+
+  if (!parts.includes(match[1])) {
+    return null;
+  }
+
+  return parts.filter((column) => column !== match[1]).join(",");
+}
+
 function isMissingCompatibilityColumn(error: unknown) {
   const message = isRecord(error) ? String(error.message ?? "") : String(error ?? "");
 
-  return ["address", "escalation_1", "include_ope_in_fees", "is_retainer", "task_code", "place_of_supply", "registration_type", "receiving_date", "serial_no", "amount_received", "pending_amount"].some((column) =>
+  // Only a genuine missing-column error counts; a unique-key or not-null
+  // violation that merely mentions a column name must surface as-is instead
+  // of silently stripping task codes and serials from the record.
+  if (!/does not exist|could not find|schema cache/i.test(message)) {
+    return false;
+  }
+
+  return ["address", "escalation_1", "include_ope_in_fees", "is_retainer", "task_code", "place_of_supply", "registration_type", "receiving_date", "serial_no", "amount_received", "pending_amount", "accounts_remark"].some((column) =>
     message.includes(column)
   );
 }
@@ -1035,6 +1114,7 @@ function stripCompatibilityColumns<T extends Record<string, unknown>>(record: T)
     serial_no: _serialNo,
     amount_received: _amountReceived,
     pending_amount: _pendingAmount,
+    accounts_remark: _accountsRemark,
     ...compatibleRecord
   } = record;
 
@@ -1082,7 +1162,8 @@ async function assignSerialNumbers<T extends Record<string, unknown>>(
     .order("serial_no", { ascending: false, nullsFirst: false })
     .limit(1);
 
-  if (error && isMissingCompatibilityColumn(error)) {
+  if (error) {
+    // Let the database sequence assign serial numbers instead of guessing.
     return rows;
   }
 
@@ -1112,6 +1193,7 @@ function preserveAccountsOnlyFields<T extends Record<string, unknown>>(
 
   const cleaned = {
     ...nextRecord,
+    accounts_remark: text(existingRecord.accounts_remark),
     invoice_date: existingRecord.invoice_date ?? null,
     invoice_no: text(existingRecord.invoice_no),
     memo_date: existingRecord.memo_date ?? null,

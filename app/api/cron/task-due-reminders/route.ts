@@ -103,6 +103,7 @@ export async function GET(request: Request) {
   let failed = 0;
   let sent = 0;
   let skipped = 0;
+  const errors: string[] = [];
 
   for (const task of dueTasks.tasks) {
     const row = task.custom_values?.taskline_data ?? {};
@@ -174,6 +175,9 @@ export async function GET(request: Request) {
         sent += 1;
       } catch (error) {
         failed += 1;
+        if (errors.length < 5) {
+          errors.push(error instanceof Error ? error.message : String(error));
+        }
         console.error("Could not send TaskLine due reminder:", error);
       }
     }
@@ -181,6 +185,7 @@ export async function GET(request: Request) {
 
   return NextResponse.json({
     dueDate: dueDateKey,
+    errors,
     failed,
     sent,
     skipped

@@ -2424,27 +2424,19 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
 
             <div className="mt-5 flex justify-end gap-2 border-t border-slate-200 pt-4">
               <button
-                className="inline-flex h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-xs font-black uppercase text-slate-700"
+                className="inline-flex h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-xs font-black uppercase text-red-600 transition hover:bg-red-50"
                 onClick={() => setBillingDraft(null)}
                 type="button"
               >
-                Cancel
+                Back
               </button>
               <button
-                className="inline-flex h-10 items-center justify-center rounded-xl border border-lime-200 bg-white px-4 text-xs font-black uppercase text-lime-800 transition hover:bg-lime-50 disabled:opacity-50"
+                className="inline-flex h-10 items-center justify-center rounded-xl bg-navy-700 px-5 text-xs font-black uppercase text-white transition hover:bg-navy-800 disabled:opacity-50"
                 disabled={isSavingBilling}
                 onClick={() => void saveBillingDraft({ openBilling: false })}
                 type="button"
               >
                 {isSavingBilling ? "Creating..." : "Create"}
-              </button>
-              <button
-                className="inline-flex h-10 items-center justify-center rounded-xl bg-lime-700 px-4 text-xs font-black uppercase text-white transition hover:bg-lime-800 disabled:opacity-50"
-                disabled={isSavingBilling}
-                onClick={() => void saveBillingDraft({ openBilling: true })}
-                type="button"
-              >
-                {isSavingBilling ? "Creating..." : "Create and open Billing"}
               </button>
             </div>
           </form>
