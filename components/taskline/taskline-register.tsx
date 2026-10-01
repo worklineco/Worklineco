@@ -328,6 +328,7 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
   const [billingDuplicateNotice, setBillingDuplicateNotice] = useState<{ code: string; date: string } | null>(null);
   const billingClientRowsFetchRef = useRef<Promise<ClientRegisterRow[]> | null>(null);
   const [billingFieldErrorsVisible, setBillingFieldErrorsVisible] = useState(false);
+  const [billableBreakdown, setBillableBreakdown] = useState<{ items: [string, number][]; loading: boolean } | null>(null);
   const [billingMessage, setBillingMessage] = useState("");
   const [isSavingBilling, setIsSavingBilling] = useState(false);
   const [editingRowId, setEditingRowId] = useState<string | null>(null);
@@ -1760,6 +1761,41 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
     }
   }
 
+  // Double-clicking "Show Billables" opens a popup splitting the billable
+  // count by register (Litigation / Non-Litigation / CESTAT / High Court).
+  async function openBillableBreakdown() {
+    setBillableBreakdown({ items: [], loading: true });
+
+    let allRows: TaskLineRow[] = [];
+
+    try {
+      const response = await fetch("/api/taskline?register=all", { cache: "no-store", credentials: "include" });
+      const result = (await response.json().catch(() => ({}))) as { rows?: TaskLineRow[] };
+      allRows = result.rows ?? [];
+    } catch (error) {
+      console.error("Billable breakdown load failed:", error);
+      allRows = getCached<{ rows?: TaskLineRow[] }>("all:rows:v1")?.rows ?? [];
+    }
+
+    const counts = new Map<string, number>();
+
+    for (const row of allRows) {
+      if (!isPendingBillableRow(row, billedTaskCodes)) {
+        continue;
+      }
+      const label = text(row.register_name) || "Other";
+      counts.set(label, (counts.get(label) ?? 0) + 1);
+    }
+
+    const preferredOrder = ["Litigation", "Non-Litigation", "CESTAT", "High Court"];
+    const items: [string, number][] = [
+      ...preferredOrder.filter((label) => counts.has(label)).map((label) => [label, counts.get(label) ?? 0] as [string, number]),
+      ...[...counts.entries()].filter(([label]) => !preferredOrder.includes(label))
+    ];
+
+    setBillableBreakdown({ items, loading: false });
+  }
+
   function loadBillingClientRows(refresh = false): Promise<ClientRegisterRow[]> {
     if (!refresh) {
       const cached = getCached<{ rows?: ClientRegisterRow[] }>(billingClientRowsCacheKey);
@@ -2367,7 +2403,8 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
             className={`inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-md border px-3 text-xs font-bold transition ${
               showBillablesOnly ? "border-amber-500 bg-amber-50 text-amber-700" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
             }`}
-            title="Show only billable, work-done tasks (W-codes) that are not yet in the Billing register"
+            onDoubleClick={() => void openBillableBreakdown()}
+            title="Show only billable, work-done tasks (W-codes) that are not yet in the Billing register. Double-click for the register-wise split."
           >
             <input checked={showBillablesOnly} className="accent-amber-600" onChange={(event) => setShowBillablesOnly(event.target.checked)} type="checkbox" />
             Show Billables
@@ -2886,6 +2923,41 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
               </button>
             </div>
           </form>
+        </div>
+      ) : null}
+
+      {billableBreakdown ? (
+        <div className="fixed inset-0 z-[86] flex items-center justify-center bg-navy-700/40 p-4">
+          <div className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl">
+            <p className="text-xs font-black uppercase tracking-[0.14em] text-amber-600">Billables by register</p>
+            {billableBreakdown.loading ? (
+              <p className="mt-3 text-sm font-bold text-slate-500">Counting billable tasks...</p>
+            ) : billableBreakdown.items.length ? (
+              <ul className="mt-3 space-y-1.5">
+                {billableBreakdown.items.map(([label, count]) => (
+                  <li className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2 text-sm font-bold text-slate-900" key={label}>
+                    <span>{label}</span>
+                    <span className="inline-flex min-w-6 items-center justify-center rounded-full bg-amber-500 px-2 text-xs font-black text-white">{count}</span>
+                  </li>
+                ))}
+                <li className="flex items-center justify-between px-3 pt-2 text-sm font-black text-slate-950">
+                  <span>Total</span>
+                  <span>{billableBreakdown.items.reduce((sum, [, count]) => sum + count, 0)}</span>
+                </li>
+              </ul>
+            ) : (
+              <p className="mt-3 text-sm font-bold text-slate-500">No pending billable tasks.</p>
+            )}
+            <div className="mt-4 flex justify-end">
+              <button
+                className="inline-flex h-10 items-center justify-center rounded-xl bg-navy-700 px-4 text-xs font-black uppercase text-white transition hover:bg-navy-800"
+                onClick={() => setBillableBreakdown(null)}
+                type="button"
+              >
+                OK
+              </button>
+            </div>
+          </div>
         </div>
       ) : null}
 
