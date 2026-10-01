@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowDown, ArrowUp, ArrowUpDown, Filter, ChevronDown, Download, History, Link2, Maximize2, Menu, Pencil, Plus, RotateCcw, Search, Settings2, ShieldCheck, Trash2, Upload, X } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, Filter, ChevronDown, Download, History, Link2, Maximize2, Menu, Pencil, Pin, Plus, RotateCcw, Search, Settings2, ShieldCheck, Trash2, Upload, X } from "lucide-react";
 import type { ComponentType } from "react";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { BillingColumnFilter } from "@/components/billing/billing-column-filter";
@@ -97,7 +97,7 @@ type BillingColumn = {
   type?: "date" | "money" | "select" | "text";
   width: number;
 };
-type BillingColumnLayout = { hiddenColumnKeys: string[]; order: string[] };
+type BillingColumnLayout = { frozenColumnKeys: string[]; hiddenColumnKeys: string[]; order: string[] };
 type InlineEditor = { field: BillingField; recordId: string; value: string };
 type BillingView = "audit" | "register" | "trash";
 
@@ -326,6 +326,7 @@ export function BillingRegister() {
   const [columnOrder, setColumnOrder] = useState<string[]>(defaultBillingColumnOrder);
   const [hasLoadedColumnLayout, setHasLoadedColumnLayout] = useState(false);
   const [hiddenColumnKeys, setHiddenColumnKeys] = useState<Set<string>>(() => new Set());
+  const [frozenColumnKeys, setFrozenColumnKeys] = useState<Set<string>>(() => new Set());
   const [editDraft, setEditDraft] = useState<BillingRecord | null>(null);
   const [inlineEditor, setInlineEditor] = useState<InlineEditor | null>(null);
   const inlineEditorValueRef = useRef<string>("");
@@ -390,6 +391,17 @@ export function BillingRegister() {
     ),
     [activeBillingGroupColumnSet, hiddenColumnKeys, orderedBillingColumns]
   );
+  const frozenLefts = useMemo(() => {
+    const map = new Map<string, number>();
+    let accumulated = 0;
+    for (const column of visibleBillingColumns) {
+      if (frozenColumnKeys.has(String(column.field))) {
+        map.set(String(column.field), accumulated);
+        accumulated += column.width;
+      }
+    }
+    return map;
+  }, [frozenColumnKeys, visibleBillingColumns]);
   const visibleTableWidth = useMemo(
     () => visibleBillingColumns.reduce((total, column) => total + column.width, 0),
     [visibleBillingColumns]
@@ -505,6 +517,7 @@ export function BillingRegister() {
     const savedLayout = getSavedBillingColumnLayout();
     setColumnOrder(savedLayout.order);
     setHiddenColumnKeys(new Set(savedLayout.hiddenColumnKeys));
+    setFrozenColumnKeys(new Set(savedLayout.frozenColumnKeys));
     setHasLoadedColumnLayout(true);
   }, []);
 
@@ -514,10 +527,11 @@ export function BillingRegister() {
     }
 
     saveBillingColumnLayout({
+      frozenColumnKeys: Array.from(frozenColumnKeys),
       hiddenColumnKeys: Array.from(hiddenColumnKeys),
       order: columnOrder
     });
-  }, [columnOrder, hasLoadedColumnLayout, hiddenColumnKeys]);
+  }, [columnOrder, frozenColumnKeys, hasLoadedColumnLayout, hiddenColumnKeys]);
 
   useEffect(() => {
     setTablePage(1);
@@ -1091,11 +1105,13 @@ export function BillingRegister() {
           ) : null}
           {isColumnOptionsOpen ? (
             <BillingColumnOptionsPanel
+              frozenColumnKeys={frozenColumnKeys}
               hiddenColumnKeys={hiddenColumnKeys}
               onApply={(layout) => {
                 const normalizedLayout = normalizeBillingColumnLayout(layout);
                 setColumnOrder(normalizedLayout.order);
                 setHiddenColumnKeys(new Set(normalizedLayout.hiddenColumnKeys));
+                setFrozenColumnKeys(new Set(normalizedLayout.frozenColumnKeys));
                 setIsColumnOptionsOpen(false);
               }}
               onClose={() => setIsColumnOptionsOpen(false)}
@@ -1258,8 +1274,10 @@ export function BillingRegister() {
             </colgroup>
             <thead className="sticky top-0 z-10 bg-slate-100 text-[11px] font-semibold uppercase tracking-wide text-slate-600 [&_th]:border-b [&_th]:border-slate-200">
               <tr>
-                {visibleBillingColumns.map((column) => (
-                  <th className="border-r border-white/10 px-3 py-3 last:border-r-0" key={column.field} aria-sort={sort?.field === column.field ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}>
+                {visibleBillingColumns.map((column) => {
+                  const frozenLeft = frozenLefts.get(String(column.field));
+                  return (
+                  <th className={`border-r border-white/10 px-3 py-3 last:border-r-0 ${frozenLeft !== undefined ? "sticky z-20 bg-slate-100" : ""}`} style={frozenLeft !== undefined ? { left: frozenLeft } : undefined} key={column.field} aria-sort={sort?.field === column.field ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}>
                     <div className="flex items-center justify-between gap-1">
                       <span>{column.label}</span>
                       {column.field !== "actions" ? <div className="flex shrink-0 items-center gap-1">
@@ -1273,11 +1291,14 @@ export function BillingRegister() {
                       </div> : null}
                     </div>
                   </th>
-                ))}
+                  );
+                })}
               </tr>
               <tr className="bg-slate-50">
-                {visibleBillingColumns.map((column) => (
-                  <th className="border-r border-slate-200 px-2 py-2 last:border-r-0" key={`filter-${column.field}`}>
+                {visibleBillingColumns.map((column) => {
+                  const frozenLeft = frozenLefts.get(String(column.field));
+                  return (
+                  <th className={`border-r border-slate-200 px-2 py-2 last:border-r-0 ${frozenLeft !== undefined ? "sticky z-20 bg-slate-50" : ""}`} style={frozenLeft !== undefined ? { left: frozenLeft } : undefined} key={`filter-${column.field}`}>
                     {column.field === "actions" ? null : (
                       <input
                         aria-label={`Filter ${column.label}`}
@@ -1296,7 +1317,8 @@ export function BillingRegister() {
                       />
                     )}
                   </th>
-                ))}
+                  );
+                })}
               </tr>
             </thead>
             <tbody>
@@ -1307,6 +1329,7 @@ export function BillingRegister() {
                   <BillingRow
                     access={access}
                     columns={visibleBillingColumns}
+                    frozenLefts={frozenLefts}
                     inlineEditor={inlineEditor}
                     key={record.id}
                     masters={mergedMasters}
@@ -1421,6 +1444,7 @@ export function BillingRegister() {
 type BillingRowProps = {
   access: AccessScope;
   columns: BillingColumn[];
+  frozenLefts: Map<string, number>;
   inlineEditor: InlineEditor | null;
   masters: Record<string, string[]>;
   matters: GstatMatter[];
@@ -1446,6 +1470,7 @@ function billingRowPropsEqual(previous: BillingRowProps, next: BillingRowProps) 
   return (
     previous.record === next.record &&
     previous.columns === next.columns &&
+    previous.frozenLefts === next.frozenLefts &&
     previous.masters === next.masters &&
     previous.matters === next.matters &&
     previous.access === next.access &&
@@ -1458,6 +1483,7 @@ function billingRowPropsEqual(previous: BillingRowProps, next: BillingRowProps) 
 const BillingRow = memo(function BillingRow({
   access,
   columns,
+  frozenLefts,
   inlineEditor,
   masters,
   matters,
@@ -1478,6 +1504,7 @@ const BillingRow = memo(function BillingRow({
         <BillingCell
           access={access}
           column={column}
+          frozenLeft={frozenLefts.get(String(column.field))}
           inlineEditor={inlineEditor}
           key={`${record.id}-${column.field}`}
           masters={masters}
@@ -1501,6 +1528,7 @@ const BillingRow = memo(function BillingRow({
 function BillingCell({
   access,
   column,
+  frozenLeft,
   inlineEditor,
   masters,
   matters,
@@ -1517,6 +1545,7 @@ function BillingCell({
 }: {
   access: AccessScope;
   column: BillingColumn;
+  frozenLeft?: number;
   inlineEditor: InlineEditor | null;
   masters: Record<string, string[]>;
   matters: GstatMatter[];
@@ -1535,6 +1564,8 @@ function BillingCell({
   const isGstatLink = column.field === "gstat_link";
   const field = column.field as BillingField;
   const isAccountsOnly = accountsOnlyFields.has(field);
+  const frozenTdClass = frozenLeft !== undefined ? "sticky z-[4] bg-white" : "";
+  const frozenTdStyle = frozenLeft !== undefined ? { left: frozenLeft } : undefined;
   const receiptStatus = String(record.receiving_status ?? "").trim().toLowerCase();
   const receiptIsAuto =
     receiptStatus === "" || receiptStatus === "pending" || receiptStatus === "received" || receiptStatus === "realised" || receiptStatus === "realized";
@@ -1555,7 +1586,7 @@ function BillingCell({
 
   if (isActions) {
     return (
-      <td className="border-r border-slate-100 px-3 py-2 last:border-r-0">
+      <td className={`border-r border-slate-100 px-3 py-2 last:border-r-0 ${frozenTdClass}`} style={frozenTdStyle}>
         <div className="flex items-center gap-1">
           <button
             className="inline-flex size-8 items-center justify-center rounded-md border border-sky-200 text-sky-700 hover:bg-sky-50"
@@ -1590,7 +1621,7 @@ function BillingCell({
     const currentLabel = getMatterLabel(record, matters);
 
     return (
-      <td className="border-r border-slate-100 px-2 py-2 last:border-r-0">
+      <td className={`border-r border-slate-100 px-2 py-2 last:border-r-0 ${frozenTdClass}`} style={frozenTdStyle}>
         <label className="flex items-center gap-2">
           <Link2 className="size-4 shrink-0 text-slate-400" />
           <select
@@ -1611,7 +1642,7 @@ function BillingCell({
   }
 
   return (
-    <td className="border-r border-slate-100 px-2 py-2 font-semibold text-slate-700 last:border-r-0">
+    <td className={`border-r border-slate-100 px-2 py-2 font-semibold text-slate-700 last:border-r-0 ${frozenTdClass}`} style={frozenTdStyle}>
       {isEditing && column.type === "select" ? (
         <select
           autoFocus
@@ -1961,11 +1992,13 @@ function BillingMenuItem({ icon: Icon, label, onClick }: { icon: ComponentType<{
 }
 
 function BillingColumnOptionsPanel({
+  frozenColumnKeys,
   hiddenColumnKeys,
   onApply,
   onClose,
   orderedColumns
 }: {
+  frozenColumnKeys: Set<string>;
   hiddenColumnKeys: Set<string>;
   onApply: (layout: BillingColumnLayout) => void;
   onClose: () => void;
@@ -1973,6 +2006,20 @@ function BillingColumnOptionsPanel({
 }) {
   const [draftOrder, setDraftOrder] = useState<string[]>(() => orderedColumns.map((column) => String(column.field)));
   const [draftHiddenColumnKeys, setDraftHiddenColumnKeys] = useState<Set<string>>(() => new Set(hiddenColumnKeys));
+  const [draftFrozenColumnKeys, setDraftFrozenColumnKeys] = useState<Set<string>>(() => new Set(frozenColumnKeys));
+
+  function toggleDraftFrozen(column: BillingColumn) {
+    const columnKey = String(column.field);
+    setDraftFrozenColumnKeys((currentKeys) => {
+      const nextKeys = new Set(currentKeys);
+      if (nextKeys.has(columnKey)) {
+        nextKeys.delete(columnKey);
+      } else {
+        nextKeys.add(columnKey);
+      }
+      return nextKeys;
+    });
+  }
   const draftColumns = useMemo(
     () =>
       draftOrder
@@ -2038,6 +2085,7 @@ function BillingColumnOptionsPanel({
             onClick={() => {
               setDraftOrder(defaultBillingColumnOrder);
               setDraftHiddenColumnKeys(new Set());
+              setDraftFrozenColumnKeys(new Set());
             }}
             type="button"
           >
@@ -2081,6 +2129,20 @@ function BillingColumnOptionsPanel({
               </label>
               <div className="flex items-center gap-1">
                 <button
+                  aria-label={`${draftFrozenColumnKeys.has(columnKey) ? "Unfreeze" : "Freeze"} ${column.label}`}
+                  className={`inline-flex size-7 items-center justify-center rounded-md border transition disabled:cursor-not-allowed disabled:opacity-35 ${
+                    draftFrozenColumnKeys.has(columnKey)
+                      ? "border-navy-600 bg-navy-600 text-white"
+                      : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+                  }`}
+                  disabled={isHidden}
+                  onClick={() => toggleDraftFrozen(column)}
+                  title={draftFrozenColumnKeys.has(columnKey) ? "Unfreeze column" : "Freeze column (keep visible while scrolling)"}
+                  type="button"
+                >
+                  <Pin className="size-3.5" />
+                </button>
+                <button
                   aria-label={`Move ${column.label} up`}
                   className="inline-flex size-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-35"
                   disabled={index === 0}
@@ -2108,7 +2170,7 @@ function BillingColumnOptionsPanel({
         <button className={buttonClass("light")} onClick={onClose} type="button">Cancel</button>
         <button
           className={buttonClass("dark")}
-          onClick={() => onApply({ hiddenColumnKeys: Array.from(draftHiddenColumnKeys), order: draftOrder })}
+          onClick={() => onApply({ frozenColumnKeys: Array.from(draftFrozenColumnKeys), hiddenColumnKeys: Array.from(draftHiddenColumnKeys), order: draftOrder })}
           type="button"
         >
           Save
@@ -2639,19 +2701,19 @@ function getClientAddress(row: ClientRegisterRow | null) {
 
 function getSavedBillingColumnLayout(): BillingColumnLayout {
   if (typeof window === "undefined") {
-    return { hiddenColumnKeys: [], order: defaultBillingColumnOrder };
+    return { frozenColumnKeys: [], hiddenColumnKeys: [], order: defaultBillingColumnOrder };
   }
 
   try {
     const savedLayout = window.localStorage.getItem(billingColumnLayoutStorageKey);
 
     if (!savedLayout) {
-      return { hiddenColumnKeys: [], order: defaultBillingColumnOrder };
+      return { frozenColumnKeys: [], hiddenColumnKeys: [], order: defaultBillingColumnOrder };
     }
 
     return normalizeBillingColumnLayout(JSON.parse(savedLayout) as Partial<BillingColumnLayout>);
   } catch {
-    return { hiddenColumnKeys: [], order: defaultBillingColumnOrder };
+    return { frozenColumnKeys: [], hiddenColumnKeys: [], order: defaultBillingColumnOrder };
   }
 }
 
@@ -2670,8 +2732,11 @@ function normalizeBillingColumnLayout(layout: Partial<BillingColumnLayout>): Bil
   const hiddenColumnKeys = Array.isArray(layout.hiddenColumnKeys)
     ? layout.hiddenColumnKeys.filter((key) => knownColumnKeys.has(key) && key !== "actions" && key !== "serial_no" && key !== "task_code")
     : [];
+  const frozenColumnKeys = Array.isArray(layout.frozenColumnKeys)
+    ? layout.frozenColumnKeys.filter((key) => knownColumnKeys.has(key) && !hiddenColumnKeys.includes(key))
+    : [];
 
-  return { hiddenColumnKeys, order };
+  return { frozenColumnKeys, hiddenColumnKeys, order };
 }
 
 function pinBillingColumnOrder(order: string[]) {
