@@ -2545,22 +2545,87 @@ async function sendPendingReviewMail(
     const entity = text(row.entity) || "TaskLine task";
     const taskName = text(row.task) || "Task";
     const taskCode = text(row.task_code) || "-";
+    const team = text(row.team) || "-";
+    const manager = text(row.name) || "-";
+    const resource = text(row.resource) || "-";
+    const dueDate = text(row.due_date) || "Not set";
     const bodyText = [
       "TASK PENDING FOR REVIEW",
       "",
       entity,
       `Task: ${taskName}`,
       `Task Code: ${taskCode}`,
-      `Team: ${text(row.team) || "-"}`,
-      `Manager: ${text(row.name) || "-"}`,
-      `Resource: ${text(row.resource) || "-"}`,
-      `Due date: ${text(row.due_date) || "Not set"}`,
+      `Team: ${team}`,
+      `Manager: ${manager}`,
+      `Resource: ${resource}`,
+      `Due date: ${dueDate}`,
       "",
       `Open TaskLine: ${allocationAppUrl}/taskline`
     ].join("\n");
+    const safeEntity = allocationEscapeHtml(entity);
+    const bodyHtml = `<!doctype html>
+<html>
+  <body style="margin:0;background:#f4f6fa;font-family:Arial,Helvetica,sans-serif;color:#0f172a;">
+    <div style="display:none;max-height:0;overflow:hidden;">${safeEntity} — pending for review.</div>
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f4f6fa;padding:28px 12px;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:520px;background:#ffffff;border:1px solid #e2e8f0;border-radius:18px;overflow:hidden;">
+            <tr>
+              <td style="padding:24px;">
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+                  <tr>
+                    <td width="52" valign="top">
+                      <div style="width:44px;height:44px;border-radius:14px;background:#fef3c7;color:#b45309;text-align:center;line-height:44px;font-size:21px;">&#128269;</div>
+                    </td>
+                    <td style="padding-left:14px;">
+                      <div style="font-size:12px;line-height:18px;font-weight:700;letter-spacing:1.2px;color:#b45309;">TASK PENDING FOR REVIEW</div>
+                      <div style="margin-top:6px;font-size:17px;line-height:24px;font-weight:700;color:#172033;">${safeEntity}</div>
+                      <table role="presentation" cellspacing="0" cellpadding="0" style="margin-top:12px;font-size:14px;line-height:22px;">
+                        <tr>
+                          <td style="width:88px;color:#94a3b8;font-weight:600;">Task</td>
+                          <td style="color:#475569;font-weight:600;">${allocationEscapeHtml(taskName)}</td>
+                        </tr>
+                        <tr>
+                          <td style="color:#94a3b8;font-weight:600;">Task Code</td>
+                          <td style="color:#475569;font-weight:600;">${allocationEscapeHtml(taskCode)}</td>
+                        </tr>
+                        <tr>
+                          <td style="color:#94a3b8;font-weight:600;">Team</td>
+                          <td style="color:#475569;font-weight:600;">${allocationEscapeHtml(team)}</td>
+                        </tr>
+                        <tr>
+                          <td style="color:#94a3b8;font-weight:600;">Manager</td>
+                          <td style="color:#475569;font-weight:600;">${allocationEscapeHtml(manager)}</td>
+                        </tr>
+                        <tr>
+                          <td style="color:#94a3b8;font-weight:600;">Resource</td>
+                          <td style="color:#475569;font-weight:600;">${allocationEscapeHtml(resource)}</td>
+                        </tr>
+                        <tr>
+                          <td style="color:#94a3b8;font-weight:600;">Due date</td>
+                          <td style="color:#475569;font-weight:600;">${allocationEscapeHtml(dueDate)}</td>
+                        </tr>
+                      </table>
+                    </td>
+                  </tr>
+                </table>
+                <div style="margin-top:22px;text-align:center;">
+                  <a href="${allocationEscapeHtml(`${allocationAppUrl}/taskline`)}" style="display:inline-block;border-radius:10px;background:#1e3168;color:#ffffff;text-decoration:none;font-size:14px;font-weight:700;padding:12px 22px;">Open TaskLine</a>
+                </div>
+              </td>
+            </tr>
+          </table>
+          <div style="padding-top:12px;font-size:11px;line-height:18px;color:#94a3b8;">Automated notification from WorkLine Co</div>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>`;
 
     await transporter.sendMail({
       from: smtp.from,
+      html: bodyHtml,
       subject: `Pending for review: ${entity} — ${taskName}`,
       text: bodyText,
       to: pendingReviewRecipient
