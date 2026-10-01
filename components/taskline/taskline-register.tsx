@@ -294,7 +294,7 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
     [isCombinedView, registerKey]
   );
   const visibleColumnGroups = useMemo(() => taskLineColumnGroups.filter((group) => !hiddenColumnGroupKeys.has(group.key)), [hiddenColumnGroupKeys]);
-  const taskLineRowsCacheKey = `${registerKey}:rows:v1`;
+  const taskLineRowsCacheKey = `${registerKey}:rows:${isCombinedView ? "v2" : "v1"}`;
   const taskLineApiPath = `/api/taskline?register=${encodeURIComponent(registerKey)}`;
   const taskLineApiQuery = (query: string) => `${taskLineApiPath}&${query}`;
   const registerAccess = useRegisterEditAccess();
