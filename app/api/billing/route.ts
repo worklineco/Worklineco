@@ -1089,6 +1089,13 @@ function removeMissingSelectColumn(columns: string, error: unknown) {
 function isMissingCompatibilityColumn(error: unknown) {
   const message = isRecord(error) ? String(error.message ?? "") : String(error ?? "");
 
+  // Only a genuine missing-column error counts; a unique-key or not-null
+  // violation that merely mentions a column name must surface as-is instead
+  // of silently stripping task codes and serials from the record.
+  if (!/does not exist|could not find|schema cache/i.test(message)) {
+    return false;
+  }
+
   return ["address", "escalation_1", "include_ope_in_fees", "is_retainer", "task_code", "place_of_supply", "registration_type", "receiving_date", "serial_no", "amount_received", "pending_amount", "accounts_remark"].some((column) =>
     message.includes(column)
   );
@@ -1155,7 +1162,8 @@ async function assignSerialNumbers<T extends Record<string, unknown>>(
     .order("serial_no", { ascending: false, nullsFirst: false })
     .limit(1);
 
-  if (error && isMissingCompatibilityColumn(error)) {
+  if (error) {
+    // Let the database sequence assign serial numbers instead of guessing.
     return rows;
   }
 
