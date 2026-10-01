@@ -2026,7 +2026,7 @@ function BillingColumnOptionsPanel({
   }
 
   return (
-    <div className="absolute left-0 top-12 z-[80] w-[360px] overflow-hidden rounded-lg border border-slate-200 bg-white text-slate-950 shadow-2xl">
+    <div className="absolute right-0 top-12 z-[80] max-w-[calc(100vw-2rem)] w-[360px] overflow-hidden rounded-lg border border-slate-200 bg-white text-slate-950 shadow-2xl">
       <div className="flex items-center justify-between border-b border-slate-200 px-3 py-2">
         <div>
           <p className="text-xs font-black uppercase text-slate-950">Column Options</p>
