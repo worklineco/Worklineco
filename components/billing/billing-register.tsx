@@ -2,7 +2,7 @@
 
 import { ArrowDown, ArrowUp, ArrowUpDown, Filter, ChevronDown, Download, History, Link2, Maximize2, Menu, Pencil, Plus, RotateCcw, Search, Settings2, ShieldCheck, Trash2, Upload, X } from "lucide-react";
 import type { ComponentType } from "react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { BillingColumnFilter } from "@/components/billing/billing-column-filter";
 import { getCached, setCached } from "@/lib/data-cache";
 import * as XLSX from "xlsx-js-style";
@@ -332,6 +332,7 @@ export function BillingRegister() {
   const [filters, setFilters] = useState({ search: "", status: "", receiptStatus: "", team: "", source: "" });
   const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
   const [columnFilterResetKey, setColumnFilterResetKey] = useState(0);
+  const [showMarkedForReviewOnly, setShowMarkedForReviewOnly] = useState(false);
   const columnFilterTimersRef = useRef<Record<string, number>>({});
   const [valueFilters, setValueFilters] = useState<Record<string, string[]>>({});
   const [sort, setSort] = useState<{ field: BillingColumn["field"]; direction: "asc" | "desc" } | null>(null);
@@ -404,6 +405,7 @@ export function BillingRegister() {
           const column = billingColumnByKey.get(field);
           return !column || values.includes(getBillingFilterValue(record, column, matters));
         }) &&
+        (!showMarkedForReviewOnly || String(record.billing_status ?? "").trim().toLowerCase() === "marked for review") &&
         (!filters.status || record.billing_status === filters.status) &&
         (!filters.receiptStatus || record.receiving_status === filters.receiptStatus) &&
         (!filters.team || record.owner_team === filters.team) &&
@@ -427,7 +429,7 @@ export function BillingRegister() {
       }
       return sort.direction === "asc" ? compared : -compared;
     });
-  }, [columnFilters, valueFilters, sort, filters, matters, records, visibleBillingColumns]);
+  }, [columnFilters, valueFilters, sort, filters, matters, records, visibleBillingColumns, showMarkedForReviewOnly]);
   function applyValueFilter(values: string[] | undefined) {
     if (!filterMenu) return;
     const field = String(filterMenu.column.field);
@@ -446,6 +448,10 @@ export function BillingRegister() {
     ? auditLogs.filter((log) => log.entity_id === selectedRecordId)
     : auditLogs.slice(0, 12);
   const billingSummary = useMemo(() => getBillingSummary(filteredRecords), [filteredRecords]);
+  const markedForReviewCount = useMemo(
+    () => records.filter((record) => String(record.billing_status ?? "").trim().toLowerCase() === "marked for review").length,
+    [records]
+  );
   const hasActiveColumnFilters = Object.values(columnFilters).some((value) => value.trim()) || Object.keys(valueFilters).length > 0;
   const pageCount = Math.max(1, Math.ceil(filteredRecords.length / billingPageSize));
   const pagedRecords = useMemo(() => {
@@ -744,6 +750,20 @@ export function BillingRegister() {
     } finally {
       setSavingCell(null);
     }
+  }
+
+  function startInlineEdit(record: BillingRecord, field: BillingField, value: string) {
+    inlineEditorValueRef.current = value;
+    setInlineEditor({ field, recordId: record.id!, value });
+  }
+
+  function handleEditorChange(value: string) {
+    inlineEditorValueRef.current = value;
+  }
+
+  function openRowHistory(record: BillingRecord) {
+    setSelectedRecordId(record.id ?? null);
+    void loadBillingActivity();
   }
 
   async function saveDirectField(record: BillingRecord, field: BillingField, rawValue: string) {
@@ -1134,6 +1154,28 @@ export function BillingRegister() {
             Showing {pageStart}-{pageEnd} of {filteredRecords.length} matching billing rows
           </p>
           <div className="flex items-center gap-2">
+            <label
+              className={`inline-flex h-11 cursor-pointer items-center gap-1.5 rounded-md border px-3 text-xs font-black uppercase transition ${
+                showMarkedForReviewOnly ? "border-amber-500 bg-amber-50 text-amber-700" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+              }`}
+              title="Show only bills whose Billing status is Marked for Review"
+            >
+              <input
+                checked={showMarkedForReviewOnly}
+                className="accent-amber-600"
+                onChange={(event) => {
+                  setShowMarkedForReviewOnly(event.target.checked);
+                  setTablePage(1);
+                }}
+                type="checkbox"
+              />
+              Mark for Review
+              {markedForReviewCount > 0 ? (
+                <span className="inline-flex min-w-5 items-center justify-center rounded-full bg-amber-500 px-1.5 text-[11px] font-black text-white">
+                  {markedForReviewCount}
+                </span>
+              ) : null}
+            </label>
             <button
               className={buttonClass("light")}
               disabled={tablePage <= 1}
@@ -1220,36 +1262,24 @@ export function BillingRegister() {
                 <tr><td className="px-4 py-8 font-bold text-slate-500" colSpan={visibleBillingColumns.length}>Loading billing rows...</td></tr>
               ) : filteredRecords.length ? (
                 pagedRecords.map((record, rowIndex) => (
-                  <tr className="border-b border-slate-100 last:border-b-0" key={record.id}>
-                    {visibleBillingColumns.map((column) => (
-                      <BillingCell
-                        access={access}
-                        column={column}
-                        inlineEditor={inlineEditor}
-                        key={`${record.id}-${column.field}`}
-                        masters={mergedMasters}
-                        matters={matters}
-                        onDelete={() => deleteRecord(record)}
-                        onEdit={(field, value) => {
-                          inlineEditorValueRef.current = value;
-                          setInlineEditor({ field, recordId: record.id!, value });
-                        }}
-                        onEditForm={() => openEditForm(record)}
-                        onEditorChange={(value) => {
-                          inlineEditorValueRef.current = value;
-                        }}
-                        onHistory={() => {
-                          setSelectedRecordId(record.id ?? null);
-                          void loadBillingActivity();
-                        }}
-                        onDirectSave={(field, value) => saveDirectField(record, field, value)}
-                        onSave={saveInlineEditor}
-                        record={record}
-                        savingCell={savingCell}
-                        serialNumber={pageStart + rowIndex}
-                      />
-                    ))}
-                  </tr>
+                  <BillingRow
+                    access={access}
+                    columns={visibleBillingColumns}
+                    inlineEditor={inlineEditor}
+                    key={record.id}
+                    masters={mergedMasters}
+                    matters={matters}
+                    onDelete={deleteRecord}
+                    onDirectSave={saveDirectField}
+                    onEdit={startInlineEdit}
+                    onEditForm={openEditForm}
+                    onEditorChange={handleEditorChange}
+                    onHistory={openRowHistory}
+                    onSave={saveInlineEditor}
+                    record={record}
+                    savingCell={savingCell}
+                    serialNumber={pageStart + rowIndex}
+                  />
                 ))
               ) : (
                 <tr><td className="px-4 py-8 font-bold text-slate-500" colSpan={visibleBillingColumns.length}>No billing rows match the current filters.</td></tr>
@@ -1345,6 +1375,86 @@ export function BillingRegister() {
     </section>
   );
 }
+
+type BillingRowProps = {
+  access: AccessScope;
+  columns: BillingColumn[];
+  inlineEditor: InlineEditor | null;
+  masters: Record<string, string[]>;
+  matters: GstatMatter[];
+  onDelete: (record: BillingRecord) => void;
+  onDirectSave: (record: BillingRecord, field: BillingField, value: string) => void;
+  onEdit: (record: BillingRecord, field: BillingField, value: string) => void;
+  onEditForm: (record: BillingRecord) => void;
+  onEditorChange: (value: string) => void;
+  onHistory: (record: BillingRecord) => void;
+  onSave: (valueOverride?: string) => void;
+  record: BillingRecord;
+  savingCell: InlineEditor | null;
+  serialNumber: number;
+};
+
+function rowEditorKey(editor: InlineEditor | null, recordId: string | undefined) {
+  return editor && editor.recordId === recordId ? `${editor.field}:${editor.value}` : "";
+}
+
+// Rows re-render only when their own data or their own editing state changes,
+// so typing in a cell or a filter no longer re-renders the whole grid.
+function billingRowPropsEqual(previous: BillingRowProps, next: BillingRowProps) {
+  return (
+    previous.record === next.record &&
+    previous.columns === next.columns &&
+    previous.masters === next.masters &&
+    previous.matters === next.matters &&
+    previous.access === next.access &&
+    previous.serialNumber === next.serialNumber &&
+    rowEditorKey(previous.inlineEditor, previous.record.id) === rowEditorKey(next.inlineEditor, next.record.id) &&
+    rowEditorKey(previous.savingCell, previous.record.id) === rowEditorKey(next.savingCell, next.record.id)
+  );
+}
+
+const BillingRow = memo(function BillingRow({
+  access,
+  columns,
+  inlineEditor,
+  masters,
+  matters,
+  onDelete,
+  onDirectSave,
+  onEdit,
+  onEditForm,
+  onEditorChange,
+  onHistory,
+  onSave,
+  record,
+  savingCell,
+  serialNumber
+}: BillingRowProps) {
+  return (
+    <tr className="border-b border-slate-100 last:border-b-0">
+      {columns.map((column) => (
+        <BillingCell
+          access={access}
+          column={column}
+          inlineEditor={inlineEditor}
+          key={`${record.id}-${column.field}`}
+          masters={masters}
+          matters={matters}
+          onDelete={() => onDelete(record)}
+          onEdit={(field, value) => onEdit(record, field, value)}
+          onEditForm={() => onEditForm(record)}
+          onEditorChange={onEditorChange}
+          onHistory={() => onHistory(record)}
+          onDirectSave={(field, value) => onDirectSave(record, field, value)}
+          onSave={onSave}
+          record={record}
+          savingCell={savingCell}
+          serialNumber={serialNumber}
+        />
+      ))}
+    </tr>
+  );
+}, billingRowPropsEqual);
 
 function BillingCell({
   access,
