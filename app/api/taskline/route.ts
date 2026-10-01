@@ -262,6 +262,12 @@ const taskLineColumns = [
 ];
 
 export async function GET(request: Request) {
+  const resendSince = text(new URL(request.url).searchParams.get("resend_allocations_since"));
+
+  if (resendSince) {
+    return resendAllocationMails(request, resendSince);
+  }
+
   console.time("taskline:requireUser");
   const auth = await requireUser();
   console.timeEnd("taskline:requireUser");
@@ -2508,6 +2514,82 @@ function allocationNormalizeName(value: unknown) {
 
 // "Pending for review" stage mail: Team 03 tasks only.
 const pendingReviewRecipient = "shuchis.dco@gmail.com";
+
+// One-off recovery: resend the task-creation mails (resource allocation,
+// name tag, senior-manager "new task added") for tasks created after the
+// given ISO time - used to backfill mails missed during an SMTP outage.
+// Guarded by CRON_SECRET; tasks whose allocation mails already went out
+// (per the audit log) are skipped, so re-running never duplicates.
+async function resendAllocationMails(request: Request, sinceRaw: string) {
+  const secret = process.env.CRON_SECRET;
+  const header = request.headers.get("authorization") ?? "";
+
+  if (!secret || header !== `Bearer ${secret}`) {
+    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+  }
+
+  const since = new Date(sinceRaw);
+
+  if (Number.isNaN(since.getTime()) || Date.now() - since.getTime() > 7 * 86400000) {
+    return NextResponse.json({ error: "Provide a valid ISO time within the last 7 days." }, { status: 400 });
+  }
+
+  const admin = createAdminClient();
+  const result = await admin
+    .from("tasks")
+    .select("id,organisation_id,title,description,due_at,custom_values,created_by,created_at,updated_at")
+    .in("custom_values->>workline_module", modulesForRegister("all"))
+    .gte("created_at", since.toISOString())
+    .order("created_at", { ascending: true })
+    .limit(200);
+
+  if (result.error) {
+    return NextResponse.json({ error: result.error.message }, { status: 500 });
+  }
+
+  const records = (result.data ?? []) as TaskRecord[];
+  const mailedIds = new Set<string>();
+
+  if (records.length) {
+    const sentLogs = await admin
+      .from("audit_logs")
+      .select("entity_id")
+      .eq("action", "taskline.allocation_email_sent")
+      .in("entity_id", records.map((record) => record.id))
+      .limit(2000);
+
+    for (const row of sentLogs.data ?? []) {
+      mailedIds.add(text((row as { entity_id?: string | null }).entity_id));
+    }
+  }
+
+  let sent = 0;
+  let skipped = 0;
+  const processed: string[] = [];
+
+  for (const record of records) {
+    if (mailedIds.has(record.id)) {
+      skipped += 1;
+      continue;
+    }
+
+    const row = record.custom_values?.taskline_data ?? {};
+
+    if (text(row.resource)) {
+      await sendResourceAllocationMail(admin, record.organisation_id, record);
+    }
+
+    if (text(row.name)) {
+      await sendResourceAllocationMail(admin, record.organisation_id, record, "name");
+    }
+
+    await sendResourceAllocationMail(admin, record.organisation_id, record, "senior_manager");
+    sent += 1;
+    processed.push(text(row.task_code) || text(row.entity) || record.id);
+  }
+
+  return NextResponse.json({ processed, sent, since: since.toISOString(), skipped, total: records.length });
+}
 
 function isPendingReviewStage(value: unknown) {
   return text(value).trim().toLowerCase() === "pending for review";
