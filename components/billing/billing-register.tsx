@@ -878,6 +878,18 @@ export function BillingRegister() {
     const workbook = XLSX.read(data);
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
     const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "" });
+
+    // Same guard as the other registers: refuse files whose headings do not
+    // match the template / exported sheet, with a clear message.
+    if (rows.length) {
+      const headers = new Set(Object.keys(rows[0]).map((key) => key.trim().toLowerCase()));
+      const hasIdentity = ["billing id", "client", "gstin", "task code"].some((header) => headers.has(header));
+      if (!headers.has(importActionColumn.toLowerCase()) || !hasIdentity) {
+        setMessage(`Could not find the "${importActionColumn}" and "Client"/"GSTIN" headers in ${file.name}. Use Download template or an exported billing sheet.`);
+        return;
+      }
+    }
+
     const billingRows = rows.map((row) => {
       const record = { ...emptyRecord };
       const importedRecord = record as unknown as Record<BillingField, unknown>;
@@ -926,8 +938,9 @@ export function BillingRegister() {
     const rows = exportRecords.map((record, index) => ({
       [importActionColumn]: "Update",
       "Billing ID": record.id ?? "",
-      "S.No.": index + 1,
+      "S.No.": record.serial_no ?? index + 1,
       Team: record.owner_team,
+      "Task Code": record.task_code ?? "",
       "Pushed From Sheet": formatSourceModule(record.source_module),
       "Pushed By": record.pushed_by ?? "",
       "Voucher Type": record.voucher_type,
@@ -960,6 +973,7 @@ export function BillingRegister() {
       "Amount Received": record.amount_received,
       "Pending Amount": record.pending_amount,
       Remarks: record.remarks,
+      "Remark Accounts Team": record.accounts_remark ?? "",
       "GSTAT Link": getMatterLabel(record, matters)
     }));
     const worksheet = XLSX.utils.json_to_sheet(rows.length ? rows : [blankExportRow()]);
