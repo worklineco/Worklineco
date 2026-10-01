@@ -2670,6 +2670,9 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
                 <p className="mt-1 text-sm font-bold text-slate-500">
                   {pendingBillableCount} task{pendingBillableCount === 1 ? "" : "s"} {pendingBillableCount === 1 ? "is" : "are"} done and billable but not yet in the Billing register.
                 </p>
+                <p className="mt-2 text-xs font-bold text-amber-700">
+                  If a task has already been billed, please update its Task Code so it matches the Billing register and drops off this list.
+                </p>
               </div>
             </div>
             <div className="mt-5 flex justify-end gap-2">
