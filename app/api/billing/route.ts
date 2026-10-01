@@ -704,13 +704,31 @@ async function loadBillingRecordsFast(
   organisationId: string,
   access: AccessScope
 ) {
-  const result = await selectBillingRecordsPage(admin, organisationId, access, billingSelectColumns, 0, fetchBatchSize - 1);
+  let columns = billingSelectColumns;
 
-  if (result.error && isMissingCompatibilityColumn(result.error)) {
-    return selectBillingRecordsPage(admin, organisationId, access, fallbackBillingSelectColumns, 0, fetchBatchSize - 1);
+  for (let attempt = 0; attempt < 16; attempt += 1) {
+    const result = await selectBillingRecordsPage(admin, organisationId, access, columns, 0, fetchBatchSize - 1);
+
+    if (!result.error) {
+      return result;
+    }
+
+    const trimmedColumns = removeMissingSelectColumn(columns, result.error);
+
+    if (trimmedColumns) {
+      columns = trimmedColumns;
+      continue;
+    }
+
+    if (isMissingCompatibilityColumn(result.error) && columns !== fallbackBillingSelectColumns) {
+      columns = fallbackBillingSelectColumns;
+      continue;
+    }
+
+    return result;
   }
 
-  return result;
+  return selectBillingRecordsPage(admin, organisationId, access, fallbackBillingSelectColumns, 0, fetchBatchSize - 1);
 }
 
 async function fetchAllBillingRecords(
@@ -725,11 +743,17 @@ async function fetchAllBillingRecords(
     const to = from + fetchBatchSize - 1;
     const result = await selectBillingRecordsPage(admin, organisationId, access, columns, from, to);
 
-    if (result.error && isMissingCompatibilityColumn(result.error) && columns !== fallbackBillingSelectColumns) {
-      return fetchAllBillingRecords(admin, organisationId, access, fallbackBillingSelectColumns);
-    }
-
     if (result.error) {
+      const trimmedColumns = removeMissingSelectColumn(columns, result.error);
+
+      if (trimmedColumns) {
+        return fetchAllBillingRecords(admin, organisationId, access, trimmedColumns);
+      }
+
+      if (isMissingCompatibilityColumn(result.error) && columns !== fallbackBillingSelectColumns) {
+        return fetchAllBillingRecords(admin, organisationId, access, fallbackBillingSelectColumns);
+      }
+
       return result;
     }
 
@@ -1040,6 +1064,26 @@ function cleanRecord(
     receiving_date: null,
     receiving_status: "Pending"
   };
+}
+
+// When a SELECT fails because one column is missing (an unapplied migration),
+// drop just that column and try again instead of falling back to the minimal
+// compatibility column set, which would hide task codes and serial numbers.
+function removeMissingSelectColumn(columns: string, error: unknown) {
+  const message = isRecord(error) ? String(error.message ?? "") : String(error ?? "");
+  const match = /column\s+(?:"?[\w.]+"?\.)?"?([a-z0-9_]+)"?\s+does not exist/i.exec(message);
+
+  if (!match) {
+    return null;
+  }
+
+  const parts = columns.split(",");
+
+  if (!parts.includes(match[1])) {
+    return null;
+  }
+
+  return parts.filter((column) => column !== match[1]).join(",");
 }
 
 function isMissingCompatibilityColumn(error: unknown) {
