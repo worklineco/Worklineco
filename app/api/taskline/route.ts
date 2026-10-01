@@ -84,7 +84,7 @@ type RegisterKey = "all" | "cestat" | "high_court" | "non_litigation" | "tasklin
 const registerKeys = new Set<RegisterKey>(["taskline", "high_court", "cestat", "non_litigation", "all"]);
 const combinedRegisterKeys: Exclude<RegisterKey, "all">[] = ["taskline", "non_litigation", "cestat", "high_court"];
 const gstatModuleKey = "gstat";
-const overviewColumns = ["__id", "register_name", "team", "task_code", "name", "resource", "entity_group", "entity", "state_name", "gstin", "task", "due_date", "stage", "status_open_close", "remarks", "document_link"];
+const overviewColumns = ["__id", "register_name", "team", "task_code", "name", "resource", "entity_group", "entity", "state_name", "gstin", "task", "due_date", "stage", "status_open_close", "billable", "remarks", "document_link"];
 const overviewCacheTtlMs = 60_000;
 const overviewCache = new Map<string, { expiresAt: number; rows: TaskLineRow[] }>();
 
@@ -111,7 +111,7 @@ function overviewCacheKey(organisationId: string, access: AccessScope) {
   return `${organisationId}|${access.canViewAll ? "all" : access.teams.join(",")}`;
 }
 
-const overviewTaskFields = ["register_key", "team", "task_code", "name", "resource", "entity_group", "entity", "state_name", "gstin", "task", "due_date", "stage", "status_open_close", "remarks", "document_link"];
+const overviewTaskFields = ["register_key", "team", "task_code", "name", "resource", "entity_group", "entity", "state_name", "gstin", "task", "due_date", "stage", "status_open_close", "billable", "remarks", "document_link"];
 const overviewTaskSelect = [
   "id",
   "workline_module:custom_values->>workline_module",
