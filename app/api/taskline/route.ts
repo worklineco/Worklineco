@@ -743,6 +743,7 @@ async function handlePost(request: Request) {
       const previousResource = text((existing.data as TaskRecord).custom_values?.taskline_data?.resource);
       const previousName = text((existing.data as TaskRecord).custom_values?.taskline_data?.name);
       const previousDueDate = text((existing.data as TaskRecord).custom_values?.taskline_data?.due_date);
+      const previousStage = text((existing.data as TaskRecord).custom_values?.taskline_data?.stage);
       const savedRecord = saved.data as TaskRecord;
 
       after(async () => {
@@ -765,6 +766,12 @@ async function handlePost(request: Request) {
           // audit-log dedupe keys stop double sends either way).
           if (registerSendsMails(registerKey) && text(cleaned.due_date) === indiaTodayDisplayDate() && previousDueDate !== text(cleaned.due_date)) {
             await sendDueTodayReminderNow(admin, organisation.organisationId, savedRecord);
+          }
+
+          // Review mail: when a Team 03 task's Stage is set to "Pending for
+          // review", notify the review mailbox (only on the change into it).
+          if (registerSendsMails(registerKey) && isPendingReviewStage(cleaned.stage) && !isPendingReviewStage(previousStage)) {
+            await sendPendingReviewMail(admin, organisation.organisationId, savedRecord);
           }
         } catch (error) {
           console.error("TaskLine post-save notifications failed:", error);
@@ -836,6 +843,11 @@ async function handlePost(request: Request) {
       // (the daily 09:00 IST mail for today may have already gone out).
       if (registerSendsMails(registerKey) && text(cleaned.due_date) === indiaTodayDisplayDate()) {
         await sendDueTodayReminderNow(admin, organisation.organisationId, createdRecord);
+      }
+
+      // Review mail for rows created directly in "Pending for review".
+      if (registerSendsMails(registerKey) && isPendingReviewStage(cleaned.stage)) {
+        await sendPendingReviewMail(admin, organisation.organisationId, createdRecord);
       }
     } catch (error) {
       console.error("TaskLine post-create notifications failed:", error);
@@ -2492,6 +2504,84 @@ function allocationNormalizeName(value: unknown) {
   }
 
   return parts.join(" ");
+}
+
+// "Pending for review" stage mail: Team 03 tasks only.
+const pendingReviewRecipient = "shuchis.dco@gmail.com";
+
+function isPendingReviewStage(value: unknown) {
+  return text(value).trim().toLowerCase() === "pending for review";
+}
+
+async function sendPendingReviewMail(
+  admin: ReturnType<typeof createAdminClient>,
+  organisationId: string,
+  record: TaskRecord
+) {
+  try {
+    const row = record.custom_values?.taskline_data ?? {};
+
+    if (teamMatchKey(row.team) !== teamMatchKey("Team 03")) {
+      return;
+    }
+
+    const smtp = allocationSmtpConfiguration();
+
+    if ("error" in smtp) {
+      console.warn("Pending-review email skipped:", smtp.error);
+      return;
+    }
+
+    const transporter = createTransport({
+      auth: {
+        pass: smtp.password,
+        user: smtp.user
+      },
+      host: smtp.host,
+      port: smtp.port,
+      secure: smtp.port === 465
+    });
+
+    const entity = text(row.entity) || "TaskLine task";
+    const taskName = text(row.task) || "Task";
+    const taskCode = text(row.task_code) || "-";
+    const bodyText = [
+      "TASK PENDING FOR REVIEW",
+      "",
+      entity,
+      `Task: ${taskName}`,
+      `Task Code: ${taskCode}`,
+      `Team: ${text(row.team) || "-"}`,
+      `Manager: ${text(row.name) || "-"}`,
+      `Resource: ${text(row.resource) || "-"}`,
+      `Due date: ${text(row.due_date) || "Not set"}`,
+      "",
+      `Open TaskLine: ${allocationAppUrl}/taskline`
+    ].join("\n");
+
+    await transporter.sendMail({
+      from: smtp.from,
+      subject: `Pending for review: ${entity} — ${taskName}`,
+      text: bodyText,
+      to: pendingReviewRecipient
+    });
+
+    await admin.from("audit_logs").insert({
+      action: "taskline.pending_review_email_sent",
+      actor_user_id: null,
+      entity_id: record.id,
+      entity_type: "taskline_email_pending_review",
+      new_value: {
+        recipient: pendingReviewRecipient,
+        task_code: taskCode,
+        sent_at: new Date().toISOString()
+      },
+      old_value: null,
+      organisation_id: organisationId
+    });
+  } catch (error) {
+    console.error("Pending-review email failed:", error);
+  }
 }
 
 function allocationIsEmail(value: string) {
