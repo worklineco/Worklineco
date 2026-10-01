@@ -194,11 +194,10 @@ const gstStateByCode: Record<string, string> = {
   "99": "Other Country"
 };
 const billingColumns: BillingColumn[] = [
-  { field: "serial_no", label: "S.No.", type: "text", width: 130 },
+  { field: "actions", label: "Actions", width: 150 },
   { field: "task_code", label: "Task Code", type: "select", width: 140 },
   { field: "owner_team", label: "Team", type: "text", width: 128 },
   { field: "source_module", label: "Pushed From Sheet", type: "select", width: 160 },
-  { field: "pushed_by", label: "Pushed By", type: "text", width: 170 },
   { field: "voucher_type", label: "Voucher", type: "select", width: 145 },
   { field: "is_retainer", label: "Retainer Bill", type: "select", width: 130 },
   { field: "group_name", label: "Group", type: "select", width: 145 },
@@ -232,7 +231,25 @@ const billingColumns: BillingColumn[] = [
   { field: "remarks", label: "Remarks", type: "text", width: 220 },
   { field: "accounts_remark", label: "Remark Accounts Team", type: "text", width: 220 },
   { field: "gstat_link", label: "GSTAT Link", width: 170 },
-  { field: "actions", label: "Actions", width: 150 }
+  { field: "pushed_by", label: "Pushed By", type: "text", width: 170 }
+];
+const billingColumnGroups: { columns: string[] | null; key: string; label: string }[] = [
+  {
+    key: "core",
+    label: "Client & Matter",
+    columns: ["actions", "task_code", "client", "owner_team", "group_name", "gstin", "place_of_supply", "address", "registration_type", "description", "poc_name", "poc_mobile", "poc_email", "escalation_1", "remarks", "accounts_remark", "gstat_link"]
+  },
+  {
+    key: "fees",
+    label: "Fees & Tax",
+    columns: ["actions", "task_code", "client", "amount", "cgst", "sgst", "igst", "ope", "include_ope_in_fees", "ope_remarks", "total"]
+  },
+  {
+    key: "receipt",
+    label: "Invoice & Receipt",
+    columns: ["actions", "task_code", "client", "billing_status", "memo_no", "memo_date", "invoice_no", "invoice_date", "receiving_status", "receiving_date", "amount_received", "pending_amount"]
+  },
+  { key: "all", label: "All", columns: null }
 ];
 const billingColumnByKey = new Map(billingColumns.map((column) => [String(column.field), column]));
 const defaultBillingColumnOrder = billingColumns.map((column) => String(column.field));
@@ -329,6 +346,7 @@ export function BillingRegister() {
   const [isSummaryOpen, setIsSummaryOpen] = useState(false);
   const [taskCodes, setTaskCodes] = useState<string[]>([]);
   const [isToolbarMenuOpen, setIsToolbarMenuOpen] = useState(false);
+  const [activeBillingGroup, setActiveBillingGroup] = useState("core");
   const [filters, setFilters] = useState({ search: "", status: "", receiptStatus: "", team: "", source: "" });
   const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
   const [columnFilterResetKey, setColumnFilterResetKey] = useState(0);
@@ -360,9 +378,17 @@ export function BillingRegister() {
         .filter((column): column is BillingColumn => Boolean(column)),
     [columnOrder]
   );
+  const activeBillingGroupColumnSet = useMemo(() => {
+    const group = billingColumnGroups.find((item) => item.key === activeBillingGroup);
+    return group?.columns ? new Set(group.columns) : null;
+  }, [activeBillingGroup]);
   const visibleBillingColumns = useMemo(
-    () => orderedBillingColumns.filter((column) => column.field === "actions" || !hiddenColumnKeys.has(String(column.field))),
-    [hiddenColumnKeys, orderedBillingColumns]
+    () => orderedBillingColumns.filter(
+      (column) =>
+        (column.field === "actions" || !hiddenColumnKeys.has(String(column.field))) &&
+        (!activeBillingGroupColumnSet || activeBillingGroupColumnSet.has(String(column.field)))
+    ),
+    [activeBillingGroupColumnSet, hiddenColumnKeys, orderedBillingColumns]
   );
   const visibleTableWidth = useMemo(
     () => visibleBillingColumns.reduce((total, column) => total + column.width, 0),
@@ -1207,6 +1233,22 @@ export function BillingRegister() {
           onClose={() => setFilterMenu(null)}
           onSort={(direction) => { setSort(direction ? { field: filterMenu.column.field, direction } : null); setFilterMenu(null); }}
         /> : null}
+        <div className="mb-2 flex flex-wrap gap-1.5">
+          {billingColumnGroups.map((group) => (
+            <button
+              className={`rounded-lg px-3 py-1.5 text-xs font-black transition ${
+                activeBillingGroup === group.key
+                  ? "bg-navy-700 text-white"
+                  : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+              }`}
+              key={group.key}
+              onClick={() => setActiveBillingGroup(group.key)}
+              type="button"
+            >
+              {group.label}
+            </button>
+          ))}
+        </div>
         <div className={`overflow-auto rounded-md border border-slate-200 bg-white ${isFullscreen ? "min-h-0 flex-1" : "max-h-[calc(100vh-190px)]"}`}>
           <table className="table-fixed border-collapse text-left text-sm" style={{ minWidth: visibleTableWidth, width: visibleTableWidth }}>
             <colgroup>
@@ -1813,20 +1855,48 @@ function BillingSummaryPanel({
   summary: ReturnType<typeof getBillingSummary>;
 }) {
   return (
-    <section className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-3">
+    <section className="mt-4 rounded-xl border border-slate-200 bg-gradient-to-br from-slate-50 to-indigo-50/40 p-3">
       <div className="grid gap-3 xl:grid-cols-[260px_1fr_1fr]">
-        <div className="rounded-md border border-slate-200 bg-white p-3">
-          <p className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">Summary</p>
-          <p className="mt-2 text-2xl font-black text-slate-950">{summary.rowCount}</p>
-          <p className="mt-1 text-xs font-bold text-slate-500">visible billing row{summary.rowCount === 1 ? "" : "s"}</p>
-          <p className="mt-3 text-sm font-black text-slate-950">{formatMoney(summary.total)}</p>
-          <p className="text-xs font-bold text-slate-500">total billing value</p>
+        <div className="rounded-xl bg-gradient-to-br from-[#1e3168] to-[#101a3a] p-4 text-white shadow-sm">
+          <p className="text-[10px] font-black uppercase tracking-[0.14em] text-white/70">Summary</p>
+          <p className="mt-2 text-3xl font-black leading-none">{summary.rowCount}</p>
+          <p className="mt-1 text-xs font-bold text-white/70">visible billing row{summary.rowCount === 1 ? "" : "s"}</p>
+          <div className="mt-4 rounded-lg bg-white/10 px-3 py-2">
+            <p className="text-lg font-black leading-tight">{formatMoney(summary.total)}</p>
+            <p className="text-[11px] font-bold text-white/70">total billing value</p>
+          </div>
         </div>
         <SummaryGroup activeLabel={activeBillingStatus} items={summary.billingStatus} onSelect={onFilterStatus} title="Billing Status" />
         <SummaryGroup activeLabel={activeReceiptStatus} items={summary.receivingStatus} onSelect={onFilterReceiptStatus} title="Receipt Status" />
       </div>
     </section>
   );
+}
+
+function billingSummaryAccent(label: string) {
+  const value = label.toLowerCase();
+  if (value.includes("receiv") || value.includes("recie") || value.includes("raise") || value.includes("done") || value.includes("realis")) {
+    return "#10b981";
+  }
+  if (value.includes("pending")) {
+    return "#f97316";
+  }
+  if (value.includes("hold")) {
+    return "#f59e0b";
+  }
+  if (value.includes("cancel") || value.includes("merged")) {
+    return "#f43f5e";
+  }
+  if (value.includes("revis")) {
+    return "#0ea5e9";
+  }
+  if (value.includes("credit")) {
+    return "#8b5cf6";
+  }
+  if (value.includes("draft") || value === "na" || value.includes("na /")) {
+    return "#94a3b8";
+  }
+  return "#6366f1";
 }
 
 function SummaryGroup({
@@ -1841,25 +1911,32 @@ function SummaryGroup({
   title: string;
 }) {
   return (
-    <div className="rounded-md border border-slate-200 bg-white p-3">
+    <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
       <p className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">{title}</p>
       <div className="mt-2 grid gap-1.5">
         {items.length ? items.slice(0, 8).map((item) => {
           const isActive = Boolean(onSelect && activeLabel === item.label);
+          const accent = billingSummaryAccent(item.label);
 
           return (
           <button
             aria-pressed={onSelect ? isActive : undefined}
-            className={`grid grid-cols-[minmax(0,1fr)_auto] gap-2 rounded-md px-2 py-1.5 text-left ${
+            className={`grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-lg border-l-4 py-1.5 pl-2 pr-2 text-left transition ${
               isActive ? "bg-slate-100" : onSelect ? "hover:bg-slate-50" : "cursor-default"
             }`}
             disabled={!onSelect}
             key={item.label}
             onClick={() => onSelect?.(item.label)}
+            style={{ borderLeftColor: accent, backgroundColor: isActive ? undefined : `${accent}0f` }}
             type="button"
           >
-            <span className="min-w-0 truncate text-xs font-black text-slate-700">{item.label || "Not set"}</span>
-            <span className="text-xs font-bold text-slate-500">{item.count} / {formatMoney(item.amount)}</span>
+            <span className="flex min-w-0 items-center gap-1.5">
+              <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: accent }} />
+              <span className="min-w-0 truncate text-xs font-black text-slate-700">{item.label || "Not set"}</span>
+            </span>
+            <span className="shrink-0 text-xs font-black" style={{ color: accent }}>
+              {item.count} <span className="font-bold text-slate-400">/</span> {formatMoney(item.amount)}
+            </span>
           </button>
         );
         }) : (
@@ -2598,13 +2675,16 @@ function normalizeBillingColumnLayout(layout: Partial<BillingColumnLayout>): Bil
 }
 
 function pinBillingColumnOrder(order: string[]) {
-  const withoutPinned = order.filter((key) => !["address", "place_of_supply", "serial_no", "task_code"].includes(key));
+  const withoutPinned = order.filter(
+    (key) => !["actions", "address", "place_of_supply", "pushed_by", "serial_no", "task_code"].includes(key)
+  );
   const clientIndex = withoutPinned.indexOf("client");
   const insertAt = clientIndex >= 0 ? clientIndex + 1 : 0;
 
   withoutPinned.splice(insertAt, 0, "place_of_supply", "address");
 
-  return ["serial_no", "task_code", ...withoutPinned];
+  // Actions + Task Code are pinned to the front; Pushed By is pinned to the end.
+  return ["actions", "task_code", ...withoutPinned, "pushed_by"];
 }
 
 function normalizeGstin(value: unknown) {
