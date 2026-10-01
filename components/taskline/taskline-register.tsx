@@ -3,7 +3,7 @@
 import { ArrowDown, ArrowUp, Bookmark, CalendarDays, Check, ChevronDown, CircleDot, Star, Download, Filter, History, ListChecks, Menu, Pencil, Pin, Plus, ReceiptText, RotateCcw, Scale, Search, Settings2, Trash2, Upload, Workflow, X } from "lucide-react";
 import Link from "next/link";
 import type { ComponentType, PointerEvent as ReactPointerEvent } from "react";
-import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import * as XLSX from "xlsx-js-style";
 import { clearCached, getCached, setCached } from "@/lib/data-cache";
@@ -543,9 +543,6 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
       return row;
     });
   }, [rows, entityGroupByName]);
-  const deferredSearch = useDeferredValue(search);
-  const deferredColumnFilters = useDeferredValue(columnFilters);
-  const deferredValueFilters = useDeferredValue(valueFilters);
   const focusedRows = useMemo(
     () => (pendencyFocus ? resolvedRows.filter((row) => matchesPendencyFocus(row, pendencyFocus)) : resolvedRows),
     [pendencyFocus, resolvedRows]
@@ -560,15 +557,15 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
   );
   const filteredRows = useMemo(
     () => applyTaskLineFilters(scopedRows, {
-      columnFilters: deferredColumnFilters,
+      columnFilters,
       dueColorFilter,
       dueRange,
-      search: deferredSearch,
+      search,
       sortState,
       statusFilter,
-      valueFilters: deferredValueFilters
+      valueFilters
     }),
-    [scopedRows, deferredColumnFilters, dueColorFilter, dueRange, deferredSearch, sortState, statusFilter, deferredValueFilters]
+    [scopedRows, columnFilters, dueColorFilter, dueRange, search, sortState, statusFilter, valueFilters]
   );
   const hasActiveColumnFilters = Object.values(columnFilters).some((value) => value.trim());
   const hasActiveDataQuery = Boolean(
