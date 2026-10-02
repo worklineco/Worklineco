@@ -783,7 +783,6 @@ export function BillingRegister() {
         currentRecords.map((item) => (item.id === saved.id ? saved : item))
       );
       setMessage(`Saved ${getColumnLabel(inlineEditor.field)}.`);
-      void loadBilling();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Could not save billing cell.");
       await loadBilling();
@@ -832,7 +831,6 @@ export function BillingRegister() {
         currentRecords.map((item) => (item.id === saved.id ? saved : item))
       );
       setMessage(`Saved ${getColumnLabel(field)}.`);
-      void loadBilling();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Could not save billing cell.");
       await loadBilling();
@@ -895,7 +893,6 @@ export function BillingRegister() {
       );
       setEditDraft(null);
       setMessage("Billing row updated.");
-      void loadBilling();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Could not update billing row.");
     }
@@ -1603,14 +1600,6 @@ function BillingCell({
             type="button"
           >
             <History className="size-4" />
-          </button>
-          <button
-            className="inline-flex size-8 items-center justify-center rounded-md border border-rose-200 text-rose-700 hover:bg-rose-50"
-            onClick={onDelete}
-            title="Delete billing row"
-            type="button"
-          >
-            <Trash2 className="size-4" />
           </button>
         </div>
       </td>
