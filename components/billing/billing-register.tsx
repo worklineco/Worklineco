@@ -194,7 +194,7 @@ const gstStateByCode: Record<string, string> = {
   "99": "Other Country"
 };
 const billingColumns: BillingColumn[] = [
-  { field: "actions", label: "Actions", width: 150 },
+  { field: "actions", label: "Actions", width: 92 },
   { field: "task_code", label: "Task Code", type: "select", width: 140 },
   { field: "owner_team", label: "Team", type: "text", width: 128 },
   { field: "source_module", label: "Pushed From Sheet", type: "select", width: 160 },
