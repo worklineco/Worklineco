@@ -7,6 +7,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import * as XLSX from "xlsx-js-style";
 import { clearCached, getCached, setCached } from "@/lib/data-cache";
+import { downloadEngagementLetterDocx, engagementFormats } from "@/lib/engagement-letters";
 import { useRegisterEditAccess, viewOnlyRegisterMessage as sharedViewOnlyRegisterMessage } from "@/lib/use-register-access";
 import { isSamePersonName, normalizePersonName } from "@/lib/person-name";
 import {
@@ -3384,6 +3385,7 @@ function TaskLineForm({
 }) {
   const [openSections, setOpenSections] = useState<Set<string>>(() => new Set(["core"]));
   const [formError, setFormError] = useState("");
+  const [draftingEL, setDraftingEL] = useState(false);
   const [gstatPreview, setGstatPreview] = useState<GstatLinkPreview | null>(null);
   const [isVerifyingGstat, setIsVerifyingGstat] = useState(false);
 
@@ -3412,29 +3414,45 @@ function TaskLineForm({
     onSubmit();
   }
 
-  // Draft an Engagement Letter from this task's row: open the EL tool pre-filled
-  // with the shared fields. The user picks the format and downloads the Word draft.
-  function openDraftEL() {
-    const params = new URLSearchParams();
-    const add = (key: string, value: unknown) => {
+  // Draft an Engagement Letter from this task's row — generated and downloaded
+  // right here (no page change). The EL format is chosen from the task wording.
+  async function openDraftEL() {
+    const values: Record<string, string> = {};
+    const set = (key: string, value: unknown) => {
       const clean = text(value).trim();
       if (clean) {
-        params.set(key, clean);
+        values[key] = clean;
       }
     };
-    add("clientName", draft.entity);
-    add("gstin", draft.gstin);
-    add("documentPeriod", draft.period);
-    add("stage", draft.stage);
-    add("orderReference", draft.ref_no);
-    add("orderDate", draft.ref_date);
-    add("fee", draft.total_agreed_fee);
-    add("clientAddress", draft.address);
-    const teamDigits = text(draft.team).match(/\d+/);
-    if (teamDigits) {
-      params.set("teamNumber", teamDigits[0]);
+    set("clientName", draft.entity);
+    set("gstin", draft.gstin);
+    set("documentPeriod", draft.period);
+    set("stage", draft.stage);
+    set("orderReference", draft.ref_no);
+    set("orderDate", draft.ref_date);
+    set("fee", draft.total_agreed_fee);
+    set("clientAddress", draft.address);
+    set("authority", draft.court_location);
+
+    const taskText = text(draft.task).toLowerCase();
+    const formatId = taskText.includes("retainer")
+      ? "gst-retainership"
+      : taskText.includes("review")
+        ? "gst-review"
+        : taskText.includes("summon")
+          ? "gst-summon"
+          : "gstat-tribunal";
+    const format = engagementFormats.find((item) => item.id === formatId) ?? engagementFormats[0];
+
+    try {
+      setFormError("");
+      setDraftingEL(true);
+      await downloadEngagementLetterDocx(format, values, `${text(draft.entity) || "entity"}-${format.category}`);
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : "Could not draft the engagement letter.");
+    } finally {
+      setDraftingEL(false);
     }
-    window.open(`/engagement-letter?${params.toString()}`, "_blank", "noopener,noreferrer");
   }
 
   function toggleSection(key: string) {
@@ -3765,13 +3783,14 @@ function TaskLineForm({
 
         <footer className="flex flex-wrap items-center justify-end gap-2 border-t border-slate-200 px-5 py-4">
           <button
-            className="mr-auto inline-flex h-10 items-center gap-2 rounded-md border border-emerald-300 bg-emerald-50 px-3 text-sm font-black text-emerald-700 transition hover:bg-emerald-100"
+            className="mr-auto inline-flex h-10 items-center gap-2 rounded-md border border-emerald-300 bg-emerald-50 px-3 text-sm font-black text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={draftingEL}
             onClick={openDraftEL}
-            title="Draft an Engagement Letter from this task's data"
+            title="Draft and download an Engagement Letter from this task's data"
             type="button"
           >
             <ReceiptText className="size-4" />
-            Draft EL
+            {draftingEL ? "Drafting..." : "Draft EL"}
           </button>
           <button className={buttonClass("light")} onClick={onClose} type="button">Cancel</button>
           <button className={buttonClass("primary")} onClick={handleFormSubmit} type="button">
