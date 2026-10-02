@@ -3412,6 +3412,31 @@ function TaskLineForm({
     onSubmit();
   }
 
+  // Draft an Engagement Letter from this task's row: open the EL tool pre-filled
+  // with the shared fields. The user picks the format and downloads the Word draft.
+  function openDraftEL() {
+    const params = new URLSearchParams();
+    const add = (key: string, value: unknown) => {
+      const clean = text(value).trim();
+      if (clean) {
+        params.set(key, clean);
+      }
+    };
+    add("clientName", draft.entity);
+    add("gstin", draft.gstin);
+    add("documentPeriod", draft.period);
+    add("stage", draft.stage);
+    add("orderReference", draft.ref_no);
+    add("orderDate", draft.ref_date);
+    add("fee", draft.total_agreed_fee);
+    add("clientAddress", draft.address);
+    const teamDigits = text(draft.team).match(/\d+/);
+    if (teamDigits) {
+      params.set("teamNumber", teamDigits[0]);
+    }
+    window.open(`/engagement-letter?${params.toString()}`, "_blank", "noopener,noreferrer");
+  }
+
   function toggleSection(key: string) {
     setOpenSections((current) => {
       const next = new Set(current);
@@ -3738,7 +3763,16 @@ function TaskLineForm({
           })}
         </div>
 
-        <footer className="flex justify-end gap-2 border-t border-slate-200 px-5 py-4">
+        <footer className="flex flex-wrap items-center justify-end gap-2 border-t border-slate-200 px-5 py-4">
+          <button
+            className="mr-auto inline-flex h-10 items-center gap-2 rounded-md border border-emerald-300 bg-emerald-50 px-3 text-sm font-black text-emerald-700 transition hover:bg-emerald-100"
+            onClick={openDraftEL}
+            title="Draft an Engagement Letter from this task's data"
+            type="button"
+          >
+            <ReceiptText className="size-4" />
+            Draft EL
+          </button>
           <button className={buttonClass("light")} onClick={onClose} type="button">Cancel</button>
           <button className={buttonClass("primary")} onClick={handleFormSubmit} type="button">
             {isEdit ? <Pencil className="size-4" /> : <Plus className="size-4" />}

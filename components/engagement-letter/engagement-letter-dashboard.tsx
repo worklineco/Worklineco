@@ -2,7 +2,7 @@
 
 import { Download, Eye, FileText, Plus, Printer, X } from "lucide-react";
 import JSZip from "jszip";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 type EngagementField = {
   key: string;
@@ -367,6 +367,20 @@ export function EngagementLetterDashboard() {
   const [formValues, setFormValues] = useState<Record<string, string>>({});
   const [generatedLetter, setGeneratedLetter] = useState<GeneratedLetter | null>(null);
   const [engagementLog, setEngagementLog] = useState<EngagementLogEntry[]>([]);
+  // Pre-fill values passed in the URL (e.g. "Draft EL" from a TaskLine row).
+  // Applied when a format is chosen, since choosing a format resets the fields.
+  const prefillValuesRef = useRef<Record<string, string>>({});
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const prefill: Record<string, string> = {};
+    params.forEach((value, key) => {
+      if (key !== "format" && value) {
+        prefill[key] = value;
+      }
+    });
+    prefillValuesRef.current = prefill;
+  }, []);
 
   useEffect(() => {
     const savedLog = window.localStorage.getItem(engagementLogStorageKey);
@@ -401,12 +415,13 @@ export function EngagementLetterDashboard() {
   );
 
   function openCreateWindow(format: EngagementFormat) {
+    const prefill = prefillValuesRef.current;
     setActiveFormat(format);
     setFormValues(
       format.fields.reduce<Record<string, string>>((values, field) => {
-        values[field.key] = "";
+        values[field.key] = prefill[field.key] ?? "";
         return values;
-      }, { elNo: "", teamNumber: "" })
+      }, { elNo: prefill.elNo ?? "", teamNumber: prefill.teamNumber ?? "" })
     );
     setGeneratedLetter(null);
   }
