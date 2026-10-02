@@ -329,3 +329,188 @@ export async function downloadEngagementLetterDocx(
   link.click();
   URL.revokeObjectURL(url);
 }
+
+// ---------------------------------------------------------------------------
+// Team-03 engagement letters: generated from the firm's own Word templates and
+// drafted from a TaskLine row. Rules: no Document Period, EL No = Task Code,
+// Place = Jaipur, Date = download date, Entity + GSTIN from the task, and any
+// remaining [...] placeholder is highlighted yellow for the user to edit.
+// ---------------------------------------------------------------------------
+type Team03Format = {
+  authoritySearch?: string;
+  category: string;
+  docNoSearch?: string;
+  entitySearches: string[];
+  gstinSearch?: string;
+  id: string;
+  issueSearch?: string;
+  templatePath: string;
+};
+
+const team03Formats: Team03Format[] = [
+  {
+    category: "Specific Litigation",
+    docNoSearch: "1899/12/296",
+    entitySearches: ["M/s THINKING HATS ENTERTAINMENT SOLUTIONS PRIVATE", "M/s. Thinking Hats Entertainment Solutions Private", "Thinking Hats Entertainment Solutions Private"],
+    id: "specific-litigation",
+    templatePath: "/templates/team03/specific-litigation.docx"
+  },
+  {
+    category: "General Litigation",
+    entitySearches: [],
+    id: "general-litigation",
+    templatePath: "/templates/team03/general-litigation.docx"
+  },
+  {
+    authoritySearch: "Chief Commissioner",
+    category: "Audit Memo",
+    entitySearches: ["BINARY INFOSOLUTIONS PRIVATE LIMITED", "M/s.Binary Infosoultions Private Limited", "Binary Infosoultions Private Limited"],
+    gstinSearch: "08AAECB5959N1Z0",
+    id: "audit-memo",
+    templatePath: "/templates/team03/audit-memo.docx"
+  },
+  {
+    authoritySearch: "Superintendent",
+    category: "Summon",
+    entitySearches: ["M/S NEERJA MODI SCHOOL", "M/s Neerja Modi School"],
+    id: "summon",
+    issueSearch: "Inquiry related to non-payment of GST on Input Services on RCM",
+    templatePath: "/templates/team03/summon.docx"
+  },
+  {
+    category: "GST Review",
+    entitySearches: ["(Entity’s Name)", "(Entity's Name)"],
+    id: "review",
+    templatePath: "/templates/team03/review.docx"
+  },
+  {
+    category: "Advisory and Compliance",
+    entitySearches: ["(Entity’s Name)", "(Entity's Name)"],
+    id: "advisory-compliance",
+    templatePath: "/templates/team03/advisory-compliance.docx"
+  },
+  {
+    category: "Compliance Professional Services",
+    entitySearches: ["(Entity’s Name)", "(Entity's Name)"],
+    id: "compliance-professional",
+    templatePath: "/templates/team03/compliance-professional.docx"
+  },
+  {
+    category: "Retainership",
+    entitySearches: [],
+    id: "retainership",
+    templatePath: "/templates/team03/retainership.docx"
+  }
+];
+
+// Keyword rules: pick the EL template from the task wording.
+export function pickTeam03FormatId(task: string) {
+  const value = String(task ?? "").toLowerCase();
+  if (value.includes("summon")) return "summon";
+  if (value.includes("audit") || value.includes("adt")) return "audit-memo";
+  if (value.includes("scn")) return "specific-litigation";
+  if (value.includes("review")) return "review";
+  if (value.includes("retainer")) return "retainership";
+  if (value.includes("advisory")) return "advisory-compliance";
+  if (value.includes("registration") || value.includes("compliance") || value.includes("return") || value.includes("gstr")) {
+    return "compliance-professional";
+  }
+  return "general-litigation";
+}
+
+function todayDdMmYyyy() {
+  const parts = new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "2-digit", timeZone: "Asia/Kolkata", year: "numeric" }).formatToParts(new Date());
+  const get = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value ?? "";
+  return `${get("day")}-${get("month")}-${get("year")}`;
+}
+
+function removeDocumentPeriod(xml: string) {
+  // Drop any table row that mentions Document Period (label + its value).
+  let out = xml.replace(/<w:tr\b[\s\S]*?<\/w:tr>/g, (row) => (row.includes("Document Period") ? "" : row));
+  out = out.replace(/Document Period/g, "");
+  return out;
+}
+
+function setLabelledValue(xml: string, label: string, value: string) {
+  // Replace "<label>: <anything in the same run>" with "<label>: <value>".
+  const pattern = new RegExp(`(<w:t[^>]*>)([^<]*?)${label}:\\s*[^<]*(</w:t>)`, "g");
+  return xml.replace(pattern, (_match, open: string, prefix: string, close: string) => `${open}${prefix}${label}: ${xmlEscape(value)}${close}`);
+}
+
+function highlightBracketRuns(xml: string) {
+  return xml.replace(/<w:r\b[^>]*>[\s\S]*?<\/w:r>/g, (run) => {
+    if (!/<w:t[^>]*>[^<]*\[[^<]*<\/w:t>/.test(run) || run.includes("<w:highlight")) {
+      return run;
+    }
+    if (run.includes("<w:rPr>")) {
+      return run.replace("<w:rPr>", '<w:rPr><w:highlight w:val="yellow"/>');
+    }
+    if (run.includes("<w:rPr/>")) {
+      return run.replace("<w:rPr/>", '<w:rPr><w:highlight w:val="yellow"/></w:rPr>');
+    }
+    return run.replace(/(<w:r\b[^>]*>)/, '$1<w:rPr><w:highlight w:val="yellow"/></w:rPr>');
+  });
+}
+
+export async function downloadTaskEngagementLetter(
+  formatId: string,
+  data: { entity: string; gstin: string; taskCode: string }
+) {
+  const format = team03Formats.find((item) => item.id === formatId) ?? team03Formats[1];
+
+  const response = await fetch(format.templatePath);
+  if (!response.ok) {
+    throw new Error("Could not load the engagement letter template.");
+  }
+
+  const zip = await JSZip.loadAsync(await response.arrayBuffer());
+  const documentXml = zip.file("word/document.xml");
+  if (!documentXml) {
+    throw new Error("The engagement letter template is missing document.xml.");
+  }
+
+  const entity = data.entity.trim() || "[Entity Name]";
+  const gstin = data.gstin.trim() || "[GSTIN]";
+  const elNo = data.taskCode.trim() || "[EL No]";
+  let xml = await documentXml.async("string");
+
+  // Entity name: underscore blanks, "(Entity's Name)", and any baked example name.
+  xml = xml.replace(/_{6,}/g, xmlEscape(entity));
+  for (const search of format.entitySearches) {
+    xml = replaceAllXmlText(xml, search, entity);
+  }
+  // Entity work and any issue/authority become editable (highlighted) placeholders.
+  xml = replaceAllXmlText(xml, "(Entity's Work)", "[Entity Work]");
+  xml = replaceAllXmlText(xml, "(Entity’s Work)", "[Entity Work]");
+  if (format.authoritySearch) {
+    xml = replaceAllXmlText(xml, format.authoritySearch, "[Authority]");
+  }
+  if (format.issueSearch) {
+    xml = replaceAllXmlText(xml, format.issueSearch, "[Issue]");
+  }
+  if (format.gstinSearch) {
+    xml = replaceAllXmlText(xml, format.gstinSearch, gstin);
+  }
+  if (format.docNoSearch) {
+    xml = replaceAllXmlText(xml, format.docNoSearch, elNo);
+  }
+
+  xml = removeDocumentPeriod(xml);
+  xml = setLabelledValue(xml, "Place", "Jaipur");
+  xml = setLabelledValue(xml, "Date", todayDdMmYyyy());
+  xml = highlightBracketRuns(xml);
+
+  zip.file("word/document.xml", xml);
+
+  const output = await zip.generateAsync({
+    mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    type: "blob"
+  });
+  const url = URL.createObjectURL(output);
+  const link = document.createElement("a");
+  link.href = url;
+  const safeEntity = (entity.replace(/[\\/:*?"<>|\[\]]/g, "").trim() || "entity").toLowerCase().replace(/\s+/g, "-");
+  link.download = `${safeEntity}-${format.category.toLowerCase().replace(/\s+/g, "-")}-engagement-letter.docx`;
+  link.click();
+  URL.revokeObjectURL(url);
+}

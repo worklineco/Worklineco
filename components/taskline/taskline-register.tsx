@@ -7,7 +7,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import * as XLSX from "xlsx-js-style";
 import { clearCached, getCached, setCached } from "@/lib/data-cache";
-import { downloadEngagementLetterDocx, engagementFormats } from "@/lib/engagement-letters";
+import { downloadTaskEngagementLetter, pickTeam03FormatId } from "@/lib/engagement-letters";
 import { useRegisterEditAccess, viewOnlyRegisterMessage as sharedViewOnlyRegisterMessage } from "@/lib/use-register-access";
 import { isSamePersonName, normalizePersonName } from "@/lib/person-name";
 import {
@@ -3415,39 +3415,17 @@ function TaskLineForm({
   }
 
   // Draft an Engagement Letter from this task's row — generated and downloaded
-  // right here (no page change). The EL format is chosen from the task wording.
+  // right here (no page change). The EL format is chosen from the task wording;
+  // Entity, GSTIN and Task Code (as EL No) come from the row.
   async function openDraftEL() {
-    const values: Record<string, string> = {};
-    const set = (key: string, value: unknown) => {
-      const clean = text(value).trim();
-      if (clean) {
-        values[key] = clean;
-      }
-    };
-    set("clientName", draft.entity);
-    set("gstin", draft.gstin);
-    set("documentPeriod", draft.period);
-    set("stage", draft.stage);
-    set("orderReference", draft.ref_no);
-    set("orderDate", draft.ref_date);
-    set("fee", draft.total_agreed_fee);
-    set("clientAddress", draft.address);
-    set("authority", draft.court_location);
-
-    const taskText = text(draft.task).toLowerCase();
-    const formatId = taskText.includes("retainer")
-      ? "gst-retainership"
-      : taskText.includes("review")
-        ? "gst-review"
-        : taskText.includes("summon")
-          ? "gst-summon"
-          : "gstat-tribunal";
-    const format = engagementFormats.find((item) => item.id === formatId) ?? engagementFormats[0];
-
     try {
       setFormError("");
       setDraftingEL(true);
-      await downloadEngagementLetterDocx(format, values, `${text(draft.entity) || "entity"}-${format.category}`);
+      await downloadTaskEngagementLetter(pickTeam03FormatId(text(draft.task)), {
+        entity: text(draft.entity),
+        gstin: text(draft.gstin),
+        taskCode: text(draft.task_code)
+      });
     } catch (error) {
       setFormError(error instanceof Error ? error.message : "Could not draft the engagement letter.");
     } finally {
