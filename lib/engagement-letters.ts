@@ -511,6 +511,40 @@ function fillStandaloneUnderscoreParagraphs(xml: string, entity: string) {
   });
 }
 
+// Highlight one value inside matching runs, splitting the run so only the
+// value itself turns yellow. Already-highlighted runs are left alone.
+function highlightValueInRuns(xml: string, value: string) {
+  const target = xmlEscape(value);
+  if (!target.trim()) {
+    return xml;
+  }
+  return xml.replace(/<w:r\b[^>]*>[\s\S]*?<\/w:r>/g, (run) => {
+    if (run.includes("<w:highlight") || run.includes("<w:tab") || run.includes("<w:br") || run.includes("<w:drawing")) {
+      return run;
+    }
+    const textMatch = run.match(/<w:t[^>]*>([^<]*)<\/w:t>/);
+    if (!textMatch || !textMatch[1].includes(target)) {
+      return run;
+    }
+    const at = textMatch[1].indexOf(target);
+    const before = textMatch[1].slice(0, at);
+    const after = textMatch[1].slice(at + target.length);
+    const properties = run.match(/<w:rPr>[\s\S]*?<\/w:rPr>/)?.[0] ?? "";
+    const highlighted = properties
+      ? properties.replace("<w:rPr>", '<w:rPr><w:highlight w:val="yellow"/>')
+      : '<w:rPr><w:highlight w:val="yellow"/></w:rPr>';
+    const makeRun = (text: string, props: string) => {
+      if (!text) {
+        return "";
+      }
+      let piece = run.replace(/<w:rPr>[\s\S]*?<\/w:rPr>/, "");
+      piece = props ? piece.replace(/(<w:r\b[^>]*>)/, `$1${props}`) : piece;
+      return piece.replace(/<w:t[^>]*>[^<]*<\/w:t>/, `<w:t xml:space="preserve">${text}</w:t>`);
+    };
+    return makeRun(before, properties) + makeRun(target, highlighted) + makeRun(after, properties);
+  });
+}
+
 // Fee amounts change on every engagement, so every table cell that holds only
 // an amount (digits/commas, optional Rs. or a bracketed note) is highlighted
 // yellow for review. Document No. rows and ranges like "Rs. 5 to 20 lakhs"
@@ -609,10 +643,18 @@ export async function downloadTaskEngagementLetter(
   }
 
   xml = format.docNoSearch ? removeDocumentPeriod(xml) : repurposeDocumentPeriodRow(xml, elNo);
+  const letterDate = todayDdMmYyyy();
   xml = setLabelledValue(xml, "Place", "Jaipur");
-  xml = setLabelledValue(xml, "Date", todayDdMmYyyy());
+  xml = setLabelledValue(xml, "Date", letterDate);
   xml = highlightBracketRuns(xml);
   xml = highlightAmountCells(xml);
+
+  // Everything the generator filled in is highlighted too, so the user can
+  // review each auto-filled value before sending the letter.
+  const reviewValues = Array.from(new Set([entity, entity.toUpperCase(), data.gstin.trim(), data.taskCode.trim(), letterDate, "Jaipur"])).filter(Boolean);
+  for (const value of reviewValues) {
+    xml = highlightValueInRuns(xml, value);
+  }
 
   zip.file("word/document.xml", xml);
 
