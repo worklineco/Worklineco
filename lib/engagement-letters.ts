@@ -656,6 +656,12 @@ export async function downloadTaskEngagementLetter(
     xml = highlightValueInRuns(xml, value);
   }
 
+  // The cover title sits in a fixed-size text box sized for long names, so a
+  // short entity left all the spare space hanging under the title. Centre the
+  // box text vertically so the title sits in the middle at any name length.
+  xml = xml.replace(/(<wps:bodyPr[^>]*anchor=")t(")/g, "$1ctr$2");
+  xml = xml.replace(/v-text-anchor:\s*top/g, "v-text-anchor:middle");
+
   zip.file("word/document.xml", xml);
 
   const output = await zip.generateAsync({
