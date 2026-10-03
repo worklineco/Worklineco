@@ -519,6 +519,25 @@ function fillStandaloneUnderscoreParagraphs(xml: string, entity: string) {
 // (Shift+Enter) to push the next section onto a new page. At 1.5 spacing
 // those invisible blanks become big mid-page holes, so drop any run of four
 // or more and let the letter flow naturally instead.
+// The main page heading carries two manual line breaks above its text; keep
+// just one so the gap under the document-info table is a single blank line.
+function tightenHeadingGap(xml: string) {
+  return xml.replace(/<w:p\b[\s\S]*?<\/w:p>/g, (para) => {
+    const paragraphText = Array.from(para.matchAll(/<w:t[^>]*>([^<]*)<\/w:t>/g), (match) => match[1]).join("").trim();
+    if (!paragraphText.startsWith("ENGAGEMENT LETTER FOR")) {
+      return para;
+    }
+    let kept = false;
+    return para.replace(/<w:br\s*\/>/g, () => {
+      if (!kept) {
+        kept = true;
+        return "<w:br/>";
+      }
+      return "";
+    });
+  });
+}
+
 function removeFillerLineBreaks(xml: string) {
   return xml.replace(/<w:p\b[\s\S]*?<\/w:p>/g, (para) => {
     const breakCount = (para.match(/<w:br\s*\/>/g) ?? []).length;
@@ -748,6 +767,7 @@ export async function downloadTaskEngagementLetter(
 
   // Letter body reads at 1.5 line spacing; tables and cover boxes keep theirs.
   xml = removeFillerLineBreaks(xml);
+  xml = tightenHeadingGap(xml);
   xml = setBodyLineSpacing(xml);
   xml = keepSignatureBlockTogether(xml);
 
