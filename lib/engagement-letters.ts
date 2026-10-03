@@ -515,6 +515,45 @@ function fillStandaloneUnderscoreParagraphs(xml: string, entity: string) {
 // value itself turns yellow. Already-highlighted runs are left alone.
 // Set 1.5 line spacing on the letter body. Tables and the cover text boxes
 // keep their own tighter spacing so their layout is not disturbed.
+// The firm templates pad some paragraphs with many manual line breaks
+// (Shift+Enter) to push the next section onto a new page. At 1.5 spacing
+// those invisible blanks become big mid-page holes, so drop any run of four
+// or more and let the letter flow naturally instead.
+function removeFillerLineBreaks(xml: string) {
+  return xml.replace(/<w:p\b[\s\S]*?<\/w:p>/g, (para) => {
+    const breakCount = (para.match(/<w:br\s*\/>/g) ?? []).length;
+    if (breakCount < 4) {
+      return para;
+    }
+    return para.replace(/<w:br\s*\/>/g, "");
+  });
+}
+
+// Keep the firm signature block (For Dhadda & Co. ... [Partner] + Date) on
+// one page instead of splitting it across a page boundary.
+function keepSignatureBlockTogether(xml: string) {
+  let inBlock = false;
+  return xml.replace(/<w:p\b[\s\S]*?<\/w:p>/g, (para) => {
+    const paragraphText = Array.from(para.matchAll(/<w:t[^>]*>([^<]*)<\/w:t>/g), (match) => match[1]).join("").trim();
+    if (!inBlock && paragraphText.startsWith("For Dhadda")) {
+      inBlock = true;
+    }
+    if (!inBlock) {
+      return para;
+    }
+    if (paragraphText === "[Partner]") {
+      inBlock = false;
+    }
+    if (para.includes("keepNext")) {
+      return para;
+    }
+    if (para.includes("<w:pPr>")) {
+      return para.replace("<w:pPr>", "<w:pPr><w:keepNext/>");
+    }
+    return para.replace(/(<w:p\b[^>]*>)/, "$1<w:pPr><w:keepNext/></w:pPr>");
+  });
+}
+
 function setBodyLineSpacing(xml: string) {
   const protectedBlocks: string[] = [];
   let out = xml.replace(/<w:tbl\b[\s\S]*?<\/w:tbl>|<w:txbxContent>[\s\S]*?<\/w:txbxContent>/g, (block) => {
@@ -523,6 +562,12 @@ function setBodyLineSpacing(xml: string) {
   });
   const spacingTag = '<w:spacing w:line="360" w:lineRule="auto"/>';
   out = out.replace(/<w:p\b[\s\S]*?<\/w:p>/g, (para) => {
+    // Empty spacer paragraphs keep their original (single) height so the
+    // template's deliberate gaps are not stretched by the 1.5 spacing.
+    const paragraphText = Array.from(para.matchAll(/<w:t[^>]*>([^<]*)<\/w:t>/g), (match) => match[1]).join("");
+    if (!paragraphText.trim()) {
+      return para;
+    }
     if (para.includes("<w:spacing")) {
       return para.replace(/<w:spacing\b([^>]*?)\/>/, (_match, attrs: string) => {
         const kept = attrs.replace(/\s*w:line="[^"]*"/, "").replace(/\s*w:lineRule="[^"]*"/, "");
@@ -702,7 +747,9 @@ export async function downloadTaskEngagementLetter(
   });
 
   // Letter body reads at 1.5 line spacing; tables and cover boxes keep theirs.
+  xml = removeFillerLineBreaks(xml);
   xml = setBodyLineSpacing(xml);
+  xml = keepSignatureBlockTogether(xml);
 
   // The cover title sits in a fixed-size text box sized for long names, so a
   // short entity left all the spare space hanging under the title. Centre the
