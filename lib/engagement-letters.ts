@@ -656,6 +656,19 @@ export async function downloadTaskEngagementLetter(
     xml = highlightValueInRuns(xml, value);
   }
 
+  // The Acknowledgement section must always begin on a fresh page, never
+  // dangle its heading at the bottom of the previous one.
+  xml = xml.replace(/<w:p\b[\s\S]*?<\/w:p>/g, (para) => {
+    const paragraphText = Array.from(para.matchAll(/<w:t[^>]*>([^<]*)<\/w:t>/g), (match) => match[1]).join("").trim();
+    if (paragraphText.toLowerCase() !== "acknowledgement" || para.includes("pageBreakBefore")) {
+      return para;
+    }
+    if (para.includes("<w:pPr>")) {
+      return para.replace("<w:pPr>", "<w:pPr><w:pageBreakBefore/>");
+    }
+    return para.replace(/(<w:p\b[^>]*>)/, "$1<w:pPr><w:pageBreakBefore/></w:pPr>");
+  });
+
   // The cover title sits in a fixed-size text box sized for long names, so a
   // short entity left all the spare space hanging under the title. Centre the
   // box text vertically so the title sits in the middle at any name length.
