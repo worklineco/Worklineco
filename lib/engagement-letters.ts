@@ -431,10 +431,84 @@ function removeDocumentPeriod(xml: string) {
   return out;
 }
 
+// Templates without their own Document No. row reuse the Document Period row
+// for it: the label becomes "Document No." and the FY value becomes the EL No.
+function repurposeDocumentPeriodRow(xml: string, elNo: string) {
+  return xml.replace(/<w:tr\b[\s\S]*?<\/w:tr>/g, (row) => {
+    if (!row.includes("Document Period")) {
+      return row;
+    }
+    let labelDone = false;
+    let valueDone = false;
+    return row.replace(/(<w:t[^>]*>)([^<]*)(<\/w:t>)/g, (match, open: string, text: string, close: string) => {
+      if (!labelDone) {
+        if (text.includes("Document Period")) {
+          labelDone = true;
+          return `${open}${text.replace("Document Period", "Document No.")}${close}`;
+        }
+        return match;
+      }
+      if (!text.trim()) {
+        return match;
+      }
+      if (!valueDone) {
+        valueDone = true;
+        return `${open}${xmlEscape(elNo)}${close}`;
+      }
+      return `${open}${close}`;
+    });
+  });
+}
+
 function setLabelledValue(xml: string, label: string, value: string) {
-  // Replace "<label>: <anything in the same run>" with "<label>: <value>".
-  const pattern = new RegExp(`(<w:t[^>]*>)([^<]*?)${label}:\\s*[^<]*(</w:t>)`, "g");
-  return xml.replace(pattern, (_match, open: string, prefix: string, close: string) => `${open}${prefix}${label}: ${xmlEscape(value)}${close}`);
+  // Rewrite whole "<label>: <value>" paragraphs, even when Word split the old
+  // value across several runs (otherwise the stale value stays behind and the
+  // letter shows e.g. "Date: 03-10-202620-12-2025").
+  const startsWithLabel = new RegExp(`^\\s*${label}:`);
+  return xml.replace(/<w:p\b[\s\S]*?<\/w:p>/g, (para) => {
+    const paragraphText = Array.from(para.matchAll(/<w:t[^>]*>([^<]*)<\/w:t>/g), (match) => match[1]).join("");
+    if (!startsWithLabel.test(paragraphText)) {
+      return para;
+    }
+    let labelSeen = false;
+    return para.replace(/(<w:t[^>]*>)([^<]*)(<\/w:t>)/g, (match, open: string, text: string, close: string) => {
+      if (!labelSeen) {
+        const at = text.indexOf(label);
+        if (at < 0) {
+          return match; // leading spacer runs stay untouched
+        }
+        labelSeen = true;
+        return `${open}${text.slice(0, at)}${label}: ${xmlEscape(value)}${close}`;
+      }
+      return `${open}${close}`;
+    });
+  });
+}
+
+// Cover and "For" pages in some templates are blank underscore lines. Fill
+// them as the firm writes them: "M/s <ENTITY>" in caps on the cover pages
+// (before "Privileged and Confidential") and "M/s <Entity>" afterwards.
+function fillStandaloneUnderscoreParagraphs(xml: string, entity: string) {
+  const coverBoundary = xml.indexOf("Privileged and Confidential");
+  return xml.replace(/<w:p\b[\s\S]*?<\/w:p>/g, (para, offset: number) => {
+    const paragraphText = Array.from(para.matchAll(/<w:t[^>]*>([^<]*)<\/w:t>/g), (match) => match[1]).join("");
+    if (!/^\s*(For\s+)?[\s_]*_{4,}[\s_]*$/.test(paragraphText)) {
+      return para;
+    }
+    const isCover = coverBoundary >= 0 && offset < coverBoundary;
+    const value = `M/s ${isCover ? entity.toUpperCase() : entity}`;
+    let filled = false;
+    return para.replace(/(<w:t[^>]*>)([^<]*)(<\/w:t>)/g, (match, open: string, text: string, close: string) => {
+      if (!text.includes("_")) {
+        return match;
+      }
+      if (filled) {
+        return `${open}${close}`;
+      }
+      filled = true;
+      return `${open}${xmlEscape(value)}${close}`;
+    });
+  });
 }
 
 function highlightBracketRuns(xml: string) {
@@ -474,10 +548,17 @@ export async function downloadTaskEngagementLetter(
   const elNo = data.taskCode.trim() || "[EL No]";
   let xml = await documentXml.async("string");
 
-  // Entity name: underscore blanks, "(Entity's Name)", and any baked example name.
+  // Entity name: underscore blanks, "(Entity's Name)", and any baked example
+  // name. A search that carries an "M/s" prefix keeps that prefix, and an
+  // all-caps example (the cover pages) gets the entity in caps too.
+  xml = fillStandaloneUnderscoreParagraphs(xml, entity);
   xml = xml.replace(/_{6,}/g, xmlEscape(entity));
   for (const search of format.entitySearches) {
-    xml = replaceAllXmlText(xml, search, entity);
+    const prefixMatch = search.match(/^M\/[sS]\.?\s*/);
+    const core = prefixMatch ? search.slice(prefixMatch[0].length) : search;
+    const coreIsUpper = /[A-Z]/.test(core) && core === core.toUpperCase();
+    const replacement = `${prefixMatch ? prefixMatch[0] : ""}${coreIsUpper ? entity.toUpperCase() : entity}`;
+    xml = replaceAllXmlText(xml, search, replacement);
   }
   // Entity work and any issue/authority become editable (highlighted) placeholders.
   xml = replaceAllXmlText(xml, "(Entity's Work)", "[Entity Work]");
@@ -495,7 +576,7 @@ export async function downloadTaskEngagementLetter(
     xml = replaceAllXmlText(xml, format.docNoSearch, elNo);
   }
 
-  xml = removeDocumentPeriod(xml);
+  xml = format.docNoSearch ? removeDocumentPeriod(xml) : repurposeDocumentPeriodRow(xml, elNo);
   xml = setLabelledValue(xml, "Place", "Jaipur");
   xml = setLabelledValue(xml, "Date", todayDdMmYyyy());
   xml = highlightBracketRuns(xml);
