@@ -333,7 +333,7 @@ export async function downloadEngagementLetterDocx(
 // ---------------------------------------------------------------------------
 // Team-03 engagement letters: generated from the firm's own Word templates and
 // drafted from a TaskLine row. Rules: no Document Period, EL No = Task Code,
-// Place = Jaipur, Date = download date, Entity + GSTIN from the task, and any
+// Place = left blank, Date = download date, Entity + GSTIN from the task, and any
 // remaining [...] placeholder is highlighted yellow for the user to edit.
 // ---------------------------------------------------------------------------
 type Team03Format = {
@@ -513,6 +513,33 @@ function fillStandaloneUnderscoreParagraphs(xml: string, entity: string) {
 
 // Highlight one value inside matching runs, splitting the run so only the
 // value itself turns yellow. Already-highlighted runs are left alone.
+// Set 1.5 line spacing on the letter body. Tables and the cover text boxes
+// keep their own tighter spacing so their layout is not disturbed.
+function setBodyLineSpacing(xml: string) {
+  const protectedBlocks: string[] = [];
+  let out = xml.replace(/<w:tbl\b[\s\S]*?<\/w:tbl>|<w:txbxContent>[\s\S]*?<\/w:txbxContent>/g, (block) => {
+    protectedBlocks.push(block);
+    return `\u0001WLKEEP${protectedBlocks.length - 1}\u0001`;
+  });
+  const spacingTag = '<w:spacing w:line="360" w:lineRule="auto"/>';
+  out = out.replace(/<w:p\b[\s\S]*?<\/w:p>/g, (para) => {
+    if (para.includes("<w:spacing")) {
+      return para.replace(/<w:spacing\b([^>]*?)\/>/, (_match, attrs: string) => {
+        const kept = attrs.replace(/\s*w:line="[^"]*"/, "").replace(/\s*w:lineRule="[^"]*"/, "");
+        return `<w:spacing${kept} w:line="360" w:lineRule="auto"/>`;
+      });
+    }
+    if (/<w:pStyle[^>]*\/>/.test(para)) {
+      return para.replace(/(<w:pStyle[^>]*\/>)/, `$1${spacingTag}`);
+    }
+    if (para.includes("<w:pPr>")) {
+      return para.replace("<w:pPr>", `<w:pPr>${spacingTag}`);
+    }
+    return para.replace(/(<w:p\b[^>]*>)/, `$1<w:pPr>${spacingTag}</w:pPr>`);
+  });
+  return out.replace(/\u0001WLKEEP(\d+)\u0001/g, (_match, index: string) => protectedBlocks[Number(index)]);
+}
+
 function highlightValueInRuns(xml: string, value: string) {
   const target = xmlEscape(value);
   if (!target.trim()) {
@@ -582,6 +609,11 @@ function highlightBracketRuns(xml: string) {
     if (!/<w:t[^>]*>[^<]*\[[^<]*<\/w:t>/.test(run) || run.includes("<w:highlight")) {
       return run;
     }
+    // "[Partner]" under the firm signature is part of the letter, not a
+    // placeholder to fill - leave it unhighlighted.
+    if (/<w:t[^>]*>[^<]*\[Partner\][^<]*<\/w:t>/i.test(run)) {
+      return run;
+    }
     if (run.includes("<w:rPr>")) {
       return run.replace("<w:rPr>", '<w:rPr><w:highlight w:val="yellow"/>');
     }
@@ -644,14 +676,14 @@ export async function downloadTaskEngagementLetter(
 
   xml = format.docNoSearch ? removeDocumentPeriod(xml) : repurposeDocumentPeriodRow(xml, elNo);
   const letterDate = todayDdMmYyyy();
-  xml = setLabelledValue(xml, "Place", "Jaipur");
+  xml = setLabelledValue(xml, "Place", "");
   xml = setLabelledValue(xml, "Date", letterDate);
   xml = highlightBracketRuns(xml);
   xml = highlightAmountCells(xml);
 
   // Everything the generator filled in is highlighted too, so the user can
   // review each auto-filled value before sending the letter.
-  const reviewValues = Array.from(new Set([entity, entity.toUpperCase(), data.gstin.trim(), data.taskCode.trim(), letterDate, "Jaipur"])).filter(Boolean);
+  const reviewValues = Array.from(new Set([entity, entity.toUpperCase(), data.gstin.trim(), data.taskCode.trim(), letterDate])).filter(Boolean);
   for (const value of reviewValues) {
     xml = highlightValueInRuns(xml, value);
   }
@@ -668,6 +700,9 @@ export async function downloadTaskEngagementLetter(
     }
     return para.replace(/(<w:p\b[^>]*>)/, "$1<w:pPr><w:pageBreakBefore/></w:pPr>");
   });
+
+  // Letter body reads at 1.5 line spacing; tables and cover boxes keep theirs.
+  xml = setBodyLineSpacing(xml);
 
   // The cover title sits in a fixed-size text box sized for long names, so a
   // short entity left all the spare space hanging under the title. Centre the
