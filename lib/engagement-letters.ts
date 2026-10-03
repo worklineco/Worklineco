@@ -511,6 +511,38 @@ function fillStandaloneUnderscoreParagraphs(xml: string, entity: string) {
   });
 }
 
+// Fee amounts change on every engagement, so every table cell that holds only
+// an amount (digits/commas, optional Rs. or a bracketed note) is highlighted
+// yellow for review. Document No. rows and ranges like "Rs. 5 to 20 lakhs"
+// keep their normal formatting.
+function highlightAmountCells(xml: string) {
+  return xml.replace(/<w:tr\b[\s\S]*?<\/w:tr>/g, (row) => {
+    if (row.includes("Document No")) {
+      return row;
+    }
+    return row.replace(/<w:tc\b[\s\S]*?<\/w:tc>/g, (cell) => {
+      const cellText = Array.from(cell.matchAll(/<w:t[^>]*>([^<]*)<\/w:t>/g), (match) => match[1]).join(" ");
+      const bare = cellText.replace(/\([^)]*\)/g, "").replace(/Rs\.?/gi, "");
+      const digitsOnly = bare.replace(/[,\s]/g, "");
+      if (!/\d{3}/.test(digitsOnly) || /[A-Za-z]/.test(bare) || /\d-\d/.test(bare)) {
+        return cell;
+      }
+      return cell.replace(/<w:r\b[^>]*>[\s\S]*?<\/w:r>/g, (run) => {
+        if (!/<w:t[^>]*>[^<]+<\/w:t>/.test(run) || run.includes("<w:highlight")) {
+          return run;
+        }
+        if (run.includes("<w:rPr>")) {
+          return run.replace("<w:rPr>", '<w:rPr><w:highlight w:val="yellow"/>');
+        }
+        if (run.includes("<w:rPr/>")) {
+          return run.replace("<w:rPr/>", '<w:rPr><w:highlight w:val="yellow"/></w:rPr>');
+        }
+        return run.replace(/(<w:r\b[^>]*>)/, '$1<w:rPr><w:highlight w:val="yellow"/></w:rPr>');
+      });
+    });
+  });
+}
+
 function highlightBracketRuns(xml: string) {
   return xml.replace(/<w:r\b[^>]*>[\s\S]*?<\/w:r>/g, (run) => {
     if (!/<w:t[^>]*>[^<]*\[[^<]*<\/w:t>/.test(run) || run.includes("<w:highlight")) {
@@ -580,6 +612,7 @@ export async function downloadTaskEngagementLetter(
   xml = setLabelledValue(xml, "Place", "Jaipur");
   xml = setLabelledValue(xml, "Date", todayDdMmYyyy());
   xml = highlightBracketRuns(xml);
+  xml = highlightAmountCells(xml);
 
   zip.file("word/document.xml", xml);
 
