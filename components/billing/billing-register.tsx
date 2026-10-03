@@ -1710,8 +1710,8 @@ function BillingAddForm({
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-navy-700/45 px-4 py-6">
-      <section className="max-h-[90vh] w-full max-w-5xl overflow-hidden rounded-lg border border-slate-200 bg-white shadow-[0_24px_90px_rgba(15,23,42,0.30)]">
-        <header className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
+      <section className="flex h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-[0_24px_90px_rgba(15,23,42,0.30)]">
+        <header className="flex shrink-0 items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
           <div>
             <p className="text-xs font-black uppercase tracking-[0.14em] text-navy-700">
               {isEdit ? "Edit billing record" : "New billing record"}
@@ -1733,7 +1733,7 @@ function BillingAddForm({
           </button>
         </header>
 
-        <div className="max-h-[68vh] overflow-auto p-5">
+        <div className="min-h-0 flex-1 overflow-auto p-5">
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
             <label>
               <span className="text-[10px] font-black uppercase text-slate-500">Task Code</span>
@@ -1812,7 +1812,7 @@ function BillingAddForm({
           </div>
         </div>
 
-        <footer className="flex justify-end gap-2 border-t border-slate-200 px-5 py-4">
+        <footer className="flex shrink-0 justify-end gap-2 border-t border-slate-200 px-5 py-4">
           <button className={buttonClass("light")} onClick={onClose} type="button">Cancel</button>
           <button className={buttonClass("primary")} onClick={onSubmit} type="button">
             {isEdit ? <Pencil className="size-4" /> : <Plus className="size-4" />}
