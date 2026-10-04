@@ -199,7 +199,7 @@ function isPendingBillableRow(row: TaskLineRow, billedCodes: Map<string, string>
   }
   return !billedCodes.has(code.toUpperCase());
 }
-type TeamMemberLite = { designation: string; joining_date: string; name: string; team: string };
+type TeamMemberLite = { designation: string; joining_date: string; leaving_date: string; name: string; team: string };
 type EntityMasterOption = { entity: string; group: string; gstin: string; state: string };
 const emptyOptions: string[] = [];
 const teamOptions = ["Team-02", "Team-03", "Team-04", "Team-05", "Team-06", "Team-08"];
@@ -267,14 +267,21 @@ function taskLineMemberLeavingDate(designation: string, joiningDate: string): st
   return leaving.toISOString();
 }
 
-function isTaskLineMemberActive(member: { designation: string; joining_date: string }): boolean {
-  const leaving = taskLineMemberLeavingDate(member.designation, member.joining_date);
+function isTaskLineMemberActive(member: { designation: string; joining_date: string; leaving_date?: string }): boolean {
+  // An explicit Leaving Date on the Teams register always wins over the
+  // implied two-year articleship window (which can misfire on a wrongly
+  // entered joining date and silently drop the member from dropdowns).
+  const leaving = text(member.leaving_date) || taskLineMemberLeavingDate(member.designation, member.joining_date);
   if (!leaving) {
+    return true;
+  }
+  const leavingTime = new Date(leaving).getTime();
+  if (Number.isNaN(leavingTime)) {
     return true;
   }
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  return new Date(leaving).getTime() >= today.getTime();
+  return leavingTime >= today.getTime();
 }
 
 function isPartnerDesignation(value: string) {
@@ -993,7 +1000,7 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
     try {
       const response = await fetch("/api/teams", { cache: "no-store" });
       const result = (await response.json()) as {
-        members?: { designation?: string; joining_date?: string; name?: string; team?: string }[];
+        members?: { designation?: string; joining_date?: string; leaving_date?: string; name?: string; team?: string }[];
         me?: { team?: string };
       };
       if (!response.ok) {
@@ -1005,6 +1012,7 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
         (result.members ?? []).map((member) => ({
           designation: text(member.designation),
           joining_date: text(member.joining_date),
+          leaving_date: text(member.leaving_date),
           name: text(member.name),
           team: text(member.team)
         }))
