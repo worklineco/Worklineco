@@ -554,7 +554,11 @@ function filterAndSortTaskLineRows(sourceRows: TaskLineRow[], query: TaskLineQue
     const matchesColumns = Object.entries(query.columnFilters).every(([key, value]) =>
       text(row[key]).toLowerCase().includes(value.trim().toLowerCase())
     );
-    const matchesValues = Object.entries(query.valueFilters).every(([key, values]) => values.includes(text(row[key])));
+    // Same normalization as the register's filter menu: case/space-insensitive,
+    // so a ticked value matches every stored case/spacing variant of it.
+    const matchesValues = Object.entries(query.valueFilters).every(
+      ([key, values]) => !values.length || values.some((value) => normalizeFilterValue(value) === normalizeFilterValue(row[key]))
+    );
     const matchesDueColor = !query.dueColorFilter.length || query.dueColorFilter.includes(taskLineDueDateCategory(text(row.due_date)));
     return matchesSearch && matchesStatus && matchesColumns && matchesValues && matchesDueColor;
   });
@@ -591,6 +595,10 @@ function filterAndSortTaskLineRows(sourceRows: TaskLineRow[], query: TaskLineQue
 
     return factor * rawA.localeCompare(rawB, undefined, { numeric: true });
   });
+}
+
+function normalizeFilterValue(value: unknown) {
+  return text(value).toLocaleLowerCase().replace(/\s+/g, " ");
 }
 
 function taskLineDueDateCategory(value: string) {
