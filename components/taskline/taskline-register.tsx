@@ -1790,20 +1790,7 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
 
   // Double-clicking "Show Billables" opens a popup splitting the billable
   // count by register (Litigation / Non-Litigation / CESTAT / High Court).
-  async function openBillableBreakdown() {
-    setBillableBreakdown({ items: [], loading: true });
-
-    let allRows: TaskLineRow[] = [];
-
-    try {
-      const response = await fetch("/api/taskline?register=all", { cache: "no-store", credentials: "include" });
-      const result = (await response.json().catch(() => ({}))) as { rows?: TaskLineRow[] };
-      allRows = result.rows ?? [];
-    } catch (error) {
-      console.error("Billable breakdown load failed:", error);
-      allRows = getCached<{ rows?: TaskLineRow[] }>("all:rows:v1")?.rows ?? [];
-    }
-
+  function buildBillableBreakdownItems(allRows: TaskLineRow[]): [string, number][] {
     const counts = new Map<string, number>();
 
     for (const row of allRows) {
@@ -1815,12 +1802,36 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
     }
 
     const preferredOrder = ["Litigation", "Non-Litigation", "CESTAT", "High Court"];
-    const items: [string, number][] = [
+
+    return [
       ...preferredOrder.filter((label) => counts.has(label)).map((label) => [label, counts.get(label) ?? 0] as [string, number]),
       ...[...counts.entries()].filter(([label]) => !preferredOrder.includes(label))
     ];
+  }
 
-    setBillableBreakdown({ items, loading: false });
+  async function openBillableBreakdown() {
+    // Count instantly from the cached overview rows when available; the
+    // fresh fetch then corrects the numbers quietly in the background.
+    const cachedRows =
+      getCached<{ rows?: TaskLineRow[] }>("all:rows:v2")?.rows ??
+      getCached<{ rows?: TaskLineRow[] }>("all:rows:v1")?.rows;
+
+    if (cachedRows?.length) {
+      setBillableBreakdown({ items: buildBillableBreakdownItems(cachedRows), loading: false });
+    } else {
+      setBillableBreakdown({ items: [], loading: true });
+    }
+
+    try {
+      const response = await fetch("/api/taskline?register=all", { cache: "no-store", credentials: "include" });
+      const result = (await response.json().catch(() => ({}))) as { rows?: TaskLineRow[] };
+      const allRows = result.rows ?? [];
+      setCached("all:rows:v2", { rows: allRows });
+      setBillableBreakdown((current) => (current ? { items: buildBillableBreakdownItems(allRows), loading: false } : current));
+    } catch (error) {
+      console.error("Billable breakdown load failed:", error);
+      setBillableBreakdown((current) => (current ? { ...current, loading: false } : current));
+    }
   }
 
   function loadBillingClientRows(refresh = false): Promise<ClientRegisterRow[]> {
