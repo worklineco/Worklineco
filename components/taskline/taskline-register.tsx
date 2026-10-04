@@ -4846,6 +4846,7 @@ const billingAuditSkipFields = new Set([
   "serial_no",
   "source_module",
   "updated_at",
+  "updated_by",
   "version_no"
 ]);
 
