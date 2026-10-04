@@ -7,28 +7,28 @@ import Link from "next/link";
 const poaFormats = [
   {
     description: "Authorization to submit, appear and plead in GST appeal proceedings before the appellate authority.",
-    file: "/poa/poa-appeal.docx",
+    file: "/poa/1791134838095_POA_APPEAL.docx",
     filename: "POA - Appeal.docx",
     label: "POA — Appeal",
     type: "Word (.docx)"
   },
   {
     description: "Authorization for GST audit proceedings initiated under ADT-01 before the audit officer.",
-    file: "/poa/poa-adt-01.docx",
+    file: "/poa/1791134838098_POA__ADT-01.docx",
     filename: "POA - ADT-01 Audit.docx",
     label: "POA — ADT-01 (Audit)",
     type: "Word (.docx)"
   },
   {
     description: "Authorization to reply, appear and plead in show cause notice proceedings.",
-    file: "/poa/poa-scn.docx",
+    file: "/poa/1791134838100_POA__SCN.docx",
     filename: "POA - SCN.docx",
     label: "POA — Show Cause Notice",
     type: "Word (.docx)"
   },
   {
     description: "Authorization for proceedings before the Directorate General of GST Intelligence.",
-    file: "/poa/poa-dggi.doc",
+    file: "/poa/1791134838101_POA_DGGI.doc",
     filename: "POA - DGGI.doc",
     label: "POA — DGGI",
     type: "Word (.doc)"
