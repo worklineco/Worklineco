@@ -3,6 +3,7 @@
 import { ArrowDown, ArrowUp, ArrowUpDown, Check, Mail, Pencil, RefreshCw, ShieldCheck, UsersRound, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { getCached, setCached } from "@/lib/data-cache";
+import { LoadingIndicator } from "@/components/shared/loading-indicator";
 
 type TeamMember = {
   designation: string;
@@ -246,7 +247,7 @@ export function TeamsPanel() {
             {canEdit ? <span>Actions</span> : null}
           </div>
 
-          {isLoading ? <p className="px-4 py-5 text-sm font-bold text-slate-500">Loading team members...</p> : null}
+          {isLoading ? <p className="px-4 py-5 text-sm font-bold text-slate-500"><LoadingIndicator label="Loading team members..." /></p> : null}
           {!isLoading && members.length === 0 && !message ? <p className="px-4 py-5 text-sm font-bold text-slate-500">No team members found.</p> : null}
 
           {!isLoading && sortedMembers.map(({ member, originalIndex }) => {
@@ -597,3 +598,4 @@ function formatDate(value: string) {
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
 }
+ 
