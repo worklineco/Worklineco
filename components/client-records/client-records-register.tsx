@@ -142,7 +142,7 @@ export function ClientRecordsRegister() {
       });
       const matchesValueFilters = columns.every((column) => {
         const selected = valueFilters[column];
-        return !selected || selected.includes(String(row[column] ?? ""));
+        return !selected?.length || selected.includes(String(row[column] ?? ""));
       });
 
       return matchesSearch && matchesTextFilters && matchesValueFilters;
@@ -376,7 +376,7 @@ export function ClientRecordsRegister() {
     const options = uniqueValuesForColumn(column);
     setOpenFilterColumn(column);
     setFilterSearch("");
-    setFilterDraft(valueFilters[column] ? [...valueFilters[column]] : options);
+    setFilterDraft(valueFilters[column]?.length ? [...valueFilters[column]] : options);
     const rect = anchor.getBoundingClientRect();
     const width = 288;
     const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
@@ -423,7 +423,8 @@ export function ClientRecordsRegister() {
     const options = uniqueValuesForColumn(column);
     setValueFilters((current) => {
       const next = { ...current };
-      if (filterDraft.length >= options.length) delete next[column];
+      // "None" or "all" ticked both mean the column is unfiltered.
+      if (!filterDraft.length || filterDraft.length >= options.length) delete next[column];
       else next[column] = [...filterDraft];
       return next;
     });
