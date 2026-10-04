@@ -403,13 +403,29 @@ export default function PdfIndexingPage() {
 
     try {
       const newRows: PdfFileRow[] = [];
+      const replacedRowIds = new Set<string>();
 
-      for (const file of documentFiles) {
-        const id = `${file.webkitRelativePath || file.name}-${file.size}-${file.lastModified}`;
+      for (const [fileIndex, file] of documentFiles.entries()) {
+        const path = file.webkitRelativePath || file.name;
+        const id = `${path}-${file.size}-${file.lastModified}`;
         const fileKind = getSupportedFileKind(file);
 
         if (!fileKind || pdfFileMapRef.current.has(id)) {
           continue;
+        }
+
+        // A re-added file that changed on disk gets a new id (size/mtime):
+        // drop the stale row for the same path instead of showing both.
+        const staleRow = pdfRows.find((existing) => existing.path === path && existing.id !== id);
+
+        if (staleRow) {
+          pdfFileMapRef.current.delete(staleRow.id);
+          replacedRowIds.add(staleRow.id);
+        }
+
+        if (documentFiles.length > 1) {
+          setMessage(`Reading ${file.name} (${fileIndex + 1} of ${documentFiles.length})...`);
+          await waitForUiUpdate();
         }
 
         pdfFileMapRef.current.set(id, file);
@@ -420,13 +436,15 @@ export default function PdfIndexingPage() {
           id,
           name: file.name,
           pages: fileKind === "pdf" ? await getPdfPageCount(file) : 1,
-          path: file.webkitRelativePath || file.name,
+          path,
           size: file.size
         });
       }
 
       setPdfRows((current) => {
-        const byId = new Map(current.map((existing) => [existing.id, existing]));
+        const byId = new Map(
+          current.filter((existing) => !replacedRowIds.has(existing.id)).map((existing) => [existing.id, existing])
+        );
         for (const row of newRows) {
           byId.set(row.id, row);
         }
@@ -1015,8 +1033,16 @@ export default function PdfIndexingPage() {
           const largestImage = images.reduce((largest, image) =>
             image.width * image.height > largest.width * largest.height ? image : largest
           );
-          const dpiX = largestImage.width / (width / 72);
-          const dpiY = largestImage.height / (height / 72);
+          // Pair image pixels with the page edge they actually span: scanners
+          // often store a landscape image on a portrait page box (drawn
+          // rotated), which used to halve the reported DPI and raise false
+          // "below 300 DPI" alarms.
+          const imageIsLandscape = largestImage.width >= largestImage.height;
+          const pageIsLandscape = width >= height;
+          const spanWidth = imageIsLandscape === pageIsLandscape ? width : height;
+          const spanHeight = imageIsLandscape === pageIsLandscape ? height : width;
+          const dpiX = largestImage.width / (spanWidth / 72);
+          const dpiY = largestImage.height / (spanHeight / 72);
           const effectiveDpi = Math.floor(Math.min(dpiX, dpiY));
 
           if (effectiveDpi < 300) {
@@ -1242,11 +1268,17 @@ export default function PdfIndexingPage() {
           continue;
         }
 
-        outputs.push({
-          bytes: await createMergedPdfBytes(lot.rows, pdfFileMapRef.current),
-          filename: `workline-smart-merge-lot-${String(outputs.length + 1).padStart(2, "0")}.pdf`,
-          isOverLimit: false
-        });
+        // Inputs can merge into something BIGGER than their sum (shared
+        // resources, re-embedded pages), so verify the actual saved size and
+        // re-split the lot by files when it lands over the limit.
+        const lotOutputs = await createSizeVerifiedMergeOutputs(lot.rows, pdfFileMapRef.current, smartMergeMaxSize, setMessage);
+
+        for (const output of lotOutputs) {
+          outputs.push({
+            ...output,
+            filename: output.filename || `workline-smart-merge-lot-${String(outputs.length + 1).padStart(2, "0")}.pdf`,
+          });
+        }
       }
 
       const overLimitOutputs = outputs.filter((output) => output.isOverLimit);
@@ -1379,14 +1411,14 @@ export default function PdfIndexingPage() {
       const preparedRows = await createGstatDocketPreparedRows(rows, pageNumberState, pdfFileMapRef.current);
       const groups = createGstatDocketGroups(preparedRows);
 
-      for (const group of groups) {
+      for (const [groupIndex, group] of groups.entries()) {
         setMessage(`GSTAT Docket: merging ${group.label}...`);
         await waitForUiUpdate();
 
         const docketPdf = await createGstatDocketPdf(group.rows, {
           stampBuffer,
         });
-        const filename = `${String(outputs.length + 1).padStart(2, "0")}-${sanitizeFilenamePart(group.label)}.pdf`;
+        const filename = `${String(groupIndex + 1).padStart(2, "0")}-${sanitizeFilenamePart(group.label)}.pdf`;
         const groupOutputs = shouldSmartSplit
           ? await createSmartSplitSizedOutputs(docketPdf, filename, group.label, setMessage, smartMergeMaxSize ?? SMART_MERGE_MAX_SIZE)
           : [{ bytes: await docketPdf.save(), filename, isOverLimit: false }];
@@ -2251,11 +2283,10 @@ async function getPdfPageCount(file: File) {
 function hasDigitalSignature(bytes: Uint8Array) {
   const pdfSource = new TextDecoder("latin1").decode(bytes);
 
-  return (
-    /\/ByteRange\s*\[/.test(pdfSource) ||
-    /\/Type\s*\/Sig\b/.test(pdfSource) ||
-    /\/FT\s*\/Sig\b/.test(pdfSource)
-  );
+  // A real signature carries a signed /ByteRange plus a signature dictionary.
+  // An EMPTY signature field (common in bank and government forms) only has
+  // /FT /Sig with no /ByteRange, and must not block compression.
+  return /\/ByteRange\s*\[/.test(pdfSource) && (/\/Type\s*\/Sig\b/.test(pdfSource) || /\/SubFilter\s*\//.test(pdfSource));
 }
 
 async function compressUnsignedPdfToTarget(
@@ -2359,8 +2390,12 @@ function downloadBlob(blob: Blob, filename: string) {
 
   link.href = url;
   link.download = filename;
+  document.body.appendChild(link);
   link.click();
-  URL.revokeObjectURL(url);
+  link.remove();
+  // Revoking immediately can abort large downloads in some browsers; give
+  // the browser a minute to finish streaming the blob first.
+  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
 function createPdfBlob(bytes: Uint8Array) {
@@ -2734,6 +2769,41 @@ function createSmartMergeLots(rows: PdfFileRow[], maxSize = SMART_MERGE_MAX_SIZE
   return lots;
 }
 
+// Merge rows and verify the ACTUAL saved size against the limit. A result
+// over the limit is re-split by files (halving) until each part fits; a
+// single file over the limit falls back to page-by-page splitting.
+async function createSizeVerifiedMergeOutputs(
+  rows: PdfFileRow[],
+  fileMap: Map<string, File>,
+  maxSize: number,
+  reportProgress: (message: string) => void
+): Promise<SmartMergeOutput[]> {
+  if (rows.length === 1) {
+    const singleBytes = await createMergedPdfBytes(rows, fileMap);
+
+    if (singleBytes.byteLength <= maxSize) {
+      return [{ bytes: singleBytes, filename: "", isOverLimit: false }];
+    }
+
+    return createSmartMergePartsForOversizedPdf(rows[0], fileMap, reportProgress, maxSize);
+  }
+
+  const bytes = await createMergedPdfBytes(rows, fileMap);
+
+  if (bytes.byteLength <= maxSize) {
+    return [{ bytes, filename: "", isOverLimit: false }];
+  }
+
+  reportProgress(`Smart Merge: a lot saved as ${formatFileSize(bytes.byteLength)} (over ${formatFileSize(maxSize)}), re-splitting ${rows.length} files...`);
+  await waitForUiUpdate();
+  const half = Math.ceil(rows.length / 2);
+
+  return [
+    ...(await createSizeVerifiedMergeOutputs(rows.slice(0, half), fileMap, maxSize, reportProgress)),
+    ...(await createSizeVerifiedMergeOutputs(rows.slice(half), fileMap, maxSize, reportProgress)),
+  ];
+}
+
 async function createMergedPdfBytes(rows: PdfFileRow[], fileMap: Map<string, File>) {
   const mergedPdf = await PDFDocument.create();
 
@@ -2919,8 +2989,46 @@ async function createPortraitPdf(sourcePdf: PDFDocument) {
 }
 
 async function appendPortraitPages(targetPdf: PDFDocument, sourcePdf: PDFDocument) {
-  for (const sourcePage of sourcePdf.getPages()) {
-    await appendPortraitPage(targetPdf, sourcePage);
+  // Pages already displayed portrait are copied in batches: copying keeps
+  // shared fonts/images deduplicated and the content lossless, where
+  // re-embedding every page used to balloon merged files (and could run the
+  // browser out of memory). Only displayed-landscape pages go through the
+  // rotate-to-portrait embedding path.
+  const pages = sourcePdf.getPages();
+  const portraitIndices = new Set<number>();
+
+  pages.forEach((page, index) => {
+    const { height, width } = page.getSize();
+    const rotation = normalizePageRotation(page.getRotation().angle);
+    const sideways = rotation === 90 || rotation === 270;
+    const viewedWidth = sideways ? height : width;
+    const viewedHeight = sideways ? width : height;
+
+    if (viewedWidth <= viewedHeight) {
+      portraitIndices.add(index);
+    }
+  });
+
+  let runStart = 0;
+
+  for (let index = 0; index <= pages.length; index += 1) {
+    if (index < pages.length && portraitIndices.has(index)) {
+      continue;
+    }
+
+    if (runStart < index) {
+      const copiedPages = await targetPdf.copyPages(
+        sourcePdf,
+        Array.from({ length: index - runStart }, (_, offset) => runStart + offset)
+      );
+      copiedPages.forEach((page) => targetPdf.addPage(page));
+    }
+
+    if (index < pages.length) {
+      await appendPortraitPage(targetPdf, pages[index]);
+    }
+
+    runStart = index + 1;
   }
 }
 
@@ -2930,6 +3038,9 @@ async function appendPortraitPage(targetPdf: PDFDocument, sourcePage: ReturnType
 
   sourcePage.setRotation(degrees(0));
   const embeddedPage = await targetPdf.embedPage(sourcePage);
+  // Restore the source page so re-reading it (e.g. overlapping split ranges)
+  // still sees the original rotation.
+  sourcePage.setRotation(degrees(rotation));
 
   // Dimensions as the page is actually DISPLAYED (the viewer applies /Rotate).
   const sideways = rotation === 90 || rotation === 270;
