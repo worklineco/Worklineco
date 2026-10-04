@@ -1,14 +1,9 @@
-import { ArrowLeft, FileSearch, FileText, Mic, ScrollText, Wrench } from "lucide-react";
+import { ArrowLeft, FileSearch, Mic, ScrollText, Wrench } from "lucide-react";
 import Link from "next/link";
 
+// Engagement Letters are generated automatically from TaskLine, so the
+// Tools page no longer lists a separate Engagement Letter card.
 const tools = [
-  {
-    description: "Generate and track engagement letters with saved formats and generated EL log.",
-    href: "/engagement-letter",
-    icon: FileText,
-    label: "Engagement Letter",
-    tone: "bg-cyan-100 text-cyan-800"
-  },
   {
     description: "Index PDF files, organize documents, and work with PDF utilities.",
     href: "/pdf-indexing",
