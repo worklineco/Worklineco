@@ -5,6 +5,7 @@ import type { ComponentType } from "react";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { BillingColumnFilter } from "@/components/billing/billing-column-filter";
 import { getCached, setCached } from "@/lib/data-cache";
+import { LoadingIndicator } from "@/components/shared/loading-indicator";
 import * as XLSX from "xlsx-js-style";
 
 type BillingRecord = {
@@ -1370,7 +1371,7 @@ export function BillingRegister() {
             </thead>
             <tbody>
               {isLoading ? (
-                <tr><td className="px-4 py-8 font-bold text-slate-500" colSpan={visibleBillingColumns.length}>Loading billing rows...</td></tr>
+                <tr><td className="px-4 py-8 font-bold text-slate-500" colSpan={visibleBillingColumns.length}><LoadingIndicator label="Loading billing rows..." /></td></tr>
               ) : filteredRecords.length ? (
                 pagedRecords.map((record, rowIndex) => (
                   <BillingRow
@@ -1404,27 +1405,29 @@ export function BillingRegister() {
 
       {viewMode === "audit" ? (
         <>
-          {selectedRecordId ? (
-            <div className="mt-4 flex flex-wrap items-center gap-2 rounded-md border border-slate-200 bg-white px-4 py-3">
-              <History className="size-4 text-rose-700" />
-              <div className="min-w-0">
-                <h3 className="text-sm font-black uppercase tracking-[0.14em] text-slate-700">
-                  {selectedRecord?.client || selectedRecord?.invoice_no || selectedRecord?.memo_no || "Billing row"}
-                </h3>
-                <p className="mt-0.5 truncate text-xs font-bold text-slate-500">
-                  Billing updates only, from the moment this row was pushed to Billing. The task&apos;s earlier journey lives in its TaskLine audit trail.
-                </p>
-              </div>
-              <button
-                className="ml-auto inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 transition hover:bg-slate-50"
-                onClick={() => { setSelectedRecordId(null); setRowHistoryLogs(null); setViewMode("register"); }}
-                type="button"
-              >
-                <RotateCcw className="size-3.5" />
-                Back to register
-              </button>
+          <div className="mt-4 flex flex-wrap items-center gap-2 rounded-md border border-slate-200 bg-white px-4 py-3">
+            <History className="size-4 text-rose-700" />
+            <div className="min-w-0">
+              <h3 className="text-sm font-black uppercase tracking-[0.14em] text-slate-700">
+                {selectedRecordId
+                  ? selectedRecord?.client || selectedRecord?.invoice_no || selectedRecord?.memo_no || "Billing row"
+                  : "Billing Audit Trail"}
+              </h3>
+              <p className="mt-0.5 truncate text-xs font-bold text-slate-500">
+                {selectedRecordId
+                  ? "Billing updates only, from the moment this row was pushed to Billing. The task's earlier journey lives in its TaskLine audit trail."
+                  : "The latest changes across the whole Billing register."}
+              </p>
             </div>
-          ) : null}
+            <button
+              className="ml-auto inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 transition hover:bg-slate-50"
+              onClick={() => { setSelectedRecordId(null); setRowHistoryLogs(null); setViewMode("register"); }}
+              type="button"
+            >
+              <RotateCcw className="size-3.5" />
+              Back to register
+            </button>
+          </div>
           <BillingAuditTable
             logs={selectedRecordId ? selectedAuditLogs : auditLogs}
             isLoading={selectedRecordId ? isRowHistoryLoading : isActivityLoading}
@@ -1433,7 +1436,24 @@ export function BillingRegister() {
       ) : null}
 
       {viewMode === "trash" ? (
-        <BillingTrashTable isLoading={isActivityLoading} onRestore={restoreTrashRecord} rows={trashRecords} />
+        <>
+          <div className="mt-4 flex flex-wrap items-center gap-2 rounded-md border border-slate-200 bg-white px-4 py-3">
+            <Trash2 className="size-4 text-rose-700" />
+            <div className="min-w-0">
+              <h3 className="text-sm font-black uppercase tracking-[0.14em] text-slate-700">Billing Trash</h3>
+              <p className="mt-0.5 truncate text-xs font-bold text-slate-500">Deleted billing rows stay restorable here for 30 days.</p>
+            </div>
+            <button
+              className="ml-auto inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 transition hover:bg-slate-50"
+              onClick={() => setViewMode("register")}
+              type="button"
+            >
+              <RotateCcw className="size-3.5" />
+              Back to register
+            </button>
+          </div>
+          <BillingTrashTable isLoading={isActivityLoading} onRestore={restoreTrashRecord} rows={trashRecords} />
+        </>
       ) : null}
 
       {addDraft ? (
@@ -2239,10 +2259,12 @@ function BillingAuditTable({ isLoading, logs }: { isLoading: boolean; logs: Audi
               </tr>
             );
           })}
-          {!logs.length && !isLoading ? (
+          {!logs.length ? (
             <tr>
               <td className="px-3 py-8 text-center text-sm font-bold text-slate-500" colSpan={6}>
-                <span className="inline-flex items-center gap-2"><ShieldCheck className="size-4" /> No billing audit entries found.</span>
+                {isLoading
+                  ? <LoadingIndicator label="Loading billing history..." />
+                  : <span className="inline-flex items-center gap-2"><ShieldCheck className="size-4" /> No billing audit entries found.</span>}
               </td>
             </tr>
           ) : null}
@@ -2293,10 +2315,12 @@ function BillingTrashTable({
               </td>
             </tr>
           ))}
-          {!rows.length && !isLoading ? (
+          {!rows.length ? (
             <tr>
               <td className="px-3 py-8 text-center text-sm font-bold text-slate-500" colSpan={8}>
-                <span className="inline-flex items-center gap-2"><Trash2 className="size-4" /> No deleted billing rows are currently in trash.</span>
+                {isLoading
+                  ? <LoadingIndicator label="Loading trash..." />
+                  : <span className="inline-flex items-center gap-2"><Trash2 className="size-4" /> No deleted billing rows are currently in trash.</span>}
               </td>
             </tr>
           ) : null}
@@ -2982,3 +3006,4 @@ function toNumber(value: unknown) {
   const parsed = Number(String(value ?? "").replace(/,/g, ""));
   return Number.isFinite(parsed) ? parsed : 0;
 }
+ 
