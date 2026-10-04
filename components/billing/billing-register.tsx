@@ -334,6 +334,8 @@ export function BillingRegister() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isColumnOptionsOpen, setIsColumnOptionsOpen] = useState(false);
   const [isActivityLoading, setIsActivityLoading] = useState(false);
+  const [isRowHistoryLoading, setIsRowHistoryLoading] = useState(false);
+  const [rowHistoryLogs, setRowHistoryLogs] = useState<AuditLog[] | null>(null);
   const [isFullTableLoading, setIsFullTableLoading] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [matters, setMatters] = useState<GstatMatter[]>([]);
@@ -499,7 +501,7 @@ export function BillingRegister() {
 
   const selectedRecord = records.find((record) => record.id === selectedRecordId) ?? null;
   const selectedAuditLogs = selectedRecordId
-    ? auditLogs.filter((log) => log.entity_id === selectedRecordId)
+    ? rowHistoryLogs ?? auditLogs.filter((log) => log.entity_id === selectedRecordId)
     : auditLogs.slice(0, 12);
   const billingSummary = useMemo(() => getBillingSummary(filteredRecords), [filteredRecords]);
   const markedForReviewCount = useMemo(
@@ -818,7 +820,34 @@ export function BillingRegister() {
 
   function openRowHistory(record: BillingRecord) {
     setSelectedRecordId(record.id ?? null);
-    void loadBillingActivity();
+    setRowHistoryLogs(null);
+
+    if (record.id) {
+      void loadRowHistory(record.id);
+    }
+  }
+
+  // The row panel fetches the record's COMPLETE billing audit trail from the
+  // server (the global activity feed only holds the latest entries overall,
+  // so older rows used to show an empty history).
+  async function loadRowHistory(recordId: string) {
+    setIsRowHistoryLoading(true);
+
+    try {
+      const response = await fetch(`/api/billing?scope=activity&recordId=${encodeURIComponent(recordId)}`, { cache: "no-store" });
+      const result = (await response.json().catch(() => ({}))) as { auditLogs?: AuditLog[]; error?: string };
+
+      if (!response.ok) {
+        console.error("Billing row history load failed:", result.error);
+        return;
+      }
+
+      setRowHistoryLogs(result.auditLogs ?? []);
+    } catch (error) {
+      console.error("Billing row history load error:", error);
+    } finally {
+      setIsRowHistoryLoading(false);
+    }
   }
 
   async function saveDirectField(record: BillingRecord, field: BillingField, rawValue: string) {
@@ -1414,10 +1443,13 @@ export function BillingRegister() {
                 <p className="mt-1 text-sm font-bold text-slate-500">
                   {selectedRecord?.owner_team || "No team"} - {selectedRecord?.billing_status || "Draft"}
                 </p>
+                <p className="mt-1 text-xs font-bold text-slate-400">
+                  Billing updates only, from the moment this row was pushed to Billing. The task&apos;s earlier journey lives in its TaskLine audit trail.
+                </p>
               </div>
               <button
                 className="inline-flex size-9 items-center justify-center rounded-md border border-slate-200 text-slate-700 hover:bg-slate-50"
-                onClick={() => setSelectedRecordId(null)}
+                onClick={() => { setSelectedRecordId(null); setRowHistoryLogs(null); }}
                 title="Close history"
                 type="button"
               >
@@ -1433,7 +1465,7 @@ export function BillingRegister() {
                       <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
                         <div>
                           <p className="text-sm font-black uppercase text-slate-950">
-                            {log.action.replace("billing.", "")}
+                            {formatBillingAuditAction(log.action)}
                           </p>
                           <p className="text-xs font-bold text-slate-500">Updated by {log.actor_name || "Unknown user"}</p>
                         </div>
@@ -1445,7 +1477,7 @@ export function BillingRegister() {
                 </div>
               ) : (
                 <p className="rounded-md border border-slate-200 px-3 py-8 text-center text-sm font-bold text-slate-500">
-                  No history entries found for this billing row.
+                  {isRowHistoryLoading ? "Loading billing history..." : "No history entries found for this billing row."}
                 </p>
               )}
             </div>
@@ -2208,7 +2240,7 @@ function BillingAuditTable({ isLoading, logs }: { isLoading: boolean; logs: Audi
             return (
               <tr className="odd:bg-white even:bg-slate-50/80" key={log.id}>
                 <td className="border-b border-r border-slate-200 px-3 py-2 font-semibold text-slate-700">{formatDateTime(log.created_at)}</td>
-                <td className="border-b border-r border-slate-200 px-3 py-2 font-black text-slate-900">{log.action.replace("billing.", "")}</td>
+                <td className="border-b border-r border-slate-200 px-3 py-2 font-black text-slate-900">{formatBillingAuditAction(log.action)}</td>
                 <td className="border-b border-r border-slate-200 px-3 py-2 font-semibold text-slate-700">{log.actor_name || "Unknown user"}</td>
                 <td className="border-b border-r border-slate-200 px-3 py-2 font-semibold text-slate-700">{summary.owner_team ?? "-"}</td>
                 <td className="border-b border-r border-slate-200 px-3 py-2 font-semibold text-slate-700">{summary.client ?? "-"}</td>
@@ -2823,6 +2855,14 @@ const auditFields: BillingField[] = [
   "accounts_remark",
   "gstat_appeal_id"
 ];
+
+function formatBillingAuditAction(action: string) {
+  if (action === "billing.create") {
+    return "pushed to billing";
+  }
+
+  return action.replace("billing.", "").replace(/[._]/g, " ");
+}
 
 function getAuditChanges(log: AuditLog): AuditChange[] {
   const oldValue = log.old_value ?? {};
