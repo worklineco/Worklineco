@@ -27,7 +27,7 @@ import {
 } from "lucide-react";
 import { supabase } from "@/lib/supabase/client";
 import { clearWorkspaceCache, getCurrentUser } from "@/lib/supabase/session";
-import { clearDataCache } from "@/lib/data-cache";
+import { clearDataCache, getCached, setCached } from "@/lib/data-cache";
 import { JoiningDatePrompt } from "@/components/layout/joining-date-prompt";
 
 type NavItem = {
@@ -71,6 +71,23 @@ function toProfileDateInput(value: string) {
   if (Number.isNaN(date.getTime())) return "";
   return date.toISOString().slice(0, 10);
 }
+
+// The Team dropdown lists every team already on the Team Members register.
+function buildTeamOptions(members: { team?: string; teams?: string[] }[]) {
+  const unique = new Map<string, string>();
+
+  for (const member of members) {
+    for (const team of [member.team ?? "", ...(member.teams ?? [])]) {
+      const display = String(team).trim();
+
+      if (display) {
+        unique.set(display.toLowerCase(), unique.get(display.toLowerCase()) ?? display);
+      }
+    }
+  }
+
+  return Array.from(unique.values()).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+}
 const collapseStorageKey = "wl_sidebar_collapsed";
 const sjAppointmentEmails = new Set(["jatinshah.dco@gmail.com", "somya.dco@gmail.com"]);
 
@@ -89,6 +106,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [profileEditor, setProfileEditor] = useState<ProfileEditorDraft | null>(null);
   const [profileEditorMessage, setProfileEditorMessage] = useState("");
   const [isProfileSaving, setIsProfileSaving] = useState(false);
+  const [profileTeamOptions, setProfileTeamOptions] = useState<string[]>([]);
 
   useEffect(() => {
     if (window.localStorage.getItem(collapseStorageKey) === "1") {
@@ -109,8 +127,30 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   const canEditProfile = Boolean(profileUserId) && profileEditorRoles.includes(profileRole.trim().toLowerCase());
 
+  async function loadProfileTeamOptions() {
+    const cached = getCached<{ members?: { team?: string; teams?: string[] }[] }>("teams:members:v1");
+
+    if (cached?.members?.length) {
+      setProfileTeamOptions(buildTeamOptions(cached.members));
+      return;
+    }
+
+    try {
+      const response = await fetch("/api/teams", { cache: "no-store" });
+      const result = (await response.json().catch(() => ({}))) as { members?: { team?: string; teams?: string[] }[] };
+
+      if (response.ok) {
+        setCached("teams:members:v1", result);
+        setProfileTeamOptions(buildTeamOptions(result.members ?? []));
+      }
+    } catch {
+      // The dropdown still shows the current team; options just stay empty.
+    }
+  }
+
   function openProfileEditor() {
     setProfileEditorMessage("");
+    void loadProfileTeamOptions();
     setProfileEditor({
       designation: profileRole.trim(),
       joining_date: toProfileDateInput(profileJoining),
@@ -437,12 +477,19 @@ export function AppShell({ children }: { children: ReactNode }) {
               </label>
               <label className="block">
                 <span className="text-xs font-black uppercase tracking-wide text-slate-500">Team</span>
-                <input
+                <select
                   className="mt-1 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold text-slate-900 outline-none transition focus:border-navy-400"
                   onChange={(event) => setProfileEditor((current) => (current ? { ...current, team: event.target.value } : current))}
-                  placeholder="Team / Partner"
                   value={profileEditor.team}
-                />
+                >
+                  <option value="">Select team</option>
+                  {profileTeamOptions.map((option) => (
+                    <option key={option} value={option}>{option}</option>
+                  ))}
+                  {profileEditor.team && !profileTeamOptions.includes(profileEditor.team) ? (
+                    <option value={profileEditor.team}>{profileEditor.team}</option>
+                  ) : null}
+                </select>
               </label>
               <label className="block">
                 <span className="text-xs font-black uppercase tracking-wide text-slate-500">Designation</span>
