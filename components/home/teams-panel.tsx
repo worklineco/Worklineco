@@ -46,6 +46,7 @@ export function TeamsPanel() {
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<EditDraft>({ designation: "", joining_date: "", leaving_date: "", name: "", team: "" });
+  const [isCustomTeam, setIsCustomTeam] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [myRole, setMyRole] = useState("");
   const [isAdminRoleOpen, setIsAdminRoleOpen] = useState(false);
@@ -111,6 +112,22 @@ export function TeamsPanel() {
     });
   }, [members, sortDirection, sortKey]);
 
+  const teamOptions = useMemo(() => {
+    const unique = new Map<string, string>();
+
+    for (const member of members) {
+      for (const team of [member.team, ...(member.teams ?? [])]) {
+        const display = String(team ?? "").trim();
+
+        if (display) {
+          unique.set(display.toLowerCase(), unique.get(display.toLowerCase()) ?? display);
+        }
+      }
+    }
+
+    return Array.from(unique.values()).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  }, [members]);
+
   function changeSort(nextKey: SortKey) {
     if (nextKey === sortKey) {
       setSortDirection((current) => (current === "asc" ? "desc" : "asc"));
@@ -123,6 +140,7 @@ export function TeamsPanel() {
 
   function startEdit(member: TeamMember) {
     setEditingId(member.id);
+    setIsCustomTeam(false);
     setDraft({
       designation: member.designation === "-" ? "" : member.designation,
       joining_date: toDateInputValue(member.joining_date),
@@ -270,7 +288,33 @@ export function TeamsPanel() {
 
                 <div className="min-w-0">
                   {isEditing ? (
-                    <input className={editInputClass} onChange={(event) => setDraft((current) => ({ ...current, team: event.target.value }))} placeholder="Team / Partner" value={draft.team} />
+                    <div className="space-y-1">
+                      <select
+                        className={editInputClass}
+                        onChange={(event) => {
+                          if (event.target.value === "__custom__") {
+                            setIsCustomTeam(true);
+                            setDraft((current) => ({ ...current, team: "" }));
+                          } else {
+                            setIsCustomTeam(false);
+                            setDraft((current) => ({ ...current, team: event.target.value }));
+                          }
+                        }}
+                        value={isCustomTeam ? "__custom__" : draft.team}
+                      >
+                        <option value="">Select team</option>
+                        {teamOptions.map((option) => (
+                          <option key={option} value={option}>{option}</option>
+                        ))}
+                        {draft.team && !isCustomTeam && !teamOptions.includes(draft.team) ? (
+                          <option value={draft.team}>{draft.team}</option>
+                        ) : null}
+                        <option value="__custom__">New team...</option>
+                      </select>
+                      {isCustomTeam ? (
+                        <input className={editInputClass} onChange={(event) => setDraft((current) => ({ ...current, team: event.target.value }))} placeholder="New team name" value={draft.team} />
+                      ) : null}
+                    </div>
                   ) : (
                     <p className="font-bold text-slate-600">{formatMemberTeams(member)}</p>
                   )}
