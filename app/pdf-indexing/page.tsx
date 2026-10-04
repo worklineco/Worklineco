@@ -1517,18 +1517,18 @@ export default function PdfIndexingPage() {
               <div className="h-px w-full bg-slate-200" />
 
               <div className="flex w-full flex-wrap gap-2 lg:justify-end">
-                <ToolButton disabled={isProcessing || selectedRowIds.size < 2} icon={Shuffle} label="Merge" onClick={mergeSelectedPdfs} />
-                <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={BookMarked} label="Smart Merge" onClick={startSmartMerge} />
-                <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={BookMarked} label="PaperBook" onClick={createPaperBookPdf} />
-                <ToolButton disabled={isProcessing || selectedRowIds.size < 2} icon={BookMarked} label="Bookmarks" onClick={createBookmarkedPdf} />
-                <ToolButton disabled={isProcessing || pdfRows.length === 0} icon={ListOrdered} label="Create Index" onClick={createPdfIndex} />
-                <ToolButton disabled={isProcessing} icon={FileSearch} label="GSTAT Docket" onClick={openGstatDocket} />
+                <ToolButton disabled={isProcessing || selectedRowIds.size < 2} icon={Shuffle} label="Merge" onClick={mergeSelectedPdfs} title="Combine the selected files into one PDF; landscape pages are straightened to portrait" />
+                <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={BookMarked} label="Smart Merge" onClick={startSmartMerge} title="Merge into parts that each stay under a size limit you choose (court-portal friendly)" />
+                <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={BookMarked} label="PaperBook" onClick={createPaperBookPdf} title="Build a PaperBook: merged with bookmarks, TRUE COPY stamps and optional page numbers" />
+                <ToolButton disabled={isProcessing || selectedRowIds.size < 2} icon={BookMarked} label="Bookmarks" onClick={createBookmarkedPdf} title="Merge with a clickable bookmark for every document and annexure" />
+                <ToolButton disabled={isProcessing || pdfRows.length === 0} icon={ListOrdered} label="Create Index" onClick={createPdfIndex} title="Download a Word index of the listed files with starting page numbers" />
+                <ToolButton disabled={isProcessing} icon={FileSearch} label="GSTAT Docket" onClick={openGstatDocket} title="Build GSTAT docket sets grouped by document type, with stamps and continuous numbering" />
               </div>
 
               <div className="flex w-full flex-wrap gap-2 lg:justify-end">
-                <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={Archive} label="Compress PDF" onClick={openCompressionDialog} />
-                <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={Scissors} label="Split" onClick={splitSelectedPdfs} />
-                <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={Scissors} label="Smart Split" onClick={startSmartSplit} />
+                <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={Archive} label="Compress PDF" onClick={openCompressionDialog} title="Shrink the selected PDFs to a target size in MB (signed PDFs are left untouched)" />
+                <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={Scissors} label="Split" onClick={splitSelectedPdfs} title="Extract page ranges (for example 1-5,6-10) from each selected PDF into a ZIP" />
+                <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={Scissors} label="Smart Split" onClick={startSmartSplit} title="Split by document type into docket parts, with optional size limit and numbering" />
                 <label className="inline-flex h-10 min-w-[136px] items-center justify-center gap-2 rounded-xl border border-slate-950/10 bg-white px-3 text-xs font-black uppercase text-slate-800 shadow-sm">
                   <input
                     checked={smartSplitShouldLimitSize}
@@ -1539,8 +1539,8 @@ export default function PdfIndexingPage() {
                   />
                   19.5 MB Split
                 </label>
-                <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={Hash} label="Page No." onClick={addPageNumbersToPdfs} />
-                <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={FileImage} label="True Copy" onClick={applyTrueCopyStampToPdfs} />
+                <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={Hash} label="Page No." onClick={addPageNumbersToPdfs} title="Stamp page numbers in the top-right corner of every page" />
+                <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={FileImage} label="True Copy" onClick={applyTrueCopyStampToPdfs} title="Apply the TRUE COPY stamp to every page of the selected PDFs" />
               </div>
             </div>
           </div>
@@ -1943,18 +1943,21 @@ function ToolButton({
   disabled,
   icon: Icon,
   label,
-  onClick
+  onClick,
+  title
 }: {
   disabled?: boolean;
   icon: LucideIcon;
   label: string;
   onClick: () => void;
+  title: string;
 }) {
   return (
     <button
       className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-950/10 bg-white px-3 text-xs font-black uppercase text-slate-800 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:translate-y-0 disabled:hover:shadow-sm"
       disabled={disabled}
       onClick={onClick}
+      title={title}
       type="button"
     >
       <Icon className="size-4" />
