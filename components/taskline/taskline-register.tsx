@@ -768,7 +768,7 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
     setFilterSearch("");
     setFilterMenuPos({ left, maxHeight, top });
     setOpenColumnOptions(options);
-    setFilterDraft(valueFilters[key] ? [...valueFilters[key]] : options);
+    setFilterDraft(valueFilters[key]?.length ? [...valueFilters[key]] : options);
     setIsFilterOptionsLoading(false);
   }
 
@@ -811,12 +811,16 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
   }, [closeColumnFilter, openFilterKey]);
 
   function applyColumnFilter(key: string) {
+    // Keep only ticks that are real options (stale selections from an older
+    // option list would otherwise silently hide rows), and treat "none" or
+    // "all" selected as no filter at all.
+    const selected = openColumnOptions.filter((option) => filterDraft.includes(option));
     setValueFilters((current) => {
       const next = { ...current };
-      if (filterDraft.length >= openColumnOptions.length) {
+      if (!selected.length || selected.length >= openColumnOptions.length) {
         delete next[key];
       } else {
-        next[key] = [...filterDraft];
+        next[key] = selected;
       }
       return next;
     });
@@ -4994,6 +4998,12 @@ function applyTaskLineFilters(sourceRows: TaskLineRow[], filters: TaskLineFilter
   const dueBounds = filters.dueRange.preset
     ? computeDueRangeBounds(filters.dueRange.preset, filters.dueRange.start, filters.dueRange.end)
     : null;
+  // Compare value filters with the same normalization the menu uses to build
+  // its options (case/space-insensitive), so ticking a value like "Team 03"
+  // also keeps rows stored as "team 03" / "TEAM 03".
+  const valueFilterSets = Object.entries(filters.valueFilters)
+    .filter(([, values]) => values.length)
+    .map(([key, values]) => [key, new Set(values.map((value) => normalizeOptionKey(value)))] as const);
   const result = sourceRows.filter((row) => {
     const matchesSearch = !query || taskLineColumns.some((column) => text(row[column.key]).toLowerCase().includes(query));
     const matchesStatus = !filters.statusFilter || text(row.status_open_close) === filters.statusFilter;
@@ -5001,7 +5011,7 @@ function applyTaskLineFilters(sourceRows: TaskLineRow[], filters: TaskLineFilter
       const needle = text(value).trim().toLowerCase();
       return !needle || text(row[key]).toLowerCase().includes(needle);
     });
-    const matchesValues = Object.entries(filters.valueFilters).every(([key, values]) => !values.length || values.includes(text(row[key])));
+    const matchesValues = valueFilterSets.every(([key, keys]) => keys.has(normalizeOptionKey(row[key])));
     const matchesDueColor = !filters.dueColorFilter.length || filters.dueColorFilter.includes(dueDateCategory(text(row.due_date)));
     let matchesDueRange = true;
     if (dueBounds) {
