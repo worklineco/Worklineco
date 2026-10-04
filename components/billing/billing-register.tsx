@@ -426,10 +426,14 @@ export function BillingRegister() {
           getMatterLabel(record, matters)
         ].some((value) => String(value ?? "").toLowerCase().includes(search));
 
-      const matchesColumnFilters = visibleBillingColumns.every((column) => {
-        const filter = String(columnFilters[String(column.field)] ?? "").trim().toLowerCase();
+      // Apply every typed column filter, including ones on columns that were
+      // hidden afterwards — otherwise a hidden column's filter still counts as
+      // active but silently stops narrowing the rows.
+      const matchesColumnFilters = Object.entries(columnFilters).every(([field, rawFilter]) => {
+        const filter = String(rawFilter ?? "").trim().toLowerCase();
+        const column = billingColumnByKey.get(field);
 
-        if (!filter || column.field === "actions") {
+        if (!filter || !column || column.field === "actions") {
           return true;
         }
 
@@ -461,23 +465,35 @@ export function BillingRegister() {
       if (column.field !== "gstat_link" && (column.type === "money" || column.field === "serial_no" || column.field === "version_no")) {
         compared = toNumber(first[column.field]) - toNumber(second[column.field]);
       } else if (column.type === "date" && column.field !== "gstat_link") {
-        compared = String(first[column.field] ?? "").localeCompare(String(second[column.field] ?? ""));
+        // Stored dates can be ISO (imports) or dd-mm-yyyy (inline edits):
+        // normalize both to ISO so the comparison is chronological.
+        compared = normalizeDateInput(first[column.field]).localeCompare(normalizeDateInput(second[column.field]));
       } else {
         compared = a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
       }
       return sort.direction === "asc" ? compared : -compared;
     });
-  }, [columnFilters, valueFilters, sort, filters, matters, records, visibleBillingColumns, showMarkedForReviewOnly]);
+  }, [columnFilters, valueFilters, sort, filters, matters, records, showMarkedForReviewOnly]);
   function applyValueFilter(values: string[] | undefined) {
     if (!filterMenu) return;
     const field = String(filterMenu.column.field);
     setValueFilters((current) => {
       const next = { ...current };
-      if (values === undefined) delete next[field];
+      // Nothing ticked means "no filter" rather than "hide every row".
+      if (values === undefined || !values.length) delete next[field];
       else next[field] = values;
       return next;
     });
-    setColumnFilters((current) => ({ ...current, [field]: "" }));
+
+    // Picking values replaces any typed text filter on the column: cancel its
+    // pending debounce and remount the input so the stale text disappears too.
+    window.clearTimeout(columnFilterTimersRef.current[field]);
+
+    if (String(columnFilters[field] ?? "").trim()) {
+      setColumnFilters((current) => ({ ...current, [field]: "" }));
+      setColumnFilterResetKey((current) => current + 1);
+    }
+
     setFilterMenu(null);
   }
 
@@ -1095,7 +1111,7 @@ export function BillingRegister() {
                 <BillingMenuItem icon={Upload} label="Import" onClick={() => { setIsToolbarMenuOpen(false); fileInputRef.current?.click(); }} />
                 <BillingMenuItem icon={Maximize2} label={isFullscreen ? "Exit fullscreen" : "Fullscreen"} onClick={() => { setIsToolbarMenuOpen(false); setIsFullscreen((current) => !current); }} />
                 {hasActiveColumnFilters ? (
-                  <BillingMenuItem icon={X} label="Clear column filters" onClick={() => { setIsToolbarMenuOpen(false); setColumnFilters({}); setValueFilters({}); setColumnFilterResetKey((current) => current + 1); }} />
+                  <BillingMenuItem icon={X} label="Clear column filters" onClick={() => { setIsToolbarMenuOpen(false); Object.values(columnFilterTimersRef.current).forEach((timer) => window.clearTimeout(timer)); columnFilterTimersRef.current = {}; setColumnFilters({}); setValueFilters({}); setColumnFilterResetKey((current) => current + 1); }} />
                 ) : null}
               </div>
             </>
@@ -1165,6 +1181,8 @@ export function BillingRegister() {
         <button
           className={buttonClass("light")}
           onClick={() => {
+            Object.values(columnFilterTimersRef.current).forEach((timer) => window.clearTimeout(timer));
+            columnFilterTimersRef.current = {};
             setFilters({ search: "", status: "", receiptStatus: "", team: "", source: "" });
             setColumnFilters({});
             setValueFilters({});
