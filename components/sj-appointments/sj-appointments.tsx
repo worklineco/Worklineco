@@ -1,6 +1,7 @@
 "use client";
 
 import { ArrowLeft, CalendarDays, Clock3, Edit3, RefreshCw, Trash2, UsersRound } from "lucide-react";
+import { LoadingIndicator } from "@/components/shared/loading-indicator";
 import Link from "next/link";
 import type { FormEvent, ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
@@ -350,7 +351,7 @@ export function SJAppointments() {
             {viewMode === "board" ? (
               <div className="mt-5 space-y-3">
                 {isLoading ? (
-                  <p className="rounded-lg border border-slate-200 bg-white p-5 text-sm font-bold text-slate-500">Loading appointments...</p>
+                  <p className="rounded-lg border border-slate-200 bg-white p-5 text-sm font-bold text-slate-500"><LoadingIndicator label="Loading appointments..." /></p>
                 ) : dayAppointments.length ? (
                   dayAppointments.map((appointment) => (
                     <article className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm" key={appointment.id}>
@@ -495,3 +496,4 @@ function dateAfterDays(days: number) {
   date.setDate(date.getDate() + days);
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(date);
 }
+ 
