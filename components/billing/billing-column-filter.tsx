@@ -95,4 +95,3 @@ export function BillingColumnFilter({ label, anchor, options, selected, onApply,
     </div>, document.body
   );
 }
- 
