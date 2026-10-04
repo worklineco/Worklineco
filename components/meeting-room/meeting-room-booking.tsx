@@ -668,4 +668,3 @@ function minutesFromTime(value: string) {
   const [hour, minute] = value.split(":").map(Number);
   return hour * 60 + minute;
 }
- 
