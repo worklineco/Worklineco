@@ -4759,6 +4759,14 @@ function toDisplayRow(row: TaskLineRow) {
 }
 
 function formatAuditAction(action: string) {
+  if (action === "billing.create") {
+    return "pushed to billing";
+  }
+
+  if (action.startsWith("billing.")) {
+    return `billing ${action.replace("billing.", "").replace(/[._]/g, " ")}`;
+  }
+
   return action.replace("taskline.", "").replace(/_/g, " ");
 }
 
@@ -4772,7 +4780,9 @@ function formatAuditTime(value: string) {
 function formatServerAuditLog(log: Record<string, unknown>): TaskLineAuditLog {
   const oldValue = readAuditValue(log.old_value);
   const newValue = readAuditValue(log.new_value);
-  const change = summarizeAuditChange(oldValue, newValue);
+  const change = text(log.action).startsWith("billing.")
+    ? summarizeBillingAuditChange(oldValue, newValue, text(log.action))
+    : summarizeAuditChange(oldValue, newValue);
 
   return {
     action: text(log.action),
@@ -4819,6 +4829,67 @@ function summarizeAuditChange(oldValue: TaskLineRow | null, newValue: TaskLineRo
 
   if (oldValue) {
     return { field: "Deleted row", newValue: "-", oldValue: getAuditRowLabel(oldValue) || "Deleted row" };
+  }
+
+  return { field: "-", newValue: "-", oldValue: "-" };
+}
+
+// Billing audit entries carry billing-register fields, so they are diffed
+// generically (every changed field) instead of against the TaskLine columns.
+const billingAuditSkipFields = new Set([
+  "created_at",
+  "created_by",
+  "gstat_appeal_id",
+  "id",
+  "organisation_id",
+  "pushed_by",
+  "serial_no",
+  "source_module",
+  "updated_at",
+  "version_no"
+]);
+
+function billingAuditFieldLabel(field: string) {
+  return field.replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function summarizeBillingAuditChange(oldValue: TaskLineRow | null, newValue: TaskLineRow | null, action: string) {
+  if (oldValue && newValue) {
+    const fields = Array.from(new Set([...Object.keys(oldValue), ...Object.keys(newValue)])).filter(
+      (field) => !billingAuditSkipFields.has(field)
+    );
+    const changed = fields.filter((field) => text(oldValue[field]) !== text(newValue[field]));
+
+    if (!changed.length) {
+      return { field: "-", newValue: "-", oldValue: "-" };
+    }
+
+    return {
+      field: changed.map(billingAuditFieldLabel).join(", "),
+      newValue: changed.map((field) => text(newValue[field]) || "-").join("; "),
+      oldValue: changed.map((field) => text(oldValue[field]) || "-").join("; ")
+    };
+  }
+
+  const billingRowLabel = (value: TaskLineRow) =>
+    [text(value.client), text(value.invoice_no) || text(value.memo_no), text(value.total) ? `Total ${text(value.total)}` : ""]
+      .filter(Boolean)
+      .join(" · ");
+
+  if (newValue) {
+    return {
+      field: action === "billing.create" ? "Pushed to Billing" : "New billing row",
+      newValue: billingRowLabel(newValue) || "Billing record created",
+      oldValue: "-"
+    };
+  }
+
+  if (oldValue) {
+    return {
+      field: "Billing row deleted",
+      newValue: "-",
+      oldValue: billingRowLabel(oldValue) || "Billing record"
+    };
   }
 
   return { field: "-", newValue: "-", oldValue: "-" };
