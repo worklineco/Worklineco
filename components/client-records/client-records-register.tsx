@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import type { ComponentType } from "react";
+import { LoadingIndicator } from "@/components/shared/loading-indicator";
 import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { getCached, setCached } from "@/lib/data-cache";
@@ -397,6 +398,22 @@ export function ClientRecordsRegister() {
     function handleFilterKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
         closeColumnFilter();
+        return;
+      }
+
+      // Excel-style shortcut: C clears this column's filter, unless the user
+      // is typing in the search box.
+      const target = event.target;
+      const isTyping = target instanceof HTMLTextAreaElement || (target instanceof HTMLInputElement && target.type !== "checkbox");
+
+      if ((event.key === "c" || event.key === "C") && !isTyping && openFilterColumn) {
+        event.preventDefault();
+        setValueFilters((current) => {
+          const next = { ...current };
+          delete next[openFilterColumn];
+          return next;
+        });
+        closeColumnFilter();
       }
     }
 
@@ -732,7 +749,7 @@ export function ClientRecordsRegister() {
           </thead>
           <tbody>
             {isLoading ? (
-              <tr><td className="px-4 py-8 text-sm font-bold text-slate-500" colSpan={columns.length + 2}>Loading client records...</td></tr>
+              <tr><td className="px-4 py-8 text-sm font-bold text-slate-500" colSpan={columns.length + 2}><LoadingIndicator label="Loading client records..." /></td></tr>
             ) : pagedRows.length ? (
               pagedRows.map((row) => (
                 <tr className="border-b border-slate-100 last:border-b-0" key={String(row.id)}>
@@ -1068,3 +1085,4 @@ function formatDate(value: unknown) {
   if (!value) return "-";
   return new Date(String(value)).toLocaleString();
 }
+ 
