@@ -7,6 +7,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import * as XLSX from "xlsx-js-style";
 import { clearCached, getCached, setCached } from "@/lib/data-cache";
+import { LoadingIndicator } from "@/components/shared/loading-indicator";
 import { downloadTaskEngagementLetter, pickTeam03FormatId } from "@/lib/engagement-letters";
 import { useRegisterEditAccess, viewOnlyRegisterMessage as sharedViewOnlyRegisterMessage } from "@/lib/use-register-access";
 import { isSamePersonName, normalizePersonName } from "@/lib/person-name";
@@ -794,6 +795,22 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
 
     function handleFilterKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
+        closeColumnFilter();
+        return;
+      }
+
+      // Excel-style shortcut: C clears this column's filter, unless the user
+      // is typing in the search box.
+      const target = event.target;
+      const isTyping = target instanceof HTMLTextAreaElement || (target instanceof HTMLInputElement && target.type !== "checkbox");
+
+      if ((event.key === "c" || event.key === "C") && !isTyping && openFilterKey) {
+        event.preventDefault();
+        setValueFilters((current) => {
+          const next = { ...current };
+          delete next[openFilterKey];
+          return next;
+        });
         closeColumnFilter();
       }
     }
@@ -2588,7 +2605,7 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
             </thead>
             <tbody>
               {isLoading ? (
-                <tr><td className="px-4 py-8 font-bold text-slate-500" colSpan={visibleColumns.length + (actionColumnHidden ? 0 : 1)}>Loading TaskLine rows...</td></tr>
+                <tr><td className="px-4 py-8 font-bold text-slate-500" colSpan={visibleColumns.length + (actionColumnHidden ? 0 : 1)}><LoadingIndicator label="Loading TaskLine rows..." /></td></tr>
               ) : pagedRows.length ? pagedRows.map((row, rowIndex) => {
                 const rowNameOptions = nameOptionsForTeam(text(row.team));
                 const rowResourceOptions = resourceOptionsForTeam(text(row.team));
@@ -2666,7 +2683,7 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
 
       {viewMode === "audit" ? (
         isAuditLoading
-          ? <p className="mt-4 rounded-md border border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm font-bold text-slate-500">Loading audit trail...</p>
+          ? <p className="mt-4 rounded-md border border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm font-bold text-slate-500"><LoadingIndicator label="Loading audit trail..." /></p>
           : <TaskLineAuditTable logs={auditLogs} onBack={() => { setViewMode("register"); setSelectedAuditRow(null); }} selectedRow={selectedAuditRow} />
       ) : null}
 
@@ -5324,7 +5341,7 @@ function TaskLineFilterMenu({
         </label>
         <div className="mt-1 space-y-1">
           {isLoading ? (
-            <p className="py-6 text-center text-sm font-semibold text-slate-500">Loading values...</p>
+            <p className="py-6 text-center text-sm font-semibold text-slate-500"><LoadingIndicator label="Loading values..." /></p>
           ) : visibleOptions.length ? (
             visibleOptions.map((value) => (
               <label className="flex cursor-pointer items-center gap-2 text-sm font-semibold text-slate-950" key={value || "(blank)"}>
@@ -5631,3 +5648,4 @@ function ToolbarMenuItem({
     </button>
   );
 }
+ 
