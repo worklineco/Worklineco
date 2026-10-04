@@ -1730,6 +1730,45 @@ async function loadAuditLogs(
     ];
   }
 
+  // A task's audit trail covers its whole life span: once it is pushed to
+  // Billing, the billing record's own audit entries (matched by Task Code)
+  // are merged in so the journey runs creation -> edits -> billing.
+  if (entityId && selectedTask) {
+    const taskCode = text(formatRecord(selectedTask).task_code);
+
+    if (taskCode) {
+      const billingLogColumns = "id,action,entity_id,old_value,new_value,created_at,actor_user_id";
+      const [byNewValue, byOldValue] = await Promise.all([
+        admin
+          .from("audit_logs")
+          .select(billingLogColumns)
+          .eq("organisation_id", organisationId)
+          .eq("entity_type", "billing_record")
+          .ilike("new_value->>task_code", taskCode)
+          .order("created_at", { ascending: true })
+          .limit(500),
+        admin
+          .from("audit_logs")
+          .select(billingLogColumns)
+          .eq("organisation_id", organisationId)
+          .eq("entity_type", "billing_record")
+          .ilike("old_value->>task_code", taskCode)
+          .order("created_at", { ascending: true })
+          .limit(500)
+      ]);
+      const seenLogIds = new Set(taskLineLogs.map((log) => String(log.id)));
+
+      for (const log of [...(byNewValue.data ?? []), ...(byOldValue.data ?? [])] as AuditLog[]) {
+        if (!seenLogIds.has(String(log.id))) {
+          seenLogIds.add(String(log.id));
+          taskLineLogs.push(log);
+        }
+      }
+
+      taskLineLogs.sort((first, second) => String(first.created_at).localeCompare(String(second.created_at)));
+    }
+  }
+
   if (!taskLineLogs.length) {
     return taskLineLogs;
   }
