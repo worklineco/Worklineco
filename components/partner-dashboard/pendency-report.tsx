@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { ArrowRight, Gavel, Landmark, Scale, TriangleAlert, Users } from "lucide-react";
+import { LoadingIndicator } from "@/components/shared/loading-indicator";
 import { useEffect, useMemo, useState } from "react";
 import { getCached, setCached } from "@/lib/data-cache";
 import {
@@ -668,7 +669,7 @@ export function PendencyReport() {
   if (isLoading && !summary) {
     return (
       <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-        <p className="text-sm font-bold text-slate-400">Loading pendency…</p>
+        <p className="text-sm font-bold text-slate-400"><LoadingIndicator label="Loading pendency…" /></p>
       </section>
     );
   }
@@ -687,3 +688,4 @@ export function PendencyReport() {
     </>
   );
 }
+ 
