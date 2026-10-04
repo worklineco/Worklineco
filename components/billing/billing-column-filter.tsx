@@ -29,7 +29,17 @@ export function BillingColumnFilter({ label, anchor, options, selected, onApply,
       if (target instanceof Node && !menuRef.current?.contains(target)) onClose();
     }
     function onKey(event: KeyboardEvent) {
-      if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); onClose(); }
+      if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); onClose(); return; }
+
+      // Excel-style shortcut: C clears this column's filter, unless the user
+      // is typing in the search box.
+      const target = event.target;
+      const isTyping = target instanceof HTMLTextAreaElement || (target instanceof HTMLInputElement && target.type !== "checkbox");
+
+      if ((event.key === "c" || event.key === "C") && !isTyping) {
+        event.preventDefault();
+        onApply(undefined);
+      }
     }
     function onResize() { onClose(); }
     function onScroll(event: Event) {
@@ -46,7 +56,7 @@ export function BillingColumnFilter({ label, anchor, options, selected, onApply,
       window.removeEventListener("resize", onResize);
       window.removeEventListener("scroll", onScroll, true);
     };
-  }, [onClose]);
+  }, [onApply, onClose]);
 
   if (typeof document === "undefined") return null;
   const top = Math.max(8, Math.min(anchor.bottom + 4, window.innerHeight - 420));
@@ -85,3 +95,4 @@ export function BillingColumnFilter({ label, anchor, options, selected, onApply,
     </div>, document.body
   );
 }
+ 
