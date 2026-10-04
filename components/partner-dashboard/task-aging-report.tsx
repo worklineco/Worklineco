@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { LoadingIndicator } from "@/components/shared/loading-indicator";
 
 type AgingTeam = {
   b0_7: number;
@@ -63,7 +64,7 @@ export function TaskAgingReport() {
 
       {loading ? (
         <p className="mt-6 rounded-xl border border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm font-bold text-slate-500">
-          Loading ageing report…
+          <LoadingIndicator label="Loading ageing report…" />
         </p>
       ) : teams.length === 0 ? (
         <p className="mt-6 rounded-xl border border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm font-bold text-slate-500">
@@ -108,3 +109,4 @@ export function TaskAgingReport() {
     </section>
   );
 }
+ 
