@@ -3006,4 +3006,3 @@ function toNumber(value: unknown) {
   const parsed = Number(String(value ?? "").replace(/,/g, ""));
   return Number.isFinite(parsed) ? parsed : 0;
 }
- 
