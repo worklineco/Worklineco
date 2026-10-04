@@ -1541,6 +1541,7 @@ export default function PdfIndexingPage() {
                 </label>
                 <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={Hash} label="Page No." onClick={addPageNumbersToPdfs} title="Stamp page numbers in the top-right corner of every page" />
                 <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={FileImage} label="True Copy" onClick={applyTrueCopyStampToPdfs} title="Apply the TRUE COPY stamp to every page of the selected PDFs" />
+                <ToolButton disabled={isProcessing || selectedRowIds.size === 0} icon={Eye} label="Check DPI" onClick={checkSelectedPdfDpi} title="Check that every page scan is at least 300 DPI (court filing quality)" />
               </div>
             </div>
           </div>
@@ -2319,10 +2320,10 @@ async function compressUnsignedPdfToTarget(
     { quality: 0.36, scale: Math.max(0.35, startScale * 0.50) },
   ];
 
-  // Loaded lazily; module specifier cast to string so the typecheck does not
-  // require pdfjs-dist type resolution (the package is installed at runtime).
-  const pdfjsModule = "pdfjs-dist";
-  const pdfjs = await import(pdfjsModule);
+  // Loaded lazily with a static specifier so the bundler actually ships the
+  // module (a variable specifier compiled to "Cannot find module" at runtime,
+  // which silently broke compression for every file that needed it).
+  const pdfjs = await import("pdfjs-dist");
   pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
   const loadingTask = pdfjs.getDocument({ data: sourceBytes.slice() });
   const renderedPdf = await loadingTask.promise;
