@@ -85,6 +85,28 @@ export function AppShell({ children }: { children: ReactNode }) {
     setMobileOpen(false);
   }, [pathname]);
 
+  // Every control on the site shows a small hover message: buttons with a
+  // hand-written title keep it, and the rest fall back to their aria-label
+  // or visible text so no button is left unexplained.
+  useEffect(() => {
+    function addHoverTitle(event: MouseEvent) {
+      const target = event.target instanceof Element ? event.target.closest('button, [role="button"], a[href]') : null;
+
+      if (!target || target.getAttribute("title")) {
+        return;
+      }
+
+      const text = (target.getAttribute("aria-label") ?? target.textContent ?? "").replace(/\s+/g, " ").trim();
+
+      if (text) {
+        target.setAttribute("title", text.length > 90 ? `${text.slice(0, 89)}...` : text);
+      }
+    }
+
+    document.addEventListener("mouseover", addHoverTitle);
+    return () => document.removeEventListener("mouseover", addHoverTitle);
+  }, []);
+
   const isBareRoute = bareRoutePrefixes.some(
     (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`)
   );
