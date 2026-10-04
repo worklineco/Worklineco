@@ -1732,8 +1732,10 @@ async function loadAuditLogs(
 
   // A task's audit trail covers its whole life span: once it is pushed to
   // Billing, the billing record's own audit entries (matched by Task Code)
-  // are merged in so the journey runs creation -> edits -> billing.
-  if (entityId && selectedTask) {
+  // are merged in so the journey runs creation -> edits -> billing. Article
+  // Assistants cannot access the Billing module, so they keep the
+  // TaskLine-only trail.
+  if (entityId && selectedTask && access.role !== "article assistant") {
     const taskCode = text(formatRecord(selectedTask).task_code);
 
     if (taskCode) {
