@@ -1,6 +1,7 @@
 "use client";
 
 import { ArrowLeft, CalendarDays, Clock3, Edit3, RefreshCw, Trash2 } from "lucide-react";
+import { LoadingIndicator } from "@/components/shared/loading-indicator";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
@@ -483,7 +484,7 @@ export function MeetingRoomBooking() {
 
                     <div className="mt-4 grid gap-2">
                       {isLoading ? (
-                        <p className="rounded-md border border-slate-200 px-3 py-4 text-sm font-bold text-slate-500">Loading bookings...</p>
+                        <p className="rounded-md border border-slate-200 px-3 py-4 text-sm font-bold text-slate-500"><LoadingIndicator label="Loading bookings..." /></p>
                       ) : roomBookings.length ? (
                         roomBookings.map((booking) => (
                           <div className={`rounded-md border px-3 py-3 ${booking.id === editingId ? "border-amber-300 bg-amber-50" : "border-slate-200 bg-slate-50"}`} key={booking.id}>
@@ -667,3 +668,4 @@ function minutesFromTime(value: string) {
   const [hour, minute] = value.split(":").map(Number);
   return hour * 60 + minute;
 }
+ 
