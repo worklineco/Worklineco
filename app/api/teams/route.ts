@@ -195,11 +195,38 @@ export async function PATCH(request: Request) {
   const requesterOrg = String(auth.user.app_metadata?.workline_organisation ?? "").trim();
   const targetOrg = String(target.user.app_metadata?.workline_organisation ?? "").trim();
 
-  if (!requesterOrg || requesterOrg !== targetOrg) {
-    return NextResponse.json(
-      { error: "You can only edit members in your organisation." },
-      { status: 403 }
-    );
+  // Editing your own record never crosses organisations - legacy accounts
+  // without trusted organisation metadata were wrongly refused here. For
+  // other members, a legacy target falls back to the server-managed public
+  // membership, the same way the members listing does.
+  if (!isSelfEdit && (!requesterOrg || requesterOrg !== targetOrg)) {
+    let sameOrganisation = false;
+
+    if (requesterOrg && !targetOrg) {
+      const { data: requesterOrganisation } = await admin
+        .from("organisations")
+        .select("id")
+        .ilike("slug", requesterOrg)
+        .maybeSingle();
+
+      if (requesterOrganisation?.id) {
+        const { data: publicMember } = await admin
+          .from("users")
+          .select("id")
+          .eq("organisation_id", requesterOrganisation.id)
+          .eq("id", id)
+          .maybeSingle();
+
+        sameOrganisation = Boolean(publicMember?.id);
+      }
+    }
+
+    if (!sameOrganisation) {
+      return NextResponse.json(
+        { error: "You can only edit members in your organisation." },
+        { status: 403 }
+      );
+    }
   }
 
   const nextMetadata: Record<string, unknown> = { ...(target.user.user_metadata ?? {}) };
