@@ -1283,7 +1283,7 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
     const cached = useCache ? getCached<{ rows?: TaskLineRow[] }>(taskLineRowsCacheKey) : undefined;
 
     if (cached?.rows?.length) {
-      setRows(cached.rows.map(canonicalizeTaskLineRowName));
+      setRows(dedupeTaskLineRows(cached.rows.map(canonicalizeTaskLineRowName)));
       setIsLoading(false);
     } else {
       setIsLoading(true);
@@ -1313,7 +1313,7 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
       if (!response.ok) {
         throw new Error(result.error ?? `Could not load ${registerName}.`);
       }
-      return (result.rows ?? []).map(canonicalizeTaskLineRowName);
+      return dedupeTaskLineRows((result.rows ?? []).map(canonicalizeTaskLineRowName));
     };
 
     const fullRequest = fetch(useCache ? taskLineApiPath : `${taskLineApiPath}&fresh=1`, { cache: "no-store" });
@@ -1817,7 +1817,7 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
       getCached<{ rows?: TaskLineRow[] }>("all:rows:v1")?.rows;
 
     if (cachedRows?.length) {
-      setBillableBreakdown({ items: buildBillableBreakdownItems(cachedRows), loading: false });
+      setBillableBreakdown({ items: buildBillableBreakdownItems(dedupeTaskLineRows(cachedRows)), loading: false });
     } else {
       setBillableBreakdown({ items: [], loading: true });
     }
@@ -1825,7 +1825,7 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
     try {
       const response = await fetch("/api/taskline?register=all", { cache: "no-store", credentials: "include" });
       const result = (await response.json().catch(() => ({}))) as { rows?: TaskLineRow[] };
-      const allRows = result.rows ?? [];
+      const allRows = dedupeTaskLineRows(result.rows ?? []);
       setCached("all:rows:v2", { rows: allRows });
       setBillableBreakdown((current) => (current ? { items: buildBillableBreakdownItems(allRows), loading: false } : current));
     } catch (error) {
@@ -5100,6 +5100,22 @@ type TaskLineFilterInput = {
   statusFilter: string;
   valueFilters: Record<string, string[]>;
 };
+
+// A row id served twice (older server responses could duplicate rows across
+// page boundaries) breaks React's keyed rendering: leftover rows linger in the
+// table and ignore the active filters. Keep the first occurrence only.
+function dedupeTaskLineRows(sourceRows: TaskLineRow[]) {
+  const seen = new Set<string>();
+  const result = sourceRows.filter((row) => {
+    const id = text(row.__id);
+    if (!id || seen.has(id)) {
+      return false;
+    }
+    seen.add(id);
+    return true;
+  });
+  return result.length === sourceRows.length ? sourceRows : result;
+}
 
 function applyTaskLineFilters(sourceRows: TaskLineRow[], filters: TaskLineFilterInput) {
   const query = filters.search.trim().toLowerCase();
