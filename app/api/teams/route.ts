@@ -162,10 +162,23 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: "Member id is required." }, { status: 400 });
   }
 
+  // Partner/Others can edit anyone. Everyone else may update their OWN
+  // basic details (name and dates) - never team or designation, because the
+  // designation drives access rights across the app.
   const requesterRole = String(auth.user.app_metadata?.workline_role ?? "").trim().toLowerCase();
-  if (!editorRoles.includes(requesterRole)) {
+  const isEditor = editorRoles.includes(requesterRole);
+  const isSelfEdit = id === auth.user.id;
+
+  if (!isEditor && !isSelfEdit) {
     return NextResponse.json(
-      { error: "Only Partner or Others roles can edit team members." },
+      { error: "Only Partner or Others roles can edit other team members." },
+      { status: 403 }
+    );
+  }
+
+  if (!isEditor && (body.team !== undefined || body.designation !== undefined)) {
+    return NextResponse.json(
+      { error: "Team and designation changes are made by a Partner." },
       { status: 403 }
     );
   }
