@@ -289,9 +289,8 @@ export function AppShell({ children }: { children: ReactNode }) {
         }`}
       >
         <div className={`flex px-3 py-4 ${collapsed ? "flex-col items-center gap-3" : "items-center gap-3"}`}>
-          <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-navy-500 text-sm font-semibold">
-            WL
-          </div>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img alt="WorkLine Co" className="size-9 shrink-0 rounded-lg" src="/icon.svg" />
           {!collapsed ? (
             <div className="flex-1 truncate text-[15px] font-semibold tracking-wide">WorkLine Co</div>
           ) : null}
@@ -372,9 +371,8 @@ export function AppShell({ children }: { children: ReactNode }) {
           />
           <aside className="absolute left-0 top-0 flex h-full w-64 flex-col bg-navy-700 text-white shadow-2xl">
             <div className="flex items-center gap-3 px-4 py-4">
-              <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-navy-500 text-sm font-semibold">
-                WL
-              </div>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img alt="WorkLine Co" className="size-9 shrink-0 rounded-lg" src="/icon.svg" />
               <div className="flex-1 truncate text-[15px] font-semibold tracking-wide">WorkLine Co</div>
               <button
                 aria-label="Close menu"
@@ -453,9 +451,8 @@ export function AppShell({ children }: { children: ReactNode }) {
           >
             <Menu className="size-6" />
           </button>
-          <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-navy-500 text-xs font-semibold">
-            WL
-          </div>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img alt="WorkLine Co" className="size-8 shrink-0 rounded-lg" src="/icon.svg" />
           <span className="text-sm font-semibold tracking-wide">WorkLine Co</span>
         </div>
         {children}
