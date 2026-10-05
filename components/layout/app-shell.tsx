@@ -125,7 +125,11 @@ export function AppShell({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  const canEditProfile = Boolean(profileUserId) && profileEditorRoles.includes(profileRole.trim().toLowerCase());
+  // Everyone can open the editor for their own basic details; team and
+  // designation stay editable by Partner/Others only (the server enforces
+  // the same rule).
+  const canEditProfile = Boolean(profileUserId);
+  const canEditRoleFields = profileEditorRoles.includes(profileRole.trim().toLowerCase());
 
   async function loadProfileTeamOptions() {
     const cached = getCached<{ members?: { team?: string; teams?: string[] }[] }>("teams:members:v1");
@@ -169,8 +173,22 @@ export function AppShell({ children }: { children: ReactNode }) {
     setProfileEditorMessage("");
 
     try {
+      // Non-editor roles send only their own basic fields; the server
+      // rejects team/designation changes from them anyway.
+      const payload: Record<string, string> = {
+        id: profileUserId,
+        joining_date: profileEditor.joining_date,
+        leaving_date: profileEditor.leaving_date,
+        name: profileEditor.name
+      };
+
+      if (canEditRoleFields) {
+        payload.designation = profileEditor.designation;
+        payload.team = profileEditor.team;
+      }
+
       const response = await fetch("/api/teams", {
-        body: JSON.stringify({ id: profileUserId, ...profileEditor }),
+        body: JSON.stringify(payload),
         headers: { "Content-Type": "application/json" },
         method: "PATCH"
       });
@@ -182,8 +200,12 @@ export function AppShell({ children }: { children: ReactNode }) {
       }
 
       setProfileName(profileEditor.name.trim() || profileName);
-      setProfileRole(profileEditor.designation.trim() || profileRole);
-      setProfileTeam(profileEditor.team.trim());
+
+      if (canEditRoleFields) {
+        setProfileRole(profileEditor.designation.trim() || profileRole);
+        setProfileTeam(profileEditor.team.trim());
+      }
+
       setProfileJoining(profileEditor.joining_date);
       setProfileLeaving(profileEditor.leaving_date);
       setProfileEditor(null);
@@ -451,7 +473,9 @@ export function AppShell({ children }: { children: ReactNode }) {
               <div>
                 <p className="text-xs font-black uppercase tracking-[0.14em] text-navy-700">My details</p>
                 <h3 className="mt-1 text-lg font-black text-slate-950">Update basic details</h3>
-                <p className="mt-1 text-xs font-bold text-slate-500">Changes save to the Team Members register.</p>
+                <p className="mt-1 text-xs font-bold text-slate-500">
+                  Changes save to the Team Members register.{canEditRoleFields ? "" : " Team and designation changes are made by a Partner."}
+                </p>
               </div>
               <button
                 aria-label="Close"
@@ -478,8 +502,10 @@ export function AppShell({ children }: { children: ReactNode }) {
               <label className="block">
                 <span className="text-xs font-black uppercase tracking-wide text-slate-500">Team</span>
                 <select
-                  className="mt-1 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold text-slate-900 outline-none transition focus:border-navy-400"
+                  className="mt-1 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold text-slate-900 outline-none transition focus:border-navy-400 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-500"
+                  disabled={!canEditRoleFields}
                   onChange={(event) => setProfileEditor((current) => (current ? { ...current, team: event.target.value } : current))}
+                  title={canEditRoleFields ? undefined : "Team changes are made by a Partner"}
                   value={profileEditor.team}
                 >
                   <option value="">Select team</option>
@@ -494,8 +520,10 @@ export function AppShell({ children }: { children: ReactNode }) {
               <label className="block">
                 <span className="text-xs font-black uppercase tracking-wide text-slate-500">Designation</span>
                 <select
-                  className="mt-1 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold text-slate-900 outline-none transition focus:border-navy-400"
+                  className="mt-1 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold text-slate-900 outline-none transition focus:border-navy-400 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-500"
+                  disabled={!canEditRoleFields}
                   onChange={(event) => setProfileEditor((current) => (current ? { ...current, designation: event.target.value } : current))}
+                  title={canEditRoleFields ? undefined : "Designation changes are made by a Partner"}
                   value={profileEditor.designation}
                 >
                   <option value="">Select role</option>
