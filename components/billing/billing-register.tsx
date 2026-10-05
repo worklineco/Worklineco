@@ -151,7 +151,7 @@ const defaultMasters: Record<string, string[]> = {
   cost_center: [],
   group_name: [],
   income_head: [],
-  receiving_status: ["Pending", "Received", "Part Received"],
+  receiving_status: ["Pending", "Received", "Part Received", "YD"],
   voucher_type: ["Proforma Invoice", "Tax Invoice", "Debit Note", "Credit Note"]
 };
 const gstStateByCode: Record<string, string> = {
