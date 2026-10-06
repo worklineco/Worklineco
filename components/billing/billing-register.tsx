@@ -1788,6 +1788,9 @@ function BillingAddForm({
   onSubmit: () => void;
 }) {
   const isEdit = mode === "edit";
+  // Stable options identity so the client picker doesn't re-render its whole
+  // list every time a field in the draft changes.
+  const clientSelectOptions = useMemo(() => clientOptions.map((value) => ({ value, label: value })), [clientOptions]);
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-navy-700/45 px-4 py-6">
@@ -1850,7 +1853,7 @@ function BillingAddForm({
               <SearchableSelect
                 allowCustom
                 onChange={(value) => onChange("client", value)}
-                options={clientOptions.map((value) => ({ value, label: value }))}
+                options={clientSelectOptions}
                 placeholder="Select client"
                 value={draft.client}
               />
