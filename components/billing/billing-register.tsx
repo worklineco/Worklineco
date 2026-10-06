@@ -262,7 +262,7 @@ const importHeaders: Array<{ field: BillingField; label: string }> = [
   { field: "serial_no", label: "S.No." },
   { field: "owner_team", label: "Team" },
   { field: "task_code", label: "Task Code" },
-  { field: "voucher_type", label: "Voucher Type" },
+  { field: "voucher_type", label: "Voucher" },
   { field: "is_retainer", label: "Retainer Bill" },
   { field: "group_name", label: "Group" },
   { field: "gstin", label: "GSTIN" },
@@ -271,7 +271,7 @@ const importHeaders: Array<{ field: BillingField; label: string }> = [
   { field: "address", label: "Address" },
   { field: "registration_type", label: "Registration Type" },
   { field: "escalation_1", label: "Escalation 1" },
-  { field: "poc_name", label: "SPOC Name" },
+  { field: "poc_name", label: "SPOC" },
   { field: "poc_mobile", label: "SPOC Mobile" },
   { field: "poc_email", label: "SPOC Email" },
   { field: "description", label: "Description" },
@@ -280,9 +280,9 @@ const importHeaders: Array<{ field: BillingField; label: string }> = [
   { field: "sgst", label: "SGST" },
   { field: "igst", label: "IGST" },
   { field: "ope", label: "OPE" },
-  { field: "include_ope_in_fees", label: "Include OPE in Professional Fees" },
+  { field: "include_ope_in_fees", label: "Include OPE in Fee" },
   { field: "ope_remarks", label: "OPE Remarks" },
-  { field: "billing_status", label: "Billing Status" },
+  { field: "billing_status", label: "Billing" },
   { field: "memo_no", label: "Memo No." },
   { field: "memo_date", label: "Memo Date" },
   { field: "invoice_no", label: "Invoice No." },
@@ -306,6 +306,9 @@ const importHeaderAliases: Partial<Record<BillingField, string[]>> = {
 };
 const importActionColumn = "Import Action";
 const importActionOptions = ["Add", "Update", "Delete"];
+// Sheet-protection password for downloaded import templates (guards against
+// accidental edits to headers and the hidden Billing ID column).
+const importTemplatePassword = "SJS@WORKLINE";
 const billingImportBatchSize = 100;
 const billingPageSize = 100;
 const accountsOnlyFields = new Set<BillingField>([
@@ -1134,8 +1137,10 @@ export function BillingRegister() {
     downloadImportTemplate({
       actionOptions: importActionOptions,
       fileName: "workline-billing-import-template.xlsx",
-      headers: [importActionColumn, ...importHeaders.map((header) => header.label)],
+      headers: [importActionColumn, ...importHeaders.filter((header) => header.field !== "serial_no").map((header) => header.label)],
+      hiddenHeaders: ["Billing ID"],
       mandatoryHeaders: ["Client", "GSTIN", "Amount"],
+      protectionPassword: importTemplatePassword,
       sheetName: "Billing Import"
     })
       .then(() => setMessage("Billing import template downloaded."))
