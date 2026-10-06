@@ -1,0 +1,331 @@
+1
+00:00:00,000 --> 00:00:03,000
+WorkLine Co — full feature walkthrough
+
+2
+00:00:03,200 --> 00:00:06,200
+Your firm's single workspace, end to end
+
+3
+00:00:06,400 --> 00:00:09,400
+Let's go through every tab on the left
+
+4
+00:00:09,600 --> 00:00:11,600
+DASHBOARD
+
+5
+00:00:11,800 --> 00:00:14,800
+Your morning landing page
+
+6
+00:00:14,1000 --> 00:00:19,000
+Calendar pulls due dates from TaskLine
+
+7
+00:00:19,200 --> 00:00:23,200
+Task chats — WhatsApp-style, open instantly
+
+8
+00:00:23,400 --> 00:00:26,400
+Unread counts, delete/hide a chat
+
+9
+00:00:26,600 --> 00:00:29,600
+Quick notes scratchpad with dates
+
+10
+00:00:29,800 --> 00:00:32,800
+Colour any line to flag priority
+
+11
+00:00:33,000 --> 00:00:37,000
+Partners: Pendency report + Open-task ageing chart
+
+12
+00:00:37,200 --> 00:00:41,200
+Ageing grouped by team and days waiting
+
+13
+00:00:41,400 --> 00:00:43,400
+GST TRACKER
+
+14
+00:00:43,600 --> 00:00:47,600
+Consolidated GST compliance status by client
+
+15
+00:00:47,800 --> 00:00:50,800
+TASKLINE — the core register
+
+16
+00:00:51,000 --> 00:00:55,000
+Every task is a row with a W Task Code
+
+17
+00:00:55,200 --> 00:00:59,200
+Column tabs: Core / Legal / Billing / All
+
+18
+00:00:59,400 --> 00:01:03,400
+Save your own Views, like a spreadsheet
+
+19
+00:01:03,600 --> 00:01:06,600
+Set a default view that opens automatically
+
+20
+00:01:06,800 --> 00:01:09,800
+Live column filters as you type
+
+21
+00:01:10,000 --> 00:01:14,000
+Filter lists show only values still available
+
+22
+00:01:14,200 --> 00:01:17,200
+Freeze, reorder and resize columns
+
+23
+00:01:17,400 --> 00:01:21,400
+Add / Edit opens a clean sectioned form
+
+24
+00:01:21,600 --> 00:01:25,600
+Team auto-fills; Entity Group is mandatory
+
+25
+00:01:25,800 --> 00:01:29,800
+GSTIN auto-pulls Entity, Group and State
+
+26
+00:01:30,000 --> 00:01:35,000
+Reminder Days: daily emails up to the due date
+
+27
+00:01:35,200 --> 00:01:39,200
+Name / Resource tags email the person
+
+28
+00:01:39,400 --> 00:01:44,400
+Show Billables: finished billable, not yet billed
+
+29
+00:01:44,600 --> 00:01:48,600
+A reminder pops up so billing isn't missed
+
+30
+00:01:48,800 --> 00:01:52,800
+Green button in Actions = Push to Billing
+
+31
+00:01:53,000 --> 00:01:58,000
+Draft EL builds the Word letter from the task
+
+32
+00:01:58,200 --> 00:02:03,200
+Entity, GSTIN, Task Code filled; [ ] highlighted yellow
+
+33
+00:02:03,400 --> 00:02:06,400
+Task Hub for chat & mentions
+
+34
+00:02:06,600 --> 00:02:10,600
+Export view downloads exactly what you see
+
+35
+00:02:10,800 --> 00:02:12,800
+GSTR-9 / 9C
+
+36
+00:02:13,000 --> 00:02:17,000
+Tracks annual return work, client by client
+
+37
+00:02:17,200 --> 00:02:19,200
+LITIGATION REGISTERS
+
+38
+00:02:19,400 --> 00:02:23,400
+Non-Litigation — advisory & compliance matters
+
+39
+00:02:23,600 --> 00:02:26,600
+Litigation — general litigation
+
+40
+00:02:26,800 --> 00:02:30,800
+GSTAT — tribunal: appeals, benches, hearings
+
+41
+00:02:31,000 --> 00:02:35,000
+Appeal vs PH; PH tasks flow into TaskLine
+
+42
+00:02:35,200 --> 00:02:38,200
+CESTAT and High Court registers
+
+43
+00:02:38,400 --> 00:02:42,400
+All work like TaskLine: filter, freeze, views
+
+44
+00:02:42,600 --> 00:02:46,600
+BILLING — the firm's receivables sheet
+
+45
+00:02:46,800 --> 00:02:50,800
+Colour-coded summary, status at a glance
+
+46
+00:02:50,1000 --> 00:02:53,1000
+Click any status to filter the list
+
+47
+00:02:54,200 --> 00:02:59,200
+Tabs: Client & Matter / Fees & Tax / Invoice & Receipt
+
+48
+00:02:59,400 --> 00:03:03,400
+Actions, Task Code & Client stay pinned
+
+49
+00:03:03,600 --> 00:03:08,600
+Receipt status auto-fills Received & Pending
+
+50
+00:03:08,800 --> 00:03:13,800
+Part-received? Enter received, Pending calculates
+
+51
+00:03:13,1000 --> 00:03:16,1000
+Freeze columns from Column Options
+
+52
+00:03:17,200 --> 00:03:20,200
+Edits save instantly — no waiting
+
+53
+00:03:20,400 --> 00:03:23,400
+Bills arrive via Push to Billing
+
+54
+00:03:23,600 --> 00:03:27,600
+Link old Google-Sheet bills by Task Code once
+
+55
+00:03:27,800 --> 00:03:29,800
+MEETING ROOM
+
+56
+00:03:29,1000 --> 00:03:33,1000
+Book rooms: date, time, team, purpose
+
+57
+00:03:34,200 --> 00:03:37,200
+Bookings show on the shared calendar
+
+58
+00:03:37,400 --> 00:03:40,400
+TOOLS — the document toolbox
+
+59
+00:03:40,600 --> 00:03:44,600
+PDF & Indexing: merge + index, multi-folder
+
+60
+00:03:44,800 --> 00:03:47,800
+Smart Merge splits heavy outputs
+
+61
+00:03:47,1000 --> 00:03:51,1000
+Engagement Letter generator (Word templates)
+
+62
+00:03:52,200 --> 00:03:57,200
+Litigation, review, retainership, advisory, audit, summon
+
+63
+00:03:57,400 --> 00:04:01,400
+Minutes of Meeting & Power of Attorney
+
+64
+00:04:01,600 --> 00:04:04,600
+Generated EL log of what's issued
+
+65
+00:04:04,800 --> 00:04:06,800
+DCo POLICIES
+
+66
+00:04:06,1000 --> 00:04:10,1000
+The firm's policy library in one place
+
+67
+00:04:11,200 --> 00:04:15,200
+CLIENT RECORDS — the master database
+
+68
+00:04:15,400 --> 00:04:19,400
+Entity, GSTIN, group, state, address, SPOC
+
+69
+00:04:19,600 --> 00:04:23,600
+Single source of truth for every register
+
+70
+00:04:23,800 --> 00:04:27,800
+Entity Group in TaskLine stays in sync
+
+71
+00:04:27,1000 --> 00:04:29,1000
+TEAM MEMBERS
+
+72
+00:04:30,200 --> 00:04:34,200
+Team, designation and joining date
+
+73
+00:04:34,400 --> 00:04:39,400
+Partners / Others can edit inline + leaving date
+
+74
+00:04:39,600 --> 00:04:43,600
+Designation drives access across TaskLine
+
+75
+00:04:43,800 --> 00:04:45,800
+SJ APPOINTMENTS
+
+76
+00:04:45,1000 --> 00:04:48,1000
+Senior-partner appointments & meetings
+
+77
+00:04:49,200 --> 00:04:51,200
+TRASH
+
+78
+00:04:51,400 --> 00:04:55,400
+Deleted rows can be reviewed and restored
+
+79
+00:04:55,600 --> 00:04:59,600
+Sidebar collapses to icons; account menu below
+
+80
+00:04:59,800 --> 00:05:03,800
+One login. Every register. Every document tool.
+
+81
+00:05:03,1000 --> 00:05:06,1000
+Reminders that chase the work for you
+
+82
+00:05:07,200 --> 00:05:10,200
+Spot an issue? Use the feedback button
+
+83
+00:05:10,400 --> 00:05:13,400
+Thanks for watching — WorkLine Co
