@@ -6,6 +6,8 @@ import { createPortal } from "react-dom";
 
 export type SelectOption = { value: string; label: string };
 
+const renderLimit = 200;
+
 /** A themed, searchable picker that escapes scrolling dialogs and respects page zoom. */
 export function SearchableSelect({ value, options, onChange, placeholder, disabled = false, allowCustom = false }: {
   value: string;
@@ -26,6 +28,9 @@ export function SearchableSelect({ value, options, onChange, placeholder, disabl
   const [position, setPosition] = useState({ left: 0, top: 0, width: 0, height: 300 });
   const selected = options.find((option) => option.value === value);
   const visible = useMemo(() => options.filter((option) => option.label.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())), [options, query]);
+  // Render at most a window of matches — huge lists (hundreds of clients) stay
+  // smooth to open and type into; the search narrows to anything beyond it.
+  const shown = useMemo(() => visible.slice(0, renderLimit), [visible]);
   const custom = allowCustom && query.trim() && !options.some((option) => option.value.toLocaleLowerCase() === query.trim().toLocaleLowerCase());
 
   function close() { setOpen(false); }
@@ -98,23 +103,24 @@ export function SearchableSelect({ value, options, onChange, placeholder, disabl
     {open ? createPortal(<div ref={host} className="pointer-events-none fixed inset-0 z-[150]">
       <div ref={menu} className="pointer-events-auto absolute flex flex-col overflow-hidden rounded-lg border border-slate-200 bg-white text-slate-900 shadow-2xl" style={{ left: position.left, top: position.top, width: position.width, maxHeight: position.height, visibility: position.width ? "visible" : "hidden" }}>
         <div className="flex shrink-0 items-center gap-2 border-b border-slate-200 p-2"><Search className="size-4 text-slate-400" />
-          <input ref={searchInput} role="combobox" aria-label={`Search ${placeholder.replace(/^Select /i, "")}`} aria-expanded="true" aria-controls={id} aria-activedescendant={visible[active] ? `${id}-${active}` : undefined}
+          <input ref={searchInput} role="combobox" aria-label={`Search ${placeholder.replace(/^Select /i, "")}`} aria-expanded="true" aria-controls={id} aria-activedescendant={shown[active] ? `${id}-${active}` : undefined}
             className="min-w-0 flex-1 bg-white p-1 text-sm text-slate-900 outline-none" placeholder="Search…" value={query}
             onChange={(event) => { setQuery(event.target.value); setActive(0); }}
             onKeyDown={(event) => {
               if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-                event.preventDefault(); const next = Math.max(0, Math.min(visible.length - 1, active + (event.key === "ArrowDown" ? 1 : -1))); setActive(next);
+                event.preventDefault(); const next = Math.max(0, Math.min(shown.length - 1, active + (event.key === "ArrowDown" ? 1 : -1))); setActive(next);
                 document.getElementById(`${id}-${next}`)?.scrollIntoView({ block: "nearest" });
-              } else if (event.key === "Enter") { event.preventDefault(); if (visible[active]) choose(visible[active].value); else if (custom) choose(query.trim()); }
+              } else if (event.key === "Enter") { event.preventDefault(); if (shown[active]) choose(shown[active].value); else if (custom) choose(query.trim()); }
               else if (event.key === "Tab") close();
             }} />
         </div>
         <div id={id} role="listbox" aria-label={placeholder} className="min-h-0 overflow-y-auto p-1">
           {value ? <button type="button" className="w-full rounded px-3 py-2 text-left text-sm text-slate-500 hover:bg-slate-100" onClick={() => choose("")}>Clear selection</button> : null}
           {custom ? <button type="button" className="w-full break-words rounded bg-emerald-50 px-3 py-2 text-left text-sm text-emerald-800" onClick={() => choose(query.trim())}>Use “{query.trim()}”</button> : null}
-          {visible.map((option, index) => <button key={option.value} id={`${id}-${index}`} type="button" role="option" aria-selected={option.value === value} title={option.label}
+          {shown.map((option, index) => <button key={option.value} id={`${id}-${index}`} type="button" role="option" aria-selected={option.value === value} title={option.label}
             className={`block w-full whitespace-normal break-words rounded px-3 py-2 text-left text-sm font-semibold ${option.value === value ? "bg-navy-700 text-white" : index === active ? "bg-slate-100 text-slate-900" : "text-slate-900 hover:bg-slate-100"}`}
             onClick={() => choose(option.value)}>{option.label}</button>)}
+          {visible.length > shown.length ? <p className="px-3 py-2 text-xs font-semibold text-slate-500">{(visible.length - shown.length).toLocaleString("en-IN")} more — keep typing to narrow down.</p> : null}
           {!visible.length ? <p className="px-3 py-3 text-sm text-slate-500">No matching options.</p> : null}
         </div>
       </div>
