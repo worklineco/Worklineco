@@ -4,7 +4,7 @@ import { ArrowDown, ArrowUp, ArrowUpDown, Filter, ChevronDown, Download, History
 import type { ComponentType } from "react";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { BillingColumnFilter } from "@/components/billing/billing-column-filter";
-import { SearchableSelect } from "@/components/shared/searchable-select";
+import { SearchableSelect, type SelectOption } from "@/components/shared/searchable-select";
 import { getCached, setCached } from "@/lib/data-cache";
 import { LoadingIndicator } from "@/components/shared/loading-indicator";
 import * as XLSX from "xlsx-js-style";
@@ -363,18 +363,22 @@ export function BillingRegister() {
   const filterOptions = useMemo(() => filterMenu
     ? Array.from(new Set(records.map((record) => getBillingFilterValue(record, filterMenu.column, matters)))).sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }))
     : [], [filterMenu, records, matters]);
-  // Client names from the Client Records register, for the Client dropdown in
-  // the create/edit dialog (picking one autofills GSTIN and Group).
-  const clientNameOptions = useMemo(() => {
-    const unique = new Map<string, string>();
+  // Client picker options from the Client Records register, in the same
+  // "Name — GSTIN — State" format the GSTR-9 9C dialog uses. The value stays
+  // the plain client name, which drives the GSTIN/Group autofill.
+  const clientPickerOptions = useMemo(() => {
+    const unique = new Map<string, SelectOption>();
     for (const row of clientRecords) {
       const name = getClientName(row);
       const key = normalizeClientName(name);
-      if (key && !unique.has(key)) {
-        unique.set(key, name);
+      if (!key || unique.has(key)) {
+        continue;
       }
+      const gstin = getFirstValue(row, gstinKeys);
+      const state = getFirstValue(row, clientStateKeys);
+      unique.set(key, { label: [name, gstin, state].filter(Boolean).join(" — "), value: name });
     }
-    return Array.from(unique.values()).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+    return Array.from(unique.values()).sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: "base" }));
   }, [clientRecords]);
   const [masters, setMasters] = useState(defaultMasters);
 
@@ -1490,7 +1494,7 @@ export function BillingRegister() {
       {addDraft ? (
         <BillingAddForm
           access={access}
-          clientOptions={clientNameOptions}
+          clientOptions={clientPickerOptions}
           draft={addDraft}
           masters={mergedMasters}
           mode="create"
@@ -1503,7 +1507,7 @@ export function BillingRegister() {
       {editDraft ? (
         <BillingAddForm
           access={access}
-          clientOptions={clientNameOptions}
+          clientOptions={clientPickerOptions}
           draft={editDraft}
           masters={mergedMasters}
           mode="edit"
@@ -1768,7 +1772,7 @@ function BillingCell({
   );
 }
 
-function BillingAddForm({
+const BillingAddForm = memo(function BillingAddFormBase({
   access,
   clientOptions,
   draft,
@@ -1779,7 +1783,7 @@ function BillingAddForm({
   onSubmit
 }: {
   access: AccessScope;
-  clientOptions: string[];
+  clientOptions: SelectOption[];
   draft: BillingRecord;
   masters: Record<string, string[]>;
   mode: "create" | "edit";
@@ -1788,9 +1792,6 @@ function BillingAddForm({
   onSubmit: () => void;
 }) {
   const isEdit = mode === "edit";
-  // Stable options identity so the client picker doesn't re-render its whole
-  // list every time a field in the draft changes.
-  const clientSelectOptions = useMemo(() => clientOptions.map((value) => ({ value, label: value })), [clientOptions]);
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-navy-700/45 px-4 py-6">
@@ -1853,7 +1854,7 @@ function BillingAddForm({
               <SearchableSelect
                 allowCustom
                 onChange={(value) => onChange("client", value)}
-                options={clientSelectOptions}
+                options={clientOptions}
                 placeholder="Select client"
                 value={draft.client}
               />
@@ -1915,7 +1916,17 @@ function BillingAddForm({
       </section>
     </div>
   );
-}
+}, (previous, next) =>
+  // The dialog depends on these data props alone; the handler props are
+  // recreated on every register render and always do the same thing, so they
+  // are ignored here. Background table refreshes then leave the open dialog
+  // untouched — same stillness as the GSTR-9 9C Add entry dialog.
+  previous.access === next.access &&
+  previous.clientOptions === next.clientOptions &&
+  previous.draft === next.draft &&
+  previous.masters === next.masters &&
+  previous.mode === next.mode
+);
 
 function FormInput({
   field,
@@ -2885,6 +2896,7 @@ const clientNameKeys = ["Particulars", "Client", "Client Name", "Name", "Legal N
 const clientAddressKeys = ["Address", "Client Address", "Billing Address", "Registered Address", "Principal Place of Business"];
 const registrationTypeKeys = ["Registration Type", "Reg Type", "GST Registration Type", "Registration"];
 const clientGroupKeys = ["Group", "Group Name", "Entity Group", "Client Group"];
+const clientStateKeys = ["State", "State Name", "POS", "Place of Supply"];
 
 const auditFields: BillingField[] = [
   "owner_team",
