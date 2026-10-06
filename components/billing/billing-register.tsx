@@ -362,6 +362,19 @@ export function BillingRegister() {
   const filterOptions = useMemo(() => filterMenu
     ? Array.from(new Set(records.map((record) => getBillingFilterValue(record, filterMenu.column, matters)))).sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }))
     : [], [filterMenu, records, matters]);
+  // Client names from the Client Records register, for the Client dropdown in
+  // the create/edit dialog (picking one autofills GSTIN and Group).
+  const clientNameOptions = useMemo(() => {
+    const unique = new Map<string, string>();
+    for (const row of clientRecords) {
+      const name = getClientName(row);
+      const key = normalizeClientName(name);
+      if (key && !unique.has(key)) {
+        unique.set(key, name);
+      }
+    }
+    return Array.from(unique.values()).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+  }, [clientRecords]);
   const [masters, setMasters] = useState(defaultMasters);
 
   const mergedMasters = useMemo(
@@ -1459,6 +1472,7 @@ export function BillingRegister() {
       {addDraft ? (
         <BillingAddForm
           access={access}
+          clientOptions={clientNameOptions}
           draft={addDraft}
           masters={mergedMasters}
           mode="create"
@@ -1471,6 +1485,7 @@ export function BillingRegister() {
       {editDraft ? (
         <BillingAddForm
           access={access}
+          clientOptions={clientNameOptions}
           draft={editDraft}
           masters={mergedMasters}
           mode="edit"
@@ -1737,6 +1752,7 @@ function BillingCell({
 
 function BillingAddForm({
   access,
+  clientOptions,
   draft,
   masters,
   mode,
@@ -1745,6 +1761,7 @@ function BillingAddForm({
   onSubmit
 }: {
   access: AccessScope;
+  clientOptions: string[];
   draft: BillingRecord;
   masters: Record<string, string[]>;
   mode: "create" | "edit";
@@ -1766,7 +1783,7 @@ function BillingAddForm({
               {isEdit ? "Edit Billing Entry" : "Create Billing Entry"}
             </h3>
             <p className="mt-1 text-sm font-bold text-slate-500">
-              {isEdit ? "Update this billing row in one place. Cell editing remains available in the table." : "Enter GSTIN first to auto-fill client, POS, and registration type."}
+              {isEdit ? "Update this billing row in one place. Cell editing remains available in the table." : "Pick a client from Client Records or enter GSTIN first — GSTIN, group, POS and registration type fill automatically."}
             </p>
           </div>
           <button
@@ -1810,7 +1827,21 @@ function BillingAddForm({
               </select>
             </label>
             <FormInput field="gstin" label="GSTIN" onChange={onChange} value={draft.gstin} />
-            <FormInput field="client" label="Client" onChange={onChange} value={draft.client} />
+            <label>
+              <span className="text-[10px] font-black uppercase text-slate-500">Client</span>
+              <input
+                className={formControlClass}
+                list="billing-client-record-options"
+                onChange={(event) => onChange("client", event.target.value)}
+                placeholder="Pick from Client Records or type"
+                value={draft.client}
+              />
+              <datalist id="billing-client-record-options">
+                {clientOptions.map((option) => (
+                  <option key={option} value={option} />
+                ))}
+              </datalist>
+            </label>
             <FormInput field="place_of_supply" label="Place of Supply" onChange={onChange} value={draft.place_of_supply} />
             <FormInput field="registration_type" label="Registration Type" onChange={onChange} value={draft.registration_type} />
             <FormInput field="address" label="Address" onChange={onChange} value={draft.address} wide />
@@ -2345,22 +2376,38 @@ function prepareRecordUpdate(record: BillingRecord, field: BillingField, rawValu
 }
 
 function enrichBillingRecord(record: BillingRecord, clientRecords: ClientRegisterRow[], changedField?: BillingField): BillingRecord {
-  const matchedClient = findClientByGstin(record.gstin, clientRecords);
+  let working = record;
+
+  // Picking a client from Client Records fills its GSTIN and Group; the GSTIN
+  // match below then cascades the address, POS and registration type.
+  if (changedField === "client") {
+    const clientByName = findClientByName(record.client, clientRecords);
+    if (clientByName) {
+      working = {
+        ...record,
+        group_name: getClientGroup(clientByName) || record.group_name,
+        gstin: getFirstValue(clientByName, gstinKeys) || record.gstin
+      };
+    }
+  }
+
+  const matchedClient = findClientByGstin(working.gstin, clientRecords);
   const placeOfSupply = changedField === "place_of_supply"
-    ? record.place_of_supply
-    : stateFromGstin(record.gstin) || record.place_of_supply;
-  const ope = toNumber(record.ope);
-  const taxBase = getTaxBase(toNumber(record.amount), ope, record.include_ope_in_fees);
+    ? working.place_of_supply
+    : stateFromGstin(working.gstin) || working.place_of_supply;
+  const ope = toNumber(working.ope);
+  const taxBase = getTaxBase(toNumber(working.amount), ope, working.include_ope_in_fees);
   const tax = calculateTax(taxBase, placeOfSupply);
 
   return recalc({
-    ...record,
-    address: changedField === "address" ? record.address : getClientAddress(matchedClient) || record.address,
+    ...working,
+    address: changedField === "address" ? working.address : getClientAddress(matchedClient) || working.address,
     cgst: tax.cgst,
-    client: changedField === "client" ? record.client : getClientName(matchedClient) || record.client,
+    client: changedField === "client" ? working.client : getClientName(matchedClient) || working.client,
+    group_name: changedField === "group_name" ? working.group_name : working.group_name || getClientGroup(matchedClient),
     igst: tax.igst,
     place_of_supply: placeOfSupply,
-    registration_type: getRegistrationType(matchedClient) || record.registration_type,
+    registration_type: getRegistrationType(matchedClient) || working.registration_type,
     sgst: tax.sgst
   });
 }
@@ -2708,6 +2755,24 @@ function getClientName(row: ClientRegisterRow | null) {
   return getFirstValue(row, clientNameKeys);
 }
 
+function getClientGroup(row: ClientRegisterRow | null) {
+  return getFirstValue(row, clientGroupKeys);
+}
+
+function findClientByName(name: string, clientRecords: ClientRegisterRow[]) {
+  const normalizedName = normalizeClientName(name);
+
+  if (!normalizedName) {
+    return null;
+  }
+
+  return clientRecords.find((row) => normalizeClientName(getClientName(row)) === normalizedName) ?? null;
+}
+
+function normalizeClientName(value: unknown) {
+  return String(value ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+}
+
 function getRegistrationType(row: ClientRegisterRow | null) {
   return getFirstValue(row, registrationTypeKeys);
 }
@@ -2802,6 +2867,7 @@ const gstinKeys = ["GSTIN/UIN", "GSTIN", "GSTIN No", "GSTIN No.", "GST No", "GST
 const clientNameKeys = ["Particulars", "Client", "Client Name", "Name", "Legal Name", "Trade Name"];
 const clientAddressKeys = ["Address", "Client Address", "Billing Address", "Registered Address", "Principal Place of Business"];
 const registrationTypeKeys = ["Registration Type", "Reg Type", "GST Registration Type", "Registration"];
+const clientGroupKeys = ["Group", "Group Name", "Entity Group", "Client Group"];
 
 const auditFields: BillingField[] = [
   "owner_team",
