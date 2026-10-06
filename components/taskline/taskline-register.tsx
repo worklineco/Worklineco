@@ -7,6 +7,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import * as XLSX from "xlsx-js-style";
 import { clearCached, getCached, setCached } from "@/lib/data-cache";
+import { downloadImportTemplate } from "@/lib/import-template";
 import { LoadingIndicator } from "@/components/shared/loading-indicator";
 import { downloadTaskEngagementLetter, pickTeam03FormatId } from "@/lib/engagement-letters";
 import { useRegisterEditAccess, viewOnlyRegisterMessage as sharedViewOnlyRegisterMessage } from "@/lib/use-register-access";
@@ -1925,19 +1926,16 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
   }
 
   function downloadTemplate() {
-    const templateRow = importTaskLineColumns.reduce<Record<string, string>>(
-      (row, column) => {
-        row[column.label] = "";
-        return row;
-      },
-      { [importActionColumn]: "Add" }
-    );
-    const worksheet = XLSX.utils.json_to_sheet([templateRow], { header: [importActionColumn, ...importTaskLineColumns.map((column) => column.label)] });
-    worksheet["!cols"] = [importActionColumn, ...importTaskLineColumns.map((column) => column.label)].map(() => ({ wch: 22 }));
-    addImportActionDropdown(worksheet, 500);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "TaskLine Import");
-    XLSX.writeFile(workbook, "workline-taskline-import-template.xlsx");
+    setMessage("Preparing the TaskLine import template...");
+    downloadImportTemplate({
+      actionOptions: importActionOptions,
+      fileName: "workline-taskline-import-template.xlsx",
+      headers: [importActionColumn, ...importTaskLineColumns.map((column) => column.label)],
+      mandatoryHeaders: ["Task Code", "Team", "Entity", "Task"],
+      sheetName: "TaskLine Import"
+    })
+      .then(() => setMessage("TaskLine import template downloaded."))
+      .catch(() => setMessage("Could not build the TaskLine import template."));
     addAuditLog({ action: "taskline.download_template", newValue: "Downloaded import template" });
   }
 
