@@ -1,7 +1,7 @@
 "use client";
 
 import { ChevronDown, Search } from "lucide-react";
-import { useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useDeferredValue, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 export type SelectOption = { value: string; label: string };
@@ -27,11 +27,15 @@ export function SearchableSelect({ value, options, onChange, placeholder, disabl
   const [active, setActive] = useState(0);
   const [position, setPosition] = useState({ left: 0, top: 0, width: 0, height: 300 });
   const selected = options.find((option) => option.value === value);
-  const visible = useMemo(() => options.filter((option) => option.label.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())), [options, query]);
+  // Filter against a deferred copy of the query: each keystroke paints
+  // immediately and the option list catches up right after, so typing in a
+  // big client list never stutters.
+  const deferredQuery = useDeferredValue(query);
+  const visible = useMemo(() => options.filter((option) => option.label.toLocaleLowerCase().includes(deferredQuery.trim().toLocaleLowerCase())), [options, deferredQuery]);
   // Render at most a window of matches — huge lists (hundreds of clients) stay
   // smooth to open and type into; the search narrows to anything beyond it.
   const shown = useMemo(() => visible.slice(0, renderLimit), [visible]);
-  const custom = allowCustom && query.trim() && !options.some((option) => option.value.toLocaleLowerCase() === query.trim().toLocaleLowerCase());
+  const custom = allowCustom && deferredQuery.trim() && !options.some((option) => option.value.toLocaleLowerCase() === deferredQuery.trim().toLocaleLowerCase());
 
   function close() { setOpen(false); }
   function choose(next: string) { onChange(next); close(); trigger.current?.focus({ preventScroll: true }); }
