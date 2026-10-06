@@ -97,6 +97,8 @@ type GstatLinkPreview = {
 
 const importActionColumn = "Import Action";
 const importActionOptions = ["Add", "Update", "Delete"];
+// Sheet-protection password for the downloaded import template.
+const importTemplatePassword = "SJS@WORKLINE";
 const taskLineImportBatchSize = 250;
 const taskLineImportConcurrency = 2;
 const taskLineImportMaxAttempts = 3;
@@ -1932,6 +1934,7 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
       fileName: "workline-taskline-import-template.xlsx",
       headers: [importActionColumn, ...importTaskLineColumns.map((column) => column.label)],
       mandatoryHeaders: ["Task Code", "Team", "Entity", "Task"],
+      protectionPassword: importTemplatePassword,
       sheetName: "TaskLine Import"
     })
       .then(() => setMessage("TaskLine import template downloaded."))
@@ -5673,3 +5676,4 @@ function ToolbarMenuItem({
     </button>
   );
 }
+ 
