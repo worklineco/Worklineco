@@ -6,6 +6,8 @@ import { createPortal } from "react-dom";
 import { ViewOnlyAccessDialog } from "@/components/shared/view-only-access-dialog";
 import allocationData from "@/lib/data/gstr-9-9c-allocations-25-26.json";
 import { useRegisterEditAccess } from "@/lib/use-register-access";
+import { SearchableSelect } from "@/components/shared/searchable-select";
+import { normalizeTeam } from "@/lib/user-teams";
 
 type CellValue = string | number | boolean;
 type WorkbookSheet = { columns: string[]; name: string; rows: CellValue[][] };
@@ -186,6 +188,7 @@ export function GstrNineNineCRegister({ workbook }: { workbook: GstrWorkbookData
   const [message, setMessage] = useState("");
   const [isViewOnlyDialogOpen, setIsViewOnlyDialogOpen] = useState(false);
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
+  const [entryTeam, setEntryTeam] = useState("");
   const [visibleCount, setVisibleCount] = useState(rowsPerBatch);
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
 
@@ -254,13 +257,14 @@ export function GstrNineNineCRegister({ workbook }: { workbook: GstrWorkbookData
   useEffect(() => {
     let active = true;
     void fetch("/api/gstr-9-9c", { cache: "no-store" })
-      .then(async (response) => ({ ok: response.ok, result: await response.json() as { error?: string; overrides?: StoredOverride[]; rows?: StoredRow[] } }))
+      .then(async (response) => ({ ok: response.ok, result: await response.json() as { error?: string; overrides?: StoredOverride[]; rows?: StoredRow[]; team?: string } }))
       .then(({ ok, result }) => {
         if (!active) return;
         if (!ok) {
           setMessage(result.error ?? "Could not load saved changes.");
           return;
         }
+        setEntryTeam(result.team ?? "");
         const overrides = new Map((result.overrides ?? []).map((item) => [`${item.row_key}|${item.column}`, item.value ?? ""]));
         const addedRows: CellValue[][] = (result.rows ?? [])
           .filter((item) => item.row_key)
@@ -578,7 +582,7 @@ export function GstrNineNineCRegister({ workbook }: { workbook: GstrWorkbookData
       </div>
       <ViewOnlyAccessDialog onClose={() => setIsViewOnlyDialogOpen(false)} open={isViewOnlyDialogOpen} />
       {isAddDialogOpen ? (
-        <AddEntryDialog columns={activeSheet.columns} onClose={() => setIsAddDialogOpen(false)} onSubmit={addEntry} />
+        <AddEntryDialog columns={activeSheet.columns} team={entryTeam} onClose={() => setIsAddDialogOpen(false)} onSubmit={addEntry} />
       ) : null}
     </section>
   );
@@ -586,16 +590,63 @@ export function GstrNineNineCRegister({ workbook }: { workbook: GstrWorkbookData
 
 function AddEntryDialog({
   columns,
+  team,
   onClose,
   onSubmit
 }: {
   columns: string[];
+  team: string;
   onClose: () => void;
   onSubmit: (values: Record<string, string>) => Promise<void>;
 }) {
   const [values, setValues] = useState<Record<string, string>>({});
   const [error, setError] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+  const [clients, setClients] = useState<Record<string, string | number>[]>([]);
+  const [members, setMembers] = useState<{ name: string; team: string; teams?: string[]; leaving_date?: string }[]>([]);
+  const [selectedClient, setSelectedClient] = useState("");
+  const [isLoadingOptions, setIsLoadingOptions] = useState(true);
+  const [optionsError, setOptionsError] = useState("");
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const clientOptions = useMemo(() => clients.map((row, index) => ({
+    value: String(index),
+    label: [row.Particulars, row["GSTIN/UIN"], row.State].filter(Boolean).join(" — ")
+  })).filter((option) => String(clients[Number(option.value)].Particulars ?? "").trim()).sort((a, b) => a.label.localeCompare(b.label)), [clients]);
+  const resourceOptions = useMemo(() => Array.from(new Set(members.filter((member) =>
+    !member.leaving_date && [member.team, ...(member.teams ?? [])].some((value) => normalizeTeam(value) === normalizeTeam(team))
+  ).map((member) => member.name).filter(Boolean))).sort().map((value) => ({ value, label: value })), [members, team]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setIsLoadingOptions(true);
+    setOptionsError("");
+    async function loadOptions() {
+      try {
+        const results = await Promise.all(["/api/client-records/managed", "/api/teams"].map(async (url) => {
+          const response = await fetch(url, { cache: "no-store", signal: controller.signal });
+          const result = await response.json();
+          if (!response.ok) throw new Error(result.error || "Could not load form options.");
+          return result;
+        }));
+        if (!controller.signal.aborted) { setClients(results[0].rows ?? []); setMembers(results[1].members ?? []); }
+      } catch (error) {
+        if (!controller.signal.aborted) setOptionsError(error instanceof Error ? error.message : "Could not load form options.");
+      } finally { if (!controller.signal.aborted) setIsLoadingOptions(false); }
+    }
+    void loadOptions();
+    return () => controller.abort();
+  }, [loadAttempt]);
+
+  function selectClient(key: string) {
+    setSelectedClient(key);
+    const client = key ? clients[Number(key)] : undefined;
+    setValues((current) => ({ ...current,
+      "Client Name": String(client?.Particulars ?? ""),
+      Group: String(client?.Group ?? ""),
+      GSTIN: String(client?.["GSTIN/UIN"] ?? ""),
+      State: String(client?.State ?? "")
+    }));
+  }
   const inputClassName = "h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-900 outline-none focus:border-navy-400 focus:ring-2 focus:ring-navy-100";
 
   useEffect(() => {
@@ -612,6 +663,8 @@ function AddEntryDialog({
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (isSaving || isLoadingOptions) return;
+    if (!team) { setError("Your account has no allocated team. Please contact a Partner."); return; }
     if (!String(values["Client Name"] ?? "").trim()) {
       setError("Client Name is required.");
       return;
@@ -619,7 +672,7 @@ function AddEntryDialog({
     setIsSaving(true);
     setError("");
     try {
-      await onSubmit(values);
+      await onSubmit({ ...values, "Team Allocation": team });
       onClose();
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "Could not add this entry.");
@@ -642,17 +695,23 @@ function AddEntryDialog({
         </div>
 
         <div className="grid flex-1 gap-3 overflow-y-auto px-5 py-4 sm:grid-cols-2">
+          {isLoadingOptions ? <p className="text-sm text-slate-500 sm:col-span-2">Loading clients and team members…</p> : null}
+          {optionsError ? <p role="alert" className="text-sm text-rose-700 sm:col-span-2">{optionsError} <button type="button" className="underline" onClick={() => setLoadAttempt((value) => value + 1)}>Retry</button></p> : null}
+          {!team ? <p role="alert" className="text-sm text-amber-700 sm:col-span-2">Waiting for your allocated team. If this continues, refresh the page or contact a Partner.</p> : null}
           {columns.map((column) => (
             <label className={`flex flex-col gap-1 text-xs font-black uppercase tracking-wide text-slate-600 ${column === "Remarks" ? "sm:col-span-2" : ""}`} key={column}>
               <span>
                 {column}
                 {column === "Client Name" ? <span className="ml-1 text-rose-600">*</span> : null}
               </span>
-              {column === "Status" ? (
-                <select className={inputClassName} onChange={(event) => setValue(column, event.target.value)} value={values[column] ?? ""}>
-                  <option value="">Select status</option>
-                  {statusOptions.map((option) => <option key={option} value={option}>{option}</option>)}
-                </select>
+              {column === "Client Name" ? (
+                <SearchableSelect disabled={isLoadingOptions || Boolean(optionsError)} options={clientOptions} placeholder="Select client" value={selectedClient} onChange={selectClient} />
+              ) : column === "Resource Name" ? (
+                <SearchableSelect disabled={isLoadingOptions || !team || Boolean(optionsError)} options={resourceOptions} placeholder="Select resource" value={values[column] ?? ""} onChange={(value) => setValue(column, value)} />
+              ) : column === "Status" ? (
+                <SearchableSelect options={statusOptions.map((value) => ({ value, label: value }))} placeholder="Select status" value={values[column] ?? ""} onChange={(value) => setValue(column, value)} />
+              ) : column === "Team Allocation" ? (
+                <input aria-label="Team Allocation" readOnly className={`${inputClassName} bg-slate-50`} title="Fixed to your signed-in team's allocation" value={team} />
               ) : (
                 <input
                   autoFocus={column === "Client Name"}
@@ -672,7 +731,7 @@ function AddEntryDialog({
             <button className="inline-flex h-10 items-center justify-center rounded-lg border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-50" onClick={onClose} type="button">
               Cancel
             </button>
-            <button className="inline-flex h-10 items-center justify-center rounded-lg bg-navy-700 px-4 text-sm font-black text-white transition hover:bg-navy-800 disabled:cursor-not-allowed disabled:opacity-60" disabled={isSaving} type="submit">
+            <button className="inline-flex h-10 items-center justify-center rounded-lg bg-navy-700 px-4 text-sm font-black text-white transition hover:bg-navy-800 disabled:cursor-not-allowed disabled:opacity-60" disabled={isSaving || isLoadingOptions || Boolean(optionsError) || !team} type="submit">
               {isSaving ? "Saving..." : "Save entry"}
             </button>
           </div>
@@ -947,3 +1006,4 @@ function ColumnHeader({
     </div>
   );
 }
+

@@ -3,6 +3,7 @@ import { createClient, type User } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { isViewOnlyRegisterUser, viewOnlyRegisterResponse } from "@/lib/register-access";
+import { normalizeTeam, readPrimaryTeam } from "@/lib/user-teams";
 
 type CookieToSet = { name: string; options: CookieOptions; value: string };
 type StoredOverride = { column?: string; row_key?: string; source?: string; value?: string };
@@ -54,7 +55,7 @@ export async function GET() {
 
   const overrides = (overrideResult.data ?? []).map((item) => item.custom_values as StoredOverride).filter(Boolean);
   const rows = (rowResult.data ?? []).map((item) => item.custom_values as StoredRow).filter((item) => item?.row_key);
-  return NextResponse.json({ overrides, rows });
+  return NextResponse.json({ overrides, rows, team: entryTeam(auth.user) });
 }
 
 export async function POST(request: Request) {
@@ -117,6 +118,13 @@ export async function PUT(request: Request) {
     return NextResponse.json({ error: "Client Name is required." }, { status: 400 });
   }
 
+  // Never accept a caller-supplied allocation when creating an entry.
+  const team = entryTeam(auth.user);
+  if (!team) {
+    return NextResponse.json({ error: "Your account has no allocated team. Please contact a Partner before adding an entry." }, { status: 400 });
+  }
+  values["Team Allocation"] = team;
+
   const admin = createAdminClient();
   const organisation = await getOrganisationId(admin, auth.user);
   if ("error" in organisation) return organisation.error;
@@ -132,6 +140,17 @@ export async function PUT(request: Request) {
 
   if (saved.error) return NextResponse.json({ error: saved.error.message }, { status: 500 });
   return NextResponse.json({ row: customValues });
+}
+
+function entryTeam(user: User) {
+  const trusted = user.app_metadata?.workline_teams;
+  const teams = (Array.isArray(trusted) ? trusted : typeof trusted === "string" ? trusted.split(",") : [])
+    .map((team) => String(team).trim()).filter(Boolean);
+  const preferred = normalizeTeam(user.user_metadata?.team);
+  // Legacy accounts still store their allocation in the profile. This is a
+  // default field value, not an authorization decision; register permission
+  // continues to be checked separately against trusted app metadata.
+  return teams.find((team) => normalizeTeam(team) === preferred) || teams[0] || readPrimaryTeam(user);
 }
 
 function createAdminClient() {
@@ -180,3 +199,4 @@ async function requireUser() {
   if (error || !user) return { error: NextResponse.json({ error: "Not authenticated." }, { status: 401 }) };
   return { user };
 }
+
