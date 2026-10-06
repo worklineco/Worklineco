@@ -8,8 +8,12 @@ export type ImportTemplateOptions = {
   fileName: string;
   /** All template headers, with the Import Action column first. */
   headers: string[];
+  /** Headers whose columns are hidden (e.g. internal ids kept for Update/Delete). */
+  hiddenHeaders?: string[];
   /** Headers (besides the action column) that must be filled on every row. */
   mandatoryHeaders: string[];
+  /** When set, the sheet is protected: data cells stay editable, but headers and hidden columns are locked behind this password. */
+  protectionPassword?: string;
   sheetName: string;
 };
 
@@ -46,12 +50,26 @@ export async function downloadImportTemplate(options: ImportTemplateOptions) {
     width: Math.max(18, Math.min(32, header.length + 10))
   }));
 
+  // Hidden columns (internal ids) stay locked; every other data column is
+  // unlocked so sheet protection never blocks data entry. This runs before
+  // the header styling so the header row's own lock wins afterwards.
+  const hiddenHeaders = new Set(options.hiddenHeaders ?? []);
+  options.headers.forEach((header, index) => {
+    const column = worksheet.getColumn(index + 1);
+    if (hiddenHeaders.has(header)) {
+      column.hidden = true;
+    } else {
+      column.protection = { locked: false };
+    }
+  });
+
   const headerRow = worksheet.getRow(1);
   headerRow.height = 26;
   headerRow.eachCell((cell) => {
     cell.fill = { pattern: "solid", type: "pattern", fgColor: { argb: headerNavy } };
     cell.font = { bold: true, color: { argb: headerWhite }, size: 11 };
     cell.alignment = { horizontal: "center", vertical: "middle" };
+    cell.protection = { locked: true };
   });
 
   // The Import Action column leads every row: highlighted, bold, with the
@@ -62,6 +80,7 @@ export async function downloadImportTemplate(options: ImportTemplateOptions) {
     const cell = worksheet.getCell(`A${rowNumber}`);
     cell.fill = { pattern: "solid", type: "pattern", fgColor: { argb: actionColumnFill } };
     cell.font = { bold: true };
+    cell.protection = { locked: false };
     cell.dataValidation = {
       allowBlank: false,
       formulae: [`"${options.actionOptions.join(",")}"`],
@@ -107,6 +126,17 @@ export async function downloadImportTemplate(options: ImportTemplateOptions) {
           type: "expression"
         }
       ]
+    });
+  }
+
+  if (options.protectionPassword) {
+    await worksheet.protect(options.protectionPassword, {
+      autoFilter: true,
+      formatCells: true,
+      formatRows: true,
+      selectLockedCells: true,
+      selectUnlockedCells: true,
+      sort: true
     });
   }
 
