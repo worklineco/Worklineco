@@ -84,7 +84,8 @@ type RegisterKey = "all" | "cestat" | "high_court" | "non_litigation" | "tasklin
 const registerKeys = new Set<RegisterKey>(["taskline", "high_court", "cestat", "non_litigation", "all"]);
 const combinedRegisterKeys: Exclude<RegisterKey, "all">[] = ["taskline", "non_litigation", "cestat", "high_court"];
 const gstatModuleKey = "gstat";
-const overviewColumns = ["__id", "register_name", "team", "task_code", "name", "resource", "entity_group", "entity", "state_name", "gstin", "task", "due_date", "stage", "status_open_close", "billable", "remarks", "document_link"];
+// overviewColumns is defined after taskLineColumns below: the combined view
+// carries every register column so no section shows blank cells.
 const overviewCacheTtlMs = 60_000;
 const overviewCache = new Map<string, { expiresAt: number; rows: TaskLineRow[] }>();
 
@@ -111,19 +112,14 @@ function overviewCacheKey(organisationId: string, access: AccessScope) {
   return `${organisationId}|${access.canViewAll ? "all" : access.teams.join(",")}`;
 }
 
-const overviewTaskFields = ["register_key", "team", "task_code", "name", "resource", "entity_group", "entity", "state_name", "gstin", "task", "due_date", "stage", "status_open_close", "billable", "remarks", "document_link"];
-const overviewTaskSelect = [
-  "id",
-  "workline_module:custom_values->>workline_module",
-  ...overviewTaskFields.map((field) => `${field}:custom_values->taskline_data->>${field}`)
-].join(",");
-type LeanOverviewRow = { id: string; workline_module: string | null } & Record<string, string | null>;
+// The combined view fetches the full taskline_data of every row, so columns
+// like Order/SCN Ref. Date, Period, Section and the fee fields show the same
+// values as the individual registers.
+const overviewTaskSelect = "id,workline_module:custom_values->>workline_module,taskline_data:custom_values->taskline_data";
+type LeanOverviewRow = { id: string; taskline_data: TaskLineRow | null; workline_module: string | null };
 
 function leanRowToTaskRecord(row: LeanOverviewRow): TaskRecord {
-  const tasklineData: TaskLineRow = {};
-  for (const field of overviewTaskFields) {
-    tasklineData[field] = text(row[field]);
-  }
+  const tasklineData: TaskLineRow = row.taskline_data ?? {};
   return {
     created_at: "",
     created_by: null,
@@ -276,6 +272,7 @@ const taskLineColumns = [
   "any_other",
   "any_other_1"
 ];
+const overviewColumns = ["__id", "register_name", ...taskLineColumns];
 
 export async function GET(request: Request) {
   const resendSince = text(new URL(request.url).searchParams.get("resend_allocations_since"));
