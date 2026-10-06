@@ -4,6 +4,7 @@ import { ArrowDown, ArrowUp, ArrowUpDown, Filter, ChevronDown, Download, History
 import type { ComponentType } from "react";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { BillingColumnFilter } from "@/components/billing/billing-column-filter";
+import { SearchableSelect } from "@/components/shared/searchable-select";
 import { getCached, setCached } from "@/lib/data-cache";
 import { LoadingIndicator } from "@/components/shared/loading-indicator";
 import * as XLSX from "xlsx-js-style";
@@ -1829,18 +1830,13 @@ function BillingAddForm({
             <FormInput field="gstin" label="GSTIN" onChange={onChange} value={draft.gstin} />
             <label>
               <span className="text-[10px] font-black uppercase text-slate-500">Client</span>
-              <input
-                className={formControlClass}
-                list="billing-client-record-options"
-                onChange={(event) => onChange("client", event.target.value)}
-                placeholder="Pick from Client Records or type"
+              <SearchableSelect
+                allowCustom
+                onChange={(value) => onChange("client", value)}
+                options={clientOptions.map((value) => ({ value, label: value }))}
+                placeholder="Select client"
                 value={draft.client}
               />
-              <datalist id="billing-client-record-options">
-                {clientOptions.map((option) => (
-                  <option key={option} value={option} />
-                ))}
-              </datalist>
             </label>
             <FormInput field="place_of_supply" label="Place of Supply" onChange={onChange} value={draft.place_of_supply} />
             <FormInput field="registration_type" label="Registration Type" onChange={onChange} value={draft.registration_type} />
@@ -3072,3 +3068,4 @@ function toNumber(value: unknown) {
   const parsed = Number(String(value ?? "").replace(/,/g, ""));
   return Number.isFinite(parsed) ? parsed : 0;
 }
+
