@@ -6,6 +6,7 @@ import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { BillingColumnFilter } from "@/components/billing/billing-column-filter";
 import { SearchableSelect, type SelectOption } from "@/components/shared/searchable-select";
 import { getCached, setCached } from "@/lib/data-cache";
+import { downloadImportTemplate } from "@/lib/import-template";
 import { LoadingIndicator } from "@/components/shared/loading-indicator";
 import * as XLSX from "xlsx-js-style";
 
@@ -1129,16 +1130,16 @@ export function BillingRegister() {
   }
 
   function downloadTemplate() {
-    const worksheet = XLSX.utils.json_to_sheet([importHeaders.reduce<Record<string, string>>((row, header) => {
-      row[importActionColumn] = row[importActionColumn] || "Add";
-      row[header.label] = "";
-      return row;
-    }, {})]);
-    worksheet["!cols"] = [importActionColumn, ...importHeaders.map((header) => header.label)].map(() => ({ wch: 20 }));
-    addImportActionDropdown(worksheet, 500);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Billing Import");
-    XLSX.writeFile(workbook, "workline-billing-import-template.xlsx");
+    setMessage("Preparing the billing import template...");
+    downloadImportTemplate({
+      actionOptions: importActionOptions,
+      fileName: "workline-billing-import-template.xlsx",
+      headers: [importActionColumn, ...importHeaders.map((header) => header.label)],
+      mandatoryHeaders: ["Client", "GSTIN", "Amount"],
+      sheetName: "Billing Import"
+    })
+      .then(() => setMessage("Billing import template downloaded."))
+      .catch(() => setMessage("Could not build the billing import template."));
   }
 
   if (isAccessDenied) {
