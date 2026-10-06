@@ -535,6 +535,9 @@ export function BillingRegister() {
   useEffect(() => {
     void loadBilling();
     void loadBillingActivity();
+    // Warm the client lookup so the create/edit dialog opens with the Client
+    // dropdown already populated.
+    void loadClientRecords();
     const cachedTaskCodes = getCached<{ codes?: string[] }>("billing:task-codes:v1");
     if (cachedTaskCodes && Array.isArray(cachedTaskCodes.codes)) {
       setTaskCodes(cachedTaskCodes.codes);
@@ -588,6 +591,19 @@ export function BillingRegister() {
       return clientRecords;
     }
 
+    // Cache-first so the Client dropdown is populated the moment the dialog
+    // opens; a background refresh keeps the list current.
+    const cached = getCached<{ rows?: ClientRegisterRow[] }>(clientRecordsCacheKey);
+    if (cached?.rows?.length) {
+      setClientRecords(cached.rows);
+      void refreshClientRecords();
+      return cached.rows;
+    }
+
+    return refreshClientRecords();
+  }
+
+  async function refreshClientRecords() {
     try {
       const response = await fetch("/api/client-records/managed", { cache: "no-store" });
       const result = (await response.json().catch(() => ({}))) as { rows?: ClientRegisterRow[] };
@@ -595,6 +611,7 @@ export function BillingRegister() {
       if (response.ok) {
         const rows = result.rows ?? [];
         setClientRecords(rows);
+        setCached(clientRecordsCacheKey, { rows });
         return rows;
       }
     } catch (error) {
@@ -2859,6 +2876,7 @@ function normalizeLookupKey(key: string) {
   return key.replace(/[^0-9a-z]/gi, "").toLowerCase();
 }
 
+const clientRecordsCacheKey = "clients:managed:v1";
 const gstinKeys = ["GSTIN/UIN", "GSTIN", "GSTIN No", "GSTIN No.", "GST No", "GST Number", "GSTAT Login ID"];
 const clientNameKeys = ["Particulars", "Client", "Client Name", "Name", "Legal Name", "Trade Name"];
 const clientAddressKeys = ["Address", "Client Address", "Billing Address", "Registered Address", "Principal Place of Business"];
