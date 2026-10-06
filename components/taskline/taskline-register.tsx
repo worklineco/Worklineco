@@ -7,6 +7,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import * as XLSX from "xlsx-js-style";
 import { clearCached, getCached, setCached } from "@/lib/data-cache";
+import { LoadingIndicator } from "@/components/shared/loading-indicator";
 import { downloadTaskEngagementLetter, pickTeam03FormatId } from "@/lib/engagement-letters";
 import { useRegisterEditAccess, viewOnlyRegisterMessage as sharedViewOnlyRegisterMessage } from "@/lib/use-register-access";
 import { isSamePersonName, normalizePersonName } from "@/lib/person-name";
@@ -199,7 +200,7 @@ function isPendingBillableRow(row: TaskLineRow, billedCodes: Map<string, string>
   }
   return !billedCodes.has(code.toUpperCase());
 }
-type TeamMemberLite = { designation: string; joining_date: string; name: string; team: string };
+type TeamMemberLite = { designation: string; joining_date: string; leaving_date: string; name: string; team: string };
 type EntityMasterOption = { entity: string; group: string; gstin: string; state: string };
 const emptyOptions: string[] = [];
 const teamOptions = ["Team-02", "Team-03", "Team-04", "Team-05", "Team-06", "Team-08"];
@@ -267,14 +268,21 @@ function taskLineMemberLeavingDate(designation: string, joiningDate: string): st
   return leaving.toISOString();
 }
 
-function isTaskLineMemberActive(member: { designation: string; joining_date: string }): boolean {
-  const leaving = taskLineMemberLeavingDate(member.designation, member.joining_date);
+function isTaskLineMemberActive(member: { designation: string; joining_date: string; leaving_date?: string }): boolean {
+  // An explicit Leaving Date on the Teams register always wins over the
+  // implied two-year articleship window (which can misfire on a wrongly
+  // entered joining date and silently drop the member from dropdowns).
+  const leaving = text(member.leaving_date) || taskLineMemberLeavingDate(member.designation, member.joining_date);
   if (!leaving) {
+    return true;
+  }
+  const leavingTime = new Date(leaving).getTime();
+  if (Number.isNaN(leavingTime)) {
     return true;
   }
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  return new Date(leaving).getTime() >= today.getTime();
+  return leavingTime >= today.getTime();
 }
 
 function isPartnerDesignation(value: string) {
@@ -768,7 +776,7 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
     setFilterSearch("");
     setFilterMenuPos({ left, maxHeight, top });
     setOpenColumnOptions(options);
-    setFilterDraft(valueFilters[key] ? [...valueFilters[key]] : options);
+    setFilterDraft(valueFilters[key]?.length ? [...valueFilters[key]] : options);
     setIsFilterOptionsLoading(false);
   }
 
@@ -787,6 +795,22 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
 
     function handleFilterKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
+        closeColumnFilter();
+        return;
+      }
+
+      // Excel-style shortcut: C clears this column's filter, unless the user
+      // is typing in the search box.
+      const target = event.target;
+      const isTyping = target instanceof HTMLTextAreaElement || (target instanceof HTMLInputElement && target.type !== "checkbox");
+
+      if ((event.key === "c" || event.key === "C") && !isTyping && openFilterKey) {
+        event.preventDefault();
+        setValueFilters((current) => {
+          const next = { ...current };
+          delete next[openFilterKey];
+          return next;
+        });
         closeColumnFilter();
       }
     }
@@ -811,12 +835,16 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
   }, [closeColumnFilter, openFilterKey]);
 
   function applyColumnFilter(key: string) {
+    // Keep only ticks that are real options (stale selections from an older
+    // option list would otherwise silently hide rows), and treat "none" or
+    // "all" selected as no filter at all.
+    const selected = openColumnOptions.filter((option) => filterDraft.includes(option));
     setValueFilters((current) => {
       const next = { ...current };
-      if (filterDraft.length >= openColumnOptions.length) {
+      if (!selected.length || selected.length >= openColumnOptions.length) {
         delete next[key];
       } else {
-        next[key] = [...filterDraft];
+        next[key] = selected;
       }
       return next;
     });
@@ -989,7 +1017,7 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
     try {
       const response = await fetch("/api/teams", { cache: "no-store" });
       const result = (await response.json()) as {
-        members?: { designation?: string; joining_date?: string; name?: string; team?: string }[];
+        members?: { designation?: string; joining_date?: string; leaving_date?: string; name?: string; team?: string }[];
         me?: { team?: string };
       };
       if (!response.ok) {
@@ -1001,6 +1029,7 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
         (result.members ?? []).map((member) => ({
           designation: text(member.designation),
           joining_date: text(member.joining_date),
+          leaving_date: text(member.leaving_date),
           name: text(member.name),
           team: text(member.team)
         }))
@@ -1254,7 +1283,7 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
     const cached = useCache ? getCached<{ rows?: TaskLineRow[] }>(taskLineRowsCacheKey) : undefined;
 
     if (cached?.rows?.length) {
-      setRows(cached.rows.map(canonicalizeTaskLineRowName));
+      setRows(dedupeTaskLineRows(cached.rows.map(canonicalizeTaskLineRowName)));
       setIsLoading(false);
     } else {
       setIsLoading(true);
@@ -1284,7 +1313,7 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
       if (!response.ok) {
         throw new Error(result.error ?? `Could not load ${registerName}.`);
       }
-      return (result.rows ?? []).map(canonicalizeTaskLineRowName);
+      return dedupeTaskLineRows((result.rows ?? []).map(canonicalizeTaskLineRowName));
     };
 
     const fullRequest = fetch(useCache ? taskLineApiPath : `${taskLineApiPath}&fresh=1`, { cache: "no-store" });
@@ -1761,20 +1790,7 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
 
   // Double-clicking "Show Billables" opens a popup splitting the billable
   // count by register (Litigation / Non-Litigation / CESTAT / High Court).
-  async function openBillableBreakdown() {
-    setBillableBreakdown({ items: [], loading: true });
-
-    let allRows: TaskLineRow[] = [];
-
-    try {
-      const response = await fetch("/api/taskline?register=all", { cache: "no-store", credentials: "include" });
-      const result = (await response.json().catch(() => ({}))) as { rows?: TaskLineRow[] };
-      allRows = result.rows ?? [];
-    } catch (error) {
-      console.error("Billable breakdown load failed:", error);
-      allRows = getCached<{ rows?: TaskLineRow[] }>("all:rows:v1")?.rows ?? [];
-    }
-
+  function buildBillableBreakdownItems(allRows: TaskLineRow[]): [string, number][] {
     const counts = new Map<string, number>();
 
     for (const row of allRows) {
@@ -1786,12 +1802,36 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
     }
 
     const preferredOrder = ["Litigation", "Non-Litigation", "CESTAT", "High Court"];
-    const items: [string, number][] = [
+
+    return [
       ...preferredOrder.filter((label) => counts.has(label)).map((label) => [label, counts.get(label) ?? 0] as [string, number]),
       ...[...counts.entries()].filter(([label]) => !preferredOrder.includes(label))
     ];
+  }
 
-    setBillableBreakdown({ items, loading: false });
+  async function openBillableBreakdown() {
+    // Count instantly from the cached overview rows when available; the
+    // fresh fetch then corrects the numbers quietly in the background.
+    const cachedRows =
+      getCached<{ rows?: TaskLineRow[] }>("all:rows:v2")?.rows ??
+      getCached<{ rows?: TaskLineRow[] }>("all:rows:v1")?.rows;
+
+    if (cachedRows?.length) {
+      setBillableBreakdown({ items: buildBillableBreakdownItems(dedupeTaskLineRows(cachedRows)), loading: false });
+    } else {
+      setBillableBreakdown({ items: [], loading: true });
+    }
+
+    try {
+      const response = await fetch("/api/taskline?register=all", { cache: "no-store", credentials: "include" });
+      const result = (await response.json().catch(() => ({}))) as { rows?: TaskLineRow[] };
+      const allRows = dedupeTaskLineRows(result.rows ?? []);
+      setCached("all:rows:v2", { rows: allRows });
+      setBillableBreakdown((current) => (current ? { items: buildBillableBreakdownItems(allRows), loading: false } : current));
+    } catch (error) {
+      console.error("Billable breakdown load failed:", error);
+      setBillableBreakdown((current) => (current ? { ...current, loading: false } : current));
+    }
   }
 
   function loadBillingClientRows(refresh = false): Promise<ClientRegisterRow[]> {
@@ -2576,7 +2616,7 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
             </thead>
             <tbody>
               {isLoading ? (
-                <tr><td className="px-4 py-8 font-bold text-slate-500" colSpan={visibleColumns.length + (actionColumnHidden ? 0 : 1)}>Loading TaskLine rows...</td></tr>
+                <tr><td className="px-4 py-8 font-bold text-slate-500" colSpan={visibleColumns.length + (actionColumnHidden ? 0 : 1)}><LoadingIndicator label="Loading TaskLine rows..." /></td></tr>
               ) : pagedRows.length ? pagedRows.map((row, rowIndex) => {
                 const rowNameOptions = nameOptionsForTeam(text(row.team));
                 const rowResourceOptions = resourceOptionsForTeam(text(row.team));
@@ -2654,7 +2694,7 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
 
       {viewMode === "audit" ? (
         isAuditLoading
-          ? <p className="mt-4 rounded-md border border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm font-bold text-slate-500">Loading audit trail...</p>
+          ? <p className="mt-4 rounded-md border border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm font-bold text-slate-500"><LoadingIndicator label="Loading audit trail..." /></p>
           : <TaskLineAuditTable logs={auditLogs} onBack={() => { setViewMode("register"); setSelectedAuditRow(null); }} selectedRow={selectedAuditRow} />
       ) : null}
 
@@ -3697,8 +3737,8 @@ function TaskLineForm({
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-navy-700/45 px-4 py-6">
-      <section className="max-h-[90vh] w-full max-w-6xl overflow-hidden rounded-lg border border-slate-200 bg-white shadow-[0_24px_90px_rgba(15,23,42,0.30)]">
-        <header className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
+      <section className="flex h-[90vh] w-full max-w-6xl flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-[0_24px_90px_rgba(15,23,42,0.30)]">
+        <header className="flex shrink-0 items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
           <div>
             <p className="text-xs font-black uppercase tracking-[0.14em] text-rose-700">{isEdit ? "Edit TaskLine row" : "New TaskLine row"}</p>
             <h3 className="mt-1 text-2xl font-black text-slate-950">{isEdit ? "Update task entry" : "Create task entry"}</h3>
@@ -3712,7 +3752,7 @@ function TaskLineForm({
           <div className="border-b border-rose-200 bg-rose-50 px-5 py-2.5 text-sm font-bold text-rose-700">{formError}</div>
         ) : null}
 
-        <div className="max-h-[68vh] space-y-3 overflow-auto p-5">
+        <div className="min-h-0 flex-1 space-y-3 overflow-auto p-5">
           {taskLineFormSections.map((section) => {
             if (hiddenSectionKeys?.has(section.key)) {
               return null;
@@ -3759,7 +3799,7 @@ function TaskLineForm({
           })}
         </div>
 
-        <footer className="flex flex-wrap items-center justify-end gap-2 border-t border-slate-200 px-5 py-4">
+        <footer className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-slate-200 px-5 py-4">
           <button
             className="mr-auto inline-flex h-10 items-center gap-2 rounded-md border border-emerald-300 bg-emerald-50 px-3 text-sm font-black text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
             disabled={draftingEL}
@@ -4755,6 +4795,14 @@ function toDisplayRow(row: TaskLineRow) {
 }
 
 function formatAuditAction(action: string) {
+  if (action === "billing.create") {
+    return "pushed to billing";
+  }
+
+  if (action.startsWith("billing.")) {
+    return `billing ${action.replace("billing.", "").replace(/[._]/g, " ")}`;
+  }
+
   return action.replace("taskline.", "").replace(/_/g, " ");
 }
 
@@ -4768,7 +4816,9 @@ function formatAuditTime(value: string) {
 function formatServerAuditLog(log: Record<string, unknown>): TaskLineAuditLog {
   const oldValue = readAuditValue(log.old_value);
   const newValue = readAuditValue(log.new_value);
-  const change = summarizeAuditChange(oldValue, newValue);
+  const change = text(log.action).startsWith("billing.")
+    ? summarizeBillingAuditChange(oldValue, newValue, text(log.action))
+    : summarizeAuditChange(oldValue, newValue);
 
   return {
     action: text(log.action),
@@ -4815,6 +4865,68 @@ function summarizeAuditChange(oldValue: TaskLineRow | null, newValue: TaskLineRo
 
   if (oldValue) {
     return { field: "Deleted row", newValue: "-", oldValue: getAuditRowLabel(oldValue) || "Deleted row" };
+  }
+
+  return { field: "-", newValue: "-", oldValue: "-" };
+}
+
+// Billing audit entries carry billing-register fields, so they are diffed
+// generically (every changed field) instead of against the TaskLine columns.
+const billingAuditSkipFields = new Set([
+  "created_at",
+  "created_by",
+  "gstat_appeal_id",
+  "id",
+  "organisation_id",
+  "pushed_by",
+  "serial_no",
+  "source_module",
+  "updated_at",
+  "updated_by",
+  "version_no"
+]);
+
+function billingAuditFieldLabel(field: string) {
+  return field.replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function summarizeBillingAuditChange(oldValue: TaskLineRow | null, newValue: TaskLineRow | null, action: string) {
+  if (oldValue && newValue) {
+    const fields = Array.from(new Set([...Object.keys(oldValue), ...Object.keys(newValue)])).filter(
+      (field) => !billingAuditSkipFields.has(field)
+    );
+    const changed = fields.filter((field) => text(oldValue[field]) !== text(newValue[field]));
+
+    if (!changed.length) {
+      return { field: "-", newValue: "-", oldValue: "-" };
+    }
+
+    return {
+      field: changed.map(billingAuditFieldLabel).join(", "),
+      newValue: changed.map((field) => text(newValue[field]) || "-").join("; "),
+      oldValue: changed.map((field) => text(oldValue[field]) || "-").join("; ")
+    };
+  }
+
+  const billingRowLabel = (value: TaskLineRow) =>
+    [text(value.client), text(value.invoice_no) || text(value.memo_no), text(value.total) ? `Total ${text(value.total)}` : ""]
+      .filter(Boolean)
+      .join(" · ");
+
+  if (newValue) {
+    return {
+      field: action === "billing.create" ? "Pushed to Billing" : "New billing row",
+      newValue: billingRowLabel(newValue) || "Billing record created",
+      oldValue: "-"
+    };
+  }
+
+  if (oldValue) {
+    return {
+      field: "Billing row deleted",
+      newValue: "-",
+      oldValue: billingRowLabel(oldValue) || "Billing record"
+    };
   }
 
   return { field: "-", newValue: "-", oldValue: "-" };
@@ -4989,11 +5101,33 @@ type TaskLineFilterInput = {
   valueFilters: Record<string, string[]>;
 };
 
+// A row id served twice (older server responses could duplicate rows across
+// page boundaries) breaks React's keyed rendering: leftover rows linger in the
+// table and ignore the active filters. Keep the first occurrence only.
+function dedupeTaskLineRows(sourceRows: TaskLineRow[]) {
+  const seen = new Set<string>();
+  const result = sourceRows.filter((row) => {
+    const id = text(row.__id);
+    if (!id || seen.has(id)) {
+      return false;
+    }
+    seen.add(id);
+    return true;
+  });
+  return result.length === sourceRows.length ? sourceRows : result;
+}
+
 function applyTaskLineFilters(sourceRows: TaskLineRow[], filters: TaskLineFilterInput) {
   const query = filters.search.trim().toLowerCase();
   const dueBounds = filters.dueRange.preset
     ? computeDueRangeBounds(filters.dueRange.preset, filters.dueRange.start, filters.dueRange.end)
     : null;
+  // Compare value filters with the same normalization the menu uses to build
+  // its options (case/space-insensitive), so ticking a value like "Team 03"
+  // also keeps rows stored as "team 03" / "TEAM 03".
+  const valueFilterSets = Object.entries(filters.valueFilters)
+    .filter(([, values]) => values.length)
+    .map(([key, values]) => [key, new Set(values.map((value) => normalizeOptionKey(value)))] as const);
   const result = sourceRows.filter((row) => {
     const matchesSearch = !query || taskLineColumns.some((column) => text(row[column.key]).toLowerCase().includes(query));
     const matchesStatus = !filters.statusFilter || text(row.status_open_close) === filters.statusFilter;
@@ -5001,7 +5135,7 @@ function applyTaskLineFilters(sourceRows: TaskLineRow[], filters: TaskLineFilter
       const needle = text(value).trim().toLowerCase();
       return !needle || text(row[key]).toLowerCase().includes(needle);
     });
-    const matchesValues = Object.entries(filters.valueFilters).every(([key, values]) => !values.length || values.includes(text(row[key])));
+    const matchesValues = valueFilterSets.every(([key, keys]) => keys.has(normalizeOptionKey(row[key])));
     const matchesDueColor = !filters.dueColorFilter.length || filters.dueColorFilter.includes(dueDateCategory(text(row.due_date)));
     let matchesDueRange = true;
     if (dueBounds) {
@@ -5234,7 +5368,7 @@ function TaskLineFilterMenu({
         </label>
         <div className="mt-1 space-y-1">
           {isLoading ? (
-            <p className="py-6 text-center text-sm font-semibold text-slate-500">Loading values...</p>
+            <p className="py-6 text-center text-sm font-semibold text-slate-500"><LoadingIndicator label="Loading values..." /></p>
           ) : visibleOptions.length ? (
             visibleOptions.map((value) => (
               <label className="flex cursor-pointer items-center gap-2 text-sm font-semibold text-slate-950" key={value || "(blank)"}>

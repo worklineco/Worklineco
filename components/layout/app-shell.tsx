@@ -17,6 +17,7 @@ import {
   Menu,
   PanelLeftClose,
   PanelLeftOpen,
+  Pencil,
   ReceiptText,
   Scale,
   Trash2,
@@ -26,7 +27,7 @@ import {
 } from "lucide-react";
 import { supabase } from "@/lib/supabase/client";
 import { clearWorkspaceCache, getCurrentUser } from "@/lib/supabase/session";
-import { clearDataCache } from "@/lib/data-cache";
+import { clearDataCache, getCached, setCached } from "@/lib/data-cache";
 import { JoiningDatePrompt } from "@/components/layout/joining-date-prompt";
 
 type NavItem = {
@@ -56,6 +57,37 @@ const navItems: NavItem[] = [
 ];
 
 const bareRoutePrefixes = ["/login", "/onboarding", "/auth"];
+
+// Same designation list as the Teams register editor.
+const profileRoleOptions = ["Article Assistant", "Associate", "Senior Associate", "Manager", "Senior Manager", "Partner", "Accounts", "Others"];
+// Saving goes through the Teams register API, which only these roles may use.
+const profileEditorRoles = ["partner", "others"];
+
+type ProfileEditorDraft = { designation: string; joining_date: string; leaving_date: string; name: string; team: string };
+
+function toProfileDateInput(value: string) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toISOString().slice(0, 10);
+}
+
+// The Team dropdown lists every team already on the Team Members register.
+function buildTeamOptions(members: { team?: string; teams?: string[] }[]) {
+  const unique = new Map<string, string>();
+
+  for (const member of members) {
+    for (const team of [member.team ?? "", ...(member.teams ?? [])]) {
+      const display = String(team).trim();
+
+      if (display) {
+        unique.set(display.toLowerCase(), unique.get(display.toLowerCase()) ?? display);
+      }
+    }
+  }
+
+  return Array.from(unique.values()).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+}
 const collapseStorageKey = "wl_sidebar_collapsed";
 const sjAppointmentEmails = new Set(["jatinshah.dco@gmail.com", "somya.dco@gmail.com"]);
 
@@ -67,6 +99,14 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [profileUserId, setProfileUserId] = useState("");
+  const [profileTeam, setProfileTeam] = useState("");
+  const [profileJoining, setProfileJoining] = useState("");
+  const [profileLeaving, setProfileLeaving] = useState("");
+  const [profileEditor, setProfileEditor] = useState<ProfileEditorDraft | null>(null);
+  const [profileEditorMessage, setProfileEditorMessage] = useState("");
+  const [isProfileSaving, setIsProfileSaving] = useState(false);
+  const [profileTeamOptions, setProfileTeamOptions] = useState<string[]>([]);
 
   useEffect(() => {
     if (window.localStorage.getItem(collapseStorageKey) === "1") {
@@ -78,12 +118,130 @@ export function AppShell({ children }: { children: ReactNode }) {
       setProfileName(String(metadata.full_name ?? metadata.name ?? user?.email ?? ""));
       setProfileEmail(String(user?.email ?? "").trim().toLowerCase());
       setProfileRole(String(metadata.role ?? ""));
+      setProfileUserId(String(user?.id ?? ""));
+      setProfileTeam(String(metadata.team ?? ""));
+      setProfileJoining(String(metadata.joining_date ?? ""));
+      setProfileLeaving(String(metadata.leaving_date ?? ""));
     });
   }, []);
+
+  // Everyone can open the editor for their own basic details; team and
+  // designation stay editable by Partner/Others only (the server enforces
+  // the same rule).
+  const canEditProfile = Boolean(profileUserId);
+  const canEditRoleFields = profileEditorRoles.includes(profileRole.trim().toLowerCase());
+
+  async function loadProfileTeamOptions() {
+    const cached = getCached<{ members?: { team?: string; teams?: string[] }[] }>("teams:members:v1");
+
+    if (cached?.members?.length) {
+      setProfileTeamOptions(buildTeamOptions(cached.members));
+      return;
+    }
+
+    try {
+      const response = await fetch("/api/teams", { cache: "no-store" });
+      const result = (await response.json().catch(() => ({}))) as { members?: { team?: string; teams?: string[] }[] };
+
+      if (response.ok) {
+        setCached("teams:members:v1", result);
+        setProfileTeamOptions(buildTeamOptions(result.members ?? []));
+      }
+    } catch {
+      // The dropdown still shows the current team; options just stay empty.
+    }
+  }
+
+  function openProfileEditor() {
+    setProfileEditorMessage("");
+    void loadProfileTeamOptions();
+    setProfileEditor({
+      designation: profileRole.trim(),
+      joining_date: toProfileDateInput(profileJoining),
+      leaving_date: toProfileDateInput(profileLeaving),
+      name: profileName,
+      team: profileTeam
+    });
+  }
+
+  async function saveProfileEditor() {
+    if (!profileEditor || !profileUserId) {
+      return;
+    }
+
+    setIsProfileSaving(true);
+    setProfileEditorMessage("");
+
+    try {
+      // Non-editor roles send only their own basic fields; the server
+      // rejects team/designation changes from them anyway.
+      const payload: Record<string, string> = {
+        id: profileUserId,
+        joining_date: profileEditor.joining_date,
+        leaving_date: profileEditor.leaving_date,
+        name: profileEditor.name
+      };
+
+      if (canEditRoleFields) {
+        payload.designation = profileEditor.designation;
+        payload.team = profileEditor.team;
+      }
+
+      const response = await fetch("/api/teams", {
+        body: JSON.stringify(payload),
+        headers: { "Content-Type": "application/json" },
+        method: "PATCH"
+      });
+      const result = (await response.json().catch(() => ({}))) as { error?: string };
+
+      if (!response.ok) {
+        setProfileEditorMessage(result.error ?? "Could not save your details.");
+        return;
+      }
+
+      setProfileName(profileEditor.name.trim() || profileName);
+
+      if (canEditRoleFields) {
+        setProfileRole(profileEditor.designation.trim() || profileRole);
+        setProfileTeam(profileEditor.team.trim());
+      }
+
+      setProfileJoining(profileEditor.joining_date);
+      setProfileLeaving(profileEditor.leaving_date);
+      setProfileEditor(null);
+    } catch (error) {
+      console.error("Profile save error:", error);
+      setProfileEditorMessage("Could not save your details.");
+    } finally {
+      setIsProfileSaving(false);
+    }
+  }
 
   useEffect(() => {
     setMobileOpen(false);
   }, [pathname]);
+
+  // Every control on the site shows a small hover message: buttons with a
+  // hand-written title keep it, and the rest fall back to their aria-label
+  // or visible text so no button is left unexplained.
+  useEffect(() => {
+    function addHoverTitle(event: MouseEvent) {
+      const target = event.target instanceof Element ? event.target.closest('button, [role="button"], a[href]') : null;
+
+      if (!target || target.getAttribute("title")) {
+        return;
+      }
+
+      const text = (target.getAttribute("aria-label") ?? target.textContent ?? "").replace(/\s+/g, " ").trim();
+
+      if (text) {
+        target.setAttribute("title", text.length > 90 ? `${text.slice(0, 89)}...` : text);
+      }
+    }
+
+    document.addEventListener("mouseover", addHoverTitle);
+    return () => document.removeEventListener("mouseover", addHoverTitle);
+  }, []);
 
   const isBareRoute = bareRoutePrefixes.some(
     (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`)
@@ -131,9 +289,8 @@ export function AppShell({ children }: { children: ReactNode }) {
         }`}
       >
         <div className={`flex px-3 py-4 ${collapsed ? "flex-col items-center gap-3" : "items-center gap-3"}`}>
-          <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-navy-500 text-sm font-semibold">
-            WL
-          </div>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img alt="WorkLine Co" className="size-9 shrink-0 rounded-lg" src="/icon.svg" />
           {!collapsed ? (
             <div className="flex-1 truncate text-[15px] font-semibold tracking-wide">WorkLine Co</div>
           ) : null}
@@ -175,9 +332,22 @@ export function AppShell({ children }: { children: ReactNode }) {
 
         <div className="border-t border-white/10 px-3 py-4">
           {!collapsed ? (
-            <div className="mb-2 min-w-0 px-1">
-              <p className="truncate text-sm font-semibold">{profileName || "Account"}</p>
-              {profileRole ? <p className="truncate text-xs text-navy-200">{profileRole}</p> : null}
+            <div className="mb-2 flex min-w-0 items-center gap-1.5 px-1">
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-semibold">{profileName || "Account"}</p>
+                {profileRole ? <p className="truncate text-xs text-navy-200">{profileRole}</p> : null}
+              </div>
+              {canEditProfile ? (
+                <button
+                  aria-label="Edit your details"
+                  className="shrink-0 rounded-md p-1.5 text-navy-200 transition hover:bg-white/10 hover:text-white"
+                  onClick={openProfileEditor}
+                  title="Update your basic details (name, team, designation, dates)"
+                  type="button"
+                >
+                  <Pencil className="size-3.5" />
+                </button>
+              ) : null}
             </div>
           ) : null}
           <button
@@ -201,9 +371,8 @@ export function AppShell({ children }: { children: ReactNode }) {
           />
           <aside className="absolute left-0 top-0 flex h-full w-64 flex-col bg-navy-700 text-white shadow-2xl">
             <div className="flex items-center gap-3 px-4 py-4">
-              <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-navy-500 text-sm font-semibold">
-                WL
-              </div>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img alt="WorkLine Co" className="size-9 shrink-0 rounded-lg" src="/icon.svg" />
               <div className="flex-1 truncate text-[15px] font-semibold tracking-wide">WorkLine Co</div>
               <button
                 aria-label="Close menu"
@@ -240,9 +409,22 @@ export function AppShell({ children }: { children: ReactNode }) {
 
             <div className="border-t border-white/10 px-3 py-4">
               {profileName ? (
-                <div className="mb-2 min-w-0 px-1">
-                  <p className="truncate text-sm font-semibold">{profileName}</p>
-                  {profileRole ? <p className="truncate text-xs text-navy-200">{profileRole}</p> : null}
+                <div className="mb-2 flex min-w-0 items-center gap-1.5 px-1">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold">{profileName}</p>
+                    {profileRole ? <p className="truncate text-xs text-navy-200">{profileRole}</p> : null}
+                  </div>
+                  {canEditProfile ? (
+                    <button
+                      aria-label="Edit your details"
+                      className="shrink-0 rounded-md p-1.5 text-navy-200 transition hover:bg-white/10 hover:text-white"
+                      onClick={() => { setMobileOpen(false); openProfileEditor(); }}
+                      title="Update your basic details (name, team, designation, dates)"
+                      type="button"
+                    >
+                      <Pencil className="size-3.5" />
+                    </button>
+                  ) : null}
                 </div>
               ) : null}
               <button
@@ -269,13 +451,129 @@ export function AppShell({ children }: { children: ReactNode }) {
           >
             <Menu className="size-6" />
           </button>
-          <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-navy-500 text-xs font-semibold">
-            WL
-          </div>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img alt="WorkLine Co" className="size-8 shrink-0 rounded-lg" src="/icon.svg" />
           <span className="text-sm font-semibold tracking-wide">WorkLine Co</span>
         </div>
         {children}
       </div>
+      {profileEditor ? (
+        <div className="fixed inset-0 z-[95] flex items-center justify-center bg-navy-950/55 p-4">
+          <button
+            aria-label="Close profile editor"
+            className="absolute inset-0 cursor-default"
+            onClick={() => setProfileEditor(null)}
+            type="button"
+          />
+          <section className="relative w-full max-w-md rounded-2xl border border-slate-200 bg-white p-5 text-slate-900 shadow-2xl">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-xs font-black uppercase tracking-[0.14em] text-navy-700">My details</p>
+                <h3 className="mt-1 text-lg font-black text-slate-950">Update basic details</h3>
+                <p className="mt-1 text-xs font-bold text-slate-500">
+                  Changes save to the Team Members register.{canEditRoleFields ? "" : " Team and designation changes are made by a Partner."}
+                </p>
+              </div>
+              <button
+                aria-label="Close"
+                className="inline-flex size-8 shrink-0 items-center justify-center rounded-md border border-slate-200 text-slate-600 transition hover:bg-slate-50"
+                onClick={() => setProfileEditor(null)}
+                title="Close"
+                type="button"
+              >
+                <X className="size-4" />
+              </button>
+            </div>
+
+            {profileEditorMessage ? <p className="mt-3 text-sm font-bold text-red-600">{profileEditorMessage}</p> : null}
+
+            <div className="mt-4 space-y-3">
+              <label className="block">
+                <span className="text-xs font-black uppercase tracking-wide text-slate-500">Name</span>
+                <input
+                  className="mt-1 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold text-slate-900 outline-none transition focus:border-navy-400"
+                  onChange={(event) => setProfileEditor((current) => (current ? { ...current, name: event.target.value } : current))}
+                  value={profileEditor.name}
+                />
+              </label>
+              <label className="block">
+                <span className="text-xs font-black uppercase tracking-wide text-slate-500">Team</span>
+                <select
+                  className="mt-1 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold text-slate-900 outline-none transition focus:border-navy-400 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-500"
+                  disabled={!canEditRoleFields}
+                  onChange={(event) => setProfileEditor((current) => (current ? { ...current, team: event.target.value } : current))}
+                  title={canEditRoleFields ? undefined : "Team changes are made by a Partner"}
+                  value={profileEditor.team}
+                >
+                  <option value="">Select team</option>
+                  {profileTeamOptions.map((option) => (
+                    <option key={option} value={option}>{option}</option>
+                  ))}
+                  {profileEditor.team && !profileTeamOptions.includes(profileEditor.team) ? (
+                    <option value={profileEditor.team}>{profileEditor.team}</option>
+                  ) : null}
+                </select>
+              </label>
+              <label className="block">
+                <span className="text-xs font-black uppercase tracking-wide text-slate-500">Designation</span>
+                <select
+                  className="mt-1 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold text-slate-900 outline-none transition focus:border-navy-400 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-500"
+                  disabled={!canEditRoleFields}
+                  onChange={(event) => setProfileEditor((current) => (current ? { ...current, designation: event.target.value } : current))}
+                  title={canEditRoleFields ? undefined : "Designation changes are made by a Partner"}
+                  value={profileEditor.designation}
+                >
+                  <option value="">Select role</option>
+                  {profileRoleOptions.map((option) => (
+                    <option key={option} value={option}>{option}</option>
+                  ))}
+                  {profileEditor.designation && !profileRoleOptions.includes(profileEditor.designation) ? (
+                    <option value={profileEditor.designation}>{profileEditor.designation}</option>
+                  ) : null}
+                </select>
+              </label>
+              <div className="grid grid-cols-2 gap-3">
+                <label className="block">
+                  <span className="text-xs font-black uppercase tracking-wide text-slate-500">Joining Date</span>
+                  <input
+                    className="mt-1 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold text-slate-900 outline-none transition focus:border-navy-400"
+                    onChange={(event) => setProfileEditor((current) => (current ? { ...current, joining_date: event.target.value } : current))}
+                    type="date"
+                    value={profileEditor.joining_date}
+                  />
+                </label>
+                <label className="block">
+                  <span className="text-xs font-black uppercase tracking-wide text-slate-500">Leaving Date</span>
+                  <input
+                    className="mt-1 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold text-slate-900 outline-none transition focus:border-navy-400"
+                    onChange={(event) => setProfileEditor((current) => (current ? { ...current, leaving_date: event.target.value } : current))}
+                    type="date"
+                    value={profileEditor.leaving_date}
+                  />
+                </label>
+              </div>
+            </div>
+
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                className="inline-flex h-10 items-center justify-center rounded-lg border border-slate-200 bg-white px-4 text-sm font-bold text-slate-700 transition hover:bg-slate-50"
+                onClick={() => setProfileEditor(null)}
+                type="button"
+              >
+                Cancel
+              </button>
+              <button
+                className="inline-flex h-10 items-center justify-center rounded-lg bg-navy-700 px-4 text-sm font-black text-white transition hover:bg-navy-800 disabled:opacity-50"
+                disabled={isProfileSaving}
+                onClick={() => void saveProfileEditor()}
+                type="button"
+              >
+                {isProfileSaving ? "Saving..." : "Save details"}
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
       <JoiningDatePrompt />
     </div>
   );

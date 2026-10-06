@@ -7,6 +7,7 @@ import { useRegisterEditAccess, viewOnlyRegisterMessage } from "@/lib/use-regist
 import { ViewOnlyAccessDialog } from "@/components/shared/view-only-access-dialog";
 import { readPrimaryTeam, readUserTeams, teamIsAllowed } from "@/lib/user-teams";
 import { ArrowDown, ArrowLeft, ArrowUp, Check, ChevronDown, Pin, ChevronUp, Download, Expand, ExternalLink, FileSpreadsheet, FileText, Filter, History, Menu, Pencil, Plus, ReceiptText, Search, Settings2, Trash2, Upload, X } from "lucide-react";
+import { LoadingIndicator } from "@/components/shared/loading-indicator";
 import Link from "next/link";
 import { ChangeEvent, memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { createPortal } from "react-dom";
@@ -627,6 +628,22 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
 
     function handleFilterKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
+        closeColumnFilter();
+        return;
+      }
+
+      // Excel-style shortcut: C clears this column's filter, unless the user
+      // is typing in the search box.
+      const target = event.target;
+      const isTyping = target instanceof HTMLTextAreaElement || (target instanceof HTMLInputElement && target.type !== "checkbox");
+
+      if ((event.key === "c" || event.key === "C") && !isTyping && openFilterColumnKey) {
+        event.preventDefault();
+        setColumnValueFilters((currentFilters) => {
+          const nextFilters = { ...currentFilters };
+          delete nextFilters[openFilterColumnKey];
+          return nextFilters;
+        });
         closeColumnFilter();
       }
     }
@@ -1628,7 +1645,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                 ) : null}
               </div>
               {message ? <p className="mt-1 text-sm font-bold text-emerald-700">{message}</p> : null}
-              {isLoading ? <p className="mt-1 text-sm font-bold text-slate-500">Loading saved GSTAT data...</p> : null}
+              {isLoading ? <p className="mt-1 text-sm font-bold text-slate-500"><LoadingIndicator label="Loading saved GSTAT data..." /></p> : null}
               {hasActiveFilters && (
                 <p className="mt-1 text-sm font-semibold text-slate-600">
                   Showing <span className="font-black text-navy-700">{filteredRows.length}</span> rows 

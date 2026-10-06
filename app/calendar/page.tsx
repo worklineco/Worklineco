@@ -1,5 +1,7 @@
 "use client";
 
+import { ArrowLeft } from "lucide-react";
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { MonthCalendar, type CalendarEvent } from "@/components/home/month-calendar";
 import { getCached, setCached } from "@/lib/data-cache";
@@ -38,9 +40,18 @@ export default function CalendarPage() {
   return (
     <main className="min-h-screen bg-[#f4f6fa] text-slate-950">
       <div className="mx-auto w-full max-w-none px-3 py-5 sm:px-5 lg:px-8">
-        <header className="mb-1">
-          <h1 className="text-3xl font-bold text-navy-700">Calendar</h1>
-          <p className="mt-1 text-sm font-medium text-slate-500">Your TaskLine due dates, by month.</p>
+        <header className="mb-1 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h1 className="text-3xl font-bold text-navy-700">Calendar</h1>
+            <p className="mt-1 text-sm font-medium text-slate-500">Your TaskLine due dates, by month.</p>
+          </div>
+          <Link
+            className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-4 text-sm font-black text-slate-700 transition hover:bg-slate-50"
+            href="/partner-dashboard"
+          >
+            <ArrowLeft className="size-4" />
+            Back to dashboard
+          </Link>
         </header>
         <MonthCalendar events={events} />
       </div>

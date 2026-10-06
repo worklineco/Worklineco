@@ -143,7 +143,11 @@ function overviewTaskQuery(admin: ReturnType<typeof createAdminClient>, organisa
     .select(overviewTaskSelect)
     .eq("organisation_id", organisationId)
     .in("custom_values->>workline_module", modulesForRegister("all"))
-    .order("created_at", { ascending: true });
+    // Bulk-imported rows share created_at, so paging needs the unique id as a
+    // tiebreaker - without it page boundaries shift between reads and rows get
+    // served twice while others are skipped.
+    .order("created_at", { ascending: true })
+    .order("id", { ascending: true });
   if (!access.canViewAll) {
     const teamValues = Array.from(new Set(access.teams.flatMap(taskLineTeamVariants)));
     query = teamValues.length ? query.in("custom_values->taskline_data->>team", teamValues) : query.eq("id", "00000000-0000-0000-0000-000000000000");
@@ -192,8 +196,20 @@ async function loadOverviewRows(admin: ReturnType<typeof createAdminClient>, org
   }
   console.timeEnd("taskline:overview:load");
 
+  // Never serve the same record twice: a duplicated id breaks keyed rendering
+  // in the register (leftover rows that ignore the active filters).
+  const seenIds = new Set<string>();
+  const uniqueRecords = [...taskRecords, ...(gstatRecords.data ?? [])].filter((record) => {
+    const id = text(record.id);
+    if (!id || seenIds.has(id)) {
+      return false;
+    }
+    seenIds.add(id);
+    return true;
+  });
+
   // GSTAT: only personal-hearing (GSTAT-PH) rows are shown here; appeals are excluded.
-  const rows = [...taskRecords, ...(gstatRecords.data ?? [])].map(formatRecord).map(trimToOverviewRow);
+  const rows = uniqueRecords.map(formatRecord).map(trimToOverviewRow);
   overviewCache.set(key, { expiresAt: Date.now() + overviewCacheTtlMs, rows });
   return { error: null, rows };
 }
@@ -554,7 +570,11 @@ function filterAndSortTaskLineRows(sourceRows: TaskLineRow[], query: TaskLineQue
     const matchesColumns = Object.entries(query.columnFilters).every(([key, value]) =>
       text(row[key]).toLowerCase().includes(value.trim().toLowerCase())
     );
-    const matchesValues = Object.entries(query.valueFilters).every(([key, values]) => values.includes(text(row[key])));
+    // Same normalization as the register's filter menu: case/space-insensitive,
+    // so a ticked value matches every stored case/spacing variant of it.
+    const matchesValues = Object.entries(query.valueFilters).every(
+      ([key, values]) => !values.length || values.some((value) => normalizeFilterValue(value) === normalizeFilterValue(row[key]))
+    );
     const matchesDueColor = !query.dueColorFilter.length || query.dueColorFilter.includes(taskLineDueDateCategory(text(row.due_date)));
     return matchesSearch && matchesStatus && matchesColumns && matchesValues && matchesDueColor;
   });
@@ -591,6 +611,10 @@ function filterAndSortTaskLineRows(sourceRows: TaskLineRow[], query: TaskLineQue
 
     return factor * rawA.localeCompare(rawB, undefined, { numeric: true });
   });
+}
+
+function normalizeFilterValue(value: unknown) {
+  return text(value).toLocaleLowerCase().replace(/\s+/g, " ");
 }
 
 function taskLineDueDateCategory(value: string) {
@@ -1327,6 +1351,7 @@ async function loadBilledTaskCodes(admin: ReturnType<typeof createAdminClient>, 
       .from("firm_billing_records")
       .select("task_code,created_at")
       .eq("organisation_id", organisationId)
+      .order("id", { ascending: true })
       .range(from, from + fetchBatchSize - 1);
 
     if (error) {
@@ -1577,7 +1602,10 @@ async function loadTaskLineRecords(admin: ReturnType<typeof createAdminClient>, 
     .select("id,custom_values")
     .eq("organisation_id", organisationId)
     .in("custom_values->>workline_module", modulesForRegister(registerKey))
+    // The unique id tiebreaker keeps page boundaries stable across batches -
+    // bulk-imported rows share created_at.
     .order("created_at", { ascending: true })
+    .order("id", { ascending: true })
     .range(from, from + fetchBatchSize - 1);
 
   // The exact count and the first batch run in parallel; the remaining
@@ -1609,11 +1637,20 @@ async function loadTaskLineRecords(admin: ReturnType<typeof createAdminClient>, 
   console.timeEnd(`taskline:loadRecords:fetch(${total} rows, ${batchCount} batches)`);
 
   const rows: TaskRecord[] = [];
+  const seenRecordIds = new Set<string>();
   for (const { data, error } of batchResults) {
     if (error) {
       return { data: null, error };
     }
-    rows.push(...((data ?? []) as TaskRecord[]).filter((record) => isRegisterRecord(record, registerKey) && canAccessRecord(record, access)));
+    for (const record of (data ?? []) as TaskRecord[]) {
+      // Duplicate ids break keyed rendering in the register, so a record that
+      // slips into two batches is only kept once.
+      if (seenRecordIds.has(record.id) || !isRegisterRecord(record, registerKey) || !canAccessRecord(record, access)) {
+        continue;
+      }
+      seenRecordIds.add(record.id);
+      rows.push(record);
+    }
   }
 
   if (gstatPromise) {
@@ -1641,7 +1678,8 @@ async function loadTaskLineRecordWindow(
     .select("id,organisation_id,title,description,due_at,custom_values,created_by,created_at,updated_at", { count: "exact" })
     .eq("organisation_id", organisationId)
     .in("custom_values->>workline_module", modulesForRegister(registerKey))
-    .order("created_at", { ascending: true });
+    .order("created_at", { ascending: true })
+    .order("id", { ascending: true });
 
   if (!access.canViewAll) {
     const teamValues = Array.from(new Set(access.teams.flatMap(taskLineTeamVariants)));
@@ -1720,6 +1758,47 @@ async function loadAuditLogs(
       },
       ...taskLineLogs
     ];
+  }
+
+  // A task's audit trail covers its whole life span: once it is pushed to
+  // Billing, the billing record's own audit entries (matched by Task Code)
+  // are merged in so the journey runs creation -> edits -> billing. Article
+  // Assistants cannot access the Billing module, so they keep the
+  // TaskLine-only trail.
+  if (entityId && selectedTask && access.role !== "article assistant") {
+    const taskCode = text(formatRecord(selectedTask).task_code);
+
+    if (taskCode) {
+      const billingLogColumns = "id,action,entity_id,old_value,new_value,created_at,actor_user_id";
+      const [byNewValue, byOldValue] = await Promise.all([
+        admin
+          .from("audit_logs")
+          .select(billingLogColumns)
+          .eq("organisation_id", organisationId)
+          .eq("entity_type", "billing_record")
+          .ilike("new_value->>task_code", taskCode)
+          .order("created_at", { ascending: true })
+          .limit(500),
+        admin
+          .from("audit_logs")
+          .select(billingLogColumns)
+          .eq("organisation_id", organisationId)
+          .eq("entity_type", "billing_record")
+          .ilike("old_value->>task_code", taskCode)
+          .order("created_at", { ascending: true })
+          .limit(500)
+      ]);
+      const seenLogIds = new Set(taskLineLogs.map((log) => String(log.id)));
+
+      for (const log of [...(byNewValue.data ?? []), ...(byOldValue.data ?? [])] as AuditLog[]) {
+        if (!seenLogIds.has(String(log.id))) {
+          seenLogIds.add(String(log.id));
+          taskLineLogs.push(log);
+        }
+      }
+
+      taskLineLogs.sort((first, second) => String(first.created_at).localeCompare(String(second.created_at)));
+    }
   }
 
   if (!taskLineLogs.length) {
@@ -2163,6 +2242,7 @@ async function loadPendencySummary(admin: ReturnType<typeof createAdminClient>, 
       .select(pendencySelect)
       .eq("organisation_id", organisationId)
       .eq("custom_values->>workline_module", moduleKey)
+      .order("id", { ascending: true })
       .range(from, from + pageSize - 1);
 
     if (error) {

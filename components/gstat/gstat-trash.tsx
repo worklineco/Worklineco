@@ -1,6 +1,7 @@
 "use client";
 
 import { ArrowLeft, RefreshCw, RotateCcw, ShieldCheck, Trash2 } from "lucide-react";
+import { LoadingIndicator } from "@/components/shared/loading-indicator";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
@@ -106,7 +107,7 @@ export function GstatTrash() {
             </button>
           </div>
           {message ? <p className={`mt-4 text-sm font-bold ${setupRequired ? "text-amber-700" : "text-emerald-700"}`}>{message}</p> : null}
-          {isLoading ? <p className="mt-4 text-sm font-bold text-slate-500">Loading deleted GSTAT rows...</p> : null}
+          {isLoading ? <p className="mt-4 text-sm font-bold text-slate-500"><LoadingIndicator label="Loading deleted GSTAT rows..." /></p> : null}
         </header>
 
         <section className="workline-frame mt-5 rounded-[28px] p-2 md:p-3">

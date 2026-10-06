@@ -1,6 +1,7 @@
 "use client";
 
 import { Download, Plus, Search, Upload } from "lucide-react";
+import { LoadingIndicator } from "@/components/shared/loading-indicator";
 import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx-js-style";
 import { getCached, setCached } from "@/lib/data-cache";
@@ -357,7 +358,7 @@ export function SpreadsheetRegister({
             {isLoading ? (
               <tr>
                 <td className="px-4 py-8 text-sm font-medium text-slate-500" colSpan={columns.length}>
-                  Loading saved rows...
+                  <LoadingIndicator label="Loading saved rows..." />
                 </td>
               </tr>
             ) : filteredRows.length ? (

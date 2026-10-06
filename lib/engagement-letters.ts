@@ -333,7 +333,7 @@ export async function downloadEngagementLetterDocx(
 // ---------------------------------------------------------------------------
 // Team-03 engagement letters: generated from the firm's own Word templates and
 // drafted from a TaskLine row. Rules: no Document Period, EL No = Task Code,
-// Place = Jaipur, Date = download date, Entity + GSTIN from the task, and any
+// Place = left blank, Date = download date, Entity + GSTIN from the task, and any
 // remaining [...] placeholder is highlighted yellow for the user to edit.
 // ---------------------------------------------------------------------------
 type Team03Format = {
@@ -431,15 +431,251 @@ function removeDocumentPeriod(xml: string) {
   return out;
 }
 
+// Templates without their own Document No. row reuse the Document Period row
+// for it: the label becomes "Document No." and the FY value becomes the EL No.
+function repurposeDocumentPeriodRow(xml: string, elNo: string) {
+  return xml.replace(/<w:tr\b[\s\S]*?<\/w:tr>/g, (row) => {
+    if (!row.includes("Document Period")) {
+      return row;
+    }
+    let labelDone = false;
+    let valueDone = false;
+    return row.replace(/(<w:t[^>]*>)([^<]*)(<\/w:t>)/g, (match, open: string, text: string, close: string) => {
+      if (!labelDone) {
+        if (text.includes("Document Period")) {
+          labelDone = true;
+          return `${open}${text.replace("Document Period", "Document No.")}${close}`;
+        }
+        return match;
+      }
+      if (!text.trim()) {
+        return match;
+      }
+      if (!valueDone) {
+        valueDone = true;
+        return `${open}${xmlEscape(elNo)}${close}`;
+      }
+      return `${open}${close}`;
+    });
+  });
+}
+
 function setLabelledValue(xml: string, label: string, value: string) {
-  // Replace "<label>: <anything in the same run>" with "<label>: <value>".
-  const pattern = new RegExp(`(<w:t[^>]*>)([^<]*?)${label}:\\s*[^<]*(</w:t>)`, "g");
-  return xml.replace(pattern, (_match, open: string, prefix: string, close: string) => `${open}${prefix}${label}: ${xmlEscape(value)}${close}`);
+  // Rewrite whole "<label>: <value>" paragraphs, even when Word split the old
+  // value across several runs (otherwise the stale value stays behind and the
+  // letter shows e.g. "Date: 03-10-202620-12-2025").
+  const startsWithLabel = new RegExp(`^\\s*${label}:`);
+  return xml.replace(/<w:p\b[\s\S]*?<\/w:p>/g, (para) => {
+    const paragraphText = Array.from(para.matchAll(/<w:t[^>]*>([^<]*)<\/w:t>/g), (match) => match[1]).join("");
+    if (!startsWithLabel.test(paragraphText)) {
+      return para;
+    }
+    let labelSeen = false;
+    return para.replace(/(<w:t[^>]*>)([^<]*)(<\/w:t>)/g, (match, open: string, text: string, close: string) => {
+      if (!labelSeen) {
+        const at = text.indexOf(label);
+        if (at < 0) {
+          return match; // leading spacer runs stay untouched
+        }
+        labelSeen = true;
+        return `${open}${text.slice(0, at)}${label}: ${xmlEscape(value)}${close}`;
+      }
+      return `${open}${close}`;
+    });
+  });
+}
+
+// Cover and "For" pages in some templates are blank underscore lines. Fill
+// them as the firm writes them: "M/s <ENTITY>" in caps on the cover pages
+// (before "Privileged and Confidential") and "M/s <Entity>" afterwards.
+function fillStandaloneUnderscoreParagraphs(xml: string, entity: string) {
+  const coverBoundary = xml.indexOf("Privileged and Confidential");
+  return xml.replace(/<w:p\b[\s\S]*?<\/w:p>/g, (para, offset: number) => {
+    const paragraphText = Array.from(para.matchAll(/<w:t[^>]*>([^<]*)<\/w:t>/g), (match) => match[1]).join("");
+    if (!/^\s*(For\s+)?[\s_]*_{4,}[\s_]*$/.test(paragraphText)) {
+      return para;
+    }
+    const isCover = coverBoundary >= 0 && offset < coverBoundary;
+    const value = `M/s ${isCover ? entity.toUpperCase() : entity}`;
+    let filled = false;
+    return para.replace(/(<w:t[^>]*>)([^<]*)(<\/w:t>)/g, (match, open: string, text: string, close: string) => {
+      if (!text.includes("_")) {
+        return match;
+      }
+      if (filled) {
+        return `${open}${close}`;
+      }
+      filled = true;
+      return `${open}${xmlEscape(value)}${close}`;
+    });
+  });
+}
+
+// Highlight one value inside matching runs, splitting the run so only the
+// value itself turns yellow. Already-highlighted runs are left alone.
+// Set 1.5 line spacing on the letter body. Tables and the cover text boxes
+// keep their own tighter spacing so their layout is not disturbed.
+// The firm templates pad some paragraphs with many manual line breaks
+// (Shift+Enter) to push the next section onto a new page. At 1.5 spacing
+// those invisible blanks become big mid-page holes, so drop any run of four
+// or more and let the letter flow naturally instead.
+// The main page heading carries two manual line breaks above its text; keep
+// just one so the gap under the document-info table is a single blank line.
+function tightenHeadingGap(xml: string) {
+  return xml.replace(/<w:p\b[\s\S]*?<\/w:p>/g, (para) => {
+    const paragraphText = Array.from(para.matchAll(/<w:t[^>]*>([^<]*)<\/w:t>/g), (match) => match[1]).join("").trim();
+    if (!paragraphText.startsWith("ENGAGEMENT LETTER FOR")) {
+      return para;
+    }
+    let kept = false;
+    return para.replace(/<w:br\s*\/>/g, () => {
+      if (!kept) {
+        kept = true;
+        return "<w:br/>";
+      }
+      return "";
+    });
+  });
+}
+
+function removeFillerLineBreaks(xml: string) {
+  return xml.replace(/<w:p\b[\s\S]*?<\/w:p>/g, (para) => {
+    const breakCount = (para.match(/<w:br\s*\/>/g) ?? []).length;
+    if (breakCount < 4) {
+      return para;
+    }
+    return para.replace(/<w:br\s*\/>/g, "");
+  });
+}
+
+// Keep the firm signature block (For Dhadda & Co. ... [Partner] + Date) on
+// one page instead of splitting it across a page boundary.
+function keepSignatureBlockTogether(xml: string) {
+  let inBlock = false;
+  return xml.replace(/<w:p\b[\s\S]*?<\/w:p>/g, (para) => {
+    const paragraphText = Array.from(para.matchAll(/<w:t[^>]*>([^<]*)<\/w:t>/g), (match) => match[1]).join("").trim();
+    if (!inBlock && paragraphText.startsWith("For Dhadda")) {
+      inBlock = true;
+    }
+    if (!inBlock) {
+      return para;
+    }
+    if (paragraphText === "[Partner]") {
+      inBlock = false;
+    }
+    if (para.includes("keepNext")) {
+      return para;
+    }
+    if (para.includes("<w:pPr>")) {
+      return para.replace("<w:pPr>", "<w:pPr><w:keepNext/>");
+    }
+    return para.replace(/(<w:p\b[^>]*>)/, "$1<w:pPr><w:keepNext/></w:pPr>");
+  });
+}
+
+function setBodyLineSpacing(xml: string) {
+  const protectedBlocks: string[] = [];
+  let out = xml.replace(/<w:tbl\b[\s\S]*?<\/w:tbl>|<w:txbxContent>[\s\S]*?<\/w:txbxContent>/g, (block) => {
+    protectedBlocks.push(block);
+    return `\u0001WLKEEP${protectedBlocks.length - 1}\u0001`;
+  });
+  const spacingTag = '<w:spacing w:line="360" w:lineRule="auto"/>';
+  out = out.replace(/<w:p\b[\s\S]*?<\/w:p>/g, (para) => {
+    // Empty spacer paragraphs keep their original (single) height so the
+    // template's deliberate gaps are not stretched by the 1.5 spacing.
+    const paragraphText = Array.from(para.matchAll(/<w:t[^>]*>([^<]*)<\/w:t>/g), (match) => match[1]).join("");
+    if (!paragraphText.trim()) {
+      return para;
+    }
+    if (para.includes("<w:spacing")) {
+      return para.replace(/<w:spacing\b([^>]*?)\/>/, (_match, attrs: string) => {
+        const kept = attrs.replace(/\s*w:line="[^"]*"/, "").replace(/\s*w:lineRule="[^"]*"/, "");
+        return `<w:spacing${kept} w:line="360" w:lineRule="auto"/>`;
+      });
+    }
+    if (/<w:pStyle[^>]*\/>/.test(para)) {
+      return para.replace(/(<w:pStyle[^>]*\/>)/, `$1${spacingTag}`);
+    }
+    if (para.includes("<w:pPr>")) {
+      return para.replace("<w:pPr>", `<w:pPr>${spacingTag}`);
+    }
+    return para.replace(/(<w:p\b[^>]*>)/, `$1<w:pPr>${spacingTag}</w:pPr>`);
+  });
+  return out.replace(/\u0001WLKEEP(\d+)\u0001/g, (_match, index: string) => protectedBlocks[Number(index)]);
+}
+
+function highlightValueInRuns(xml: string, value: string) {
+  const target = xmlEscape(value);
+  if (!target.trim()) {
+    return xml;
+  }
+  return xml.replace(/<w:r\b[^>]*>[\s\S]*?<\/w:r>/g, (run) => {
+    if (run.includes("<w:highlight") || run.includes("<w:tab") || run.includes("<w:br") || run.includes("<w:drawing")) {
+      return run;
+    }
+    const textMatch = run.match(/<w:t[^>]*>([^<]*)<\/w:t>/);
+    if (!textMatch || !textMatch[1].includes(target)) {
+      return run;
+    }
+    const at = textMatch[1].indexOf(target);
+    const before = textMatch[1].slice(0, at);
+    const after = textMatch[1].slice(at + target.length);
+    const properties = run.match(/<w:rPr>[\s\S]*?<\/w:rPr>/)?.[0] ?? "";
+    const highlighted = properties
+      ? properties.replace("<w:rPr>", '<w:rPr><w:highlight w:val="yellow"/>')
+      : '<w:rPr><w:highlight w:val="yellow"/></w:rPr>';
+    const makeRun = (text: string, props: string) => {
+      if (!text) {
+        return "";
+      }
+      let piece = run.replace(/<w:rPr>[\s\S]*?<\/w:rPr>/, "");
+      piece = props ? piece.replace(/(<w:r\b[^>]*>)/, `$1${props}`) : piece;
+      return piece.replace(/<w:t[^>]*>[^<]*<\/w:t>/, `<w:t xml:space="preserve">${text}</w:t>`);
+    };
+    return makeRun(before, properties) + makeRun(target, highlighted) + makeRun(after, properties);
+  });
+}
+
+// Fee amounts change on every engagement, so every table cell that holds only
+// an amount (digits/commas, optional Rs. or a bracketed note) is highlighted
+// yellow for review. Document No. rows and ranges like "Rs. 5 to 20 lakhs"
+// keep their normal formatting.
+function highlightAmountCells(xml: string) {
+  return xml.replace(/<w:tr\b[\s\S]*?<\/w:tr>/g, (row) => {
+    if (row.includes("Document No")) {
+      return row;
+    }
+    return row.replace(/<w:tc\b[\s\S]*?<\/w:tc>/g, (cell) => {
+      const cellText = Array.from(cell.matchAll(/<w:t[^>]*>([^<]*)<\/w:t>/g), (match) => match[1]).join(" ");
+      const bare = cellText.replace(/\([^)]*\)/g, "").replace(/Rs\.?/gi, "");
+      const digitsOnly = bare.replace(/[,\s]/g, "");
+      if (!/\d{3}/.test(digitsOnly) || /[A-Za-z]/.test(bare) || /\d-\d/.test(bare)) {
+        return cell;
+      }
+      return cell.replace(/<w:r\b[^>]*>[\s\S]*?<\/w:r>/g, (run) => {
+        if (!/<w:t[^>]*>[^<]+<\/w:t>/.test(run) || run.includes("<w:highlight")) {
+          return run;
+        }
+        if (run.includes("<w:rPr>")) {
+          return run.replace("<w:rPr>", '<w:rPr><w:highlight w:val="yellow"/>');
+        }
+        if (run.includes("<w:rPr/>")) {
+          return run.replace("<w:rPr/>", '<w:rPr><w:highlight w:val="yellow"/></w:rPr>');
+        }
+        return run.replace(/(<w:r\b[^>]*>)/, '$1<w:rPr><w:highlight w:val="yellow"/></w:rPr>');
+      });
+    });
+  });
 }
 
 function highlightBracketRuns(xml: string) {
   return xml.replace(/<w:r\b[^>]*>[\s\S]*?<\/w:r>/g, (run) => {
     if (!/<w:t[^>]*>[^<]*\[[^<]*<\/w:t>/.test(run) || run.includes("<w:highlight")) {
+      return run;
+    }
+    // "[Partner]" under the firm signature is part of the letter, not a
+    // placeholder to fill - leave it unhighlighted.
+    if (/<w:t[^>]*>[^<]*\[Partner\][^<]*<\/w:t>/i.test(run)) {
       return run;
     }
     if (run.includes("<w:rPr>")) {
@@ -474,10 +710,17 @@ export async function downloadTaskEngagementLetter(
   const elNo = data.taskCode.trim() || "[EL No]";
   let xml = await documentXml.async("string");
 
-  // Entity name: underscore blanks, "(Entity's Name)", and any baked example name.
+  // Entity name: underscore blanks, "(Entity's Name)", and any baked example
+  // name. A search that carries an "M/s" prefix keeps that prefix, and an
+  // all-caps example (the cover pages) gets the entity in caps too.
+  xml = fillStandaloneUnderscoreParagraphs(xml, entity);
   xml = xml.replace(/_{6,}/g, xmlEscape(entity));
   for (const search of format.entitySearches) {
-    xml = replaceAllXmlText(xml, search, entity);
+    const prefixMatch = search.match(/^M\/[sS]\.?\s*/);
+    const core = prefixMatch ? search.slice(prefixMatch[0].length) : search;
+    const coreIsUpper = /[A-Z]/.test(core) && core === core.toUpperCase();
+    const replacement = `${prefixMatch ? prefixMatch[0] : ""}${coreIsUpper ? entity.toUpperCase() : entity}`;
+    xml = replaceAllXmlText(xml, search, replacement);
   }
   // Entity work and any issue/authority become editable (highlighted) placeholders.
   xml = replaceAllXmlText(xml, "(Entity's Work)", "[Entity Work]");
@@ -495,10 +738,44 @@ export async function downloadTaskEngagementLetter(
     xml = replaceAllXmlText(xml, format.docNoSearch, elNo);
   }
 
-  xml = removeDocumentPeriod(xml);
-  xml = setLabelledValue(xml, "Place", "Jaipur");
-  xml = setLabelledValue(xml, "Date", todayDdMmYyyy());
+  xml = format.docNoSearch ? removeDocumentPeriod(xml) : repurposeDocumentPeriodRow(xml, elNo);
+  const letterDate = todayDdMmYyyy();
+  xml = setLabelledValue(xml, "Place", "");
+  xml = setLabelledValue(xml, "Date", letterDate);
   xml = highlightBracketRuns(xml);
+  xml = highlightAmountCells(xml);
+
+  // Everything the generator filled in is highlighted too, so the user can
+  // review each auto-filled value before sending the letter.
+  const reviewValues = Array.from(new Set([entity, entity.toUpperCase(), data.gstin.trim(), data.taskCode.trim(), letterDate])).filter(Boolean);
+  for (const value of reviewValues) {
+    xml = highlightValueInRuns(xml, value);
+  }
+
+  // The Acknowledgement section must always begin on a fresh page, never
+  // dangle its heading at the bottom of the previous one.
+  xml = xml.replace(/<w:p\b[\s\S]*?<\/w:p>/g, (para) => {
+    const paragraphText = Array.from(para.matchAll(/<w:t[^>]*>([^<]*)<\/w:t>/g), (match) => match[1]).join("").trim();
+    if (paragraphText.toLowerCase() !== "acknowledgement" || para.includes("pageBreakBefore")) {
+      return para;
+    }
+    if (para.includes("<w:pPr>")) {
+      return para.replace("<w:pPr>", "<w:pPr><w:pageBreakBefore/>");
+    }
+    return para.replace(/(<w:p\b[^>]*>)/, "$1<w:pPr><w:pageBreakBefore/></w:pPr>");
+  });
+
+  // Letter body reads at 1.5 line spacing; tables and cover boxes keep theirs.
+  xml = removeFillerLineBreaks(xml);
+  xml = tightenHeadingGap(xml);
+  xml = setBodyLineSpacing(xml);
+  xml = keepSignatureBlockTogether(xml);
+
+  // The cover title sits in a fixed-size text box sized for long names, so a
+  // short entity left all the spare space hanging under the title. Centre the
+  // box text vertically so the title sits in the middle at any name length.
+  xml = xml.replace(/(<wps:bodyPr[^>]*anchor=")t(")/g, "$1ctr$2");
+  xml = xml.replace(/v-text-anchor:\s*top/g, "v-text-anchor:middle");
 
   zip.file("word/document.xml", xml);
 

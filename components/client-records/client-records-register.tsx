@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import type { ComponentType } from "react";
+import { LoadingIndicator } from "@/components/shared/loading-indicator";
 import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { getCached, setCached } from "@/lib/data-cache";
@@ -142,7 +143,7 @@ export function ClientRecordsRegister() {
       });
       const matchesValueFilters = columns.every((column) => {
         const selected = valueFilters[column];
-        return !selected || selected.includes(String(row[column] ?? ""));
+        return !selected?.length || selected.includes(String(row[column] ?? ""));
       });
 
       return matchesSearch && matchesTextFilters && matchesValueFilters;
@@ -376,7 +377,7 @@ export function ClientRecordsRegister() {
     const options = uniqueValuesForColumn(column);
     setOpenFilterColumn(column);
     setFilterSearch("");
-    setFilterDraft(valueFilters[column] ? [...valueFilters[column]] : options);
+    setFilterDraft(valueFilters[column]?.length ? [...valueFilters[column]] : options);
     const rect = anchor.getBoundingClientRect();
     const width = 288;
     const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
@@ -396,6 +397,22 @@ export function ClientRecordsRegister() {
 
     function handleFilterKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
+        closeColumnFilter();
+        return;
+      }
+
+      // Excel-style shortcut: C clears this column's filter, unless the user
+      // is typing in the search box.
+      const target = event.target;
+      const isTyping = target instanceof HTMLTextAreaElement || (target instanceof HTMLInputElement && target.type !== "checkbox");
+
+      if ((event.key === "c" || event.key === "C") && !isTyping && openFilterColumn) {
+        event.preventDefault();
+        setValueFilters((current) => {
+          const next = { ...current };
+          delete next[openFilterColumn];
+          return next;
+        });
         closeColumnFilter();
       }
     }
@@ -423,7 +440,8 @@ export function ClientRecordsRegister() {
     const options = uniqueValuesForColumn(column);
     setValueFilters((current) => {
       const next = { ...current };
-      if (filterDraft.length >= options.length) delete next[column];
+      // "None" or "all" ticked both mean the column is unfiltered.
+      if (!filterDraft.length || filterDraft.length >= options.length) delete next[column];
       else next[column] = [...filterDraft];
       return next;
     });
@@ -731,7 +749,7 @@ export function ClientRecordsRegister() {
           </thead>
           <tbody>
             {isLoading ? (
-              <tr><td className="px-4 py-8 text-sm font-bold text-slate-500" colSpan={columns.length + 2}>Loading client records...</td></tr>
+              <tr><td className="px-4 py-8 text-sm font-bold text-slate-500" colSpan={columns.length + 2}><LoadingIndicator label="Loading client records..." /></td></tr>
             ) : pagedRows.length ? (
               pagedRows.map((row) => (
                 <tr className="border-b border-slate-100 last:border-b-0" key={String(row.id)}>

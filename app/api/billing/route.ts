@@ -228,6 +228,17 @@ export async function GET(request: Request) {
   const searchParams = new URL(request.url).searchParams;
 
   if (searchParams.get("scope") === "activity") {
+    // Per-row audit trail: the record's complete billing history, which by
+    // definition starts when the row was pushed to Billing - earlier TaskLine
+    // activity stays in the task's own audit trail.
+    const recordId = text(searchParams.get("recordId") ?? "");
+
+    if (recordId) {
+      return NextResponse.json({
+        auditLogs: await loadRecordAuditLogs(admin, organisation.organisationId, access, recordId)
+      });
+    }
+
     const [auditLogs, trashRecords] = await Promise.all([
       loadAuditLogs(admin, organisation.organisationId, access),
       loadTrashRecords(admin, organisation.organisationId, access)
@@ -829,6 +840,34 @@ async function loadAuditLogs(
     .eq("entity_type", "billing_record")
     .order("created_at", { ascending: false })
     .limit(150);
+
+  const logs = await attachActorNames(admin, data ?? []);
+
+  if (access.canViewAll || !access.teams.length) {
+    return logs;
+  }
+
+  return logs.filter((log) => {
+    const oldTeam = readTeam(log.old_value);
+    const newTeam = readTeam(log.new_value);
+    return teamIsAllowed(oldTeam, access.teams) || teamIsAllowed(newTeam, access.teams);
+  });
+}
+
+async function loadRecordAuditLogs(
+  admin: ReturnType<typeof createAdminClient>,
+  organisationId: string,
+  access: AccessScope,
+  recordId: string
+) {
+  const { data } = await admin
+    .from("audit_logs")
+    .select("id,action,actor_user_id,entity_id,old_value,new_value,created_at")
+    .eq("organisation_id", organisationId)
+    .eq("entity_type", "billing_record")
+    .eq("entity_id", recordId)
+    .order("created_at", { ascending: true })
+    .limit(1000);
 
   const logs = await attachActorNames(admin, data ?? []);
 

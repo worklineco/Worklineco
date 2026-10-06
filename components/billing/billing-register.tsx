@@ -4,7 +4,9 @@ import { ArrowDown, ArrowUp, ArrowUpDown, Filter, ChevronDown, Download, History
 import type { ComponentType } from "react";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { BillingColumnFilter } from "@/components/billing/billing-column-filter";
+import { SearchableSelect } from "@/components/shared/searchable-select";
 import { getCached, setCached } from "@/lib/data-cache";
+import { LoadingIndicator } from "@/components/shared/loading-indicator";
 import * as XLSX from "xlsx-js-style";
 
 type BillingRecord = {
@@ -150,7 +152,7 @@ const defaultMasters: Record<string, string[]> = {
   cost_center: [],
   group_name: [],
   income_head: [],
-  receiving_status: ["Pending", "Received", "Part Received"],
+  receiving_status: ["Pending", "Received", "Part Received", "YD"],
   voucher_type: ["Proforma Invoice", "Tax Invoice", "Debit Note", "Credit Note"]
 };
 const gstStateByCode: Record<string, string> = {
@@ -334,6 +336,8 @@ export function BillingRegister() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isColumnOptionsOpen, setIsColumnOptionsOpen] = useState(false);
   const [isActivityLoading, setIsActivityLoading] = useState(false);
+  const [isRowHistoryLoading, setIsRowHistoryLoading] = useState(false);
+  const [rowHistoryLogs, setRowHistoryLogs] = useState<AuditLog[] | null>(null);
   const [isFullTableLoading, setIsFullTableLoading] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [matters, setMatters] = useState<GstatMatter[]>([]);
@@ -359,6 +363,19 @@ export function BillingRegister() {
   const filterOptions = useMemo(() => filterMenu
     ? Array.from(new Set(records.map((record) => getBillingFilterValue(record, filterMenu.column, matters)))).sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }))
     : [], [filterMenu, records, matters]);
+  // Client names from the Client Records register, for the Client dropdown in
+  // the create/edit dialog (picking one autofills GSTIN and Group).
+  const clientNameOptions = useMemo(() => {
+    const unique = new Map<string, string>();
+    for (const row of clientRecords) {
+      const name = getClientName(row);
+      const key = normalizeClientName(name);
+      if (key && !unique.has(key)) {
+        unique.set(key, name);
+      }
+    }
+    return Array.from(unique.values()).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+  }, [clientRecords]);
   const [masters, setMasters] = useState(defaultMasters);
 
   const mergedMasters = useMemo(
@@ -426,10 +443,14 @@ export function BillingRegister() {
           getMatterLabel(record, matters)
         ].some((value) => String(value ?? "").toLowerCase().includes(search));
 
-      const matchesColumnFilters = visibleBillingColumns.every((column) => {
-        const filter = String(columnFilters[String(column.field)] ?? "").trim().toLowerCase();
+      // Apply every typed column filter, including ones on columns that were
+      // hidden afterwards — otherwise a hidden column's filter still counts as
+      // active but silently stops narrowing the rows.
+      const matchesColumnFilters = Object.entries(columnFilters).every(([field, rawFilter]) => {
+        const filter = String(rawFilter ?? "").trim().toLowerCase();
+        const column = billingColumnByKey.get(field);
 
-        if (!filter || column.field === "actions") {
+        if (!filter || !column || column.field === "actions") {
           return true;
         }
 
@@ -461,29 +482,41 @@ export function BillingRegister() {
       if (column.field !== "gstat_link" && (column.type === "money" || column.field === "serial_no" || column.field === "version_no")) {
         compared = toNumber(first[column.field]) - toNumber(second[column.field]);
       } else if (column.type === "date" && column.field !== "gstat_link") {
-        compared = String(first[column.field] ?? "").localeCompare(String(second[column.field] ?? ""));
+        // Stored dates can be ISO (imports) or dd-mm-yyyy (inline edits):
+        // normalize both to ISO so the comparison is chronological.
+        compared = normalizeDateInput(first[column.field]).localeCompare(normalizeDateInput(second[column.field]));
       } else {
         compared = a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
       }
       return sort.direction === "asc" ? compared : -compared;
     });
-  }, [columnFilters, valueFilters, sort, filters, matters, records, visibleBillingColumns, showMarkedForReviewOnly]);
+  }, [columnFilters, valueFilters, sort, filters, matters, records, showMarkedForReviewOnly]);
   function applyValueFilter(values: string[] | undefined) {
     if (!filterMenu) return;
     const field = String(filterMenu.column.field);
     setValueFilters((current) => {
       const next = { ...current };
-      if (values === undefined) delete next[field];
+      // Nothing ticked means "no filter" rather than "hide every row".
+      if (values === undefined || !values.length) delete next[field];
       else next[field] = values;
       return next;
     });
-    setColumnFilters((current) => ({ ...current, [field]: "" }));
+
+    // Picking values replaces any typed text filter on the column: cancel its
+    // pending debounce and remount the input so the stale text disappears too.
+    window.clearTimeout(columnFilterTimersRef.current[field]);
+
+    if (String(columnFilters[field] ?? "").trim()) {
+      setColumnFilters((current) => ({ ...current, [field]: "" }));
+      setColumnFilterResetKey((current) => current + 1);
+    }
+
     setFilterMenu(null);
   }
 
   const selectedRecord = records.find((record) => record.id === selectedRecordId) ?? null;
   const selectedAuditLogs = selectedRecordId
-    ? auditLogs.filter((log) => log.entity_id === selectedRecordId)
+    ? rowHistoryLogs ?? auditLogs.filter((log) => log.entity_id === selectedRecordId)
     : auditLogs.slice(0, 12);
   const billingSummary = useMemo(() => getBillingSummary(filteredRecords), [filteredRecords]);
   const markedForReviewCount = useMemo(
@@ -801,8 +834,38 @@ export function BillingRegister() {
   }
 
   function openRowHistory(record: BillingRecord) {
+    // Opens as a full audit view (same as a task's audit trail in TaskLine)
+    // rather than a pop-up.
     setSelectedRecordId(record.id ?? null);
-    void loadBillingActivity();
+    setRowHistoryLogs(null);
+    setViewMode("audit");
+
+    if (record.id) {
+      void loadRowHistory(record.id);
+    }
+  }
+
+  // The row panel fetches the record's COMPLETE billing audit trail from the
+  // server (the global activity feed only holds the latest entries overall,
+  // so older rows used to show an empty history).
+  async function loadRowHistory(recordId: string) {
+    setIsRowHistoryLoading(true);
+
+    try {
+      const response = await fetch(`/api/billing?scope=activity&recordId=${encodeURIComponent(recordId)}`, { cache: "no-store" });
+      const result = (await response.json().catch(() => ({}))) as { auditLogs?: AuditLog[]; error?: string };
+
+      if (!response.ok) {
+        console.error("Billing row history load failed:", result.error);
+        return;
+      }
+
+      setRowHistoryLogs(result.auditLogs ?? []);
+    } catch (error) {
+      console.error("Billing row history load error:", error);
+    } finally {
+      setIsRowHistoryLoading(false);
+    }
   }
 
   async function saveDirectField(record: BillingRecord, field: BillingField, rawValue: string) {
@@ -1069,7 +1132,7 @@ export function BillingRegister() {
     <section className={`w-full border border-slate-200 bg-white p-4 shadow-[0_18px_60px_rgba(15,23,42,0.10)] ${isFullscreen ? "fixed inset-3 z-50 flex flex-col overflow-hidden rounded-lg" : "rounded-lg"}`}>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-xl font-black text-slate-950">
-          Billing Register{viewMode === "audit" ? " — Audit Trail" : viewMode === "trash" ? ` — Trash (${trashRecords.length})` : ""}
+          Billing Register{viewMode === "audit" ? (selectedRecordId ? " — Row Audit Trail" : " — Audit Trail") : viewMode === "trash" ? ` — Trash (${trashRecords.length})` : ""}
           {isFullTableLoading ? <span className="ml-2 text-xs font-bold text-slate-400">loading…</span> : null}
         </h2>
         <div className="relative">
@@ -1082,9 +1145,9 @@ export function BillingRegister() {
               <div className="fixed inset-0 z-30" onClick={() => setIsToolbarMenuOpen(false)} />
               <div className="absolute right-0 top-12 z-40 w-56 overflow-hidden rounded-md border border-slate-200 bg-white py-1 shadow-2xl">
                 {viewMode !== "register" ? (
-                  <BillingMenuItem icon={RotateCcw} label="Register" onClick={() => { setIsToolbarMenuOpen(false); setViewMode("register"); }} />
+                  <BillingMenuItem icon={RotateCcw} label="Register" onClick={() => { setIsToolbarMenuOpen(false); setSelectedRecordId(null); setRowHistoryLogs(null); setViewMode("register"); }} />
                 ) : null}
-                <BillingMenuItem icon={History} label="Audit Trail" onClick={() => { setIsToolbarMenuOpen(false); setViewMode("audit"); void loadBillingActivity(); }} />
+                <BillingMenuItem icon={History} label="Audit Trail" onClick={() => { setIsToolbarMenuOpen(false); setSelectedRecordId(null); setRowHistoryLogs(null); setViewMode("audit"); void loadBillingActivity(); }} />
                 <BillingMenuItem icon={Trash2} label={`Trash (${trashRecords.length})`} onClick={() => { setIsToolbarMenuOpen(false); setViewMode("trash"); void loadBillingActivity(); }} />
                 <div className="my-1 border-t border-slate-100" />
                 <BillingMenuItem icon={Plus} label="Add row" onClick={() => { setIsToolbarMenuOpen(false); openAddForm(); }} />
@@ -1095,7 +1158,7 @@ export function BillingRegister() {
                 <BillingMenuItem icon={Upload} label="Import" onClick={() => { setIsToolbarMenuOpen(false); fileInputRef.current?.click(); }} />
                 <BillingMenuItem icon={Maximize2} label={isFullscreen ? "Exit fullscreen" : "Fullscreen"} onClick={() => { setIsToolbarMenuOpen(false); setIsFullscreen((current) => !current); }} />
                 {hasActiveColumnFilters ? (
-                  <BillingMenuItem icon={X} label="Clear column filters" onClick={() => { setIsToolbarMenuOpen(false); setColumnFilters({}); setValueFilters({}); setColumnFilterResetKey((current) => current + 1); }} />
+                  <BillingMenuItem icon={X} label="Clear column filters" onClick={() => { setIsToolbarMenuOpen(false); Object.values(columnFilterTimersRef.current).forEach((timer) => window.clearTimeout(timer)); columnFilterTimersRef.current = {}; setColumnFilters({}); setValueFilters({}); setColumnFilterResetKey((current) => current + 1); }} />
                 ) : null}
               </div>
             </>
@@ -1165,6 +1228,8 @@ export function BillingRegister() {
         <button
           className={buttonClass("light")}
           onClick={() => {
+            Object.values(columnFilterTimersRef.current).forEach((timer) => window.clearTimeout(timer));
+            columnFilterTimersRef.current = {};
             setFilters({ search: "", status: "", receiptStatus: "", team: "", source: "" });
             setColumnFilters({});
             setValueFilters({});
@@ -1320,7 +1385,7 @@ export function BillingRegister() {
             </thead>
             <tbody>
               {isLoading ? (
-                <tr><td className="px-4 py-8 font-bold text-slate-500" colSpan={visibleBillingColumns.length}>Loading billing rows...</td></tr>
+                <tr><td className="px-4 py-8 font-bold text-slate-500" colSpan={visibleBillingColumns.length}><LoadingIndicator label="Loading billing rows..." /></td></tr>
               ) : filteredRecords.length ? (
                 pagedRecords.map((record, rowIndex) => (
                   <BillingRow
@@ -1353,16 +1418,62 @@ export function BillingRegister() {
       ) : null}
 
       {viewMode === "audit" ? (
-        <BillingAuditTable logs={auditLogs} isLoading={isActivityLoading} />
+        <>
+          <div className="mt-4 flex flex-wrap items-center gap-2 rounded-md border border-slate-200 bg-white px-4 py-3">
+            <History className="size-4 text-rose-700" />
+            <div className="min-w-0">
+              <h3 className="text-sm font-black uppercase tracking-[0.14em] text-slate-700">
+                {selectedRecordId
+                  ? selectedRecord?.client || selectedRecord?.invoice_no || selectedRecord?.memo_no || "Billing row"
+                  : "Billing Audit Trail"}
+              </h3>
+              <p className="mt-0.5 truncate text-xs font-bold text-slate-500">
+                {selectedRecordId
+                  ? "Billing updates only, from the moment this row was pushed to Billing. The task's earlier journey lives in its TaskLine audit trail."
+                  : "The latest changes across the whole Billing register."}
+              </p>
+            </div>
+            <button
+              className="ml-auto inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 transition hover:bg-slate-50"
+              onClick={() => { setSelectedRecordId(null); setRowHistoryLogs(null); setViewMode("register"); }}
+              type="button"
+            >
+              <RotateCcw className="size-3.5" />
+              Back to register
+            </button>
+          </div>
+          <BillingAuditTable
+            logs={selectedRecordId ? selectedAuditLogs : auditLogs}
+            isLoading={selectedRecordId ? isRowHistoryLoading : isActivityLoading}
+          />
+        </>
       ) : null}
 
       {viewMode === "trash" ? (
-        <BillingTrashTable isLoading={isActivityLoading} onRestore={restoreTrashRecord} rows={trashRecords} />
+        <>
+          <div className="mt-4 flex flex-wrap items-center gap-2 rounded-md border border-slate-200 bg-white px-4 py-3">
+            <Trash2 className="size-4 text-rose-700" />
+            <div className="min-w-0">
+              <h3 className="text-sm font-black uppercase tracking-[0.14em] text-slate-700">Billing Trash</h3>
+              <p className="mt-0.5 truncate text-xs font-bold text-slate-500">Deleted billing rows stay restorable here for 30 days.</p>
+            </div>
+            <button
+              className="ml-auto inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 transition hover:bg-slate-50"
+              onClick={() => setViewMode("register")}
+              type="button"
+            >
+              <RotateCcw className="size-3.5" />
+              Back to register
+            </button>
+          </div>
+          <BillingTrashTable isLoading={isActivityLoading} onRestore={restoreTrashRecord} rows={trashRecords} />
+        </>
       ) : null}
 
       {addDraft ? (
         <BillingAddForm
           access={access}
+          clientOptions={clientNameOptions}
           draft={addDraft}
           masters={mergedMasters}
           mode="create"
@@ -1375,6 +1486,7 @@ export function BillingRegister() {
       {editDraft ? (
         <BillingAddForm
           access={access}
+          clientOptions={clientNameOptions}
           draft={editDraft}
           masters={mergedMasters}
           mode="edit"
@@ -1384,56 +1496,6 @@ export function BillingRegister() {
         />
       ) : null}
 
-      {selectedRecordId ? (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-navy-700/45 px-4 py-6">
-          <section className="max-h-[86vh] w-full max-w-3xl overflow-hidden rounded-lg border border-slate-200 bg-white shadow-[0_24px_90px_rgba(15,23,42,0.30)]">
-            <header className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
-              <div>
-                <p className="text-xs font-black uppercase tracking-[0.14em] text-navy-700">Row history</p>
-                <h3 className="mt-1 text-xl font-black text-slate-950">
-                  {selectedRecord?.client || selectedRecord?.invoice_no || selectedRecord?.memo_no || "Billing row"}
-                </h3>
-                <p className="mt-1 text-sm font-bold text-slate-500">
-                  {selectedRecord?.owner_team || "No team"} - {selectedRecord?.billing_status || "Draft"}
-                </p>
-              </div>
-              <button
-                className="inline-flex size-9 items-center justify-center rounded-md border border-slate-200 text-slate-700 hover:bg-slate-50"
-                onClick={() => setSelectedRecordId(null)}
-                title="Close history"
-                type="button"
-              >
-                <X className="size-4" />
-              </button>
-            </header>
-
-            <div className="max-h-[64vh] overflow-auto p-5">
-              {selectedAuditLogs.length ? (
-                <div className="space-y-3">
-                  {selectedAuditLogs.map((log) => (
-                    <article className="rounded-md border border-slate-200 p-4" key={log.id}>
-                      <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-                        <div>
-                          <p className="text-sm font-black uppercase text-slate-950">
-                            {log.action.replace("billing.", "")}
-                          </p>
-                          <p className="text-xs font-bold text-slate-500">Updated by {log.actor_name || "Unknown user"}</p>
-                        </div>
-                        <p className="text-xs font-bold text-slate-500">{formatDateTime(log.created_at)}</p>
-                      </div>
-                      <AuditChangesList changes={getAuditChanges(log)} />
-                    </article>
-                  ))}
-                </div>
-              ) : (
-                <p className="rounded-md border border-slate-200 px-3 py-8 text-center text-sm font-bold text-slate-500">
-                  No history entries found for this billing row.
-                </p>
-              )}
-            </div>
-          </section>
-        </div>
-      ) : null}
     </section>
   );
 }
@@ -1691,6 +1753,7 @@ function BillingCell({
 
 function BillingAddForm({
   access,
+  clientOptions,
   draft,
   masters,
   mode,
@@ -1699,6 +1762,7 @@ function BillingAddForm({
   onSubmit
 }: {
   access: AccessScope;
+  clientOptions: string[];
   draft: BillingRecord;
   masters: Record<string, string[]>;
   mode: "create" | "edit";
@@ -1710,8 +1774,8 @@ function BillingAddForm({
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-navy-700/45 px-4 py-6">
-      <section className="max-h-[90vh] w-full max-w-5xl overflow-hidden rounded-lg border border-slate-200 bg-white shadow-[0_24px_90px_rgba(15,23,42,0.30)]">
-        <header className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
+      <section className="flex h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-[0_24px_90px_rgba(15,23,42,0.30)]">
+        <header className="flex shrink-0 items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
           <div>
             <p className="text-xs font-black uppercase tracking-[0.14em] text-navy-700">
               {isEdit ? "Edit billing record" : "New billing record"}
@@ -1720,7 +1784,7 @@ function BillingAddForm({
               {isEdit ? "Edit Billing Entry" : "Create Billing Entry"}
             </h3>
             <p className="mt-1 text-sm font-bold text-slate-500">
-              {isEdit ? "Update this billing row in one place. Cell editing remains available in the table." : "Enter GSTIN first to auto-fill client, POS, and registration type."}
+              {isEdit ? "Update this billing row in one place. Cell editing remains available in the table." : "Pick a client from Client Records or enter GSTIN first — GSTIN, group, POS and registration type fill automatically."}
             </p>
           </div>
           <button
@@ -1733,7 +1797,7 @@ function BillingAddForm({
           </button>
         </header>
 
-        <div className="max-h-[68vh] overflow-auto p-5">
+        <div className="min-h-0 flex-1 overflow-auto p-5">
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
             <label>
               <span className="text-[10px] font-black uppercase text-slate-500">Task Code</span>
@@ -1764,7 +1828,16 @@ function BillingAddForm({
               </select>
             </label>
             <FormInput field="gstin" label="GSTIN" onChange={onChange} value={draft.gstin} />
-            <FormInput field="client" label="Client" onChange={onChange} value={draft.client} />
+            <label>
+              <span className="text-[10px] font-black uppercase text-slate-500">Client</span>
+              <SearchableSelect
+                allowCustom
+                onChange={(value) => onChange("client", value)}
+                options={clientOptions.map((value) => ({ value, label: value }))}
+                placeholder="Select client"
+                value={draft.client}
+              />
+            </label>
             <FormInput field="place_of_supply" label="Place of Supply" onChange={onChange} value={draft.place_of_supply} />
             <FormInput field="registration_type" label="Registration Type" onChange={onChange} value={draft.registration_type} />
             <FormInput field="address" label="Address" onChange={onChange} value={draft.address} wide />
@@ -1812,7 +1885,7 @@ function BillingAddForm({
           </div>
         </div>
 
-        <footer className="flex justify-end gap-2 border-t border-slate-200 px-5 py-4">
+        <footer className="flex shrink-0 justify-end gap-2 border-t border-slate-200 px-5 py-4">
           <button className={buttonClass("light")} onClick={onClose} type="button">Cancel</button>
           <button className={buttonClass("primary")} onClick={onSubmit} type="button">
             {isEdit ? <Pencil className="size-4" /> : <Plus className="size-4" />}
@@ -2190,7 +2263,7 @@ function BillingAuditTable({ isLoading, logs }: { isLoading: boolean; logs: Audi
             return (
               <tr className="odd:bg-white even:bg-slate-50/80" key={log.id}>
                 <td className="border-b border-r border-slate-200 px-3 py-2 font-semibold text-slate-700">{formatDateTime(log.created_at)}</td>
-                <td className="border-b border-r border-slate-200 px-3 py-2 font-black text-slate-900">{log.action.replace("billing.", "")}</td>
+                <td className="border-b border-r border-slate-200 px-3 py-2 font-black text-slate-900">{formatBillingAuditAction(log.action)}</td>
                 <td className="border-b border-r border-slate-200 px-3 py-2 font-semibold text-slate-700">{log.actor_name || "Unknown user"}</td>
                 <td className="border-b border-r border-slate-200 px-3 py-2 font-semibold text-slate-700">{summary.owner_team ?? "-"}</td>
                 <td className="border-b border-r border-slate-200 px-3 py-2 font-semibold text-slate-700">{summary.client ?? "-"}</td>
@@ -2213,10 +2286,12 @@ function BillingAuditTable({ isLoading, logs }: { isLoading: boolean; logs: Audi
               </tr>
             );
           })}
-          {!logs.length && !isLoading ? (
+          {!logs.length ? (
             <tr>
               <td className="px-3 py-8 text-center text-sm font-bold text-slate-500" colSpan={6}>
-                <span className="inline-flex items-center gap-2"><ShieldCheck className="size-4" /> No billing audit entries found.</span>
+                {isLoading
+                  ? <LoadingIndicator label="Loading billing history..." />
+                  : <span className="inline-flex items-center gap-2"><ShieldCheck className="size-4" /> No billing audit entries found.</span>}
               </td>
             </tr>
           ) : null}
@@ -2267,37 +2342,17 @@ function BillingTrashTable({
               </td>
             </tr>
           ))}
-          {!rows.length && !isLoading ? (
+          {!rows.length ? (
             <tr>
               <td className="px-3 py-8 text-center text-sm font-bold text-slate-500" colSpan={8}>
-                <span className="inline-flex items-center gap-2"><Trash2 className="size-4" /> No deleted billing rows are currently in trash.</span>
+                {isLoading
+                  ? <LoadingIndicator label="Loading trash..." />
+                  : <span className="inline-flex items-center gap-2"><Trash2 className="size-4" /> No deleted billing rows are currently in trash.</span>}
               </td>
             </tr>
           ) : null}
         </tbody>
       </table>
-    </div>
-  );
-}
-
-function AuditChangesList({ changes }: { changes: AuditChange[] }) {
-  if (!changes.length) {
-    return (
-      <p className="mt-3 rounded-md border border-slate-200 px-3 py-3 text-sm font-bold text-slate-500">
-        No field-level change captured.
-      </p>
-    );
-  }
-
-  return (
-    <div className="mt-3 overflow-hidden rounded-md border border-slate-200">
-      {changes.map((change) => (
-        <div className="grid gap-2 border-b border-slate-100 px-3 py-2 text-xs last:border-b-0 sm:grid-cols-[160px_minmax(0,1fr)_minmax(0,1fr)]" key={change.field}>
-          <p className="font-black text-slate-700">{change.label}</p>
-          <p className="min-w-0 break-words font-semibold text-slate-500">From: {change.oldValue || "-"}</p>
-          <p className="min-w-0 break-words font-semibold text-slate-950">To: {change.newValue || "-"}</p>
-        </div>
-      ))}
     </div>
   );
 }
@@ -2317,22 +2372,38 @@ function prepareRecordUpdate(record: BillingRecord, field: BillingField, rawValu
 }
 
 function enrichBillingRecord(record: BillingRecord, clientRecords: ClientRegisterRow[], changedField?: BillingField): BillingRecord {
-  const matchedClient = findClientByGstin(record.gstin, clientRecords);
+  let working = record;
+
+  // Picking a client from Client Records fills its GSTIN and Group; the GSTIN
+  // match below then cascades the address, POS and registration type.
+  if (changedField === "client") {
+    const clientByName = findClientByName(record.client, clientRecords);
+    if (clientByName) {
+      working = {
+        ...record,
+        group_name: getClientGroup(clientByName) || record.group_name,
+        gstin: getFirstValue(clientByName, gstinKeys) || record.gstin
+      };
+    }
+  }
+
+  const matchedClient = findClientByGstin(working.gstin, clientRecords);
   const placeOfSupply = changedField === "place_of_supply"
-    ? record.place_of_supply
-    : stateFromGstin(record.gstin) || record.place_of_supply;
-  const ope = toNumber(record.ope);
-  const taxBase = getTaxBase(toNumber(record.amount), ope, record.include_ope_in_fees);
+    ? working.place_of_supply
+    : stateFromGstin(working.gstin) || working.place_of_supply;
+  const ope = toNumber(working.ope);
+  const taxBase = getTaxBase(toNumber(working.amount), ope, working.include_ope_in_fees);
   const tax = calculateTax(taxBase, placeOfSupply);
 
   return recalc({
-    ...record,
-    address: changedField === "address" ? record.address : getClientAddress(matchedClient) || record.address,
+    ...working,
+    address: changedField === "address" ? working.address : getClientAddress(matchedClient) || working.address,
     cgst: tax.cgst,
-    client: changedField === "client" ? record.client : getClientName(matchedClient) || record.client,
+    client: changedField === "client" ? working.client : getClientName(matchedClient) || working.client,
+    group_name: changedField === "group_name" ? working.group_name : working.group_name || getClientGroup(matchedClient),
     igst: tax.igst,
     place_of_supply: placeOfSupply,
-    registration_type: getRegistrationType(matchedClient) || record.registration_type,
+    registration_type: getRegistrationType(matchedClient) || working.registration_type,
     sgst: tax.sgst
   });
 }
@@ -2680,6 +2751,24 @@ function getClientName(row: ClientRegisterRow | null) {
   return getFirstValue(row, clientNameKeys);
 }
 
+function getClientGroup(row: ClientRegisterRow | null) {
+  return getFirstValue(row, clientGroupKeys);
+}
+
+function findClientByName(name: string, clientRecords: ClientRegisterRow[]) {
+  const normalizedName = normalizeClientName(name);
+
+  if (!normalizedName) {
+    return null;
+  }
+
+  return clientRecords.find((row) => normalizeClientName(getClientName(row)) === normalizedName) ?? null;
+}
+
+function normalizeClientName(value: unknown) {
+  return String(value ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+}
+
 function getRegistrationType(row: ClientRegisterRow | null) {
   return getFirstValue(row, registrationTypeKeys);
 }
@@ -2774,6 +2863,7 @@ const gstinKeys = ["GSTIN/UIN", "GSTIN", "GSTIN No", "GSTIN No.", "GST No", "GST
 const clientNameKeys = ["Particulars", "Client", "Client Name", "Name", "Legal Name", "Trade Name"];
 const clientAddressKeys = ["Address", "Client Address", "Billing Address", "Registered Address", "Principal Place of Business"];
 const registrationTypeKeys = ["Registration Type", "Reg Type", "GST Registration Type", "Registration"];
+const clientGroupKeys = ["Group", "Group Name", "Entity Group", "Client Group"];
 
 const auditFields: BillingField[] = [
   "owner_team",
@@ -2805,6 +2895,14 @@ const auditFields: BillingField[] = [
   "accounts_remark",
   "gstat_appeal_id"
 ];
+
+function formatBillingAuditAction(action: string) {
+  if (action === "billing.create") {
+    return "pushed to billing";
+  }
+
+  return action.replace("billing.", "").replace(/[._]/g, " ");
+}
 
 function getAuditChanges(log: AuditLog): AuditChange[] {
   const oldValue = log.old_value ?? {};
@@ -2970,3 +3068,4 @@ function toNumber(value: unknown) {
   const parsed = Number(String(value ?? "").replace(/,/g, ""));
   return Number.isFinite(parsed) ? parsed : 0;
 }
+

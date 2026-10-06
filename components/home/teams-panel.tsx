@@ -2,6 +2,8 @@
 
 import { ArrowDown, ArrowUp, ArrowUpDown, Check, Mail, Pencil, RefreshCw, ShieldCheck, UsersRound, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { getCached, setCached } from "@/lib/data-cache";
+import { LoadingIndicator } from "@/components/shared/loading-indicator";
 
 type TeamMember = {
   designation: string;
@@ -31,6 +33,7 @@ type SortDirection = "asc" | "desc";
 type EditDraft = { designation: string; joining_date: string; leaving_date: string; name: string; team: string };
 
 const ARTICLE_ASSISTANT_TENURE_DAYS = 730;
+const teamsCacheKey = "teams:members:v1";
 const editableGridTemplate = "grid-cols-[0.4fr_1.1fr_0.7fr_1.3fr_1fr_0.9fr_0.9fr_0.8fr]";
 const readOnlyGridTemplate = "grid-cols-[0.4fr_1.1fr_0.7fr_1.3fr_1fr_0.9fr_0.9fr]";
 const roleOptions = ["Article Assistant", "Associate", "Senior Associate", "Manager", "Senior Manager", "Partner", "Accounts", "Others"];
@@ -43,37 +46,58 @@ export function TeamsPanel() {
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<EditDraft>({ designation: "", joining_date: "", leaving_date: "", name: "", team: "" });
+  const [isCustomTeam, setIsCustomTeam] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [myRole, setMyRole] = useState("");
   const [isAdminRoleOpen, setIsAdminRoleOpen] = useState(false);
 
-  async function loadMembers() {
-    setIsLoading(true);
-    setMessage("");
+  async function loadMembers(options: { silent?: boolean } = {}) {
+    if (!options.silent) {
+      setIsLoading(true);
+      setMessage("");
+    }
 
     try {
       const response = await fetch("/api/teams", { cache: "no-store" });
       const result = (await response.json()) as { error?: string; me?: { role?: string }; members?: TeamMember[] };
 
       if (!response.ok) {
-        setMessage(result.error ?? "Could not load team members.");
-        setMembers([]);
+        if (!options.silent) {
+          setMessage(result.error ?? "Could not load team members.");
+          setMembers([]);
+        }
         return;
       }
 
       setMyRole(String(result.me?.role ?? "").trim());
       setMembers(result.members ?? []);
+      setCached(teamsCacheKey, result);
     } catch (error) {
       console.error("Team members load error:", error);
-      setMessage("Could not load team members.");
-      setMembers([]);
+      if (!options.silent) {
+        setMessage("Could not load team members.");
+        setMembers([]);
+      }
     } finally {
       setIsLoading(false);
     }
   }
 
   useEffect(() => {
-    loadMembers();
+    // Paint instantly from the cached list, then refresh quietly behind it -
+    // the live fetch pages through every account and can take a while.
+    const cached = getCached<{ me?: { role?: string }; members?: TeamMember[] }>(teamsCacheKey);
+
+    if (cached) {
+      setMyRole(String(cached.me?.role ?? "").trim());
+      setMembers(cached.members ?? []);
+      setIsLoading(false);
+      void loadMembers({ silent: true });
+      return;
+    }
+
+    void loadMembers();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const sortedMembers = useMemo(() => {
@@ -88,6 +112,22 @@ export function TeamsPanel() {
     });
   }, [members, sortDirection, sortKey]);
 
+  const teamOptions = useMemo(() => {
+    const unique = new Map<string, string>();
+
+    for (const member of members) {
+      for (const team of [member.team, ...(member.teams ?? [])]) {
+        const display = String(team ?? "").trim();
+
+        if (display) {
+          unique.set(display.toLowerCase(), unique.get(display.toLowerCase()) ?? display);
+        }
+      }
+    }
+
+    return Array.from(unique.values()).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  }, [members]);
+
   function changeSort(nextKey: SortKey) {
     if (nextKey === sortKey) {
       setSortDirection((current) => (current === "asc" ? "desc" : "asc"));
@@ -100,6 +140,7 @@ export function TeamsPanel() {
 
   function startEdit(member: TeamMember) {
     setEditingId(member.id);
+    setIsCustomTeam(false);
     setDraft({
       designation: member.designation === "-" ? "" : member.designation,
       joining_date: toDateInputValue(member.joining_date),
@@ -116,7 +157,27 @@ export function TeamsPanel() {
   }
 
   async function saveEdit(id: string) {
-    setIsSaving(true);
+    // Apply the edit locally right away so the row updates instantly; the
+    // server save runs behind it and the list is rolled back if it fails.
+    const previousMembers = members;
+    const trimmedTeam = draft.team.trim();
+
+    setMembers((current) =>
+      current.map((member) =>
+        member.id === id
+          ? {
+              ...member,
+              designation: draft.designation.trim() || member.designation,
+              joining_date: draft.joining_date,
+              leaving_date: draft.leaving_date,
+              name: draft.name.trim() || member.name,
+              team: trimmedTeam,
+              teams: Array.from(new Set([trimmedTeam, ...(member.teams ?? [])].filter(Boolean)))
+            }
+          : member
+      )
+    );
+    setEditingId(null);
     setMessage("");
 
     try {
@@ -135,14 +196,15 @@ export function TeamsPanel() {
       const result = (await response.json().catch(() => ({}))) as { error?: string };
 
       if (!response.ok) {
+        setMembers(previousMembers);
         setMessage(result.error ?? "Could not save this member.");
         return;
       }
 
-      setEditingId(null);
-      await loadMembers();
+      void loadMembers({ silent: true });
     } catch (error) {
       console.error("Team member save error:", error);
+      setMembers(previousMembers);
       setMessage("Could not save this member.");
     } finally {
       setIsSaving(false);
@@ -179,7 +241,7 @@ export function TeamsPanel() {
           <button
             className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-navy-700 px-4 text-xs font-black uppercase text-white transition hover:bg-navy-800 disabled:bg-slate-500"
             disabled={isLoading}
-            onClick={loadMembers}
+            onClick={() => void loadMembers()}
             type="button"
           >
             <RefreshCw className={`size-4 ${isLoading ? "animate-spin" : ""}`} />
@@ -203,7 +265,7 @@ export function TeamsPanel() {
             {canEdit ? <span>Actions</span> : null}
           </div>
 
-          {isLoading ? <p className="px-4 py-5 text-sm font-bold text-slate-500">Loading team members...</p> : null}
+          {isLoading ? <p className="px-4 py-5 text-sm font-bold text-slate-500"><LoadingIndicator label="Loading team members..." /></p> : null}
           {!isLoading && members.length === 0 && !message ? <p className="px-4 py-5 text-sm font-bold text-slate-500">No team members found.</p> : null}
 
           {!isLoading && sortedMembers.map(({ member, originalIndex }) => {
@@ -226,7 +288,33 @@ export function TeamsPanel() {
 
                 <div className="min-w-0">
                   {isEditing ? (
-                    <input className={editInputClass} onChange={(event) => setDraft((current) => ({ ...current, team: event.target.value }))} placeholder="Team / Partner" value={draft.team} />
+                    <div className="space-y-1">
+                      <select
+                        className={editInputClass}
+                        onChange={(event) => {
+                          if (event.target.value === "__custom__") {
+                            setIsCustomTeam(true);
+                            setDraft((current) => ({ ...current, team: "" }));
+                          } else {
+                            setIsCustomTeam(false);
+                            setDraft((current) => ({ ...current, team: event.target.value }));
+                          }
+                        }}
+                        value={isCustomTeam ? "__custom__" : draft.team}
+                      >
+                        <option value="">Select team</option>
+                        {teamOptions.map((option) => (
+                          <option key={option} value={option}>{option}</option>
+                        ))}
+                        {draft.team && !isCustomTeam && !teamOptions.includes(draft.team) ? (
+                          <option value={draft.team}>{draft.team}</option>
+                        ) : null}
+                        <option value="__custom__">New team...</option>
+                      </select>
+                      {isCustomTeam ? (
+                        <input className={editInputClass} onChange={(event) => setDraft((current) => ({ ...current, team: event.target.value }))} placeholder="New team name" value={draft.team} />
+                      ) : null}
+                    </div>
                   ) : (
                     <p className="font-bold text-slate-600">{formatMemberTeams(member)}</p>
                   )}
