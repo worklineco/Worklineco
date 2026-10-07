@@ -44,6 +44,67 @@ function formatCell(key: DisplayKey, value: string | null) {
   return value;
 }
 
+// Searchable client picker — filters by name or GSTIN as you type.
+function ClientSelect({ clients, onChange, value }: { clients: GstClient[]; onChange: (gstin: string) => void; value: string }) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+
+  const selected = useMemo(() => clients.find((client) => client.gstin === value) ?? null, [clients, value]);
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) {
+      return clients;
+    }
+    return clients.filter((client) => client.name.toLowerCase().includes(q) || client.gstin.toLowerCase().includes(q));
+  }, [clients, query]);
+
+  return (
+    <div className="relative">
+      <input
+        className="h-11 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold text-slate-800 outline-none focus:border-navy-400"
+        onBlur={() => window.setTimeout(() => setOpen(false), 150)}
+        onChange={(event) => {
+          setQuery(event.target.value);
+          setOpen(true);
+        }}
+        onFocus={() => {
+          setQuery("");
+          setOpen(true);
+        }}
+        placeholder="Search client by name or GSTIN…"
+        value={open ? query : selected ? `${selected.name} — ${selected.gstin}` : ""}
+      />
+      {open ? (
+        <ul className="absolute z-30 mt-1 max-h-72 w-full overflow-auto rounded-lg border border-slate-200 bg-white shadow-lg">
+          {filtered.length ? (
+            filtered.slice(0, 300).map((client, index) => (
+              <li key={`${client.gstin}-${index}`}>
+                <button
+                  className={`block w-full px-3 py-2 text-left text-sm hover:bg-slate-50 ${
+                    client.gstin === value ? "bg-navy-50 font-bold text-navy-800" : "font-semibold text-slate-700"
+                  }`}
+                  onMouseDown={(event) => {
+                    event.preventDefault();
+                    onChange(client.gstin);
+                    setOpen(false);
+                    setQuery("");
+                  }}
+                  type="button"
+                >
+                  {client.name} — {client.gstin}
+                  {client.hasCredentials ? "" : <span className="text-slate-400"> (no login saved)</span>}
+                </button>
+              </li>
+            ))
+          ) : (
+            <li className="px-3 py-2 text-sm font-semibold text-slate-400">No matching client.</li>
+          )}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
 const columns: { key: DisplayKey; label: string }[] = [
   { key: "ref_id", label: "Notice / Demand Order Id" },
   { key: "notice_type", label: "Type" },
@@ -155,22 +216,10 @@ export function GstTracker() {
         </p>
 
         <div className="mt-4 flex flex-wrap items-end gap-3">
-          <label className="flex min-w-[280px] flex-1 flex-col gap-1">
+          <div className="flex min-w-[280px] flex-1 flex-col gap-1">
             <span className="text-xs font-black uppercase tracking-wide text-slate-500">Client</span>
-            <select
-              className="h-11 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold text-slate-800 outline-none focus:border-navy-400"
-              onChange={(event) => setSelectedGstin(event.target.value)}
-              value={selectedGstin}
-            >
-              <option value="">Select a client…</option>
-              {clients.map((client) => (
-                <option key={client.gstin} value={client.gstin}>
-                  {client.name} — {client.gstin}
-                  {client.hasCredentials ? "" : " (no login saved)"}
-                </option>
-              ))}
-            </select>
-          </label>
+            <ClientSelect clients={clients} onChange={setSelectedGstin} value={selectedGstin} />
+          </div>
 
           <button
             className="inline-flex h-11 items-center gap-2 rounded-lg bg-navy-700 px-4 text-sm font-black text-white transition hover:bg-navy-800 disabled:cursor-not-allowed disabled:opacity-50"

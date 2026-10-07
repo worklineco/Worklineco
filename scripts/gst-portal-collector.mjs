@@ -8,7 +8,7 @@ import { chromium } from "playwright-core";
 import XLSX from "xlsx";
 import { getCollectorOutputDir, getDefaultWorkbookPath, getWorklineGstHome } from "./gst-helper-home.mjs";
 
-const COLLECTOR_VERSION = "2026-10-07-drilldown-v4";
+const COLLECTOR_VERSION = "2026-10-07-drilldown-v10-xpath";
 const GST_PORTAL_LOGIN_URL = "https://services.gst.gov.in/services/login";
 const WORKLINE_GST_HOME = getWorklineGstHome();
 const DEFAULT_WORKBOOK_PATH = getDefaultWorkbookPath();
@@ -437,6 +437,43 @@ async function waitForAuthenticatedPortal(page) {
   ).catch(() => {});
 }
 
+// The GST portal intermittently throws an "Access Denied" / session page that
+// clears on a reload. Detect it by URL or visible text.
+async function isAccessDenied(page) {
+  return page.evaluate(() => {
+    const url = (location.href || "").toLowerCase();
+    if (url.includes("accessdenied") || url.includes("sessionexpired")) {
+      return true;
+    }
+    const text = document.body ? document.body.innerText : "";
+    return /access denied/i.test(text);
+  }).catch(() => false);
+}
+
+// When Access Denied shows up, refresh the page (then fall back to re-opening
+// the given URL) until it clears, as the provided V3 collector did.
+async function recoverFromAccessDenied(page, reloadUrl) {
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    if (!(await isAccessDenied(page))) {
+      return true;
+    }
+    console.log(`Access Denied detected — refreshing the page (attempt ${attempt + 1}).`);
+    if (attempt === 0) {
+      await page.reload({ waitUntil: "domcontentloaded", timeout: 30_000 }).catch(() => {});
+    } else if (reloadUrl) {
+      await page.goto(reloadUrl, { waitUntil: "domcontentloaded", timeout: 30_000 }).catch(() => {});
+    } else {
+      await page.reload({ waitUntil: "domcontentloaded", timeout: 30_000 }).catch(() => {});
+    }
+    await page.waitForTimeout(3_000);
+  }
+  const stillDenied = await isAccessDenied(page);
+  if (stillDenied) {
+    console.log("Access Denied did not clear after refreshing.");
+  }
+  return !stillDenied;
+}
+
 async function clickPortalLinkByText(page, text, label) {
   const clicked = await page.evaluate((targetText) => {
     const normalize = (value) => String(value ?? "").replace(/\s+/g, " ").trim().toLowerCase();
@@ -513,6 +550,7 @@ async function handlePortalPopups(page) {
 async function navigateToNoticesAndOrders(page) {
   console.log("Navigating to Services > User Services > View Notices and Orders.");
   await waitForAuthenticatedPortal(page);
+  await recoverFromAccessDenied(page, "https://services.gst.gov.in/services/auth/dashboard");
   await handlePortalPopups(page);
 
   console.log("Opening View Notices and Orders directly in the authenticated GST session.");
@@ -576,6 +614,7 @@ async function navigateToNoticesAndOrders(page) {
 
   await page.waitForLoadState("domcontentloaded", { timeout: 20_000 }).catch(() => {});
   await page.waitForTimeout(2_000);
+  await recoverFromAccessDenied(page, NOTICES_URL);
 }
 
 // Reads the notices table on the current page. It picks the table whose header
@@ -761,6 +800,8 @@ async function captureDetailTables(page) {
 async function extractViewDetail(page) {
   await page.waitForLoadState("domcontentloaded", { timeout: 15_000 }).catch(() => {});
   await page.waitForTimeout(1_500);
+  await recoverFromAccessDenied(page);
+  await page.waitForTimeout(500);
 
   const header = await page.evaluate(() => {
     const clean = (value) => String(value ?? "").replace(/\s+/g, " ").trim();
@@ -859,33 +900,64 @@ async function noticeDataRowCount(page) {
   }).catch(() => 0);
 }
 
-// Clicks the View link in a given data row of the main notices table.
-async function clickNoticeView(page, rowIndex) {
-  return page.evaluate((index) => {
-    const clean = (value) => String(value ?? "").replace(/\s+/g, " ").trim();
-    let best = null;
-    let bestCount = -1;
-    for (const table of document.querySelectorAll("table")) {
-      const bodyRows = [...table.querySelectorAll("tbody tr")].filter(
-        (tr) => !tr.querySelector("th") && [...tr.querySelectorAll("td")].some((td) => clean(td.innerText || td.textContent))
-      );
-      if (bodyRows.length > bestCount) {
-        bestCount = bodyRows.length;
-        best = bodyRows;
+// Clicks the "View" link in data row `index` with a real (trusted) click, then
+// detects what the portal did: opened a new tab (popup), navigated the current
+// tab, or started a document download. Returns the detail page when there is
+// one, plus a descriptive reason for the log.
+async function openNoticeDetail(page, index, previousUrl) {
+  // The View link lives in the 6th cell (Action column) of each data row:
+  // //table/tbody/tr[N]/td[6]/div/a. Selecting td[6] anchors gives one per row
+  // in row order, matching the extracted list rows.
+  const viewLinks = page.locator("xpath=//table/tbody/tr/td[6]//a");
+  const total = await viewLinks.count().catch(() => 0);
+  if (index >= total) {
+    return { detailPage: null, reason: `no-view-link (found ${total})` };
+  }
+  const viewLink = viewLinks.nth(index);
+
+  const popupPromise = page.waitForEvent("popup", { timeout: 5_000 }).catch(() => null);
+  const downloadPromise = page.waitForEvent("download", { timeout: 5_000 }).catch(() => null);
+  const navPromise = page
+    .waitForFunction(
+      (prev) => location.href !== prev || /case\s*id/i.test(document.body ? document.body.innerText : ""),
+      previousUrl,
+      { timeout: 5_000 }
+    )
+    .then(() => true)
+    .catch(() => false);
+
+  let clickError = "";
+  try {
+    await viewLink.scrollIntoViewIfNeeded({ timeout: 5_000 });
+    await viewLink.click({ timeout: 8_000 });
+  } catch (error) {
+    clickError = String(error?.message || error).split("\n")[0];
+  }
+
+  const [popup, download, navigated] = await Promise.all([popupPromise, downloadPromise, navPromise]);
+
+  if (download) {
+    const name = (() => {
+      try {
+        return download.suggestedFilename();
+      } catch {
+        return "file";
       }
-    }
-    if (!best || !best[index]) {
-      return false;
-    }
-    const row = best[index];
-    const link = row.querySelector("a") || [...row.querySelectorAll("button")].find((button) => /view/i.test(button.textContent || ""));
-    if (!link) {
-      return false;
-    }
-    link.scrollIntoView({ block: "center" });
-    link.click();
-    return true;
-  }, rowIndex).catch(() => false);
+    })();
+    await download.cancel().catch(() => {});
+    return { detailPage: null, reason: `download(${name})`, clickError };
+  }
+
+  if (popup) {
+    await popup.waitForLoadState("domcontentloaded", { timeout: 15_000 }).catch(() => {});
+    return { detailPage: popup, isPopup: true, reason: `popup(${popup.url()})`, clickError };
+  }
+
+  if (navigated && !(await isAccessDenied(page))) {
+    return { detailPage: page, isPopup: false, reason: `navigated(${page.url()})`, clickError };
+  }
+
+  return { detailPage: null, reason: clickError ? `click-failed: ${clickError}` : "nothing-happened", clickError };
 }
 
 // Logs the header row of every visible table so we can see what the portal returned.
@@ -938,25 +1010,36 @@ async function collectNoticesAndOrders(page) {
   console.log(`Main table: ${listRows.length} list row(s), ${rowCount} data row(s). Drilling into ${count} View page(s)...`);
 
   for (let index = 0; index < count; index += 1) {
-    const opened = await clickNoticeView(page, index);
-    if (!opened) {
-      console.log(`  Row ${index + 1}: no View link found.`);
-      continue;
+    const previousUrl = page.url();
+    const opened = await openNoticeDetail(page, index, previousUrl);
+    console.log(`  Row ${index + 1}/${count}: ${opened.reason}`);
+
+    if (opened.detailPage) {
+      const detail = await extractViewDetail(opened.detailPage);
+      if (listRows[index]) {
+        listRows[index].caseId = detail.caseId || listRows[index].caseId;
+        listRows[index].taxPeriod = detail.period || listRows[index].taxPeriod;
+        listRows[index].status = detail.status || listRows[index].status;
+        listRows[index].detail = { tabs: detail.tabs };
+      }
+
+      if (opened.isPopup) {
+        await opened.detailPage.close().catch(() => {});
+      } else {
+        // Return to the list within the session (Back avoids the Access Denied
+        // a fresh URL load triggers).
+        await page.goBack({ waitUntil: "domcontentloaded", timeout: 20_000 }).catch(() => {});
+        await page.waitForTimeout(1_200);
+      }
     }
 
-    const detail = await extractViewDetail(page);
-    if (listRows[index]) {
-      listRows[index].caseId = detail.caseId || listRows[index].caseId;
-      listRows[index].taxPeriod = detail.period || listRows[index].taxPeriod;
-      listRows[index].status = detail.status || listRows[index].status;
-      listRows[index].detail = { tabs: detail.tabs };
+    // Make sure we are back on a working notices list before the next row.
+    if (await isAccessDenied(page)) {
+      console.log(`  Access Denied — re-opening via User Services > View Notices and Orders.`);
+      await navigateToNoticesAndOrders(page);
+      await clickPortalLinkByText(page, "100", "100 rows per page").catch(() => false);
+      await page.waitForTimeout(600);
     }
-
-    // Return to the list for the next row.
-    await page.goto(NOTICES_URL, { waitUntil: "domcontentloaded", timeout: 30_000 }).catch(() => {});
-    await page.waitForTimeout(1_500);
-    await clickPortalLinkByText(page, "100", "100 rows per page").catch(() => false);
-    await page.waitForTimeout(800);
   }
 
   console.log(`Finished drilling. Collected ${listRows.length} notice row(s) with detail.`);
@@ -1417,7 +1500,7 @@ async function main() {
   }
 
   const browser = await launchChrome();
-  const context = await browser.newContext({ viewport: null });
+  const context = await browser.newContext({ acceptDownloads: true, viewport: null });
   const page = await context.newPage();
 
   await page.goto(GST_PORTAL_LOGIN_URL, { waitUntil: "domcontentloaded" });
