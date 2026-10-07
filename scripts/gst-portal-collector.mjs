@@ -51,6 +51,17 @@ const HEADER_ALIASES = new Map([
   ["reference number", "refId"],
   ["ref no", "refId"],
   ["arn", "refId"],
+  ["notice/demand order id", "refId"],
+  ["notice / demand order id", "refId"],
+  ["notice demand order id", "refId"],
+  ["demand order id", "refId"],
+  ["order id", "refId"],
+  ["notice id", "refId"],
+  ["notice / order description", "description"],
+  ["notice/order description", "description"],
+  ["notice order description", "description"],
+  ["order description", "description"],
+  ["date of issuance", "dateOfIssue"],
   ["date of issue", "dateOfIssue"],
   ["issue date", "dateOfIssue"],
   ["date of issuance", "dateOfIssue"],
@@ -259,50 +270,12 @@ function normalizeExtractedRow(row, index) {
   };
 }
 
-function isPortalDate(value) {
-  return Boolean(parsePortalDate(value));
-}
-
-function normalizeNoticeTableRow(row, index) {
-  const refId = cleanCell(row.refId ?? row["Ref ID"] ?? row["Column 1"]);
-  const noticeType = cleanCell(row.typeOfNotice ?? row["Type of Notice"] ?? row["Column 2"]);
-  const description = cleanCell(row.description ?? row.Description ?? row["Column 3"]);
-  const dateOfIssue = cleanCell(row.dateOfIssue ?? row["Date of Issue"] ?? row["Date of Issuance"] ?? row["Column 4"]);
-  const fifthColumn = cleanCell(row.dueDate ?? row["Due Date"] ?? row["Column 5"]);
-
-  return {
-    sNo: row.sNo ?? row["S.No."] ?? String(index + 1),
-    typeOfNotice: noticeType,
-    description,
-    refId,
-    dateOfIssue,
-    caseId: cleanCell(row.caseId ?? row["Case ID"] ?? ""),
-    status: isPortalDate(fifthColumn) ? "" : fifthColumn,
-    taxPeriod: cleanCell(row.taxPeriod ?? row["Tax Period"] ?? ""),
-    dueDate: isPortalDate(fifthColumn) ? fifthColumn : "",
-    section: cleanCell(row.section ?? row.Section ?? ""),
-    replyFiling: cleanCell(row.replyFiling ?? row["Reply Filing"] ?? ""),
-  };
-}
-
 async function readNoticeRowsFromOutput(filePath) {
   const content = await fs.readFile(filePath, "utf8");
   const payload = JSON.parse(content);
-  const rows = [];
 
-  for (const table of payload.tables ?? []) {
-    for (const row of table.rows ?? []) {
-      rows.push(
-        normalizeNoticeTableRow(
-          {
-            ...row,
-            sourceSection: table.section,
-          },
-          rows.length,
-        ),
-      );
-    }
-  }
+  // New format stores field-keyed rows directly under `rows`.
+  const rows = Array.isArray(payload.rows) ? payload.rows : [];
 
   return {
     extractedAt: payload.extractedAt || new Date().toISOString(),
@@ -604,88 +577,172 @@ async function navigateToNoticesAndOrders(page) {
   await page.waitForTimeout(2_000);
 }
 
-async function extractAllVisibleTables(page) {
-  return page.evaluate(() => {
-    function visibleText(node) {
-      return String(node?.innerText ?? node?.textContent ?? "")
-        .replace(/\s+/g, " ")
-        .trim();
-    }
+// Reads the notices table on the current page. It picks the table whose header
+// row maps best to our known fields, then pulls each body row by column
+// position (the robust approach proven in the V3 collector). Filter-input rows
+// and header rows are skipped.
+async function extractNoticeTableRows(page) {
+  return page.evaluate(
+    ({ aliases, fieldNames, sectionLabel }) => {
+      const aliasMap = new Map(aliases);
 
-    function isVisible(node) {
-      return Boolean(node.offsetWidth || node.offsetHeight || node.getClientRects().length);
-    }
+      function clean(value) {
+        return String(value ?? "").replace(/\s+/g, " ").trim();
+      }
 
-    return [...document.querySelectorAll("table")]
-      .filter(isVisible)
-      .map((table, tableIndex) => {
+      function normalizeHeader(value) {
+        return clean(value).replace(/[.:#]/g, "").trim().toLowerCase();
+      }
+
+      function mapHeader(header) {
+        return aliasMap.get(normalizeHeader(header)) ?? null;
+      }
+
+      function isVisible(node) {
+        return Boolean(node.offsetWidth || node.offsetHeight || node.getClientRects().length);
+      }
+
+      // Choose the visible table with the most header cells mapping to our fields.
+      let best = null;
+      let bestScore = 0;
+      for (const table of document.querySelectorAll("table")) {
+        if (!isVisible(table)) {
+          continue;
+        }
         const headerRows = [...table.querySelectorAll("thead tr")];
-        const fallbackHeaderRow = table.querySelector("tr");
-        const headerCells = [
-          ...(headerRows.at(-1)?.querySelectorAll("th,td") ?? fallbackHeaderRow?.querySelectorAll("th,td") ?? []),
-        ].map(visibleText);
-        const bodyRows = [...table.querySelectorAll("tbody tr")];
-        const fallbackRows = [...table.querySelectorAll("tr")].slice(headerCells.length ? 1 : 0);
-        const dataRows = bodyRows.length ? bodyRows : fallbackRows;
-        const rows = dataRows
-          .map((row) => {
-            const cells = [...row.querySelectorAll("td,th")].map(visibleText);
-            if (!cells.some(Boolean)) {
-              return null;
-            }
+        const headerSource = headerRows.at(-1) ?? table.querySelector("tr");
+        const headerCells = [...(headerSource?.querySelectorAll("th,td") ?? [])].map((node) => clean(node.innerText || node.textContent));
+        const score = headerCells.map(mapHeader).filter(Boolean).length;
+        if (score > bestScore) {
+          bestScore = score;
+          best = { headerCells, table };
+        }
+      }
 
-            if (!headerCells.length) {
-              return cells;
-            }
+      if (!best || bestScore < 2) {
+        return [];
+      }
 
-            return Object.fromEntries(headerCells.map((header, index) => [header || `Column ${index + 1}`, cells[index] ?? ""]));
-          })
-          .filter(Boolean);
+      const bodyRows = [...best.table.querySelectorAll("tbody tr")];
+      const dataRows = bodyRows.length ? bodyRows : [...best.table.querySelectorAll("tr")];
+      const out = [];
 
-        return {
-          tableIndex: tableIndex + 1,
-          caption: visibleText(table.querySelector("caption")),
-          headers: headerCells,
-          rows,
-        };
-      })
-      .filter((table) => table.rows.length);
-  });
+      for (const row of dataRows) {
+        if (row.querySelector("th")) {
+          continue; // header row
+        }
+        const cellNodes = [...row.querySelectorAll("td")];
+        if (!cellNodes.length) {
+          continue;
+        }
+        // Skip the filter row (cells that only hold inputs/selects, no text).
+        if (row.querySelector("input,select") && cellNodes.every((node) => !clean(node.innerText || node.textContent))) {
+          continue;
+        }
+        const cells = cellNodes.map((node) => clean(node.innerText || node.textContent));
+        if (!cells.some(Boolean)) {
+          continue;
+        }
+
+        const record = Object.fromEntries(fieldNames.map((name) => [name, ""]));
+        best.headerCells.forEach((header, index) => {
+          const field = mapHeader(header);
+          if (field && !record[field]) {
+            record[field] = cells[index] ?? "";
+          }
+        });
+        record.section = record.section || sectionLabel;
+
+        // Keep only rows that carry a real identifier or content.
+        if (record.refId || record.caseId || record.typeOfNotice || record.description) {
+          out.push(record);
+        }
+      }
+
+      return out;
+    },
+    { aliases: [...HEADER_ALIASES.entries()], fieldNames: FIELD_NAMES, sectionLabel: "" },
+  );
 }
 
+// Clicks through every page of the current notices table, collecting rows.
+async function collectRowsAcrossPages(page, sectionLabel) {
+  // Show as many rows per page as the portal allows.
+  await clickPortalLinkByText(page, "100", "100 rows per page").catch(() => false);
+  await page.waitForTimeout(1_200);
+
+  const rows = [];
+  const seen = new Set();
+
+  for (let pageIndex = 0; pageIndex < 60; pageIndex += 1) {
+    const pageRows = await extractNoticeTableRows(page);
+    for (const row of pageRows) {
+      row.section = row.section || sectionLabel;
+      const key = `${row.refId || ""}|${row.caseId || ""}|${row.typeOfNotice || ""}|${row.description || ""}|${row.dateOfIssue || ""}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        rows.push(row);
+      }
+    }
+
+    const movedNext = await page.evaluate(() => {
+      const normalize = (value) => String(value ?? "").replace(/\s+/g, " ").trim().toLowerCase();
+      const candidate = [...document.querySelectorAll("a,button,li")].find((element) => {
+        const label = normalize(element.innerText || element.textContent);
+        const isNext = label === "»" || label === "›" || label === "next" || label === "next ›" || label === "next »";
+        if (!isNext) {
+          return false;
+        }
+        const disabled =
+          /disabled/i.test(element.className || "") ||
+          element.getAttribute("aria-disabled") === "true" ||
+          /disabled/i.test(element.closest("li")?.className || "");
+        return !disabled;
+      });
+      if (!candidate) {
+        return false;
+      }
+      const clickable = candidate.tagName === "LI" ? candidate.querySelector("a,button") ?? candidate : candidate;
+      clickable.click();
+      return true;
+    }).catch(() => false);
+
+    if (!movedNext) {
+      break;
+    }
+    await page.waitForTimeout(1_500);
+  }
+
+  return rows;
+}
+
+// Collects both "Notices and Orders" and "Additional Notices and Orders" tabs.
 async function collectNoticesAndOrders(page) {
   await navigateToNoticesAndOrders(page);
 
-  const possibleTabs = ["Additional Notices and Orders", "Notices and Orders"];
-  const tables = [];
+  const rows = [];
+  const seen = new Set();
 
-  for (const tabName of possibleTabs) {
-    await clickPortalLinkByText(page, tabName, `${tabName} tab`).catch(() => false);
+  for (const tabName of ["Notices and Orders", "Additional Notices and Orders"]) {
+    const clicked = await clickPortalLinkByText(page, tabName, `${tabName} tab`).catch(() => false);
     await page.waitForTimeout(1_500);
 
-    await clickPortalLinkByText(page, "100", "100 rows per page").catch(() => false);
-    await page.waitForTimeout(1_000);
+    const tabRows = await collectRowsAcrossPages(page, tabName);
+    for (const row of tabRows) {
+      const key = `${row.refId || ""}|${row.caseId || ""}|${row.typeOfNotice || ""}|${row.description || ""}|${row.dateOfIssue || ""}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        rows.push(row);
+      }
+    }
 
-    const extractedTables = await extractAllVisibleTables(page);
-    for (const table of extractedTables) {
-      tables.push({
-        section: tabName,
-        ...table,
-      });
+    if (!clicked && rows.length) {
+      // Only one tab exists on this portal; no need to look for the other.
+      break;
     }
   }
 
-  if (!tables.length) {
-    const extractedTables = await extractAllVisibleTables(page);
-    for (const table of extractedTables) {
-      tables.push({
-        section: "View Notices and Orders",
-        ...table,
-      });
-    }
-  }
-
-  return tables;
+  return rows;
 }
 
 async function extractBestTableFromFrame(frame) {
@@ -902,18 +959,13 @@ async function readClientFromClientRecords(gstin) {
 
 // Writes extracted notice tables straight into gst_litigation_cases using the
 // service-role key (no interactive WorkLine sign-in needed).
-async function syncTablesWithServiceRole({ clientName, extractedAt, gstin, organisationId, tables }) {
+async function syncRowsWithServiceRole({ clientName, extractedAt, gstin, organisationId, rows }) {
   const admin = createAdminSupabaseClient();
   if (!admin) {
     return { insertedOrUpdated: 0, registrationId: "", skipped: true };
   }
 
-  const noticeRows = [];
-  for (const table of tables ?? []) {
-    for (const row of table.rows ?? []) {
-      noticeRows.push(normalizeNoticeTableRow(row, noticeRows.length));
-    }
-  }
+  const noticeRows = Array.isArray(rows) ? rows : [];
 
   if (!noticeRows.length) {
     return { insertedOrUpdated: 0, registrationId: "", skipped: false };
@@ -1189,7 +1241,7 @@ async function main() {
 
     if (options.autoNotices) {
       await waitForAuthenticatedPortal(page);
-      const tables = await collectNoticesAndOrders(page);
+      const rows = await collectNoticesAndOrders(page);
       const extractedAt = new Date().toISOString();
       const outputPath = await saveCollectorOutput({
         client,
@@ -1200,23 +1252,23 @@ async function main() {
           gstin: client.gstin,
           source: "gst-portal-local-browser",
           extractedAt,
-          tables,
+          rows,
         },
       });
 
       console.log("");
-      console.log(`Extracted ${tables.reduce((total, table) => total + table.rows.length, 0)} table rows from ${tables.length} table(s).`);
+      console.log(`Extracted ${rows.length} notice row(s).`);
       console.log(`Saved local output: ${outputPath}`);
 
       // Push straight into WorkLine so the GST Tracker shows the notices firm-wide.
       if (client.organisationId) {
         try {
-          const synced = await syncTablesWithServiceRole({
+          const synced = await syncRowsWithServiceRole({
             clientName: client.clientName || options.clientName,
             extractedAt,
             gstin: client.gstin,
             organisationId: client.organisationId,
-            tables,
+            rows,
           });
           if (synced.skipped) {
             console.log("Supabase service role not configured locally, so rows were not saved to WorkLine.");
