@@ -8,6 +8,7 @@ import { chromium } from "playwright-core";
 import XLSX from "xlsx";
 import { getCollectorOutputDir, getDefaultWorkbookPath, getWorklineGstHome } from "./gst-helper-home.mjs";
 
+const COLLECTOR_VERSION = "2026-10-07-positional-v2";
 const GST_PORTAL_LOGIN_URL = "https://services.gst.gov.in/services/login";
 const WORKLINE_GST_HOME = getWorklineGstHome();
 const DEFAULT_WORKBOOK_PATH = getDefaultWorkbookPath();
@@ -676,6 +677,7 @@ async function collectRowsAcrossPages(page, sectionLabel) {
 
   for (let pageIndex = 0; pageIndex < 60; pageIndex += 1) {
     const pageRows = await extractNoticeTableRows(page);
+    console.log(`  ${sectionLabel} page ${pageIndex + 1}: ${pageRows.length} row(s) read.`);
     for (const row of pageRows) {
       row.section = row.section || sectionLabel;
       const key = `${row.refId || ""}|${row.caseId || ""}|${row.typeOfNotice || ""}|${row.description || ""}|${row.dateOfIssue || ""}`;
@@ -716,30 +718,54 @@ async function collectRowsAcrossPages(page, sectionLabel) {
   return rows;
 }
 
-// Collects both "Notices and Orders" and "Additional Notices and Orders" tabs.
+// Logs the header row of every visible table so we can see what the portal returned.
+async function logVisibleTableHeaders(page) {
+  const tables = await page.evaluate(() => {
+    const clean = (value) => String(value ?? "").replace(/\s+/g, " ").trim();
+    const isVisible = (node) => Boolean(node.offsetWidth || node.offsetHeight || node.getClientRects().length);
+    return [...document.querySelectorAll("table")].filter(isVisible).map((table) => {
+      const headerSource = [...table.querySelectorAll("thead tr")].at(-1) ?? table.querySelector("tr");
+      const headers = [...(headerSource?.querySelectorAll("th,td") ?? [])].map((node) => clean(node.innerText || node.textContent));
+      const bodyRowCount = table.querySelectorAll("tbody tr").length;
+      return { bodyRowCount, headers };
+    });
+  }).catch(() => []);
+
+  console.log(`Found ${tables.length} visible table(s) on the notices page.`);
+  tables.forEach((table, index) => {
+    console.log(`  Table ${index + 1} (${table.bodyRowCount} body rows): ${table.headers.join(" | ")}`);
+  });
+}
+
+// Collects the merged "Notices and Orders" table (older portals also had an
+// "Additional Notices and Orders" tab, so we still try it).
 async function collectNoticesAndOrders(page) {
   await navigateToNoticesAndOrders(page);
+  await logVisibleTableHeaders(page);
 
   const rows = [];
   const seen = new Set();
 
-  for (const tabName of ["Notices and Orders", "Additional Notices and Orders"]) {
-    const clicked = await clickPortalLinkByText(page, tabName, `${tabName} tab`).catch(() => false);
-    await page.waitForTimeout(1_500);
-
-    const tabRows = await collectRowsAcrossPages(page, tabName);
-    for (const row of tabRows) {
+  const addRows = (incoming) => {
+    for (const row of incoming) {
       const key = `${row.refId || ""}|${row.caseId || ""}|${row.typeOfNotice || ""}|${row.description || ""}|${row.dateOfIssue || ""}`;
       if (!seen.has(key)) {
         seen.add(key);
         rows.push(row);
       }
     }
+  };
 
-    if (!clicked && rows.length) {
-      // Only one tab exists on this portal; no need to look for the other.
-      break;
-    }
+  // The current portal shows a single merged table — extract it directly first.
+  addRows(await collectRowsAcrossPages(page, "Notices and Orders"));
+  console.log(`After main table: ${rows.length} row(s).`);
+
+  // Older portals keep a separate "Additional Notices and Orders" tab.
+  const openedAdditional = await clickPortalLinkByText(page, "Additional Notices and Orders", "Additional Notices and Orders tab").catch(() => false);
+  if (openedAdditional) {
+    await page.waitForTimeout(1_500);
+    addRows(await collectRowsAcrossPages(page, "Additional Notices and Orders"));
+    console.log(`After additional notices tab: ${rows.length} row(s).`);
   }
 
   return rows;
@@ -1126,6 +1152,7 @@ async function syncRowsToSupabase({ client, extractedAt, options, rows }) {
 
 async function main() {
   await loadLocalEnv();
+  console.log(`WorkLine GST collector build: ${COLLECTOR_VERSION}`);
   let options = parseArgs();
 
   if (options.importNoticesFile) {

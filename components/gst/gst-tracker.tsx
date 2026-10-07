@@ -23,17 +23,11 @@ type GstCase = {
 const HELPER_URL = "http://127.0.0.1:48782";
 
 const columns: { key: keyof GstCase; label: string }[] = [
-  { key: "serial_no", label: "S.No." },
-  { key: "notice_type", label: "Type of Notice" },
-  { key: "description", label: "Description" },
-  { key: "ref_id", label: "Ref ID" },
-  { key: "date_of_issue", label: "Date of Issue" },
-  { key: "case_id", label: "Case ID" },
-  { key: "status", label: "Status" },
-  { key: "tax_period", label: "Tax Period" },
-  { key: "due_date", label: "Due Date" },
-  { key: "section", label: "Section" },
-  { key: "reply_filing_status", label: "Reply Filing" }
+  { key: "ref_id", label: "Notice / Demand Order Id" },
+  { key: "notice_type", label: "Type" },
+  { key: "description", label: "Notice / Order Description" },
+  { key: "date_of_issue", label: "Date of Issuance" },
+  { key: "due_date", label: "Due Date" }
 ];
 
 export function GstTracker() {
@@ -199,7 +193,7 @@ export function GstTracker() {
         </div>
 
         <div className="overflow-auto rounded-lg border border-slate-200">
-          <table className="w-full min-w-[1100px] border-collapse text-left text-sm">
+          <table className="w-full min-w-[760px] border-collapse text-left text-sm">
             <thead className="bg-slate-100 text-[11px] font-black uppercase tracking-wide text-slate-600">
               <tr>
                 {columns.map((column) => (
