@@ -1,9 +1,12 @@
 "use client";
 
-import { AlertTriangle, Download, RefreshCw, Trash2 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { AlertTriangle, ChevronDown, ChevronRight, Download, RefreshCw, Trash2 } from "lucide-react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 
 type GstClient = { gstin: string; group: string; hasCredentials: boolean; name: string };
+type DetailTable = { headers: string[]; rows: string[][] };
+type DetailTab = { name: string; tables: DetailTable[] };
+type RawPayload = { detail?: { tabs?: DetailTab[] } } | null;
 type GstCase = {
   case_id: string | null;
   date_of_issue: string | null;
@@ -11,6 +14,7 @@ type GstCase = {
   due_date: string | null;
   id: string;
   notice_type: string | null;
+  raw_payload: RawPayload;
   ref_id: string | null;
   reply_filing_status: string | null;
   section: string | null;
@@ -22,10 +26,12 @@ type GstCase = {
 
 const HELPER_URL = "http://127.0.0.1:48782";
 
-const dateKeys = new Set<keyof GstCase>(["date_of_issue", "due_date"]);
+type DisplayKey = "ref_id" | "notice_type" | "description" | "date_of_issue" | "due_date";
+
+const dateKeys = new Set<DisplayKey>(["date_of_issue", "due_date"]);
 
 // Shows stored dates (ISO yyyy-mm-dd) as dd-mm-yyyy; leaves other text as-is.
-function formatCell(key: keyof GstCase, value: GstCase[keyof GstCase]) {
+function formatCell(key: DisplayKey, value: string | null) {
   if (value === null || value === undefined || value === "") {
     return "—";
   }
@@ -38,7 +44,7 @@ function formatCell(key: keyof GstCase, value: GstCase[keyof GstCase]) {
   return value;
 }
 
-const columns: { key: keyof GstCase; label: string }[] = [
+const columns: { key: DisplayKey; label: string }[] = [
   { key: "ref_id", label: "Notice / Demand Order Id" },
   { key: "notice_type", label: "Type" },
   { key: "description", label: "Notice / Order Description" },
@@ -55,6 +61,7 @@ export function GstTracker() {
   const [isFetching, setIsFetching] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const selectedClient = useMemo(() => clients.find((client) => client.gstin === selectedGstin) ?? null, [clients, selectedGstin]);
 
@@ -212,6 +219,7 @@ export function GstTracker() {
           <table className="w-full min-w-[760px] border-collapse text-left text-sm">
             <thead className="bg-slate-100 text-[11px] font-black uppercase tracking-wide text-slate-600">
               <tr>
+                <th className="w-8 border-b border-slate-200 px-2 py-2" />
                 {columns.map((column) => (
                   <th className="whitespace-nowrap border-b border-slate-200 px-3 py-2" key={String(column.key)}>
                     {column.label}
@@ -223,33 +231,54 @@ export function GstTracker() {
             <tbody>
               {!selectedGstin ? (
                 <tr>
-                  <td className="px-4 py-10 text-center text-sm font-bold text-slate-400" colSpan={columns.length + 1}>
+                  <td className="px-4 py-10 text-center text-sm font-bold text-slate-400" colSpan={columns.length + 2}>
                     Select a client to see its notices and orders.
                   </td>
                 </tr>
               ) : cases.length ? (
-                cases.map((row) => (
-                  <tr className="border-b border-slate-100 last:border-b-0 hover:bg-slate-50" key={row.id}>
-                    {columns.map((column) => (
-                      <td className="px-3 py-2 align-top font-semibold text-slate-700" key={String(column.key)}>
-                        {formatCell(column.key, row[column.key])}
-                      </td>
-                    ))}
-                    <td className="px-3 py-2 text-right">
-                      <button
-                        aria-label="Remove notice"
-                        className="inline-flex size-7 items-center justify-center rounded-md border border-rose-200 text-rose-600 hover:bg-rose-50"
-                        onClick={() => void deleteCase(row.id)}
-                        type="button"
+                cases.map((row) => {
+                  const isExpanded = expandedId === row.id;
+                  return (
+                    <Fragment key={row.id}>
+                      <tr
+                        className="cursor-pointer border-b border-slate-100 hover:bg-slate-50"
+                        onClick={() => setExpandedId(isExpanded ? null : row.id)}
                       >
-                        <Trash2 className="size-3.5" />
-                      </button>
-                    </td>
-                  </tr>
-                ))
+                        <td className="px-2 py-2 align-top text-slate-400">
+                          {isExpanded ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
+                        </td>
+                        {columns.map((column) => (
+                          <td className="px-3 py-2 align-top font-semibold text-slate-700" key={String(column.key)}>
+                            {formatCell(column.key, row[column.key])}
+                          </td>
+                        ))}
+                        <td className="px-3 py-2 text-right">
+                          <button
+                            aria-label="Remove notice"
+                            className="inline-flex size-7 items-center justify-center rounded-md border border-rose-200 text-rose-600 hover:bg-rose-50"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void deleteCase(row.id);
+                            }}
+                            type="button"
+                          >
+                            <Trash2 className="size-3.5" />
+                          </button>
+                        </td>
+                      </tr>
+                      {isExpanded ? (
+                        <tr className="border-b border-slate-100 bg-slate-50/60">
+                          <td className="px-4 py-4" colSpan={columns.length + 2}>
+                            <NoticeDetail row={row} />
+                          </td>
+                        </tr>
+                      ) : null}
+                    </Fragment>
+                  );
+                })
               ) : (
                 <tr>
-                  <td className="px-4 py-10 text-center text-sm font-bold text-slate-400" colSpan={columns.length + 1}>
+                  <td className="px-4 py-10 text-center text-sm font-bold text-slate-400" colSpan={columns.length + 2}>
                     {isLoadingCases ? "Loading…" : "No notices saved yet. Click Get data to pull them from the portal."}
                   </td>
                 </tr>
@@ -259,5 +288,66 @@ export function GstTracker() {
         </div>
       </section>
     </div>
+  );
+}
+
+function NoticeDetail({ row }: { row: GstCase }) {
+  const tabs = row.raw_payload?.detail?.tabs ?? [];
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap gap-x-8 gap-y-2 text-sm">
+        <DetailField label="Case ID" value={row.case_id} />
+        <DetailField label="Period" value={row.tax_period} />
+        <DetailField label="Status" value={row.status} />
+      </div>
+
+      {tabs.length ? (
+        tabs.map((tab, tabIndex) => (
+          <div className="space-y-2" key={`${tab.name}-${tabIndex}`}>
+            <p className="text-xs font-black uppercase tracking-wide text-navy-700">{tab.name}</p>
+            {tab.tables.map((table, tableIndex) => (
+              <div className="overflow-auto rounded-lg border border-slate-200 bg-white" key={tableIndex}>
+                <table className="w-full border-collapse text-left text-xs">
+                  {table.headers.length ? (
+                    <thead className="bg-slate-100 font-black uppercase tracking-wide text-slate-600">
+                      <tr>
+                        {table.headers.map((header, headerIndex) => (
+                          <th className="whitespace-nowrap border-b border-slate-200 px-2 py-1.5" key={headerIndex}>
+                            {header || "—"}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                  ) : null}
+                  <tbody>
+                    {table.rows.map((cells, rowIndex) => (
+                      <tr className="border-b border-slate-100 last:border-b-0" key={rowIndex}>
+                        {cells.map((cell, cellIndex) => (
+                          <td className="px-2 py-1.5 align-top font-semibold text-slate-700" key={cellIndex}>
+                            {cell || "—"}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ))}
+          </div>
+        ))
+      ) : (
+        <p className="text-xs font-semibold text-slate-400">No detail captured for this notice yet.</p>
+      )}
+    </div>
+  );
+}
+
+function DetailField({ label, value }: { label: string; value: string | null }) {
+  return (
+    <span className="inline-flex flex-col">
+      <span className="text-[10px] font-black uppercase tracking-wide text-slate-400">{label}</span>
+      <span className="text-sm font-bold text-slate-800">{value || "—"}</span>
+    </span>
   );
 }

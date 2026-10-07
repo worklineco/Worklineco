@@ -8,7 +8,7 @@ import { chromium } from "playwright-core";
 import XLSX from "xlsx";
 import { getCollectorOutputDir, getDefaultWorkbookPath, getWorklineGstHome } from "./gst-helper-home.mjs";
 
-const COLLECTOR_VERSION = "2026-10-07-positional-v3-headerfix";
+const COLLECTOR_VERSION = "2026-10-07-drilldown-v4";
 const GST_PORTAL_LOGIN_URL = "https://services.gst.gov.in/services/login";
 const WORKLINE_GST_HOME = getWorklineGstHome();
 const DEFAULT_WORKBOOK_PATH = getDefaultWorkbookPath();
@@ -685,56 +685,207 @@ async function extractNoticeTableRows(page) {
   );
 }
 
-// Clicks through every page of the current notices table, collecting rows.
-async function collectRowsAcrossPages(page, sectionLabel) {
-  // Show as many rows per page as the portal allows.
-  await clickPortalLinkByText(page, "100", "100 rows per page").catch(() => false);
-  await page.waitForTimeout(1_200);
+const NOTICES_URL = "https://services.gst.gov.in/services/auth/notices";
 
-  const rows = [];
-  const seen = new Set();
-
-  for (let pageIndex = 0; pageIndex < 60; pageIndex += 1) {
-    const pageRows = await extractNoticeTableRows(page);
-    console.log(`  ${sectionLabel} page ${pageIndex + 1}: ${pageRows.length} row(s) read.`);
-    for (const row of pageRows) {
-      row.section = row.section || sectionLabel;
-      const key = `${row.refId || ""}|${row.caseId || ""}|${row.typeOfNotice || ""}|${row.description || ""}|${row.dateOfIssue || ""}`;
-      if (!seen.has(key)) {
-        seen.add(key);
-        rows.push(row);
-      }
+// Clicks an element in the left area of a detail page whose text matches label.
+async function clickLeftTab(page, label) {
+  return page.evaluate((target) => {
+    const norm = (value) => String(value ?? "").replace(/\s+/g, " ").trim().toLowerCase();
+    const width = window.innerWidth;
+    const element = [...document.querySelectorAll("a,li,button,[role='tab'],span")].find((candidate) => {
+      const rect = candidate.getBoundingClientRect();
+      return norm(candidate.innerText || candidate.textContent) === norm(target) && rect.width > 0 && rect.height > 0 && rect.left < width * 0.5;
+    });
+    if (!element) {
+      return false;
     }
+    const clickable = element.tagName === "LI" || element.tagName === "SPAN" ? element.querySelector("a,button") ?? element : element;
+    clickable.scrollIntoView({ block: "center" });
+    clickable.click();
+    return true;
+  }, label).catch(() => false);
+}
 
-    const movedNext = await page.evaluate(() => {
-      const normalize = (value) => String(value ?? "").replace(/\s+/g, " ").trim().toLowerCase();
-      const candidate = [...document.querySelectorAll("a,button,li")].find((element) => {
-        const label = normalize(element.innerText || element.textContent);
-        const isNext = label === "»" || label === "›" || label === "next" || label === "next ›" || label === "next »";
-        if (!isNext) {
-          return false;
+// Captures every visible data table on the current detail view as {headers, rows}.
+async function captureDetailTables(page) {
+  return page.evaluate(() => {
+    const clean = (value) => String(value ?? "").replace(/\s+/g, " ").trim();
+    const isVisible = (node) => Boolean(node.offsetWidth || node.offsetHeight || node.getClientRects().length);
+    const pickHeader = (table) => {
+      const candidates = [...table.querySelectorAll("thead tr")];
+      const firstTr = table.querySelector("tr");
+      if (!candidates.length && firstTr) {
+        candidates.push(firstTr);
+      }
+      let best = [];
+      let bestCount = -1;
+      for (const tr of candidates) {
+        const cells = [...tr.querySelectorAll("th,td")].map((node) => clean(node.innerText || node.textContent));
+        const count = cells.filter(Boolean).length;
+        if (count > bestCount) {
+          bestCount = count;
+          best = cells;
         }
-        const disabled =
-          /disabled/i.test(element.className || "") ||
-          element.getAttribute("aria-disabled") === "true" ||
-          /disabled/i.test(element.closest("li")?.className || "");
-        return !disabled;
-      });
-      if (!candidate) {
-        return false;
       }
-      const clickable = candidate.tagName === "LI" ? candidate.querySelector("a,button") ?? candidate : candidate;
-      clickable.click();
-      return true;
-    }).catch(() => false);
+      return best;
+    };
 
-    if (!movedNext) {
-      break;
+    const out = [];
+    for (const table of document.querySelectorAll("table")) {
+      if (!isVisible(table)) {
+        continue;
+      }
+      const headers = pickHeader(table);
+      const bodyRows = [...table.querySelectorAll("tbody tr")];
+      const dataRows = (bodyRows.length ? bodyRows : [...table.querySelectorAll("tr")]).filter((tr) => !tr.querySelector("th"));
+      const rows = [];
+      for (const tr of dataRows) {
+        const cellNodes = [...tr.querySelectorAll("td")];
+        if (tr.querySelector("input,select") && cellNodes.every((td) => !clean(td.innerText || td.textContent))) {
+          continue;
+        }
+        const cells = cellNodes.map((node) => clean(node.innerText || node.textContent));
+        if (cells.some(Boolean)) {
+          rows.push(cells);
+        }
+      }
+      if (rows.length) {
+        out.push({ headers, rows });
+      }
     }
-    await page.waitForTimeout(1_500);
+    return out;
+  }).catch(() => []);
+}
+
+// Reads Case ID, Period, Status and each left sub-tab's tables from a notice's View page.
+async function extractViewDetail(page) {
+  await page.waitForLoadState("domcontentloaded", { timeout: 15_000 }).catch(() => {});
+  await page.waitForTimeout(1_500);
+
+  const header = await page.evaluate(() => {
+    const clean = (value) => String(value ?? "").replace(/\s+/g, " ").trim();
+    const valueFor = (labels) => {
+      const want = labels.map((label) => label.toLowerCase());
+      const els = [...document.querySelectorAll("span,label,td,th,div,strong,p,b")];
+      const labelEl = els.find((el) => {
+        const text = clean(el.innerText || el.textContent).toLowerCase().replace(/[:\s]+$/, "");
+        return want.includes(text);
+      });
+      if (!labelEl) {
+        return "";
+      }
+      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT);
+      let passed = false;
+      while (walker.nextNode()) {
+        const node = walker.currentNode;
+        if (node === labelEl) {
+          passed = true;
+          continue;
+        }
+        if (passed && (node.tagName === "B" || node.tagName === "STRONG")) {
+          const text = clean(node.innerText || node.textContent);
+          if (text) {
+            return text;
+          }
+        }
+      }
+      return "";
+    };
+    return {
+      caseId: valueFor(["case id"]),
+      period: valueFor(["period", "tax period", "financial year"]),
+      status: valueFor(["status", "case status"])
+    };
+  }).catch(() => ({ caseId: "", period: "", status: "" }));
+
+  const tabLabels = await page.evaluate(() => {
+    const clean = (value) => String(value ?? "").replace(/\s+/g, " ").trim();
+    const width = window.innerWidth;
+    const candidates = [...document.querySelectorAll("a,li,button,[role='tab']")].filter((el) => {
+      const rect = el.getBoundingClientRect();
+      const text = clean(el.innerText || el.textContent);
+      return text && text.length <= 30 && rect.width > 0 && rect.height > 0 && rect.left < width * 0.45;
+    });
+    return [...new Set(candidates.map((el) => clean(el.innerText || el.textContent)))];
+  }).catch(() => []);
+
+  console.log(`    Detail caseId="${header.caseId}" period="${header.period}" status="${header.status}"`);
+  console.log(`    Left items: ${tabLabels.join(" | ")}`);
+
+  const knownTabs = [
+    "Notice", "Notices", "Notices and Demand Orders", "Reply", "Replies", "Order", "Orders",
+    "Proceedings", "Reminder", "Reminders", "Personal Hearing", "Adjournment", "Rectification",
+    "Appeal", "Refund", "Documents", "Attachments", "Drop Proceedings"
+  ];
+  const tabsToTry = knownTabs.filter((known) => tabLabels.some((label) => label.toLowerCase() === known.toLowerCase()));
+
+  const tabs = [];
+  const defaultTables = await captureDetailTables(page);
+  if (defaultTables.length) {
+    tabs.push({ name: "Summary", tables: defaultTables });
   }
 
-  return rows;
+  for (const tab of tabsToTry) {
+    const clicked = await clickLeftTab(page, tab);
+    if (!clicked) {
+      continue;
+    }
+    await page.waitForTimeout(1_200);
+    const captured = await captureDetailTables(page);
+    const rowTotal = captured.reduce((sum, table) => sum + table.rows.length, 0);
+    console.log(`    Sub-tab "${tab}": ${rowTotal} row(s).`);
+    if (captured.length) {
+      tabs.push({ name: tab, tables: captured });
+    }
+  }
+
+  return { caseId: header.caseId, period: header.period, status: header.status, tabs };
+}
+
+// Counts the data rows in the main notices table on the list page.
+async function noticeDataRowCount(page) {
+  return page.evaluate(() => {
+    const clean = (value) => String(value ?? "").replace(/\s+/g, " ").trim();
+    let bestCount = -1;
+    for (const table of document.querySelectorAll("table")) {
+      const bodyRows = [...table.querySelectorAll("tbody tr")].filter(
+        (tr) => !tr.querySelector("th") && [...tr.querySelectorAll("td")].some((td) => clean(td.innerText || td.textContent))
+      );
+      if (bodyRows.length > bestCount) {
+        bestCount = bodyRows.length;
+      }
+    }
+    return bestCount < 0 ? 0 : bestCount;
+  }).catch(() => 0);
+}
+
+// Clicks the View link in a given data row of the main notices table.
+async function clickNoticeView(page, rowIndex) {
+  return page.evaluate((index) => {
+    const clean = (value) => String(value ?? "").replace(/\s+/g, " ").trim();
+    let best = null;
+    let bestCount = -1;
+    for (const table of document.querySelectorAll("table")) {
+      const bodyRows = [...table.querySelectorAll("tbody tr")].filter(
+        (tr) => !tr.querySelector("th") && [...tr.querySelectorAll("td")].some((td) => clean(td.innerText || td.textContent))
+      );
+      if (bodyRows.length > bestCount) {
+        bestCount = bodyRows.length;
+        best = bodyRows;
+      }
+    }
+    if (!best || !best[index]) {
+      return false;
+    }
+    const row = best[index];
+    const link = row.querySelector("a") || [...row.querySelectorAll("button")].find((button) => /view/i.test(button.textContent || ""));
+    if (!link) {
+      return false;
+    }
+    link.scrollIntoView({ block: "center" });
+    link.click();
+    return true;
+  }, rowIndex).catch(() => false);
 }
 
 // Logs the header row of every visible table so we can see what the portal returned.
@@ -773,38 +924,43 @@ async function logVisibleTableHeaders(page) {
   });
 }
 
-// Collects the merged "Notices and Orders" table (older portals also had an
-// "Additional Notices and Orders" tab, so we still try it).
+// Collects the merged notices table, then drills into each row's View page to
+// capture Case ID, Period, Status and every left sub-tab's table.
 async function collectNoticesAndOrders(page) {
   await navigateToNoticesAndOrders(page);
   await logVisibleTableHeaders(page);
+  await clickPortalLinkByText(page, "100", "100 rows per page").catch(() => false);
+  await page.waitForTimeout(1_200);
 
-  const rows = [];
-  const seen = new Set();
+  const listRows = await extractNoticeTableRows(page);
+  const rowCount = await noticeDataRowCount(page);
+  const count = Math.min(listRows.length, rowCount);
+  console.log(`Main table: ${listRows.length} list row(s), ${rowCount} data row(s). Drilling into ${count} View page(s)...`);
 
-  const addRows = (incoming) => {
-    for (const row of incoming) {
-      const key = `${row.refId || ""}|${row.caseId || ""}|${row.typeOfNotice || ""}|${row.description || ""}|${row.dateOfIssue || ""}`;
-      if (!seen.has(key)) {
-        seen.add(key);
-        rows.push(row);
-      }
+  for (let index = 0; index < count; index += 1) {
+    const opened = await clickNoticeView(page, index);
+    if (!opened) {
+      console.log(`  Row ${index + 1}: no View link found.`);
+      continue;
     }
-  };
 
-  // The current portal shows a single merged table — extract it directly first.
-  addRows(await collectRowsAcrossPages(page, "Notices and Orders"));
-  console.log(`After main table: ${rows.length} row(s).`);
+    const detail = await extractViewDetail(page);
+    if (listRows[index]) {
+      listRows[index].caseId = detail.caseId || listRows[index].caseId;
+      listRows[index].taxPeriod = detail.period || listRows[index].taxPeriod;
+      listRows[index].status = detail.status || listRows[index].status;
+      listRows[index].detail = { tabs: detail.tabs };
+    }
 
-  // Older portals keep a separate "Additional Notices and Orders" tab.
-  const openedAdditional = await clickPortalLinkByText(page, "Additional Notices and Orders", "Additional Notices and Orders tab").catch(() => false);
-  if (openedAdditional) {
+    // Return to the list for the next row.
+    await page.goto(NOTICES_URL, { waitUntil: "domcontentloaded", timeout: 30_000 }).catch(() => {});
     await page.waitForTimeout(1_500);
-    addRows(await collectRowsAcrossPages(page, "Additional Notices and Orders"));
-    console.log(`After additional notices tab: ${rows.length} row(s).`);
+    await clickPortalLinkByText(page, "100", "100 rows per page").catch(() => false);
+    await page.waitForTimeout(800);
   }
 
-  return rows;
+  console.log(`Finished drilling. Collected ${listRows.length} notice row(s) with detail.`);
+  return listRows;
 }
 
 async function extractBestTableFromFrame(frame) {

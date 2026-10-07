@@ -72,7 +72,7 @@ export async function GET(request: Request) {
     if (registration.data?.id) {
       const casesResult = await admin
         .from("gst_litigation_cases")
-        .select("id,serial_no,notice_type,description,ref_id,date_of_issue,case_id,status,tax_period,due_date,section,reply_filing_status,source,scraped_at")
+        .select("id,serial_no,notice_type,description,ref_id,date_of_issue,case_id,status,tax_period,due_date,section,reply_filing_status,source,scraped_at,raw_payload")
         .eq("organisation_id", organisationId)
         .eq("gst_registration_id", registration.data.id)
         .order("date_of_issue", { ascending: false, nullsFirst: false })
