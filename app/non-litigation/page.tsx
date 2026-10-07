@@ -2,7 +2,7 @@ import { TaskLineRegister } from "@/components/taskline/taskline-register";
 
 export default function NonLitigationPage() {
   return (
-    <main className="min-h-screen lg:flex lg:h-dvh lg:min-h-0 lg:flex-col overflow-hidden bg-[#f4f6fa] px-2 py-3 text-slate-950 sm:px-3 lg:px-4">
+    <main className="workline-register-viewport min-h-screen lg:flex lg:min-h-0 lg:flex-col overflow-hidden bg-[#f4f6fa] px-2 py-3 text-slate-950 sm:px-3 lg:px-4">
       <section className="mx-auto w-full max-w-none lg:flex lg:min-h-0 lg:flex-1 lg:flex-col">
         <h1 className="mb-3 shrink-0 text-2xl font-black text-slate-950">Non-Litigation</h1>
         <TaskLineRegister registerKey="non_litigation" registerName="Non-Litigation" fillAvailableHeight />
