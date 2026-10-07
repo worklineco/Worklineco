@@ -22,6 +22,22 @@ type GstCase = {
 
 const HELPER_URL = "http://127.0.0.1:48782";
 
+const dateKeys = new Set<keyof GstCase>(["date_of_issue", "due_date"]);
+
+// Shows stored dates (ISO yyyy-mm-dd) as dd-mm-yyyy; leaves other text as-is.
+function formatCell(key: keyof GstCase, value: GstCase[keyof GstCase]) {
+  if (value === null || value === undefined || value === "") {
+    return "—";
+  }
+  if (dateKeys.has(key)) {
+    const match = String(value).match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (match) {
+      return `${match[3]}-${match[2]}-${match[1]}`;
+    }
+  }
+  return value;
+}
+
 const columns: { key: keyof GstCase; label: string }[] = [
   { key: "ref_id", label: "Notice / Demand Order Id" },
   { key: "notice_type", label: "Type" },
@@ -216,7 +232,7 @@ export function GstTracker() {
                   <tr className="border-b border-slate-100 last:border-b-0 hover:bg-slate-50" key={row.id}>
                     {columns.map((column) => (
                       <td className="px-3 py-2 align-top font-semibold text-slate-700" key={String(column.key)}>
-                        {row[column.key] ?? "—"}
+                        {formatCell(column.key, row[column.key])}
                       </td>
                     ))}
                     <td className="px-3 py-2 text-right">

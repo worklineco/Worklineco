@@ -8,7 +8,7 @@ import { chromium } from "playwright-core";
 import XLSX from "xlsx";
 import { getCollectorOutputDir, getDefaultWorkbookPath, getWorklineGstHome } from "./gst-helper-home.mjs";
 
-const COLLECTOR_VERSION = "2026-10-07-positional-v2";
+const COLLECTOR_VERSION = "2026-10-07-positional-v3-headerfix";
 const GST_PORTAL_LOGIN_URL = "https://services.gst.gov.in/services/login";
 const WORKLINE_GST_HOME = getWorklineGstHome();
 const DEFAULT_WORKBOOK_PATH = getDefaultWorkbookPath();
@@ -603,6 +603,27 @@ async function extractNoticeTableRows(page) {
         return Boolean(node.offsetWidth || node.offsetHeight || node.getClientRects().length);
       }
 
+      // The portal header often has two rows: the column labels and a row of
+      // filter inputs. Pick whichever header row actually carries text.
+      function pickHeaderCells(table) {
+        const candidates = [...table.querySelectorAll("thead tr")];
+        const firstTr = table.querySelector("tr");
+        if (!candidates.length && firstTr) {
+          candidates.push(firstTr);
+        }
+        let bestCells = [];
+        let bestCount = -1;
+        for (const tr of candidates) {
+          const cells = [...tr.querySelectorAll("th,td")].map((node) => clean(node.innerText || node.textContent));
+          const count = cells.filter(Boolean).length;
+          if (count > bestCount) {
+            bestCount = count;
+            bestCells = cells;
+          }
+        }
+        return bestCells;
+      }
+
       // Choose the visible table with the most header cells mapping to our fields.
       let best = null;
       let bestScore = 0;
@@ -610,9 +631,7 @@ async function extractNoticeTableRows(page) {
         if (!isVisible(table)) {
           continue;
         }
-        const headerRows = [...table.querySelectorAll("thead tr")];
-        const headerSource = headerRows.at(-1) ?? table.querySelector("tr");
-        const headerCells = [...(headerSource?.querySelectorAll("th,td") ?? [])].map((node) => clean(node.innerText || node.textContent));
+        const headerCells = pickHeaderCells(table);
         const score = headerCells.map(mapHeader).filter(Boolean).length;
         if (score > bestScore) {
           bestScore = score;
@@ -723,9 +742,26 @@ async function logVisibleTableHeaders(page) {
   const tables = await page.evaluate(() => {
     const clean = (value) => String(value ?? "").replace(/\s+/g, " ").trim();
     const isVisible = (node) => Boolean(node.offsetWidth || node.offsetHeight || node.getClientRects().length);
+    const pickHeaderCells = (table) => {
+      const candidates = [...table.querySelectorAll("thead tr")];
+      const firstTr = table.querySelector("tr");
+      if (!candidates.length && firstTr) {
+        candidates.push(firstTr);
+      }
+      let bestCells = [];
+      let bestCount = -1;
+      for (const tr of candidates) {
+        const cells = [...tr.querySelectorAll("th,td")].map((node) => clean(node.innerText || node.textContent));
+        const count = cells.filter(Boolean).length;
+        if (count > bestCount) {
+          bestCount = count;
+          bestCells = cells;
+        }
+      }
+      return bestCells;
+    };
     return [...document.querySelectorAll("table")].filter(isVisible).map((table) => {
-      const headerSource = [...table.querySelectorAll("thead tr")].at(-1) ?? table.querySelector("tr");
-      const headers = [...(headerSource?.querySelectorAll("th,td") ?? [])].map((node) => clean(node.innerText || node.textContent));
+      const headers = pickHeaderCells(table);
       const bodyRowCount = table.querySelectorAll("tbody tr").length;
       return { bodyRowCount, headers };
     });
