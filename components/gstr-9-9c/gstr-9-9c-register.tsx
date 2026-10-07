@@ -7,6 +7,7 @@ import { ViewOnlyAccessDialog } from "@/components/shared/view-only-access-dialo
 import allocationData from "@/lib/data/gstr-9-9c-allocations-25-26.json";
 import { useRegisterEditAccess } from "@/lib/use-register-access";
 import { SearchableSelect } from "@/components/shared/searchable-select";
+import { getCached, setCached } from "@/lib/data-cache";
 import { normalizeTeam } from "@/lib/user-teams";
 
 type CellValue = string | number | boolean;
@@ -23,6 +24,8 @@ type StoredRow = { row_key?: string; values?: Record<string, string> };
 type EditingCell = { column: string; columnIndex: number; original: string; rowKey: string; value: string };
 
 const columnFilterOptionLimit = 1000;
+const clientLookupCacheKey = "clients:managed:v1";
+const teamsLookupCacheKey = "teams:members:v1";
 const rowsPerBatch = 100;
 const blankColumnFilterValue = "__workline_column_blank__";
 const removedColumns = new Set(["Allocation for FY 2023-24", "EM Allocation", "ORMP", "Add. Remarks", "Reg taken", "Reg Surrendered"]);
@@ -226,6 +229,24 @@ export function GstrNineNineCRegister({ workbook }: { workbook: GstrWorkbookData
   useEffect(() => {
     setVisibleCount(rowsPerBatch);
   }, [query, deferredColumnValueFilters, sortState]);
+
+  // Warm the Add-entry dialog's lookups (clients + team members) on page load
+  // so the dialog opens instantly with its dropdowns already populated.
+  useEffect(() => {
+    async function warmLookupCache(url: string, key: string) {
+      try {
+        const response = await fetch(url, { cache: "no-store" });
+        const result = (await response.json().catch(() => null)) as unknown;
+        if (response.ok && result) {
+          setCached(key, result);
+        }
+      } catch {
+        // Ignore — the dialog falls back to fetching on open.
+      }
+    }
+    void warmLookupCache("/api/client-records/managed", clientLookupCacheKey);
+    void warmLookupCache("/api/teams", teamsLookupCacheKey);
+  }, []);
 
   const showMoreRows = useCallback(() => {
     setVisibleCount((current) => current + rowsPerBatch);
@@ -618,6 +639,19 @@ function AddEntryDialog({
 
   useEffect(() => {
     const controller = new AbortController();
+    // Cache-first: the register warms these lookups on page load, so the
+    // dialog can open with populated dropdowns instead of a loading wait.
+    // Client options are index-keyed, so we deliberately skip a background
+    // swap here — the page-load warmup keeps the cache fresh.
+    const cachedClients = getCached<{ rows?: Record<string, string | number>[] }>(clientLookupCacheKey);
+    const cachedTeams = getCached<{ members?: { name: string; team: string; teams?: string[]; leaving_date?: string }[] }>(teamsLookupCacheKey);
+    if (cachedClients?.rows?.length && cachedTeams?.members?.length) {
+      setClients(cachedClients.rows);
+      setMembers(cachedTeams.members);
+      setIsLoadingOptions(false);
+      setOptionsError("");
+      return () => controller.abort();
+    }
     setIsLoadingOptions(true);
     setOptionsError("");
     async function loadOptions() {
@@ -628,7 +662,12 @@ function AddEntryDialog({
           if (!response.ok) throw new Error(result.error || "Could not load form options.");
           return result;
         }));
-        if (!controller.signal.aborted) { setClients(results[0].rows ?? []); setMembers(results[1].members ?? []); }
+        if (!controller.signal.aborted) {
+          setClients(results[0].rows ?? []);
+          setMembers(results[1].members ?? []);
+          setCached(clientLookupCacheKey, results[0]);
+          setCached(teamsLookupCacheKey, results[1]);
+        }
       } catch (error) {
         if (!controller.signal.aborted) setOptionsError(error instanceof Error ? error.message : "Could not load form options.");
       } finally { if (!controller.signal.aborted) setIsLoadingOptions(false); }

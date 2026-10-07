@@ -4,8 +4,9 @@ import { ArrowDown, ArrowUp, ArrowUpDown, Filter, ChevronDown, Download, History
 import type { ComponentType } from "react";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { BillingColumnFilter } from "@/components/billing/billing-column-filter";
-import { SearchableSelect } from "@/components/shared/searchable-select";
+import { SearchableSelect, type SelectOption } from "@/components/shared/searchable-select";
 import { getCached, setCached } from "@/lib/data-cache";
+import { downloadImportTemplate } from "@/lib/import-template";
 import { LoadingIndicator } from "@/components/shared/loading-indicator";
 import * as XLSX from "xlsx-js-style";
 
@@ -261,7 +262,7 @@ const importHeaders: Array<{ field: BillingField; label: string }> = [
   { field: "serial_no", label: "S.No." },
   { field: "owner_team", label: "Team" },
   { field: "task_code", label: "Task Code" },
-  { field: "voucher_type", label: "Voucher Type" },
+  { field: "voucher_type", label: "Voucher" },
   { field: "is_retainer", label: "Retainer Bill" },
   { field: "group_name", label: "Group" },
   { field: "gstin", label: "GSTIN" },
@@ -270,7 +271,7 @@ const importHeaders: Array<{ field: BillingField; label: string }> = [
   { field: "address", label: "Address" },
   { field: "registration_type", label: "Registration Type" },
   { field: "escalation_1", label: "Escalation 1" },
-  { field: "poc_name", label: "SPOC Name" },
+  { field: "poc_name", label: "SPOC" },
   { field: "poc_mobile", label: "SPOC Mobile" },
   { field: "poc_email", label: "SPOC Email" },
   { field: "description", label: "Description" },
@@ -279,9 +280,9 @@ const importHeaders: Array<{ field: BillingField; label: string }> = [
   { field: "sgst", label: "SGST" },
   { field: "igst", label: "IGST" },
   { field: "ope", label: "OPE" },
-  { field: "include_ope_in_fees", label: "Include OPE in Professional Fees" },
+  { field: "include_ope_in_fees", label: "Include OPE in Fee" },
   { field: "ope_remarks", label: "OPE Remarks" },
-  { field: "billing_status", label: "Billing Status" },
+  { field: "billing_status", label: "Billing" },
   { field: "memo_no", label: "Memo No." },
   { field: "memo_date", label: "Memo Date" },
   { field: "invoice_no", label: "Invoice No." },
@@ -305,6 +306,9 @@ const importHeaderAliases: Partial<Record<BillingField, string[]>> = {
 };
 const importActionColumn = "Import Action";
 const importActionOptions = ["Add", "Update", "Delete"];
+// Sheet-protection password for downloaded import templates (guards against
+// accidental edits to headers and the hidden Billing ID column).
+const importTemplatePassword = "SJS@WORKLINE";
 const billingImportBatchSize = 100;
 const billingPageSize = 100;
 const accountsOnlyFields = new Set<BillingField>([
@@ -363,18 +367,22 @@ export function BillingRegister() {
   const filterOptions = useMemo(() => filterMenu
     ? Array.from(new Set(records.map((record) => getBillingFilterValue(record, filterMenu.column, matters)))).sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }))
     : [], [filterMenu, records, matters]);
-  // Client names from the Client Records register, for the Client dropdown in
-  // the create/edit dialog (picking one autofills GSTIN and Group).
-  const clientNameOptions = useMemo(() => {
-    const unique = new Map<string, string>();
+  // Client picker options from the Client Records register, in the same
+  // "Name — GSTIN — State" format the GSTR-9 9C dialog uses. The value stays
+  // the plain client name, which drives the GSTIN/Group autofill.
+  const clientPickerOptions = useMemo(() => {
+    const unique = new Map<string, SelectOption>();
     for (const row of clientRecords) {
       const name = getClientName(row);
       const key = normalizeClientName(name);
-      if (key && !unique.has(key)) {
-        unique.set(key, name);
+      if (!key || unique.has(key)) {
+        continue;
       }
+      const gstin = getFirstValue(row, gstinKeys);
+      const state = getFirstValue(row, clientStateKeys);
+      unique.set(key, { label: [name, gstin, state].filter(Boolean).join(" — "), value: name });
     }
-    return Array.from(unique.values()).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+    return Array.from(unique.values()).sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: "base" }));
   }, [clientRecords]);
   const [masters, setMasters] = useState(defaultMasters);
 
@@ -535,6 +543,9 @@ export function BillingRegister() {
   useEffect(() => {
     void loadBilling();
     void loadBillingActivity();
+    // Warm the client lookup so the create/edit dialog opens with the Client
+    // dropdown already populated.
+    void loadClientRecords();
     const cachedTaskCodes = getCached<{ codes?: string[] }>("billing:task-codes:v1");
     if (cachedTaskCodes && Array.isArray(cachedTaskCodes.codes)) {
       setTaskCodes(cachedTaskCodes.codes);
@@ -588,6 +599,19 @@ export function BillingRegister() {
       return clientRecords;
     }
 
+    // Cache-first so the Client dropdown is populated the moment the dialog
+    // opens; a background refresh keeps the list current.
+    const cached = getCached<{ rows?: ClientRegisterRow[] }>(clientRecordsCacheKey);
+    if (cached?.rows?.length) {
+      setClientRecords(cached.rows);
+      void refreshClientRecords();
+      return cached.rows;
+    }
+
+    return refreshClientRecords();
+  }
+
+  async function refreshClientRecords() {
     try {
       const response = await fetch("/api/client-records/managed", { cache: "no-store" });
       const result = (await response.json().catch(() => ({}))) as { rows?: ClientRegisterRow[] };
@@ -595,6 +619,7 @@ export function BillingRegister() {
       if (response.ok) {
         const rows = result.rows ?? [];
         setClientRecords(rows);
+        setCached(clientRecordsCacheKey, { rows });
         return rows;
       }
     } catch (error) {
@@ -1108,16 +1133,18 @@ export function BillingRegister() {
   }
 
   function downloadTemplate() {
-    const worksheet = XLSX.utils.json_to_sheet([importHeaders.reduce<Record<string, string>>((row, header) => {
-      row[importActionColumn] = row[importActionColumn] || "Add";
-      row[header.label] = "";
-      return row;
-    }, {})]);
-    worksheet["!cols"] = [importActionColumn, ...importHeaders.map((header) => header.label)].map(() => ({ wch: 20 }));
-    addImportActionDropdown(worksheet, 500);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Billing Import");
-    XLSX.writeFile(workbook, "workline-billing-import-template.xlsx");
+    setMessage("Preparing the billing import template...");
+    downloadImportTemplate({
+      actionOptions: importActionOptions,
+      fileName: "workline-billing-import-template.xlsx",
+      headers: [importActionColumn, ...importHeaders.filter((header) => header.field !== "serial_no").map((header) => header.label)],
+      hiddenHeaders: ["Billing ID"],
+      mandatoryHeaders: ["Client", "GSTIN", "Amount"],
+      protectionPassword: importTemplatePassword,
+      sheetName: "Billing Import"
+    })
+      .then(() => setMessage("Billing import template downloaded."))
+      .catch(() => setMessage("Could not build the billing import template."));
   }
 
   if (isAccessDenied) {
@@ -1473,7 +1500,7 @@ export function BillingRegister() {
       {addDraft ? (
         <BillingAddForm
           access={access}
-          clientOptions={clientNameOptions}
+          clientOptions={clientPickerOptions}
           draft={addDraft}
           masters={mergedMasters}
           mode="create"
@@ -1486,7 +1513,7 @@ export function BillingRegister() {
       {editDraft ? (
         <BillingAddForm
           access={access}
-          clientOptions={clientNameOptions}
+          clientOptions={clientPickerOptions}
           draft={editDraft}
           masters={mergedMasters}
           mode="edit"
@@ -1751,7 +1778,7 @@ function BillingCell({
   );
 }
 
-function BillingAddForm({
+const BillingAddForm = memo(function BillingAddFormBase({
   access,
   clientOptions,
   draft,
@@ -1762,7 +1789,7 @@ function BillingAddForm({
   onSubmit
 }: {
   access: AccessScope;
-  clientOptions: string[];
+  clientOptions: SelectOption[];
   draft: BillingRecord;
   masters: Record<string, string[]>;
   mode: "create" | "edit";
@@ -1833,7 +1860,7 @@ function BillingAddForm({
               <SearchableSelect
                 allowCustom
                 onChange={(value) => onChange("client", value)}
-                options={clientOptions.map((value) => ({ value, label: value }))}
+                options={clientOptions}
                 placeholder="Select client"
                 value={draft.client}
               />
@@ -1895,7 +1922,17 @@ function BillingAddForm({
       </section>
     </div>
   );
-}
+}, (previous, next) =>
+  // The dialog depends on these data props alone; the handler props are
+  // recreated on every register render and always do the same thing, so they
+  // are ignored here. Background table refreshes then leave the open dialog
+  // untouched — same stillness as the GSTR-9 9C Add entry dialog.
+  previous.access === next.access &&
+  previous.clientOptions === next.clientOptions &&
+  previous.draft === next.draft &&
+  previous.masters === next.masters &&
+  previous.mode === next.mode
+);
 
 function FormInput({
   field,
@@ -2859,11 +2896,13 @@ function normalizeLookupKey(key: string) {
   return key.replace(/[^0-9a-z]/gi, "").toLowerCase();
 }
 
+const clientRecordsCacheKey = "clients:managed:v1";
 const gstinKeys = ["GSTIN/UIN", "GSTIN", "GSTIN No", "GSTIN No.", "GST No", "GST Number", "GSTAT Login ID"];
 const clientNameKeys = ["Particulars", "Client", "Client Name", "Name", "Legal Name", "Trade Name"];
 const clientAddressKeys = ["Address", "Client Address", "Billing Address", "Registered Address", "Principal Place of Business"];
 const registrationTypeKeys = ["Registration Type", "Reg Type", "GST Registration Type", "Registration"];
 const clientGroupKeys = ["Group", "Group Name", "Entity Group", "Client Group"];
+const clientStateKeys = ["State", "State Name", "POS", "Place of Supply"];
 
 const auditFields: BillingField[] = [
   "owner_team",
