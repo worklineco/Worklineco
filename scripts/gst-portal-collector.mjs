@@ -830,6 +830,146 @@ function createSupabaseClient() {
   });
 }
 
+const CLIENT_RECORDS_SOURCE = "client_records_register";
+
+function createAdminSupabaseClient() {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!supabaseUrl || !serviceRoleKey) {
+    return null;
+  }
+
+  return createClient(supabaseUrl, serviceRoleKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+    },
+  });
+}
+
+// Reads the GST login (GST-ID / GST-PASS) for a GSTIN straight from the
+// Client Records register in Supabase, so credentials live in WorkLine and
+// never need a local Excel file.
+async function readClientFromClientRecords(gstin) {
+  const expectedGstin = String(gstin ?? "").trim().toUpperCase();
+  if (!expectedGstin) {
+    return null;
+  }
+
+  const admin = createAdminSupabaseClient();
+  if (!admin) {
+    return null;
+  }
+
+  const { data, error } = await admin
+    .from("clients")
+    .select("name,organisation_id,custom_values")
+    .eq("custom_values->>source", CLIENT_RECORDS_SOURCE)
+    .limit(5000);
+
+  if (error) {
+    throw new Error(`Could not read Client Records from WorkLine: ${error.message}`);
+  }
+
+  const match = (data ?? []).find((row) => {
+    const values = row.custom_values ?? {};
+    return String(values["GSTIN/UIN"] ?? "").trim().toUpperCase() === expectedGstin;
+  });
+
+  if (!match) {
+    throw new Error(`No client in Client Records has GSTIN ${expectedGstin}.`);
+  }
+
+  const values = match.custom_values ?? {};
+  const userId = String(values["GST-ID"] ?? "").trim();
+  const password = String(values["GST-PASS"] ?? "").trim();
+  const clientName = String(values["Particulars"] ?? "").trim() || String(match.name ?? "").trim();
+
+  if (!userId || !password) {
+    throw new Error(`GST-ID / GST-PASS are missing for GSTIN ${expectedGstin} in Client Records. Add them on the Client Records tab.`);
+  }
+
+  return {
+    clientName,
+    gstin: expectedGstin,
+    organisationId: match.organisation_id,
+    password,
+    rowNumber: null,
+    userId,
+  };
+}
+
+// Writes extracted notice tables straight into gst_litigation_cases using the
+// service-role key (no interactive WorkLine sign-in needed).
+async function syncTablesWithServiceRole({ clientName, extractedAt, gstin, organisationId, tables }) {
+  const admin = createAdminSupabaseClient();
+  if (!admin) {
+    return { insertedOrUpdated: 0, registrationId: "", skipped: true };
+  }
+
+  const noticeRows = [];
+  for (const table of tables ?? []) {
+    for (const row of table.rows ?? []) {
+      noticeRows.push(normalizeNoticeTableRow(row, noticeRows.length));
+    }
+  }
+
+  if (!noticeRows.length) {
+    return { insertedOrUpdated: 0, registrationId: "", skipped: false };
+  }
+
+  const existing = await admin
+    .from("gst_registrations")
+    .select("id")
+    .eq("organisation_id", organisationId)
+    .eq("gstin", gstin)
+    .maybeSingle();
+
+  if (existing.error) {
+    throw new Error(`Could not find GST registration: ${existing.error.message}`);
+  }
+
+  let registrationId = existing.data?.id;
+  if (!registrationId) {
+    const created = await admin
+      .from("gst_registrations")
+      .insert({ client_name: clientName || gstin, gstin, organisation_id: organisationId })
+      .select("id")
+      .single();
+
+    if (created.error || !created.data?.id) {
+      throw new Error(`Could not create GST registration for ${gstin}: ${created.error?.message ?? "No id returned."}`);
+    }
+
+    registrationId = created.data.id;
+  }
+
+  const payload = noticeRows.map((row, index) => {
+    const normalized = normalizeExtractedRow(row, index);
+    return {
+      ...normalized,
+      case_id: normalized.case_id || normalized.ref_id || `row-${index + 1}`,
+      gst_registration_id: registrationId,
+      organisation_id: organisationId,
+      raw_payload: row,
+      scraped_at: extractedAt,
+      source: "gst-portal-local-collector",
+      updated_at: new Date().toISOString(),
+    };
+  });
+
+  const { error: upsertError } = await admin
+    .from("gst_litigation_cases")
+    .upsert(payload, { onConflict: "organisation_id,gst_registration_id,ref_id,case_id" });
+
+  if (upsertError) {
+    throw new Error(`Could not save litigation rows to WorkLine: ${upsertError.message}`);
+  }
+
+  return { insertedOrUpdated: payload.length, registrationId, skipped: false };
+}
+
 async function promptForWorkLineLogin(rl, options) {
   if (!options.sync || options.dryRun) {
     return options;
@@ -969,13 +1109,37 @@ async function main() {
     return;
   }
 
-  const client = readClientFromWorkbook(options);
-  options = { ...options, rowNumber: client.rowNumber };
+  // Prefer credentials from the WorkLine Client Records register (looked up by
+  // GSTIN). Fall back to the local Excel workbook only if that is unavailable.
+  let client = null;
+  let credentialSource = "";
+
+  if (options.expectedGstin) {
+    try {
+      client = await readClientFromClientRecords(options.expectedGstin);
+      if (client) {
+        credentialSource = "Client Records";
+      }
+    } catch (clientRecordsError) {
+      if (!createAdminSupabaseClient()) {
+        // No service role configured locally — silently fall back to Excel.
+        client = null;
+      } else {
+        throw clientRecordsError;
+      }
+    }
+  }
+
+  if (!client) {
+    client = readClientFromWorkbook(options);
+    credentialSource = `Excel row ${client.rowNumber}`;
+    options = { ...options, rowNumber: client.rowNumber };
+  }
 
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   options = await promptForWorkLineLogin(rl, options);
 
-  console.log(`Loaded GSTIN ${client.gstin} from ${options.workbookPath}, row ${options.rowNumber}.`);
+  console.log(`Loaded GSTIN ${client.gstin} from ${credentialSource}.`);
   console.log("Password stays local and is not written to WorkLine or Git.");
   if (options.sync && !options.dryRun) {
     console.log("Supabase sync is enabled. Only extracted litigation rows will be sent to WorkLine.");
@@ -1043,6 +1207,28 @@ async function main() {
       console.log("");
       console.log(`Extracted ${tables.reduce((total, table) => total + table.rows.length, 0)} table rows from ${tables.length} table(s).`);
       console.log(`Saved local output: ${outputPath}`);
+
+      // Push straight into WorkLine so the GST Tracker shows the notices firm-wide.
+      if (client.organisationId) {
+        try {
+          const synced = await syncTablesWithServiceRole({
+            clientName: client.clientName || options.clientName,
+            extractedAt,
+            gstin: client.gstin,
+            organisationId: client.organisationId,
+            tables,
+          });
+          if (synced.skipped) {
+            console.log("Supabase service role not configured locally, so rows were not saved to WorkLine.");
+          } else {
+            console.log(`Saved ${synced.insertedOrUpdated} notice rows to WorkLine registration ${synced.registrationId}.`);
+          }
+        } catch (syncError) {
+          console.error(`Could not save notices to WorkLine: ${syncError.message}`);
+        }
+      } else {
+        console.log("No WorkLine organisation resolved for this client, so rows were not saved to WorkLine.");
+      }
     }
 
     console.log("Keep this process running while the browser is in use.");

@@ -102,6 +102,23 @@ foreach ($relativePath in $filesToCopy) {
   Copy-Item -Path $sourceFile -Destination $targetFile -Force
 }
 
+# Copy the Supabase env so the helper can read GST logins from Client Records
+# and save scraped notices back to WorkLine. Prefer .env.local, then .env.
+$envCopied = $false
+foreach ($envName in @(".env.local", ".env")) {
+  $envSource = Join-Path $SourcePath $envName
+  if (Test-Path $envSource) {
+    Copy-Item -Path $envSource -Destination (Join-Path $InstallRoot ".env.local") -Force
+    $envCopied = $true
+    break
+  }
+}
+
+if (-not $envCopied) {
+  Write-Host ""
+  Write-Host "Note: no .env.local found to copy. Create $InstallRoot\.env.local with NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY so the helper can read Client Records logins and save notices to WorkLine." -ForegroundColor Yellow
+}
+
 function Ensure-Node {
   $node = Get-Command node -ErrorAction SilentlyContinue
   if ($node) {
@@ -138,7 +155,7 @@ $helperServer = Join-Path $InstallRoot "scripts\gst-collector-server.mjs"
 $protocolCommand = "`"$nodeExe`" `"$protocolLauncher`" `"%1`""
 $helperCommand = "`"$nodeExe`" `"$helperServer`""
 
-Write-Step "Registering $ProtocolName:// link"
+Write-Step "Registering ${ProtocolName}:// link"
 $protocolKey = "HKCU:\Software\Classes\$ProtocolName"
 New-Item -Path $protocolKey -Force | Out-Null
 New-ItemProperty -Path $protocolKey -Name "(Default)" -Value "URL:WorkLine GST Protocol" -PropertyType String -Force | Out-Null
@@ -154,7 +171,7 @@ if (Test-Path $launcherTemplatePath) {
 }
 
 if (Test-Path $installLauncher) {
-  Write-Step "Registering $InstallProtocolName:// link for one-click reinstall"
+  Write-Step "Registering ${InstallProtocolName}:// link for one-click reinstall"
   $installProtocolKey = "HKCU:\Software\Classes\$InstallProtocolName"
   $installProtocolCommand = "wscript.exe `"$installLauncher`" `"%1`""
   New-Item -Path $installProtocolKey -Force | Out-Null
