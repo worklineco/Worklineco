@@ -541,6 +541,43 @@ export function BillingRegister() {
   const pageStart = filteredRecords.length ? (tablePage - 1) * billingPageSize + 1 : 0;
   const pageEnd = Math.min(tablePage * billingPageSize, filteredRecords.length);
 
+  // Keep the register fresh for viewers: bills pushed by colleagues appear on
+  // their own - when this tab regains focus and on a gentle 60s cycle while
+  // visible - instead of waiting for a manual reload. Refreshes are throttled
+  // and skipped while a dialog or cell editor is open so edits are never
+  // disturbed.
+  const lastAutoRefreshRef = useRef(Date.now());
+
+  useEffect(() => {
+    if (viewMode !== "register" || isAccessDenied) {
+      return;
+    }
+
+    const refresh = () => {
+      if (document.visibilityState !== "visible" || isFullTableLoading) {
+        return;
+      }
+      if (addDraft || editDraft || inlineEditor || savingCell) {
+        return;
+      }
+      if (Date.now() - lastAutoRefreshRef.current < 30_000) {
+        return;
+      }
+      lastAutoRefreshRef.current = Date.now();
+      void loadFullBilling();
+    };
+
+    const timer = window.setInterval(refresh, 60_000);
+    document.addEventListener("visibilitychange", refresh);
+    window.addEventListener("focus", refresh);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", refresh);
+      window.removeEventListener("focus", refresh);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewMode, isAccessDenied, addDraft, editDraft, inlineEditor, savingCell, isFullTableLoading]);
+
   useEffect(() => {
     void loadBilling();
     void loadBillingActivity();
