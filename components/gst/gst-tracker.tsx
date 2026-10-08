@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, ChevronDown, ChevronRight, Download, RefreshCw, Trash2 } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronRight, Download, FileText, RefreshCw, Trash2 } from "lucide-react";
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 
 type GstClient = { gstin: string; group: string; hasCredentials: boolean; name: string };
@@ -526,34 +526,46 @@ function CaseDetail({ group }: { group: CaseGroup }) {
   const combined = buildCombinedProceedings(tabs);
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap gap-x-8 gap-y-2 text-sm">
+    <div className="space-y-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="flex flex-wrap items-center gap-2 rounded-lg border border-navy-100 bg-gradient-to-r from-navy-50 to-sky-50/40 px-4 py-3">
         <DetailField label="Case ID" value={group.caseId} />
+        <span className="hidden h-8 w-px bg-navy-100 sm:block" />
         <DetailField label="Period" value={group.period} />
+        <span className="hidden h-8 w-px bg-navy-100 sm:block" />
         <DetailField label="Status" value={group.status} />
+        <span className="ml-auto">
+          <span
+            className={`inline-flex rounded-full px-3 py-1 text-[11px] font-black ${
+              group.openClosed === "Closed" ? "bg-slate-200 text-slate-600" : "bg-emerald-100 text-emerald-700"
+            }`}
+          >
+            {group.openClosed}
+          </span>
+        </span>
       </div>
 
-      <details className="group rounded-lg border border-slate-200 bg-white">
-        <summary className="flex cursor-pointer items-center gap-2 px-3 py-2 text-xs font-black uppercase tracking-wide text-navy-700">
+      <details className="group overflow-hidden rounded-lg border border-slate-200 bg-white">
+        <summary className="flex cursor-pointer select-none items-center gap-2 bg-slate-50 px-3 py-2 text-xs font-black uppercase tracking-wide text-navy-700 hover:bg-slate-100">
           <ChevronRight className="size-3.5 transition-transform group-open:rotate-90" />
-          Notices &amp; Orders in this case ({group.notices.length})
+          Notices &amp; Orders in this case
+          <span className="rounded-full bg-navy-100 px-2 py-0.5 text-[10px] text-navy-700">{group.notices.length}</span>
         </summary>
         <div className="overflow-auto border-t border-slate-200">
           <table className="w-full border-collapse text-left text-xs">
-            <thead className="bg-slate-100 font-black uppercase tracking-wide text-slate-600">
+            <thead className="bg-slate-100 font-black uppercase tracking-wide text-slate-500">
               <tr>
                 {noticeColumns.map((column) => (
-                  <th className="whitespace-nowrap border-b border-slate-200 px-2 py-1.5" key={String(column.key)}>
+                  <th className="whitespace-nowrap border-b border-slate-200 px-3 py-2" key={String(column.key)}>
                     {column.label}
                   </th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {group.notices.map((notice) => (
-                <tr className="border-b border-slate-100 last:border-b-0" key={notice.id}>
+              {group.notices.map((notice, noticeIndex) => (
+                <tr className={`border-b border-slate-100 last:border-b-0 ${noticeIndex % 2 ? "bg-slate-50/50" : ""}`} key={notice.id}>
                   {noticeColumns.map((column) => (
-                    <td className="px-2 py-1.5 align-top font-semibold text-slate-700" key={String(column.key)}>
+                    <td className="px-3 py-2 align-top font-semibold text-slate-700" key={String(column.key)}>
                       {formatCell(column.key, notice[column.key])}
                     </td>
                   ))}
@@ -567,13 +579,13 @@ function CaseDetail({ group }: { group: CaseGroup }) {
       {combined.rows.length ? (
         <div className="space-y-2">
           <p className="text-xs font-black uppercase tracking-wide text-navy-700">Case proceedings</p>
-          <div className="overflow-auto rounded-lg border border-slate-200 bg-white">
+          <div className="overflow-auto rounded-lg border border-slate-200 shadow-sm">
             <table className="w-full border-collapse text-left text-xs">
-              <thead className="bg-slate-100 font-black uppercase tracking-wide text-slate-600">
+              <thead className="bg-navy-700 text-[10px] font-black uppercase tracking-wide text-white">
                 <tr>
-                  <th className="whitespace-nowrap border-b border-slate-200 px-2 py-1.5">Category</th>
+                  <th className="whitespace-nowrap px-3 py-2">Category</th>
                   {combined.columns.map((header, headerIndex) => (
-                    <th className="whitespace-nowrap border-b border-slate-200 px-2 py-1.5" key={headerIndex}>
+                    <th className="whitespace-nowrap px-3 py-2" key={headerIndex}>
                       {header || "—"}
                     </th>
                   ))}
@@ -581,11 +593,26 @@ function CaseDetail({ group }: { group: CaseGroup }) {
               </thead>
               <tbody>
                 {combined.rows.map((row, rowIndex) => (
-                  <tr className="border-b border-slate-100 last:border-b-0" key={rowIndex}>
-                    <td className="whitespace-nowrap px-2 py-1.5 align-top font-black text-navy-700">{row.category}</td>
+                  <tr className={`border-b border-slate-100 last:border-b-0 ${rowIndex % 2 ? "bg-slate-50/60" : "bg-white"}`} key={rowIndex}>
+                    <td className="whitespace-nowrap px-3 py-2 align-top">
+                      <span className="flex flex-wrap gap-1">
+                        {row.category.split(",").map((name, nameIndex) => (
+                          <span
+                            className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-black uppercase ${categoryPillClass(name)}`}
+                            key={nameIndex}
+                          >
+                            {name.trim()}
+                          </span>
+                        ))}
+                      </span>
+                    </td>
                     {row.cells.map((cell, cellIndex) => (
-                      <td className="px-2 py-1.5 align-top font-semibold text-slate-700" key={cellIndex}>
-                        {cell || "—"}
+                      <td className="px-3 py-2 align-top font-semibold text-slate-700" key={cellIndex}>
+                        {combined.columns[cellIndex]?.toLowerCase() === "attachments" ? (
+                          <AttachmentCell value={cell} />
+                        ) : (
+                          cell || "—"
+                        )}
                       </td>
                     ))}
                   </tr>
@@ -598,6 +625,46 @@ function CaseDetail({ group }: { group: CaseGroup }) {
         <p className="text-xs font-semibold text-slate-400">No sub-tab detail captured for this case yet.</p>
       )}
     </div>
+  );
+}
+
+function categoryPillClass(name: string): string {
+  const value = name.toLowerCase();
+  if (value.includes("reply")) {
+    return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  }
+  if (value.includes("order")) {
+    return "border-violet-200 bg-violet-50 text-violet-700";
+  }
+  if (value.includes("intimation")) {
+    return "border-amber-200 bg-amber-50 text-amber-700";
+  }
+  if (value.includes("notice")) {
+    return "border-sky-200 bg-sky-50 text-sky-700";
+  }
+  return "border-slate-200 bg-slate-100 text-slate-600";
+}
+
+function AttachmentCell({ value }: { value: string }) {
+  const trimmed = value.trim();
+  if (!trimmed || trimmed === "—" || trimmed.toLowerCase() === "-na-" || trimmed.toLowerCase() === "na") {
+    return <span className="text-slate-400">—</span>;
+  }
+  const files = trimmed
+    .split(/(?<=\.(?:pdf|png|jpe?g|xlsx?|docx?|zip))\s+/i)
+    .map((file) => file.trim())
+    .filter(Boolean);
+  return (
+    <span className="flex flex-col gap-1">
+      {files.map((file, index) => (
+        <span className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-bold text-slate-600" key={index}>
+          <FileText className="size-3 shrink-0 text-slate-400" />
+          <span className="truncate" title={file}>
+            {file}
+          </span>
+        </span>
+      ))}
+    </span>
   );
 }
 
@@ -686,8 +753,8 @@ function FilterInput({ onChange, value }: { onChange: (value: string) => void; v
 function DetailField({ label, value }: { label: string; value: string | null }) {
   return (
     <span className="inline-flex flex-col">
-      <span className="text-[10px] font-black uppercase tracking-wide text-slate-400">{label}</span>
-      <span className="text-sm font-bold text-slate-800">{value || "—"}</span>
+      <span className="text-[10px] font-black uppercase tracking-wide text-navy-500">{label}</span>
+      <span className="text-sm font-black text-navy-900">{value || "—"}</span>
     </span>
   );
 }
