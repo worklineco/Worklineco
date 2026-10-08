@@ -525,6 +525,7 @@ export function GstTracker() {
 
 function CaseDetail({ group }: { group: CaseGroup }) {
   const tabs = group.tabs;
+  const combined = buildCombinedProceedings(tabs);
 
   return (
     <div className="space-y-4">
@@ -562,45 +563,91 @@ function CaseDetail({ group }: { group: CaseGroup }) {
         </div>
       </div>
 
-      {tabs.length ? (
-        tabs.map((tab, tabIndex) => (
-          <div className="space-y-2" key={`${tab.name}-${tabIndex}`}>
-            <p className="text-xs font-black uppercase tracking-wide text-navy-700">{tab.name}</p>
-            {tab.tables.map((table, tableIndex) => (
-              <div className="overflow-auto rounded-lg border border-slate-200 bg-white" key={tableIndex}>
-                <table className="w-full border-collapse text-left text-xs">
-                  {table.headers.length ? (
-                    <thead className="bg-slate-100 font-black uppercase tracking-wide text-slate-600">
-                      <tr>
-                        {table.headers.map((header, headerIndex) => (
-                          <th className="whitespace-nowrap border-b border-slate-200 px-2 py-1.5" key={headerIndex}>
-                            {header || "—"}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                  ) : null}
-                  <tbody>
-                    {table.rows.map((cells, rowIndex) => (
-                      <tr className="border-b border-slate-100 last:border-b-0" key={rowIndex}>
-                        {cells.map((cell, cellIndex) => (
-                          <td className="px-2 py-1.5 align-top font-semibold text-slate-700" key={cellIndex}>
-                            {cell || "—"}
-                          </td>
-                        ))}
-                      </tr>
+      {combined.rows.length ? (
+        <div className="space-y-2">
+          <p className="text-xs font-black uppercase tracking-wide text-navy-700">Case proceedings</p>
+          <div className="overflow-auto rounded-lg border border-slate-200 bg-white">
+            <table className="w-full border-collapse text-left text-xs">
+              <thead className="bg-slate-100 font-black uppercase tracking-wide text-slate-600">
+                <tr>
+                  <th className="whitespace-nowrap border-b border-slate-200 px-2 py-1.5">Category</th>
+                  {combined.columns.map((header, headerIndex) => (
+                    <th className="whitespace-nowrap border-b border-slate-200 px-2 py-1.5" key={headerIndex}>
+                      {header || "—"}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {combined.rows.map((row, rowIndex) => (
+                  <tr className="border-b border-slate-100 last:border-b-0" key={rowIndex}>
+                    <td className="whitespace-nowrap px-2 py-1.5 align-top font-black text-navy-700">{row.category}</td>
+                    {row.cells.map((cell, cellIndex) => (
+                      <td className="px-2 py-1.5 align-top font-semibold text-slate-700" key={cellIndex}>
+                        {cell || "—"}
+                      </td>
                     ))}
-                  </tbody>
-                </table>
-              </div>
-            ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-        ))
+        </div>
       ) : (
         <p className="text-xs font-semibold text-slate-400">No sub-tab detail captured for this case yet.</p>
       )}
     </div>
   );
+}
+
+// Merges every sub-tab (Intimations / Notices / Replies / Orders) into one
+// table with a Category column, deduping rows that repeat across sub-tabs.
+function buildCombinedProceedings(tabs: DetailTab[]) {
+  const columns: string[] = [];
+  const seen = new Set<string>();
+  const addColumn = (header: string) => {
+    const label = header.trim();
+    if (label && !seen.has(label.toLowerCase())) {
+      seen.add(label.toLowerCase());
+      columns.push(label);
+    }
+  };
+
+  const rowsByKey = new Map<string, { categories: string[]; values: Record<string, string> }>();
+
+  for (const tab of tabs) {
+    for (const table of tab.tables) {
+      table.headers.forEach(addColumn);
+      for (const cells of table.rows) {
+        const values: Record<string, string> = {};
+        table.headers.forEach((header, index) => {
+          const label = header.trim();
+          if (label) {
+            values[label.toLowerCase()] = cells[index] ?? "";
+          }
+        });
+        const key = Object.entries(values)
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([header, value]) => `${header}=${value}`)
+          .join("||");
+        let record = rowsByKey.get(key);
+        if (!record) {
+          record = { categories: [], values };
+          rowsByKey.set(key, record);
+        }
+        if (!record.categories.includes(tab.name)) {
+          record.categories.push(tab.name);
+        }
+      }
+    }
+  }
+
+  const rows = [...rowsByKey.values()].map((record) => ({
+    category: record.categories.join(", "),
+    cells: columns.map((header) => record.values[header.toLowerCase()] ?? "")
+  }));
+
+  return { columns, rows };
 }
 
 function FilterInput({ onChange, value }: { onChange: (value: string) => void; value: string }) {
