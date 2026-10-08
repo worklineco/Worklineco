@@ -181,18 +181,20 @@ if (Test-Path $installLauncher) {
   New-ItemProperty -Path "$installProtocolKey\shell\open\command" -Name "(Default)" -Value $installProtocolCommand -PropertyType String -Force | Out-Null
 }
 
-Write-Step "Starting helper in the background"
-$existingHelper = $null
+Write-Step "Restarting helper in the background"
+# Stop any helper already running so it picks up the updated scripts. Only the
+# GST helper process is stopped, not other Node apps.
 try {
-  $existingHelper = Invoke-WebRequest -Uri "http://127.0.0.1:$HelperPort/health" -UseBasicParsing -TimeoutSec 2
+  Get-CimInstance Win32_Process |
+    Where-Object { $_.CommandLine -and $_.CommandLine -like "*gst-collector-server*" } |
+    ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+  Start-Sleep -Seconds 1
 } catch {
-  $existingHelper = $null
+  # ignore — nothing to stop
 }
 
-if (-not $existingHelper) {
-  Start-Process -FilePath $nodeExe -ArgumentList "`"$helperServer`"" -WorkingDirectory $InstallRoot -WindowStyle Hidden
-  Start-Sleep -Seconds 2
-}
+Start-Process -FilePath $nodeExe -ArgumentList "`"$helperServer`"" -WorkingDirectory $InstallRoot -WindowStyle Hidden
+Start-Sleep -Seconds 2
 
 Write-Step "Adding sign-in startup task"
 $taskName = "WorkLine GST Helper"
