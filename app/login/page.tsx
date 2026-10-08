@@ -15,8 +15,8 @@ function BrandMark({ className = "size-11" }: { className?: string }) {
 
 export default function LoginPage() {
   return (
-    <main className="min-h-screen bg-gradient-to-br from-[#eef1f8] via-white to-[#f3eefb] px-4 py-5 text-slate-950 lg:h-screen lg:overflow-hidden">
-      <div className="mx-auto flex min-h-[calc(100vh-2.5rem)] max-w-7xl flex-col lg:h-[calc(100vh-2.5rem)]">
+    <main className="min-h-screen bg-gradient-to-br from-[#eef1f8] via-white to-[#f3eefb] px-4 py-5 text-slate-950 sm:px-6">
+      <div className="mx-auto flex min-h-[calc(100vh-2.5rem)] max-w-7xl flex-col">
         {/* Top bar: firm lockup + Login */}
         <header className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
