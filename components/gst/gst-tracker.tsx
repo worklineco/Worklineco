@@ -145,7 +145,33 @@ function groupByCase(cases: GstCase[]): CaseGroup[] {
       group.tabs = tabs;
     }
   }
+
+  // Fallback: when a case has no captured Tax Period / Status, use the notice's
+  // Date of Issuance for the period and its Description for the status.
+  for (const group of map.values()) {
+    if (!group.period) {
+      const issueDate = group.notices.find((notice) => notice.date_of_issue)?.date_of_issue;
+      if (issueDate) {
+        group.period = isoToDmy(issueDate);
+      }
+    }
+    if (!group.status) {
+      const description = group.notices.find((notice) => notice.description)?.description;
+      if (description) {
+        group.status = description;
+      }
+    }
+  }
+
   return [...map.values()];
+}
+
+function isoToDmy(value: string | null): string {
+  if (!value) {
+    return "";
+  }
+  const match = String(value).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return match ? `${match[3]}-${match[2]}-${match[1]}` : String(value);
 }
 
 export function GstTracker() {
