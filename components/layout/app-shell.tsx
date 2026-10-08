@@ -56,7 +56,7 @@ const navItems: NavItem[] = [
   { href: "/gstat/trash", icon: Trash2, label: "Trash" }
 ];
 
-const bareRoutePrefixes = ["/login", "/onboarding", "/auth"];
+const bareRoutePrefixes = ["/login", "/gst-council", "/onboarding", "/auth"];
 
 // Same designation list as the Teams register editor.
 const profileRoleOptions = ["Article Assistant", "Associate", "Senior Associate", "Manager", "Senior Manager", "Partner", "Accounts", "Others"];

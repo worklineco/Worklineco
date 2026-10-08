@@ -48,8 +48,8 @@ export default function LoginPage() {
             </div>
 
             <p className="mt-5 max-w-md text-sm font-semibold leading-6 text-slate-600">
-              One focused workspace for compliance, client records, litigation, billing, and deadline visibility — built
-              for the firm that moves with discipline and detail.
+              A single, secure workspace for task and work management, compliance, client records, litigation tracking,
+              and deadline visibility — engineered for professional firms that run with precision and accountability.
             </p>
           </section>
 
