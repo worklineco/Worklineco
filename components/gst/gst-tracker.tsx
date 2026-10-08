@@ -184,17 +184,55 @@ export function GstTracker() {
         result.message ??
           "A browser window opened on the GST portal. Enter the CAPTCHA there — the helper will log in, open View Notices and Orders, and save the data. Then click Refresh."
       );
-      // Auto-refresh a few times while the scrape runs.
-      for (const delay of [15000, 30000, 45000, 60000]) {
-        window.setTimeout(() => void loadCases(selectedGstin), delay);
-      }
+      scheduleRefreshes();
     } catch {
-      setError(
-        "Couldn't reach the local WorkLine GST Helper. Make sure it's running on this computer (Tools → install/start the GST Helper), then try again."
+      // Helper isn't running yet — launch it via the WorkLine GST Helper
+      // protocol, which starts the helper and kicks off this fetch itself.
+      startHelperViaProtocol(selectedGstin);
+      setMessage(
+        "Starting the WorkLine GST Helper on this computer… if your browser asks to open “WorkLine GST Helper”, click Open. A portal window will appear — enter the CAPTCHA there and the data will save automatically."
       );
+      void waitForHelperThenRefresh();
     } finally {
       setIsFetching(false);
     }
+  }
+
+  function startHelperViaProtocol(gstin: string) {
+    const url = `workline-gst://?gstin=${encodeURIComponent(gstin)}`;
+    const frame = document.createElement("iframe");
+    frame.style.display = "none";
+    frame.src = url;
+    document.body.appendChild(frame);
+    window.setTimeout(() => frame.remove(), 4000);
+  }
+
+  function scheduleRefreshes() {
+    for (const delay of [15000, 30000, 45000, 60000, 90000, 120000]) {
+      window.setTimeout(() => void loadCases(selectedGstin), delay);
+    }
+  }
+
+  async function waitForHelperThenRefresh() {
+    // Give the helper a few seconds to come up, then confirm it's reachable.
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 2500));
+      try {
+        const health = await fetch(`${HELPER_URL}/health`, { cache: "no-store" });
+        if (health.ok) {
+          setMessage(
+            "The portal is opening — enter the CAPTCHA in the browser window. The notices save automatically; this list refreshes on its own, or click Refresh."
+          );
+          scheduleRefreshes();
+          return;
+        }
+      } catch {
+        // keep waiting
+      }
+    }
+    setError(
+      "The WorkLine GST Helper didn’t start. Open it once from Tools → install/start the GST Helper, then click Get data again."
+    );
   }
 
   async function deleteCase(id: string) {
