@@ -117,10 +117,24 @@ type CaseGroup = {
   caseId: string;
   key: string;
   notices: GstCase[];
+  openClosed: "Closed" | "Open";
   period: string;
   status: string;
   tabs: DetailTab[];
+  type: string;
 };
+
+// Decides whether a case is Open or Closed from its status / type text.
+function deriveOpenClosed(text: string): "Closed" | "Open" {
+  const value = text.toLowerCase();
+  if (/pending|awaiting|recommended|reply furnished|hearing|show cause|\bscn\b|notice for|issued|initiated|in progress/.test(value)) {
+    return "Open";
+  }
+  if (/order|closed|disposed|dropped|withdrawn|rejected|concluded|passed|rectified/.test(value)) {
+    return "Closed";
+  }
+  return "Open";
+}
 
 // Groups the saved notices by Case ID so the tracker shows one row per case.
 function groupByCase(cases: GstCase[]): CaseGroup[] {
@@ -130,10 +144,13 @@ function groupByCase(cases: GstCase[]): CaseGroup[] {
     const key = caseId || notice.ref_id || notice.id;
     let group = map.get(key);
     if (!group) {
-      group = { caseId: caseId || "—", key, notices: [], period: "", status: "", tabs: [] };
+      group = { caseId: caseId || "—", key, notices: [], openClosed: "Open", period: "", status: "", tabs: [], type: "" };
       map.set(key, group);
     }
     group.notices.push(notice);
+    if (!group.type && notice.notice_type) {
+      group.type = notice.notice_type;
+    }
     if (!group.period && notice.tax_period) {
       group.period = notice.tax_period;
     }
@@ -161,6 +178,8 @@ function groupByCase(cases: GstCase[]): CaseGroup[] {
         group.status = description;
       }
     }
+    const descriptions = group.notices.map((notice) => notice.description ?? "").join(" ");
+    group.openClosed = deriveOpenClosed(`${group.status} ${group.type} ${descriptions}`);
   }
 
   return [...map.values()];
@@ -184,6 +203,13 @@ export function GstTracker() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [filters, setFilters] = useState<{ caseId: string; openClosed: string; period: string; status: string; type: string }>({
+    caseId: "",
+    openClosed: "",
+    period: "",
+    status: "",
+    type: ""
+  });
 
   const selectedClient = useMemo(() => clients.find((client) => client.gstin === selectedGstin) ?? null, [clients, selectedGstin]);
 
@@ -307,6 +333,16 @@ export function GstTracker() {
   }
 
   const caseGroups = groupByCase(cases);
+  const filteredGroups = caseGroups.filter((group) => {
+    const match = (value: string, filter: string) => !filter.trim() || value.toLowerCase().includes(filter.trim().toLowerCase());
+    return (
+      match(group.caseId, filters.caseId) &&
+      match(group.type, filters.type) &&
+      match(group.period, filters.period) &&
+      match(group.status, filters.status) &&
+      match(group.openClosed, filters.openClosed)
+    );
+  });
 
   return (
     <div className="mt-6 space-y-4">
@@ -370,26 +406,56 @@ export function GstTracker() {
         </div>
 
         <div className="overflow-auto rounded-lg border border-slate-200">
-          <table className="w-full min-w-[720px] border-collapse text-left text-sm">
+          <table className="w-full min-w-[980px] border-collapse text-left text-sm">
             <thead className="bg-slate-100 text-[11px] font-black uppercase tracking-wide text-slate-600">
               <tr>
                 <th className="w-8 border-b border-slate-200 px-2 py-2" />
                 <th className="whitespace-nowrap border-b border-slate-200 px-3 py-2">Case ID</th>
+                <th className="whitespace-nowrap border-b border-slate-200 px-3 py-2">Type</th>
                 <th className="whitespace-nowrap border-b border-slate-200 px-3 py-2">Tax Period</th>
                 <th className="whitespace-nowrap border-b border-slate-200 px-3 py-2">Status</th>
+                <th className="whitespace-nowrap border-b border-slate-200 px-3 py-2">Open / Closed</th>
                 <th className="whitespace-nowrap border-b border-slate-200 px-3 py-2">Notices</th>
                 <th className="border-b border-slate-200 px-3 py-2" />
+              </tr>
+              <tr className="bg-white">
+                <th className="border-b border-slate-200 px-1 py-1" />
+                <th className="border-b border-slate-200 px-1 py-1">
+                  <FilterInput onChange={(value) => setFilters((previous) => ({ ...previous, caseId: value }))} value={filters.caseId} />
+                </th>
+                <th className="border-b border-slate-200 px-1 py-1">
+                  <FilterInput onChange={(value) => setFilters((previous) => ({ ...previous, type: value }))} value={filters.type} />
+                </th>
+                <th className="border-b border-slate-200 px-1 py-1">
+                  <FilterInput onChange={(value) => setFilters((previous) => ({ ...previous, period: value }))} value={filters.period} />
+                </th>
+                <th className="border-b border-slate-200 px-1 py-1">
+                  <FilterInput onChange={(value) => setFilters((previous) => ({ ...previous, status: value }))} value={filters.status} />
+                </th>
+                <th className="border-b border-slate-200 px-1 py-1">
+                  <select
+                    className="h-7 w-full rounded border border-slate-200 bg-white px-1 text-[11px] font-bold text-slate-700 outline-none focus:border-navy-400"
+                    onChange={(event) => setFilters((previous) => ({ ...previous, openClosed: event.target.value }))}
+                    value={filters.openClosed}
+                  >
+                    <option value="">All</option>
+                    <option value="Open">Open</option>
+                    <option value="Closed">Closed</option>
+                  </select>
+                </th>
+                <th className="border-b border-slate-200 px-1 py-1" />
+                <th className="border-b border-slate-200 px-1 py-1" />
               </tr>
             </thead>
             <tbody>
               {!selectedGstin ? (
                 <tr>
-                  <td className="px-4 py-10 text-center text-sm font-bold text-slate-400" colSpan={6}>
+                  <td className="px-4 py-10 text-center text-sm font-bold text-slate-400" colSpan={8}>
                     Select a client to see its cases.
                   </td>
                 </tr>
-              ) : caseGroups.length ? (
-                caseGroups.map((group) => {
+              ) : filteredGroups.length ? (
+                filteredGroups.map((group) => {
                   const isExpanded = expandedId === group.key;
                   return (
                     <Fragment key={group.key}>
@@ -401,8 +467,18 @@ export function GstTracker() {
                           {isExpanded ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
                         </td>
                         <td className="px-3 py-2 align-top font-bold text-navy-800">{group.caseId || "—"}</td>
+                        <td className="px-3 py-2 align-top font-semibold text-slate-700">{group.type || "—"}</td>
                         <td className="px-3 py-2 align-top font-semibold text-slate-700">{group.period || "—"}</td>
                         <td className="px-3 py-2 align-top font-semibold text-slate-700">{group.status || "—"}</td>
+                        <td className="px-3 py-2 align-top">
+                          <span
+                            className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-black ${
+                              group.openClosed === "Closed" ? "bg-slate-100 text-slate-600" : "bg-emerald-50 text-emerald-700"
+                            }`}
+                          >
+                            {group.openClosed}
+                          </span>
+                        </td>
                         <td className="px-3 py-2 align-top font-semibold text-slate-500">{group.notices.length}</td>
                         <td className="px-3 py-2 text-right">
                           <button
@@ -420,7 +496,7 @@ export function GstTracker() {
                       </tr>
                       {isExpanded ? (
                         <tr className="border-b border-slate-100 bg-slate-50/60">
-                          <td className="px-4 py-4" colSpan={6}>
+                          <td className="px-4 py-4" colSpan={8}>
                             <CaseDetail group={group} />
                           </td>
                         </tr>
@@ -430,8 +506,12 @@ export function GstTracker() {
                 })
               ) : (
                 <tr>
-                  <td className="px-4 py-10 text-center text-sm font-bold text-slate-400" colSpan={6}>
-                    {isLoadingCases ? "Loading…" : "No cases saved yet. Click Get data to pull them from the portal."}
+                  <td className="px-4 py-10 text-center text-sm font-bold text-slate-400" colSpan={8}>
+                    {isLoadingCases
+                      ? "Loading…"
+                      : cases.length
+                        ? "No cases match the filters."
+                        : "No cases saved yet. Click Get data to pull them from the portal."}
                   </td>
                 </tr>
               )}
@@ -520,6 +600,18 @@ function CaseDetail({ group }: { group: CaseGroup }) {
         <p className="text-xs font-semibold text-slate-400">No sub-tab detail captured for this case yet.</p>
       )}
     </div>
+  );
+}
+
+function FilterInput({ onChange, value }: { onChange: (value: string) => void; value: string }) {
+  return (
+    <input
+      className="h-7 w-full rounded border border-slate-200 bg-white px-2 text-[11px] font-semibold normal-case tracking-normal text-slate-700 outline-none focus:border-navy-400"
+      onChange={(event) => onChange(event.target.value)}
+      onClick={(event) => event.stopPropagation()}
+      placeholder="Filter"
+      value={value}
+    />
   );
 }
 
