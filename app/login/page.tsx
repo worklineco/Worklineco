@@ -1,5 +1,6 @@
+import { ArrowUpRight, BadgeCheck, Building2, Clock3, FileText, Megaphone, ShieldCheck, Sparkles } from "lucide-react";
+import Link from "next/link";
 import { LoginForm } from "@/components/auth/login-form";
-import { BadgeCheck, Building2, Clock3, FileText, ShieldCheck, Sparkles } from "lucide-react";
 
 const accessHighlights = [
   { icon: ShieldCheck, label: "Protected workspace", value: "Firm-only access" },
@@ -33,6 +34,23 @@ export default function LoginPage() {
             and deadline visibility, built for professional firms that move with
             discipline and detail.
           </p>
+
+          <Link
+            className="group mt-5 flex items-center gap-3 rounded-2xl border border-amber-300 bg-gradient-to-r from-amber-50 via-white to-fuchsia-50 p-3.5 shadow-sm ring-1 ring-amber-200/60 transition hover:shadow-md"
+            href="/gst-council"
+          >
+            <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-amber-400 text-amber-950">
+              <Megaphone className="size-5" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="flex flex-wrap items-center gap-2">
+                <span className="text-sm font-black text-navy-900">57th GST Council</span>
+                <span className="rounded-full bg-emerald-300 px-2 py-0.5 text-[10px] font-black uppercase text-emerald-950">Updated</span>
+              </span>
+              <span className="mt-0.5 block text-xs font-bold text-slate-600">Key reforms &amp; agenda — open to view, no login needed.</span>
+            </span>
+            <ArrowUpRight className="size-5 shrink-0 text-navy-700 transition group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
+          </Link>
 
           <div className="mt-5 grid gap-3 sm:grid-cols-3">
             {accessHighlights.map((item) => {
