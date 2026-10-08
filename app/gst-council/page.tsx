@@ -36,7 +36,7 @@ const sections = [
 export default function GstCouncilPage() {
   return (
     <main className="min-h-screen bg-[#f4f6fa] px-5 py-10 sm:px-8">
-      <div className="mx-auto max-w-5xl text-slate-900">
+      <div className="w-full text-slate-900">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="inline-flex items-center gap-2 rounded-full border border-white/80 bg-white px-3 py-1.5 text-xs font-black uppercase text-navy-800 shadow-sm">
             <Sparkles className="size-3.5 text-fuchsia-600" />
@@ -75,7 +75,7 @@ export default function GstCouncilPage() {
           </p>
         </div>
 
-        <section className="mt-6 grid gap-4 sm:grid-cols-2">
+        <section className="mt-6 grid gap-4 grid-cols-[repeat(auto-fit,minmax(300px,1fr))]">
           {sections.map((item) => (
             <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm" key={item.title}>
               <h2 className="text-sm font-black text-navy-800">{item.title}</h2>
