@@ -199,6 +199,7 @@ const gstStateByCode: Record<string, string> = {
 const billingColumns: BillingColumn[] = [
   { field: "actions", label: "Actions", width: 92 },
   { field: "task_code", label: "Task Code", type: "select", width: 140 },
+  { field: "created_at", label: "Added Date", type: "date", width: 130 },
   { field: "owner_team", label: "Team", type: "text", width: 128 },
   { field: "source_module", label: "Pushed From Sheet", type: "select", width: 160 },
   { field: "voucher_type", label: "Voucher", type: "select", width: 145 },
@@ -240,17 +241,17 @@ const billingColumnGroups: { columns: string[] | null; key: string; label: strin
   {
     key: "core",
     label: "Client & Matter",
-    columns: ["actions", "task_code", "client", "owner_team", "group_name", "gstin", "place_of_supply", "address", "registration_type", "description", "poc_name", "poc_mobile", "poc_email", "escalation_1", "remarks", "accounts_remark", "gstat_link"]
+    columns: ["actions", "task_code", "created_at", "client", "owner_team", "group_name", "gstin", "place_of_supply", "address", "registration_type", "description", "poc_name", "poc_mobile", "poc_email", "escalation_1", "remarks", "accounts_remark", "gstat_link"]
   },
   {
     key: "fees",
     label: "Fees & Tax",
-    columns: ["actions", "task_code", "client", "amount", "cgst", "sgst", "igst", "ope", "include_ope_in_fees", "ope_remarks", "total"]
+    columns: ["actions", "task_code", "created_at", "client", "amount", "cgst", "sgst", "igst", "ope", "include_ope_in_fees", "ope_remarks", "total"]
   },
   {
     key: "receipt",
     label: "Invoice & Receipt",
-    columns: ["actions", "task_code", "client", "billing_status", "memo_no", "memo_date", "invoice_no", "invoice_date", "receiving_status", "receiving_date", "amount_received", "pending_amount"]
+    columns: ["actions", "task_code", "created_at", "client", "billing_status", "memo_no", "memo_date", "invoice_no", "invoice_date", "receiving_status", "receiving_date", "amount_received", "pending_amount"]
   },
   { key: "all", label: "All", columns: null }
 ];
@@ -1086,6 +1087,7 @@ export function BillingRegister() {
       "S.No.": record.serial_no ?? index + 1,
       Team: record.owner_team,
       "Task Code": record.task_code ?? "",
+      "Added Date": formatDateForExport(record.created_at),
       "Pushed From Sheet": formatSourceModule(record.source_module),
       "Pushed By": record.pushed_by ?? "",
       "Voucher Type": record.voucher_type,
@@ -1657,6 +1659,7 @@ function BillingCell({
     receiptStatus === "" || receiptStatus === "pending" || receiptStatus === "received" || receiptStatus === "realised" || receiptStatus === "realized";
   const isReadOnly =
     column.field === "serial_no" ||
+    column.field === "created_at" ||
     column.field === "source_module" ||
     column.field === "pushed_by" ||
     column.field === "total" ||

@@ -8,7 +8,7 @@ import { chromium } from "playwright-core";
 import XLSX from "xlsx";
 import { getCollectorOutputDir, getDefaultWorkbookPath, getWorklineGstHome } from "./gst-helper-home.mjs";
 
-const COLLECTOR_VERSION = "2026-10-07-drilldown-v10-xpath";
+const COLLECTOR_VERSION = "2026-10-07-casedetail-v12";
 const GST_PORTAL_LOGIN_URL = "https://services.gst.gov.in/services/login";
 const WORKLINE_GST_HOME = getWorklineGstHome();
 const DEFAULT_WORKBOOK_PATH = getDefaultWorkbookPath();
@@ -437,42 +437,6 @@ async function waitForAuthenticatedPortal(page) {
   ).catch(() => {});
 }
 
-// The GST portal intermittently throws an "Access Denied" / session page that
-// clears on a reload. Detect it by URL or visible text.
-async function isAccessDenied(page) {
-  return page.evaluate(() => {
-    const url = (location.href || "").toLowerCase();
-    if (url.includes("accessdenied") || url.includes("sessionexpired")) {
-      return true;
-    }
-    const text = document.body ? document.body.innerText : "";
-    return /access denied/i.test(text);
-  }).catch(() => false);
-}
-
-// When Access Denied shows up, refresh the page (then fall back to re-opening
-// the given URL) until it clears, as the provided V3 collector did.
-async function recoverFromAccessDenied(page, reloadUrl) {
-  for (let attempt = 0; attempt < 4; attempt += 1) {
-    if (!(await isAccessDenied(page))) {
-      return true;
-    }
-    console.log(`Access Denied detected — refreshing the page (attempt ${attempt + 1}).`);
-    if (attempt === 0) {
-      await page.reload({ waitUntil: "domcontentloaded", timeout: 30_000 }).catch(() => {});
-    } else if (reloadUrl) {
-      await page.goto(reloadUrl, { waitUntil: "domcontentloaded", timeout: 30_000 }).catch(() => {});
-    } else {
-      await page.reload({ waitUntil: "domcontentloaded", timeout: 30_000 }).catch(() => {});
-    }
-    await page.waitForTimeout(3_000);
-  }
-  const stillDenied = await isAccessDenied(page);
-  if (stillDenied) {
-    console.log("Access Denied did not clear after refreshing.");
-  }
-  return !stillDenied;
-}
 
 async function clickPortalLinkByText(page, text, label) {
   const clicked = await page.evaluate((targetText) => {
@@ -502,119 +466,6 @@ async function clickPortalLinkByText(page, text, label) {
 
   console.log(`Could not click ${label}.`);
   return false;
-}
-
-async function clickPortalLinkByHref(page, hrefPart, text, label) {
-  const clicked = await page.evaluate(
-    ({ hrefPart: targetHrefPart, text: targetText }) => {
-      const normalize = (value) => String(value ?? "").replace(/\s+/g, " ").trim().toLowerCase();
-      const target = normalize(targetText);
-      const link = [...document.querySelectorAll("a")]
-        .find((element) => {
-          const href = element.getAttribute("href") || element.getAttribute("data-ng-href") || "";
-          const textMatches = !target || normalize(element.innerText || element.textContent) === target;
-          return href.includes(targetHrefPart) && textMatches;
-        });
-
-      if (!link) {
-        return false;
-      }
-
-      link.scrollIntoView({ block: "center", inline: "center" });
-      link.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, cancelable: true, view: window }));
-      link.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window }));
-      link.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, view: window }));
-      link.click();
-      return true;
-    },
-    { hrefPart, text },
-  ).catch(() => false);
-
-  if (clicked) {
-    console.log(`Clicked ${label}.`);
-    await page.waitForLoadState("domcontentloaded", { timeout: 15_000 }).catch(() => {});
-    await page.waitForTimeout(1_000);
-    return true;
-  }
-
-  console.log(`Could not click ${label}.`);
-  return false;
-}
-
-async function handlePortalPopups(page) {
-  for (const label of ["Remind me later", "No-Remind me later", "No, Remind me later", "Remind Me Later"]) {
-    await clickPortalLinkByText(page, label, label).catch(() => false);
-  }
-}
-
-async function navigateToNoticesAndOrders(page) {
-  console.log("Navigating to Services > User Services > View Notices and Orders.");
-  await waitForAuthenticatedPortal(page);
-  await recoverFromAccessDenied(page, "https://services.gst.gov.in/services/auth/dashboard");
-  await handlePortalPopups(page);
-
-  console.log("Opening View Notices and Orders directly in the authenticated GST session.");
-  await page.goto("https://services.gst.gov.in/services/auth/notices", {
-    waitUntil: "domcontentloaded",
-    timeout: 30_000,
-  }).catch(() => {});
-  await page.waitForTimeout(2_000);
-
-  const directReached = await page.waitForFunction(
-    () =>
-      location.href.includes("/auth/notices") ||
-      document.body.innerText.includes("Additional Notices") ||
-      document.body.innerText.includes("Notices and Orders"),
-    null,
-    { timeout: 15_000 },
-  ).then(() => true).catch(() => false);
-
-  if (directReached) {
-    console.log("Opened View Notices and Orders.");
-    return;
-  }
-
-  console.log("Direct navigation did not reach notices page. Trying GST menu clicks.");
-  await clickPortalLinkByText(page, "Services", "Services");
-  await page.waitForTimeout(3_000);
-
-  const clickedUserServices =
-    await clickPortalLinkByText(page, "User Services", "User Services") ||
-    await clickPortalLinkByHref(page, "/services/auth/quicklinks/userservices", "User Services", "User Services");
-
-  if (!clickedUserServices) {
-    await page.goto("https://services.gst.gov.in/services/auth/quicklinks/userservices", {
-      waitUntil: "domcontentloaded",
-      timeout: 30_000,
-    });
-  }
-
-  await page.waitForTimeout(1_000);
-
-  const clickedNotices =
-    await clickPortalLinkByText(page, "View Notices and Orders", "View Notices and Orders") ||
-    await clickPortalLinkByHref(page, "/services/auth/notices", "View Notices and Orders", "View Notices and Orders");
-
-  const reached = await page.waitForFunction(
-    () =>
-      location.href.includes("/auth/notices") ||
-      document.body.innerText.includes("Additional Notices") ||
-      document.body.innerText.includes("Notices and Orders"),
-    null,
-    { timeout: 20_000 },
-  ).then(() => true).catch(() => false);
-
-  if (!clickedNotices || !reached) {
-    console.log("Menu navigation did not reach notices page. Opening View Notices and Orders directly.");
-    await page.goto("https://services.gst.gov.in/services/auth/notices", {
-      waitUntil: "domcontentloaded",
-      timeout: 30_000,
-    });
-  }
-
-  await page.waitForLoadState("domcontentloaded", { timeout: 20_000 }).catch(() => {});
-  await page.waitForTimeout(2_000);
-  await recoverFromAccessDenied(page, NOTICES_URL);
 }
 
 // Reads the notices table on the current page. It picks the table whose header
@@ -724,242 +575,6 @@ async function extractNoticeTableRows(page) {
   );
 }
 
-const NOTICES_URL = "https://services.gst.gov.in/services/auth/notices";
-
-// Clicks an element in the left area of a detail page whose text matches label.
-async function clickLeftTab(page, label) {
-  return page.evaluate((target) => {
-    const norm = (value) => String(value ?? "").replace(/\s+/g, " ").trim().toLowerCase();
-    const width = window.innerWidth;
-    const element = [...document.querySelectorAll("a,li,button,[role='tab'],span")].find((candidate) => {
-      const rect = candidate.getBoundingClientRect();
-      return norm(candidate.innerText || candidate.textContent) === norm(target) && rect.width > 0 && rect.height > 0 && rect.left < width * 0.5;
-    });
-    if (!element) {
-      return false;
-    }
-    const clickable = element.tagName === "LI" || element.tagName === "SPAN" ? element.querySelector("a,button") ?? element : element;
-    clickable.scrollIntoView({ block: "center" });
-    clickable.click();
-    return true;
-  }, label).catch(() => false);
-}
-
-// Captures every visible data table on the current detail view as {headers, rows}.
-async function captureDetailTables(page) {
-  return page.evaluate(() => {
-    const clean = (value) => String(value ?? "").replace(/\s+/g, " ").trim();
-    const isVisible = (node) => Boolean(node.offsetWidth || node.offsetHeight || node.getClientRects().length);
-    const pickHeader = (table) => {
-      const candidates = [...table.querySelectorAll("thead tr")];
-      const firstTr = table.querySelector("tr");
-      if (!candidates.length && firstTr) {
-        candidates.push(firstTr);
-      }
-      let best = [];
-      let bestCount = -1;
-      for (const tr of candidates) {
-        const cells = [...tr.querySelectorAll("th,td")].map((node) => clean(node.innerText || node.textContent));
-        const count = cells.filter(Boolean).length;
-        if (count > bestCount) {
-          bestCount = count;
-          best = cells;
-        }
-      }
-      return best;
-    };
-
-    const out = [];
-    for (const table of document.querySelectorAll("table")) {
-      if (!isVisible(table)) {
-        continue;
-      }
-      const headers = pickHeader(table);
-      const bodyRows = [...table.querySelectorAll("tbody tr")];
-      const dataRows = (bodyRows.length ? bodyRows : [...table.querySelectorAll("tr")]).filter((tr) => !tr.querySelector("th"));
-      const rows = [];
-      for (const tr of dataRows) {
-        const cellNodes = [...tr.querySelectorAll("td")];
-        if (tr.querySelector("input,select") && cellNodes.every((td) => !clean(td.innerText || td.textContent))) {
-          continue;
-        }
-        const cells = cellNodes.map((node) => clean(node.innerText || node.textContent));
-        if (cells.some(Boolean)) {
-          rows.push(cells);
-        }
-      }
-      if (rows.length) {
-        out.push({ headers, rows });
-      }
-    }
-    return out;
-  }).catch(() => []);
-}
-
-// Reads Case ID, Period, Status and each left sub-tab's tables from a notice's View page.
-async function extractViewDetail(page) {
-  await page.waitForLoadState("domcontentloaded", { timeout: 15_000 }).catch(() => {});
-  await page.waitForTimeout(1_500);
-  await recoverFromAccessDenied(page);
-  await page.waitForTimeout(500);
-
-  const header = await page.evaluate(() => {
-    const clean = (value) => String(value ?? "").replace(/\s+/g, " ").trim();
-    const valueFor = (labels) => {
-      const want = labels.map((label) => label.toLowerCase());
-      const els = [...document.querySelectorAll("span,label,td,th,div,strong,p,b")];
-      const labelEl = els.find((el) => {
-        const text = clean(el.innerText || el.textContent).toLowerCase().replace(/[:\s]+$/, "");
-        return want.includes(text);
-      });
-      if (!labelEl) {
-        return "";
-      }
-      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT);
-      let passed = false;
-      while (walker.nextNode()) {
-        const node = walker.currentNode;
-        if (node === labelEl) {
-          passed = true;
-          continue;
-        }
-        if (passed && (node.tagName === "B" || node.tagName === "STRONG")) {
-          const text = clean(node.innerText || node.textContent);
-          if (text) {
-            return text;
-          }
-        }
-      }
-      return "";
-    };
-    return {
-      caseId: valueFor(["case id"]),
-      period: valueFor(["period", "tax period", "financial year"]),
-      status: valueFor(["status", "case status"])
-    };
-  }).catch(() => ({ caseId: "", period: "", status: "" }));
-
-  const tabLabels = await page.evaluate(() => {
-    const clean = (value) => String(value ?? "").replace(/\s+/g, " ").trim();
-    const width = window.innerWidth;
-    const candidates = [...document.querySelectorAll("a,li,button,[role='tab']")].filter((el) => {
-      const rect = el.getBoundingClientRect();
-      const text = clean(el.innerText || el.textContent);
-      return text && text.length <= 30 && rect.width > 0 && rect.height > 0 && rect.left < width * 0.45;
-    });
-    return [...new Set(candidates.map((el) => clean(el.innerText || el.textContent)))];
-  }).catch(() => []);
-
-  console.log(`    Detail caseId="${header.caseId}" period="${header.period}" status="${header.status}"`);
-  console.log(`    Left items: ${tabLabels.join(" | ")}`);
-
-  const knownTabs = [
-    "Notice", "Notices", "Notices and Demand Orders", "Reply", "Replies", "Order", "Orders",
-    "Proceedings", "Reminder", "Reminders", "Personal Hearing", "Adjournment", "Rectification",
-    "Appeal", "Refund", "Documents", "Attachments", "Drop Proceedings"
-  ];
-  const tabsToTry = knownTabs.filter((known) => tabLabels.some((label) => label.toLowerCase() === known.toLowerCase()));
-
-  const tabs = [];
-  const defaultTables = await captureDetailTables(page);
-  if (defaultTables.length) {
-    tabs.push({ name: "Summary", tables: defaultTables });
-  }
-
-  for (const tab of tabsToTry) {
-    const clicked = await clickLeftTab(page, tab);
-    if (!clicked) {
-      continue;
-    }
-    await page.waitForTimeout(1_200);
-    const captured = await captureDetailTables(page);
-    const rowTotal = captured.reduce((sum, table) => sum + table.rows.length, 0);
-    console.log(`    Sub-tab "${tab}": ${rowTotal} row(s).`);
-    if (captured.length) {
-      tabs.push({ name: tab, tables: captured });
-    }
-  }
-
-  return { caseId: header.caseId, period: header.period, status: header.status, tabs };
-}
-
-// Counts the data rows in the main notices table on the list page.
-async function noticeDataRowCount(page) {
-  return page.evaluate(() => {
-    const clean = (value) => String(value ?? "").replace(/\s+/g, " ").trim();
-    let bestCount = -1;
-    for (const table of document.querySelectorAll("table")) {
-      const bodyRows = [...table.querySelectorAll("tbody tr")].filter(
-        (tr) => !tr.querySelector("th") && [...tr.querySelectorAll("td")].some((td) => clean(td.innerText || td.textContent))
-      );
-      if (bodyRows.length > bestCount) {
-        bestCount = bodyRows.length;
-      }
-    }
-    return bestCount < 0 ? 0 : bestCount;
-  }).catch(() => 0);
-}
-
-// Clicks the "View" link in data row `index` with a real (trusted) click, then
-// detects what the portal did: opened a new tab (popup), navigated the current
-// tab, or started a document download. Returns the detail page when there is
-// one, plus a descriptive reason for the log.
-async function openNoticeDetail(page, index, previousUrl) {
-  // The View link lives in the 6th cell (Action column) of each data row:
-  // //table/tbody/tr[N]/td[6]/div/a. Selecting td[6] anchors gives one per row
-  // in row order, matching the extracted list rows.
-  const viewLinks = page.locator("xpath=//table/tbody/tr/td[6]//a");
-  const total = await viewLinks.count().catch(() => 0);
-  if (index >= total) {
-    return { detailPage: null, reason: `no-view-link (found ${total})` };
-  }
-  const viewLink = viewLinks.nth(index);
-
-  const popupPromise = page.waitForEvent("popup", { timeout: 5_000 }).catch(() => null);
-  const downloadPromise = page.waitForEvent("download", { timeout: 5_000 }).catch(() => null);
-  const navPromise = page
-    .waitForFunction(
-      (prev) => location.href !== prev || /case\s*id/i.test(document.body ? document.body.innerText : ""),
-      previousUrl,
-      { timeout: 5_000 }
-    )
-    .then(() => true)
-    .catch(() => false);
-
-  let clickError = "";
-  try {
-    await viewLink.scrollIntoViewIfNeeded({ timeout: 5_000 });
-    await viewLink.click({ timeout: 8_000 });
-  } catch (error) {
-    clickError = String(error?.message || error).split("\n")[0];
-  }
-
-  const [popup, download, navigated] = await Promise.all([popupPromise, downloadPromise, navPromise]);
-
-  if (download) {
-    const name = (() => {
-      try {
-        return download.suggestedFilename();
-      } catch {
-        return "file";
-      }
-    })();
-    await download.cancel().catch(() => {});
-    return { detailPage: null, reason: `download(${name})`, clickError };
-  }
-
-  if (popup) {
-    await popup.waitForLoadState("domcontentloaded", { timeout: 15_000 }).catch(() => {});
-    return { detailPage: popup, isPopup: true, reason: `popup(${popup.url()})`, clickError };
-  }
-
-  if (navigated && !(await isAccessDenied(page))) {
-    return { detailPage: page, isPopup: false, reason: `navigated(${page.url()})`, clickError };
-  }
-
-  return { detailPage: null, reason: clickError ? `click-failed: ${clickError}` : "nothing-happened", clickError };
-}
-
 // Logs the header row of every visible table so we can see what the portal returned.
 async function logVisibleTableHeaders(page) {
   const tables = await page.evaluate(() => {
@@ -998,51 +613,215 @@ async function logVisibleTableHeaders(page) {
 
 // Collects the merged notices table, then drills into each row's View page to
 // capture Case ID, Period, Status and every left sub-tab's table.
-async function collectNoticesAndOrders(page) {
-  await navigateToNoticesAndOrders(page);
-  await logVisibleTableHeaders(page);
-  await clickPortalLinkByText(page, "100", "100 rows per page").catch(() => false);
-  await page.waitForTimeout(1_200);
+// Opens the Case Details page for data row `index` by clicking its View link
+// (6th cell). Returns true once the Case Details page is showing.
+async function openCaseDetail(page, index) {
+  const viewLinks = page.locator("xpath=//table/tbody/tr/td[6]//a");
+  const total = await viewLinks.count().catch(() => 0);
+  if (index >= total) {
+    return false;
+  }
+  await viewLinks.nth(index).scrollIntoViewIfNeeded().catch(() => {});
+  await viewLinks.nth(index).click({ timeout: 8_000 }).catch(() => {});
+  return page
+    .waitForFunction(
+      () => {
+        const text = document.body ? document.body.innerText : "";
+        return /case\s*id/i.test(text) || /case details/i.test(text);
+      },
+      null,
+      { timeout: 12_000 }
+    )
+    .then(() => true)
+    .catch(() => false);
+}
 
-  const listRows = await extractNoticeTableRows(page);
-  const rowCount = await noticeDataRowCount(page);
-  const count = Math.min(listRows.length, rowCount);
-  console.log(`Main table: ${listRows.length} list row(s), ${rowCount} data row(s). Drilling into ${count} View page(s)...`);
+// Clicks a left sub-tab (INTIMATIONS / NOTICES / REPLIES / ORDERS) by exact text.
+async function clickSubTab(page, name) {
+  const locator = page.getByText(name, { exact: true }).first();
+  const count = await locator.count().catch(() => 0);
+  if (!count) {
+    return false;
+  }
+  await locator.scrollIntoViewIfNeeded().catch(() => {});
+  await locator.click({ timeout: 6_000 }).catch(() => {});
+  return true;
+}
 
-  for (let index = 0; index < count; index += 1) {
-    const previousUrl = page.url();
-    const opened = await openNoticeDetail(page, index, previousUrl);
-    console.log(`  Row ${index + 1}/${count}: ${opened.reason}`);
-
-    if (opened.detailPage) {
-      const detail = await extractViewDetail(opened.detailPage);
-      if (listRows[index]) {
-        listRows[index].caseId = detail.caseId || listRows[index].caseId;
-        listRows[index].taxPeriod = detail.period || listRows[index].taxPeriod;
-        listRows[index].status = detail.status || listRows[index].status;
-        listRows[index].detail = { tabs: detail.tabs };
+// Captures the Case Details tables currently shown (Type / Reference Number /
+// Issue Date / Due Date to Reply / Section / Attachment). Skips "No Records Found".
+async function captureCaseTables(page) {
+  return page.evaluate(() => {
+    const clean = (value) => String(value ?? "").replace(/\s+/g, " ").trim();
+    const isVisible = (node) => Boolean(node.offsetWidth || node.offsetHeight || node.getClientRects().length);
+    const pickHeader = (table) => {
+      const candidates = [...table.querySelectorAll("thead tr")];
+      const firstTr = table.querySelector("tr");
+      if (!candidates.length && firstTr) {
+        candidates.push(firstTr);
       }
+      let best = [];
+      let bestCount = -1;
+      for (const tr of candidates) {
+        const cells = [...tr.querySelectorAll("th,td")].map((node) => clean(node.innerText || node.textContent));
+        const count = cells.filter(Boolean).length;
+        if (count > bestCount) {
+          bestCount = count;
+          best = cells;
+        }
+      }
+      return best;
+    };
 
-      if (opened.isPopup) {
-        await opened.detailPage.close().catch(() => {});
-      } else {
-        // Return to the list within the session (Back avoids the Access Denied
-        // a fresh URL load triggers).
-        await page.goBack({ waitUntil: "domcontentloaded", timeout: 20_000 }).catch(() => {});
-        await page.waitForTimeout(1_200);
+    const out = [];
+    for (const table of document.querySelectorAll("table")) {
+      if (!isVisible(table)) {
+        continue;
+      }
+      const headers = pickHeader(table);
+      const headerText = headers.join(" ").toLowerCase();
+      if (!/type|reference|issue date|due date|section|attachment|order|notice|reply/.test(headerText)) {
+        continue;
+      }
+      const bodyRows = [...table.querySelectorAll("tbody tr")];
+      const dataRows = (bodyRows.length ? bodyRows : [...table.querySelectorAll("tr")]).filter((tr) => !tr.querySelector("th"));
+      const rows = [];
+      for (const tr of dataRows) {
+        const cells = [...tr.querySelectorAll("td")].map((node) => clean(node.innerText || node.textContent));
+        if (!cells.some(Boolean)) {
+          continue;
+        }
+        if (/no records found/i.test(cells.join(" "))) {
+          continue;
+        }
+        rows.push(cells);
+      }
+      if (rows.length) {
+        out.push({ headers, rows });
       }
     }
+    return out;
+  }).catch(() => []);
+}
 
-    // Make sure we are back on a working notices list before the next row.
-    if (await isAccessDenied(page)) {
-      console.log(`  Access Denied — re-opening via User Services > View Notices and Orders.`);
-      await navigateToNoticesAndOrders(page);
-      await clickPortalLinkByText(page, "100", "100 rows per page").catch(() => false);
-      await page.waitForTimeout(600);
+// Reads Case ID, Tax Period, Status and each sub-tab's table from a Case Details page.
+async function extractCaseDetail(page) {
+  await page.waitForTimeout(1_000);
+
+  const header = await page.evaluate(() => {
+    const clean = (value) => String(value ?? "").replace(/\s+/g, " ").trim();
+    const norm = (value) => clean(value).toLowerCase().replace(/[:*]+$/, "").trim();
+    const valueFor = (variants) => {
+      const wants = variants.map(norm);
+      const els = [...document.querySelectorAll("div,span,p,td,th,label,b,strong")];
+      for (const el of els) {
+        const text = norm(el.innerText || el.textContent);
+        if (!wants.includes(text)) {
+          continue;
+        }
+        const sibling = el.nextElementSibling;
+        if (sibling) {
+          const value = clean(sibling.innerText || sibling.textContent);
+          if (value && norm(value) !== text) {
+            return value;
+          }
+        }
+        const parent = el.parentElement;
+        if (parent) {
+          const full = clean(parent.innerText || parent.textContent);
+          const label = clean(el.innerText || el.textContent);
+          const value = full.replace(label, "").trim();
+          if (value) {
+            return value;
+          }
+        }
+      }
+      return "";
+    };
+    return {
+      caseId: valueFor(["Case ID"]),
+      period: valueFor(["Tax Periods(s)", "Tax Period(s)", "Tax Periods", "Tax Period", "Period"]),
+      status: valueFor(["Status"])
+    };
+  }).catch(() => ({ caseId: "", period: "", status: "" }));
+
+  console.log(`    Detail caseId="${header.caseId}" period="${header.period}" status="${header.status}"`);
+
+  const tabs = [];
+  for (const name of ["INTIMATIONS", "NOTICES", "REPLIES", "ORDERS"]) {
+    await clickSubTab(page, name);
+    await page.waitForTimeout(1_200);
+    const tables = await captureCaseTables(page);
+    const rowTotal = tables.reduce((sum, table) => sum + table.rows.length, 0);
+    console.log(`    Sub-tab ${name}: ${rowTotal} row(s).`);
+    if (tables.length) {
+      tabs.push({ name, tables });
     }
   }
 
-  console.log(`Finished drilling. Collected ${listRows.length} notice row(s) with detail.`);
+  return { caseId: header.caseId, period: header.period, status: header.status, tabs };
+}
+
+// Returns to the notices list: click the "View Notices and Orders" breadcrumb,
+// and if that doesn't land on the list, go the Services route again.
+async function returnToNoticesList(page) {
+  await clickPortalLinkByText(page, "View Notices and Orders", "View Notices and Orders (breadcrumb)").catch(() => false);
+  await page.waitForTimeout(2_000);
+
+  const onList = await page
+    .evaluate(() => /notice\s*\/?\s*demand order id/i.test(document.body ? document.body.innerText : ""))
+    .catch(() => false);
+
+  if (!onList) {
+    await clickPortalLinkByText(page, "Services", "Services");
+    await page.waitForTimeout(1_500);
+    await clickPortalLinkByText(page, "User Services", "User Services");
+    await page.waitForTimeout(1_500);
+    await clickPortalLinkByText(page, "View Notices and Orders", "View Notices and Orders");
+    await page.waitForTimeout(2_000);
+  }
+
+  await clickPortalLinkByText(page, "100", "100 rows per page").catch(() => false);
+  await page.waitForTimeout(1_200);
+}
+
+// Services > User Services > View Notices and Orders, show 100 rows, read the
+// list, then open each View one by one to capture its Case Details.
+async function collectNoticesAndOrders(page) {
+  await waitForAuthenticatedPortal(page);
+
+  await clickPortalLinkByText(page, "Services", "Services");
+  await page.waitForTimeout(2_000);
+
+  await clickPortalLinkByText(page, "User Services", "User Services");
+  await page.waitForTimeout(2_000);
+
+  await clickPortalLinkByText(page, "View Notices and Orders", "View Notices and Orders");
+  await page.waitForTimeout(2_500);
+
+  await clickPortalLinkByText(page, "100", "100 rows per page");
+  await page.waitForTimeout(1_500);
+
+  await logVisibleTableHeaders(page);
+  const listRows = await extractNoticeTableRows(page);
+  console.log(`Main table: ${listRows.length} row(s). Opening each View one by one...`);
+
+  for (let index = 0; index < listRows.length; index += 1) {
+    const opened = await openCaseDetail(page, index);
+    console.log(`  Row ${index + 1}/${listRows.length}: ${opened ? "opened case details" : "no detail page"}`);
+
+    if (opened) {
+      const detail = await extractCaseDetail(page);
+      listRows[index].caseId = detail.caseId || listRows[index].caseId;
+      listRows[index].taxPeriod = detail.period || listRows[index].taxPeriod;
+      listRows[index].status = detail.status || listRows[index].status;
+      listRows[index].detail = { tabs: detail.tabs };
+    }
+
+    await returnToNoticesList(page);
+  }
+
+  console.log(`Finished. Collected ${listRows.length} notice row(s) with detail.`);
   return listRows;
 }
 
