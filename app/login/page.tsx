@@ -30,7 +30,7 @@ export default function LoginPage() {
         </header>
 
         {/* Hero */}
-        <div className="grid flex-1 items-center gap-6 py-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)]">
+        <div className="my-auto grid items-center gap-10 py-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
           <section>
             <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-black uppercase tracking-wide text-navy-800 shadow-sm">
               <Sparkles className="size-3.5 text-fuchsia-600" />

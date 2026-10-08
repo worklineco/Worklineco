@@ -35,8 +35,8 @@ const sections = [
 
 export default function GstCouncilPage() {
   return (
-    <main className="min-h-screen bg-[#f4f6fa] px-4 py-8 text-slate-900">
-      <div className="mx-auto max-w-4xl">
+    <main className="min-h-screen bg-[#f4f6fa] px-5 py-10 sm:px-8">
+      <div className="mx-auto max-w-5xl text-slate-900">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="inline-flex items-center gap-2 rounded-full border border-white/80 bg-white px-3 py-1.5 text-xs font-black uppercase text-navy-800 shadow-sm">
             <Sparkles className="size-3.5 text-fuchsia-600" />
