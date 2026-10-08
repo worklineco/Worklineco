@@ -124,13 +124,11 @@ type CaseGroup = {
   type: string;
 };
 
-// Decides whether a case is Open or Closed from its status / type text.
+// A case is Closed only when it is a Voluntary Payment or an Appeal Order;
+// every other type/status (including other orders) is treated as Open.
 function deriveOpenClosed(text: string): "Closed" | "Open" {
   const value = text.toLowerCase();
-  if (/pending|awaiting|recommended|reply furnished|hearing|show cause|\bscn\b|notice for|issued|initiated|in progress/.test(value)) {
-    return "Open";
-  }
-  if (/order|closed|disposed|dropped|withdrawn|rejected|concluded|passed|rectified/.test(value)) {
+  if (value.includes("voluntary") || value.includes("appeal order")) {
     return "Closed";
   }
   return "Open";
@@ -535,9 +533,12 @@ function CaseDetail({ group }: { group: CaseGroup }) {
         <DetailField label="Status" value={group.status} />
       </div>
 
-      <div className="space-y-2">
-        <p className="text-xs font-black uppercase tracking-wide text-navy-700">Notices &amp; Orders in this case</p>
-        <div className="overflow-auto rounded-lg border border-slate-200 bg-white">
+      <details className="group rounded-lg border border-slate-200 bg-white">
+        <summary className="flex cursor-pointer items-center gap-2 px-3 py-2 text-xs font-black uppercase tracking-wide text-navy-700">
+          <ChevronRight className="size-3.5 transition-transform group-open:rotate-90" />
+          Notices &amp; Orders in this case ({group.notices.length})
+        </summary>
+        <div className="overflow-auto border-t border-slate-200">
           <table className="w-full border-collapse text-left text-xs">
             <thead className="bg-slate-100 font-black uppercase tracking-wide text-slate-600">
               <tr>
@@ -561,7 +562,7 @@ function CaseDetail({ group }: { group: CaseGroup }) {
             </tbody>
           </table>
         </div>
-      </div>
+      </details>
 
       {combined.rows.length ? (
         <div className="space-y-2">
@@ -600,13 +601,30 @@ function CaseDetail({ group }: { group: CaseGroup }) {
   );
 }
 
+// Maps equivalent sub-tab headers onto shared columns so Reply/Order references
+// land in Reference Number, Reply/Order dates in Issue Date, and both
+// personal-hearing columns become one.
+function canonicalHeader(header: string): string {
+  const value = header.trim().toLowerCase();
+  if (/reply filed against|order no|order number|order id|demand order id|reference no|reference number|ref no|ref id|\barn\b/.test(value)) {
+    return "Reference Number";
+  }
+  if (/reply date|order date|issue date|date of issuance/.test(value)) {
+    return "Issue Date";
+  }
+  if (/personal hearing/.test(value)) {
+    return "Personal Hearing";
+  }
+  return header.trim();
+}
+
 // Merges every sub-tab (Intimations / Notices / Replies / Orders) into one
 // table with a Category column, deduping rows that repeat across sub-tabs.
 function buildCombinedProceedings(tabs: DetailTab[]) {
   const columns: string[] = [];
   const seen = new Set<string>();
   const addColumn = (header: string) => {
-    const label = header.trim();
+    const label = canonicalHeader(header);
     if (label && !seen.has(label.toLowerCase())) {
       seen.add(label.toLowerCase());
       columns.push(label);
@@ -621,9 +639,12 @@ function buildCombinedProceedings(tabs: DetailTab[]) {
       for (const cells of table.rows) {
         const values: Record<string, string> = {};
         table.headers.forEach((header, index) => {
-          const label = header.trim();
-          if (label) {
-            values[label.toLowerCase()] = cells[index] ?? "";
+          const label = canonicalHeader(header);
+          const cell = cells[index] ?? "";
+          if (label && (!values[label.toLowerCase()] || !values[label.toLowerCase()].trim()) && cell.trim()) {
+            values[label.toLowerCase()] = cell;
+          } else if (label && !(label.toLowerCase() in values)) {
+            values[label.toLowerCase()] = cell;
           }
         });
         const key = Object.entries(values)
