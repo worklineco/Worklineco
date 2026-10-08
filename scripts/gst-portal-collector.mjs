@@ -8,7 +8,7 @@ import { chromium } from "playwright-core";
 import XLSX from "xlsx";
 import { getCollectorOutputDir, getDefaultWorkbookPath, getWorklineGstHome } from "./gst-helper-home.mjs";
 
-const COLLECTOR_VERSION = "2026-10-08-casedetail-v13-replace";
+const COLLECTOR_VERSION = "2026-10-08-sources-v16";
 const GST_PORTAL_LOGIN_URL = "https://services.gst.gov.in/services/login";
 const WORKLINE_GST_HOME = getWorklineGstHome();
 const DEFAULT_WORKBOOK_PATH = getDefaultWorkbookPath();
@@ -134,6 +134,10 @@ function parseArgs() {
     outputDir: path.resolve(args.get("out") || OUTPUT_DIR),
     rowNumber: args.has("row") ? Number(args.get("row")) : null,
     saveHtml: parseBooleanFlag(args.get("save-html")),
+    sources: String(args.get("sources") || "notices,appeal,spl,payment")
+      .split(",")
+      .map((source) => source.trim().toLowerCase())
+      .filter(Boolean),
     sync: parseBooleanFlag(args.get("sync")),
     workbookPath: path.resolve(args.get("file") || DEFAULT_WORKBOOK_PATH),
     worklineEmail: args.get("workline-email") || process.env.WORKLINE_EMAIL || "",
@@ -748,8 +752,14 @@ async function extractCaseDetail(page) {
   console.log(`    Detail caseId="${header.caseId}" period="${header.period}" status="${header.status}"`);
 
   const tabs = [];
-  for (const name of ["INTIMATIONS", "NOTICES", "REPLIES", "ORDERS"]) {
-    await clickSubTab(page, name);
+  for (const name of [
+    "INTIMATIONS", "NOTICES", "REPLIES", "ORDERS",
+    "APPLICATIONS", "ACK./INTIMATION", "ACK/INTIMATION", "ACKNOWLEDGEMENT", "INTIMATION", "REJOINDER"
+  ]) {
+    const clicked = await clickSubTab(page, name);
+    if (!clicked) {
+      continue;
+    }
     await page.waitForTimeout(1_200);
     const tables = await captureCaseTables(page);
     const rowTotal = tables.reduce((sum, table) => sum + table.rows.length, 0);
@@ -783,6 +793,322 @@ async function returnToNoticesList(page) {
 
   await clickPortalLinkByText(page, "100", "100 rows per page").catch(() => false);
   await page.waitForTimeout(1_200);
+}
+
+const APPEAL_TYPE = "Appeal to Appellate Authority";
+const APPEAL_START_DATE = "01/07/2017";
+const APPEAL_WINDOW_DAYS = 90;
+
+// Splits 01/07/2017..today into <= `days` windows (the form caps the range).
+function buildDateWindows(startDmy, days) {
+  const [d, m, y] = startDmy.split("/").map(Number);
+  let cursor = new Date(Date.UTC(y, m - 1, d));
+  const now = new Date();
+  const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const fmt = (date) =>
+    `${String(date.getUTCDate()).padStart(2, "0")}/${String(date.getUTCMonth() + 1).padStart(2, "0")}/${date.getUTCFullYear()}`;
+  const windows = [];
+  while (cursor <= end) {
+    const next = new Date(cursor);
+    next.setUTCDate(next.getUTCDate() + days - 1);
+    const winEnd = next > end ? end : next;
+    windows.push([fmt(cursor), fmt(winEnd)]);
+    cursor = new Date(winEnd);
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return windows.length ? windows : [[startDmy, fmt(end)]];
+}
+
+// Services > User Services > My Applications.
+async function goToMyApplications(page) {
+  await clickPortalLinkByText(page, "Services", "Services");
+  await page.waitForTimeout(2_000);
+  await clickPortalLinkByText(page, "User Services", "User Services");
+  await page.waitForTimeout(2_000);
+
+  const clicked = await page.evaluate(() => {
+    const norm = (value) => String(value ?? "").replace(/\s+/g, " ").trim().toLowerCase();
+    const link = [...document.querySelectorAll("a")].find((anchor) => {
+      const href = anchor.getAttribute("href") || "";
+      return norm(anchor.innerText || anchor.textContent) === "my applications" || href.includes("litserv/auth/case/search");
+    });
+    if (!link) {
+      return false;
+    }
+    link.scrollIntoView({ block: "center" });
+    link.click();
+    return true;
+  }).catch(() => false);
+
+  await page.waitForTimeout(2_500);
+  const ready = await page.locator("#up_type, select").first().count().catch(() => 0);
+  return clicked && ready > 0;
+}
+
+// Selects an application type in the My Applications dropdown.
+async function selectAppealType(page, label) {
+  if (await page.locator("#up_type").count().catch(() => 0)) {
+    try {
+      await page.selectOption("#up_type", { label });
+      await page.waitForTimeout(1_500);
+      return true;
+    } catch {
+      // fall through to the generic search
+    }
+  }
+  const ok = await page.evaluate((wanted) => {
+    for (const select of document.querySelectorAll("select")) {
+      const option = [...select.options].find(
+        (o) => o.text.trim() === wanted || o.text.toLowerCase().includes("appeal to appellate")
+      );
+      if (option) {
+        select.value = option.value;
+        select.dispatchEvent(new Event("change", { bubbles: true }));
+        return true;
+      }
+    }
+    return false;
+  }, label).catch(() => false);
+  await page.waitForTimeout(1_500);
+  return ok;
+}
+
+// Fills the From/To date fields (Angular inputs need value + events set).
+async function setApplicationDates(page, from, to) {
+  await page.evaluate(({ from: fromValue, to: toValue }) => {
+    const setValue = (names, value) => {
+      for (const name of names) {
+        const el = document.querySelector(`[name='${name}']`) || document.getElementById(name);
+        if (el) {
+          el.removeAttribute("readonly");
+          el.value = value;
+          el.dispatchEvent(new Event("input", { bubbles: true }));
+          el.dispatchEvent(new Event("change", { bubbles: true }));
+          el.dispatchEvent(new Event("blur", { bubbles: true }));
+          return true;
+        }
+      }
+      return false;
+    };
+    setValue(["fromdate", "fmdt", "from_date"], fromValue);
+    setValue(["todate", "todt", "to_date"], toValue);
+  }, { from, to }).catch(() => {});
+  await page.waitForTimeout(600);
+}
+
+async function clickApplicationSearch(page) {
+  const clicked = await page.evaluate(() => {
+    const up = (value) => String(value ?? "").toUpperCase();
+    const el = [...document.querySelectorAll("button,a,input[type=submit],button[type=submit]")].find((candidate) =>
+      up(candidate.innerText || candidate.value || "").includes("SEARCH")
+    );
+    if (!el) {
+      return false;
+    }
+    el.scrollIntoView({ block: "center" });
+    el.click();
+    return true;
+  }).catch(() => false);
+  await page.waitForTimeout(2_500);
+  return clicked;
+}
+
+// Reads the application result rows (skips "No Records Found").
+async function extractAppealResultRows(page) {
+  return page.evaluate(() => {
+    const clean = (value) => String(value ?? "").replace(/\s+/g, " ").trim();
+    const out = [];
+    for (const table of document.querySelectorAll("table")) {
+      for (const tr of table.querySelectorAll("tbody tr")) {
+        const cells = [...tr.querySelectorAll("td")].map((td) => clean(td.innerText || td.textContent));
+        if (cells.length < 2 || !cells.some(Boolean)) {
+          continue;
+        }
+        if (/no records found/i.test(cells.join(" "))) {
+          continue;
+        }
+        const anchor = tr.querySelector("a");
+        out.push({ arn: clean(anchor?.innerText || anchor?.textContent || cells[0]), cells });
+      }
+    }
+    return out;
+  }).catch(() => []);
+}
+
+// Clicks the ARN link of an application in the results table.
+async function openAppealRow(page, arn) {
+  const clicked = await page.evaluate((arnText) => {
+    const clean = (value) => String(value ?? "").replace(/\s+/g, " ").trim();
+    const links = [...document.querySelectorAll("table tbody tr a")];
+    const target =
+      links.find((a) => clean(a.innerText || a.textContent) === arnText) ||
+      links.find((a) => arnText && clean(a.innerText || a.textContent).includes(arnText));
+    if (!target) {
+      return false;
+    }
+    target.scrollIntoView({ block: "center" });
+    target.click();
+    return true;
+  }, arn).catch(() => false);
+  if (!clicked) {
+    return false;
+  }
+  return page
+    .waitForFunction(() => /case\s*id/i.test(document.body ? document.body.innerText : ""), null, { timeout: 12_000 })
+    .then(() => true)
+    .catch(() => false);
+}
+
+async function returnToMyApplications(page) {
+  await clickPortalLinkByText(page, "My Applications", "My Applications (breadcrumb)").catch(() => false);
+  await page.waitForTimeout(2_000);
+  const ready = await page.locator("#up_type").count().catch(() => 0);
+  if (!ready) {
+    await goToMyApplications(page);
+  }
+}
+
+// Searches My Applications for a given application type across 90-day windows,
+// then drills into each application's case page and captures its sub-tabs.
+async function collectApplications(page, appType) {
+  console.log(`Applications (${appType}): navigating to Services > User Services > My Applications.`);
+  const reached = await goToMyApplications(page);
+  if (!reached) {
+    console.log(`Applications (${appType}): My Applications page not reachable — skipping.`);
+    return [];
+  }
+
+  await selectAppealType(page, appType);
+  const windows = buildDateWindows(APPEAL_START_DATE, APPEAL_WINDOW_DAYS);
+  console.log(`Applications (${appType}): searching ${windows.length} window(s) of ${APPEAL_WINDOW_DAYS} days from ${APPEAL_START_DATE}.`);
+
+  const found = [];
+  const seen = new Set();
+  for (const [from, to] of windows) {
+    await setApplicationDates(page, from, to);
+    await clickApplicationSearch(page);
+    await page.waitForTimeout(1_200);
+    const rows = await extractAppealResultRows(page);
+    if (rows.length) {
+      console.log(`  Appeals ${from}-${to}: ${rows.length} application(s).`);
+    }
+    for (const row of rows) {
+      const key = row.arn || row.cells.join("|");
+      if (!seen.has(key)) {
+        seen.add(key);
+        found.push({ arn: row.arn, cells: row.cells, from, to });
+      }
+    }
+  }
+
+  console.log(`Applications (${appType}): ${found.length} unique application(s) found. Opening each...`);
+
+  const results = [];
+  for (let index = 0; index < found.length; index += 1) {
+    const app = found[index];
+    if (!(await page.locator("#up_type").count().catch(() => 0))) {
+      await returnToMyApplications(page);
+    }
+    await selectAppealType(page, appType);
+    await setApplicationDates(page, app.from, app.to);
+    await clickApplicationSearch(page);
+    await page.waitForTimeout(1_200);
+
+    const opened = await openAppealRow(page, app.arn);
+    console.log(`  ${appType} ${index + 1}/${found.length} ${app.arn}: ${opened ? "opened" : "not opened"}`);
+    if (opened) {
+      const detail = await extractCaseDetail(page);
+      const dateCell = app.cells.find((cell) => /\d{1,2}\/\d{1,2}\/\d{2,4}/.test(cell)) || "";
+      results.push({
+        caseId: detail.caseId || app.arn,
+        dateOfIssue: dateCell,
+        description: app.cells.slice(1).find(Boolean) || "",
+        detail: { tabs: detail.tabs },
+        refId: app.arn,
+        replyFiling: "",
+        section: "",
+        sNo: "",
+        status: detail.status || "",
+        taxPeriod: detail.period || "",
+        typeOfNotice: appType
+      });
+    }
+    await returnToMyApplications(page);
+  }
+
+  console.log(`Applications (${appType}): captured ${results.length} application(s) with detail.`);
+  return results;
+}
+
+// Services > Ledgers > Payment towards Demand: captures each notice/order number
+// and its demand amount, so the tracker can show the demand against a case.
+async function collectPaymentTowardsDemand(page) {
+  console.log("Payment towards Demand: navigating to Services > Ledgers > Payment towards Demand.");
+  await waitForAuthenticatedPortal(page);
+  await clickPortalLinkByText(page, "Services", "Services");
+  await page.waitForTimeout(2_000);
+  await clickPortalLinkByText(page, "Ledgers", "Ledgers");
+  await page.waitForTimeout(2_000);
+  const opened =
+    (await clickPortalLinkByText(page, "Payment towards Demand", "Payment towards Demand").catch(() => false)) ||
+    (await clickPortalLinkByText(page, "Payment Towards Demand", "Payment Towards Demand").catch(() => false));
+  if (!opened) {
+    console.log("Payment towards Demand: menu item not found — skipping.");
+    return [];
+  }
+  await page.waitForTimeout(2_500);
+
+  await logVisibleTableHeaders(page);
+
+  const demands = await page.evaluate(() => {
+    const clean = (value) => String(value ?? "").replace(/\s+/g, " ").trim();
+    const isVisible = (node) => Boolean(node.offsetWidth || node.offsetHeight || node.getClientRects().length);
+    const idPattern = /\b[A-Z]{2}\d{13,15}\b/; // demand / order ids like ZD0809..., AD0809...
+    const amountPattern = /^-?[₹\s]*[\d,]+(\.\d+)?$/;
+    const out = [];
+    for (const table of document.querySelectorAll("table")) {
+      if (!isVisible(table)) {
+        continue;
+      }
+      for (const tr of table.querySelectorAll("tbody tr")) {
+        const cells = [...tr.querySelectorAll("td")].map((td) => clean(td.innerText || td.textContent));
+        if (cells.length < 2 || !cells.some(Boolean)) {
+          continue;
+        }
+        if (/no records found/i.test(cells.join(" "))) {
+          continue;
+        }
+        const idCell = cells.find((cell) => idPattern.test(cell));
+        // The demand amount is the largest numeric cell on the row.
+        const amounts = cells
+          .filter((cell) => amountPattern.test(cell.replace(/[₹\s]/g, "")) && /\d/.test(cell))
+          .map((cell) => ({ raw: cell, value: Number(cell.replace(/[^\d.]/g, "")) }))
+          .filter((entry) => Number.isFinite(entry.value));
+        amounts.sort((a, b) => b.value - a.value);
+        if (idCell && amounts.length) {
+          out.push({ amount: amounts[0].raw, noticeNo: idCell, row: cells });
+        }
+      }
+    }
+    return out;
+  }).catch(() => []);
+
+  console.log(`Payment towards Demand: captured ${demands.length} demand row(s).`);
+
+  return demands.map((demand) => ({
+    caseId: demand.noticeNo,
+    dateOfIssue: "",
+    demandAmount: demand.amount,
+    description: "Payment towards Demand",
+    detail: { tabs: [] },
+    refId: demand.noticeNo,
+    replyFiling: "",
+    section: "",
+    sNo: "",
+    status: "",
+    taxPeriod: "",
+    typeOfNotice: "Demand"
+  }));
 }
 
 // Services > User Services > View Notices and Orders, show 100 rows, read the
@@ -1039,17 +1365,16 @@ async function readClientFromClientRecords(gstin) {
 
 // Writes extracted notice tables straight into gst_litigation_cases using the
 // service-role key (no interactive WorkLine sign-in needed).
-async function syncRowsWithServiceRole({ clientName, extractedAt, gstin, organisationId, rows }) {
+async function syncRowsWithServiceRole({ clientName, extractedAt, gstin, organisationId, rows, sources }) {
   const admin = createAdminSupabaseClient();
   if (!admin) {
     return { insertedOrUpdated: 0, registrationId: "", skipped: true };
   }
 
-  const noticeRows = Array.isArray(rows) ? rows : [];
-
-  if (!noticeRows.length) {
-    return { insertedOrUpdated: 0, registrationId: "", skipped: false };
-  }
+  const dataRows = Array.isArray(rows) ? rows : [];
+  // Only these source tabs get replaced; anything else (e.g. manual) is kept.
+  const sourceTags =
+    sources && sources.length ? sources : [...new Set(dataRows.map((row) => row.sourceTab).filter(Boolean))];
 
   const existing = await admin
     .from("gst_registrations")
@@ -1064,6 +1389,9 @@ async function syncRowsWithServiceRole({ clientName, extractedAt, gstin, organis
 
   let registrationId = existing.data?.id;
   if (!registrationId) {
+    if (!dataRows.length) {
+      return { insertedOrUpdated: 0, registrationId: "", skipped: false };
+    }
     const created = await admin
       .from("gst_registrations")
       .insert({ client_name: clientName || gstin, gstin, organisation_id: organisationId })
@@ -1077,7 +1405,25 @@ async function syncRowsWithServiceRole({ clientName, extractedAt, gstin, organis
     registrationId = created.data.id;
   }
 
-  const payload = noticeRows.map((row, index) => {
+  // Replace only the selected sources' rows; leave the un-ticked ones intact.
+  if (sourceTags.length) {
+    const { error: deleteError } = await admin
+      .from("gst_litigation_cases")
+      .delete()
+      .eq("organisation_id", organisationId)
+      .eq("gst_registration_id", registrationId)
+      .in("source", sourceTags);
+
+    if (deleteError) {
+      throw new Error(`Could not clear previous rows for the selected sources: ${deleteError.message}`);
+    }
+  }
+
+  if (!dataRows.length) {
+    return { insertedOrUpdated: 0, registrationId, skipped: false };
+  }
+
+  const payload = dataRows.map((row, index) => {
     const normalized = normalizeExtractedRow(row, index);
     return {
       ...normalized,
@@ -1086,21 +1432,10 @@ async function syncRowsWithServiceRole({ clientName, extractedAt, gstin, organis
       organisation_id: organisationId,
       raw_payload: row,
       scraped_at: extractedAt,
-      source: "gst-portal-local-collector",
+      source: row.sourceTab || "gst-portal-local-collector",
       updated_at: new Date().toISOString(),
     };
   });
-
-  // Replace: clear this client's existing notices, then insert the fresh scrape.
-  const { error: deleteError } = await admin
-    .from("gst_litigation_cases")
-    .delete()
-    .eq("organisation_id", organisationId)
-    .eq("gst_registration_id", registrationId);
-
-  if (deleteError) {
-    throw new Error(`Could not clear previous litigation rows: ${deleteError.message}`);
-  }
 
   const { error: insertError } = await admin.from("gst_litigation_cases").insert(payload);
 
@@ -1331,7 +1666,31 @@ async function main() {
 
     if (options.autoNotices) {
       await waitForAuthenticatedPortal(page);
-      const rows = await collectNoticesAndOrders(page);
+
+      const selectedSources = new Set(options.sources);
+      console.log(`Selected sources: ${[...selectedSources].join(", ") || "none"}`);
+      const rows = [];
+
+      const runSource = async (key, label, collector) => {
+        if (!selectedSources.has(key)) {
+          return;
+        }
+        try {
+          const sourceRows = await collector();
+          sourceRows.forEach((row) => {
+            row.sourceTab = key;
+          });
+          rows.push(...sourceRows);
+        } catch (sourceError) {
+          console.error(`${label} collection failed: ${sourceError.message}`);
+        }
+      };
+
+      await runSource("notices", "Notices & Orders", () => collectNoticesAndOrders(page));
+      await runSource("appeal", "Appeal to Appellate Authority", () => collectApplications(page, "Appeal to Appellate Authority"));
+      await runSource("spl", "SPL (Waiver Scheme 128A)", () => collectApplications(page, "Application for Waiver Scheme under Section 128A"));
+      await runSource("payment", "Payment towards Demand", () => collectPaymentTowardsDemand(page));
+
       const extractedAt = new Date().toISOString();
       const outputPath = await saveCollectorOutput({
         client,
@@ -1359,6 +1718,7 @@ async function main() {
             gstin: client.gstin,
             organisationId: client.organisationId,
             rows,
+            sources: options.sources,
           });
           if (synced.skipped) {
             console.log("Supabase service role not configured locally, so rows were not saved to WorkLine.");

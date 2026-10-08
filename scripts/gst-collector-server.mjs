@@ -63,7 +63,7 @@ function isAllowedOrigin(origin) {
   return !origin || ALLOWED_ORIGINS.has(origin);
 }
 
-function startCollector({ gstin, rowNumber }) {
+function startCollector({ gstin, rowNumber, sources }) {
   const scriptPath = path.join(WORKLINE_GST_HOME, "scripts", "gst-portal-collector.mjs");
   const args = [scriptPath, "--login-only", "--auto-notices"];
 
@@ -73,6 +73,15 @@ function startCollector({ gstin, rowNumber }) {
 
   if (rowNumber) {
     args.push("--row", String(rowNumber));
+  }
+
+  if (Array.isArray(sources) && sources.length) {
+    const cleaned = sources
+      .map((source) => String(source).trim().toLowerCase())
+      .filter(Boolean);
+    if (cleaned.length) {
+      args.push("--sources", cleaned.join(","));
+    }
   }
 
   const outputDir = getCollectorOutputDir(WORKLINE_GST_HOME);
@@ -182,6 +191,7 @@ const server = http.createServer(async (request, response) => {
     const logPath = await startCollector({
       gstin: body.gstin,
       rowNumber: Number.isInteger(body.rowNumber) ? body.rowNumber : null,
+      sources: Array.isArray(body.sources) ? body.sources : null,
     });
 
     sendJson(

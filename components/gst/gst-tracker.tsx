@@ -6,7 +6,8 @@ import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 type GstClient = { gstin: string; group: string; hasCredentials: boolean; name: string };
 type DetailTable = { headers: string[]; rows: string[][] };
 type DetailTab = { name: string; tables: DetailTable[] };
-type RawPayload = { detail?: { tabs?: DetailTab[] } } | null;
+type RawPayload = { demandAmount?: string; detail?: { tabs?: DetailTab[] } } | null;
+type SourceKey = "appeal" | "notices" | "payment" | "spl";
 type GstCase = {
   case_id: string | null;
   date_of_issue: string | null;
@@ -208,6 +209,12 @@ export function GstTracker() {
     status: "",
     type: ""
   });
+  const [sourceSelection, setSourceSelection] = useState<Record<SourceKey, boolean>>({
+    appeal: true,
+    notices: true,
+    payment: true,
+    spl: true
+  });
 
   const selectedClient = useMemo(() => clients.find((client) => client.gstin === selectedGstin) ?? null, [clients, selectedGstin]);
 
@@ -253,10 +260,16 @@ export function GstTracker() {
       return;
     }
 
+    const sources = (Object.keys(sourceSelection) as SourceKey[]).filter((key) => sourceSelection[key]);
+    if (!sources.length) {
+      setError("Tick at least one source to update.");
+      return;
+    }
+
     setIsFetching(true);
     try {
       const response = await fetch(`${HELPER_URL}/start`, {
-        body: JSON.stringify({ gstin: selectedGstin }),
+        body: JSON.stringify({ gstin: selectedGstin, sources }),
         headers: { "Content-Type": "application/json" },
         method: "POST"
       });
@@ -330,7 +343,36 @@ export function GstTracker() {
     void loadCases(selectedGstin);
   }
 
-  const caseGroups = groupByCase(cases);
+  // Payment-towards-Demand rows aren't cases — they carry a demand amount keyed
+  // by notice/order number, shown as a column on the matching case.
+  const paymentByRef = new Map<string, string>();
+  for (const notice of cases) {
+    if (notice.source === "payment") {
+      const amount = notice.raw_payload?.demandAmount ?? "";
+      const ref = (notice.ref_id ?? notice.case_id ?? "").trim().toUpperCase();
+      if (ref && amount) {
+        paymentByRef.set(ref, amount);
+      }
+    }
+  }
+  const displayCases = cases.filter((notice) => notice.source !== "payment");
+  const caseGroups = groupByCase(displayCases);
+  const demandForGroup = (group: CaseGroup): string => {
+    let total = 0;
+    let matched = false;
+    for (const notice of group.notices) {
+      const keys = [notice.ref_id, notice.case_id].map((value) => (value ?? "").trim().toUpperCase()).filter(Boolean);
+      for (const key of keys) {
+        const amount = paymentByRef.get(key);
+        if (amount) {
+          matched = true;
+          total += Number(String(amount).replace(/[^\d.]/g, "")) || 0;
+          break;
+        }
+      }
+    }
+    return matched ? `₹${total.toLocaleString("en-IN")}` : "—";
+  };
   const filteredGroups = caseGroups.filter((group) => {
     const match = (value: string, filter: string) => !filter.trim() || value.toLowerCase().includes(filter.trim().toLowerCase());
     return (
@@ -379,6 +421,26 @@ export function GstTracker() {
           </button>
         </div>
 
+        <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
+          <span className="text-[11px] font-black uppercase tracking-wide text-slate-500">Update from portal:</span>
+          {([
+            ["notices", "View Notices & Orders"],
+            ["appeal", "Appeal to Appellate Authority"],
+            ["spl", "SPL (Waiver 128A)"],
+            ["payment", "Payment towards Demand"]
+          ] as [SourceKey, string][]).map(([key, label]) => (
+            <label className="inline-flex cursor-pointer items-center gap-1.5 text-xs font-bold text-slate-700" key={key}>
+              <input
+                checked={sourceSelection[key]}
+                className="size-4 rounded border-slate-300 text-navy-700 focus:ring-navy-400"
+                onChange={(event) => setSourceSelection((previous) => ({ ...previous, [key]: event.target.checked }))}
+                type="checkbox"
+              />
+              {label}
+            </label>
+          ))}
+        </div>
+
         {message ? (
           <p className="mt-3 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-sm font-bold text-sky-800">{message}</p>
         ) : null}
@@ -395,7 +457,7 @@ export function GstTracker() {
           <h2 className="text-sm font-black text-navy-800">
             {selectedClient ? `Cases — ${selectedClient.name}` : "Cases"}
             <span className="ml-2 text-xs font-bold text-slate-400">
-              {caseGroups.length} case{caseGroups.length === 1 ? "" : "s"} · {cases.length} notice{cases.length === 1 ? "" : "s"}
+              {caseGroups.length} case{caseGroups.length === 1 ? "" : "s"} · {displayCases.length} notice{displayCases.length === 1 ? "" : "s"}
             </span>
           </h2>
           {lastScrapedAt ? (
@@ -404,7 +466,7 @@ export function GstTracker() {
         </div>
 
         <div className="overflow-auto rounded-lg border border-slate-200">
-          <table className="w-full min-w-[980px] border-collapse text-left text-sm">
+          <table className="w-full min-w-[1120px] border-collapse text-left text-sm">
             <thead className="bg-slate-100 text-[11px] font-black uppercase tracking-wide text-slate-600">
               <tr>
                 <th className="w-8 border-b border-slate-200 px-2 py-2" />
@@ -413,6 +475,7 @@ export function GstTracker() {
                 <th className="whitespace-nowrap border-b border-slate-200 px-3 py-2">Tax Period</th>
                 <th className="whitespace-nowrap border-b border-slate-200 px-3 py-2">Status</th>
                 <th className="whitespace-nowrap border-b border-slate-200 px-3 py-2">Open / Closed</th>
+                <th className="whitespace-nowrap border-b border-slate-200 px-3 py-2">Demand Amount</th>
                 <th className="whitespace-nowrap border-b border-slate-200 px-3 py-2">Notices</th>
                 <th className="border-b border-slate-200 px-3 py-2" />
               </tr>
@@ -443,12 +506,13 @@ export function GstTracker() {
                 </th>
                 <th className="border-b border-slate-200 px-1 py-1" />
                 <th className="border-b border-slate-200 px-1 py-1" />
+                <th className="border-b border-slate-200 px-1 py-1" />
               </tr>
             </thead>
             <tbody>
               {!selectedGstin ? (
                 <tr>
-                  <td className="px-4 py-10 text-center text-sm font-bold text-slate-400" colSpan={8}>
+                  <td className="px-4 py-10 text-center text-sm font-bold text-slate-400" colSpan={9}>
                     Select a client to see its cases.
                   </td>
                 </tr>
@@ -477,6 +541,7 @@ export function GstTracker() {
                             {group.openClosed}
                           </span>
                         </td>
+                        <td className="px-3 py-2 align-top font-black text-navy-800">{demandForGroup(group)}</td>
                         <td className="px-3 py-2 align-top font-semibold text-slate-500">{group.notices.length}</td>
                         <td className="px-3 py-2 text-right">
                           <button
@@ -494,7 +559,7 @@ export function GstTracker() {
                       </tr>
                       {isExpanded ? (
                         <tr className="border-b border-slate-100 bg-slate-50/60">
-                          <td className="px-4 py-4" colSpan={8}>
+                          <td className="px-4 py-4" colSpan={9}>
                             <CaseDetail group={group} />
                           </td>
                         </tr>
@@ -504,7 +569,7 @@ export function GstTracker() {
                 })
               ) : (
                 <tr>
-                  <td className="px-4 py-10 text-center text-sm font-bold text-slate-400" colSpan={8}>
+                  <td className="px-4 py-10 text-center text-sm font-bold text-slate-400" colSpan={9}>
                     {isLoadingCases
                       ? "Loading…"
                       : cases.length
