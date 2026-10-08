@@ -8,7 +8,7 @@ import { chromium } from "playwright-core";
 import XLSX from "xlsx";
 import { getCollectorOutputDir, getDefaultWorkbookPath, getWorklineGstHome } from "./gst-helper-home.mjs";
 
-const COLLECTOR_VERSION = "2026-10-07-casedetail-v12";
+const COLLECTOR_VERSION = "2026-10-08-casedetail-v13-replace";
 const GST_PORTAL_LOGIN_URL = "https://services.gst.gov.in/services/login";
 const WORKLINE_GST_HOME = getWorklineGstHome();
 const DEFAULT_WORKBOOK_PATH = getDefaultWorkbookPath();
@@ -1091,12 +1091,21 @@ async function syncRowsWithServiceRole({ clientName, extractedAt, gstin, organis
     };
   });
 
-  const { error: upsertError } = await admin
+  // Replace: clear this client's existing notices, then insert the fresh scrape.
+  const { error: deleteError } = await admin
     .from("gst_litigation_cases")
-    .upsert(payload, { onConflict: "organisation_id,gst_registration_id,ref_id,case_id" });
+    .delete()
+    .eq("organisation_id", organisationId)
+    .eq("gst_registration_id", registrationId);
 
-  if (upsertError) {
-    throw new Error(`Could not save litigation rows to WorkLine: ${upsertError.message}`);
+  if (deleteError) {
+    throw new Error(`Could not clear previous litigation rows: ${deleteError.message}`);
+  }
+
+  const { error: insertError } = await admin.from("gst_litigation_cases").insert(payload);
+
+  if (insertError) {
+    throw new Error(`Could not save litigation rows to WorkLine: ${insertError.message}`);
   }
 
   return { insertedOrUpdated: payload.length, registrationId, skipped: false };

@@ -105,13 +105,48 @@ function ClientSelect({ clients, onChange, value }: { clients: GstClient[]; onCh
   );
 }
 
-const columns: { key: DisplayKey; label: string }[] = [
+const noticeColumns: { key: DisplayKey; label: string }[] = [
   { key: "ref_id", label: "Notice / Demand Order Id" },
   { key: "notice_type", label: "Type" },
   { key: "description", label: "Notice / Order Description" },
   { key: "date_of_issue", label: "Date of Issuance" },
   { key: "due_date", label: "Due Date" }
 ];
+
+type CaseGroup = {
+  caseId: string;
+  key: string;
+  notices: GstCase[];
+  period: string;
+  status: string;
+  tabs: DetailTab[];
+};
+
+// Groups the saved notices by Case ID so the tracker shows one row per case.
+function groupByCase(cases: GstCase[]): CaseGroup[] {
+  const map = new Map<string, CaseGroup>();
+  for (const notice of cases) {
+    const caseId = (notice.case_id ?? "").trim();
+    const key = caseId || notice.ref_id || notice.id;
+    let group = map.get(key);
+    if (!group) {
+      group = { caseId: caseId || "—", key, notices: [], period: "", status: "", tabs: [] };
+      map.set(key, group);
+    }
+    group.notices.push(notice);
+    if (!group.period && notice.tax_period) {
+      group.period = notice.tax_period;
+    }
+    if (!group.status && notice.status) {
+      group.status = notice.status;
+    }
+    const tabs = notice.raw_payload?.detail?.tabs ?? [];
+    if (tabs.length && !group.tabs.length) {
+      group.tabs = tabs;
+    }
+  }
+  return [...map.values()];
+}
 
 export function GstTracker() {
   const [clients, setClients] = useState<GstClient[]>([]);
@@ -235,13 +270,17 @@ export function GstTracker() {
     );
   }
 
-  async function deleteCase(id: string) {
-    if (!window.confirm("Remove this notice from the tracker?")) {
+  async function deleteCaseGroup(group: CaseGroup) {
+    if (!window.confirm(`Remove case ${group.caseId} and its ${group.notices.length} notice(s) from the tracker?`)) {
       return;
     }
-    await fetch(`/api/gst?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+    await Promise.all(
+      group.notices.map((notice) => fetch(`/api/gst?id=${encodeURIComponent(notice.id)}`, { method: "DELETE" }))
+    );
     void loadCases(selectedGstin);
   }
+
+  const caseGroups = groupByCase(cases);
 
   return (
     <div className="mt-6 space-y-4">
@@ -294,8 +333,10 @@ export function GstTracker() {
       <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-2 px-1 pb-3">
           <h2 className="text-sm font-black text-navy-800">
-            {selectedClient ? `Notices & Orders — ${selectedClient.name}` : "Notices & Orders"}
-            <span className="ml-2 text-xs font-bold text-slate-400">{cases.length} row{cases.length === 1 ? "" : "s"}</span>
+            {selectedClient ? `Cases — ${selectedClient.name}` : "Cases"}
+            <span className="ml-2 text-xs font-bold text-slate-400">
+              {caseGroups.length} case{caseGroups.length === 1 ? "" : "s"} · {cases.length} notice{cases.length === 1 ? "" : "s"}
+            </span>
           </h2>
           {lastScrapedAt ? (
             <span className="text-xs font-bold text-slate-400">Last updated {new Date(lastScrapedAt).toLocaleString("en-IN")}</span>
@@ -303,49 +344,47 @@ export function GstTracker() {
         </div>
 
         <div className="overflow-auto rounded-lg border border-slate-200">
-          <table className="w-full min-w-[760px] border-collapse text-left text-sm">
+          <table className="w-full min-w-[720px] border-collapse text-left text-sm">
             <thead className="bg-slate-100 text-[11px] font-black uppercase tracking-wide text-slate-600">
               <tr>
                 <th className="w-8 border-b border-slate-200 px-2 py-2" />
-                {columns.map((column) => (
-                  <th className="whitespace-nowrap border-b border-slate-200 px-3 py-2" key={String(column.key)}>
-                    {column.label}
-                  </th>
-                ))}
+                <th className="whitespace-nowrap border-b border-slate-200 px-3 py-2">Case ID</th>
+                <th className="whitespace-nowrap border-b border-slate-200 px-3 py-2">Tax Period</th>
+                <th className="whitespace-nowrap border-b border-slate-200 px-3 py-2">Status</th>
+                <th className="whitespace-nowrap border-b border-slate-200 px-3 py-2">Notices</th>
                 <th className="border-b border-slate-200 px-3 py-2" />
               </tr>
             </thead>
             <tbody>
               {!selectedGstin ? (
                 <tr>
-                  <td className="px-4 py-10 text-center text-sm font-bold text-slate-400" colSpan={columns.length + 2}>
-                    Select a client to see its notices and orders.
+                  <td className="px-4 py-10 text-center text-sm font-bold text-slate-400" colSpan={6}>
+                    Select a client to see its cases.
                   </td>
                 </tr>
-              ) : cases.length ? (
-                cases.map((row) => {
-                  const isExpanded = expandedId === row.id;
+              ) : caseGroups.length ? (
+                caseGroups.map((group) => {
+                  const isExpanded = expandedId === group.key;
                   return (
-                    <Fragment key={row.id}>
+                    <Fragment key={group.key}>
                       <tr
                         className="cursor-pointer border-b border-slate-100 hover:bg-slate-50"
-                        onClick={() => setExpandedId(isExpanded ? null : row.id)}
+                        onClick={() => setExpandedId(isExpanded ? null : group.key)}
                       >
                         <td className="px-2 py-2 align-top text-slate-400">
                           {isExpanded ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
                         </td>
-                        {columns.map((column) => (
-                          <td className="px-3 py-2 align-top font-semibold text-slate-700" key={String(column.key)}>
-                            {formatCell(column.key, row[column.key])}
-                          </td>
-                        ))}
+                        <td className="px-3 py-2 align-top font-bold text-navy-800">{group.caseId || "—"}</td>
+                        <td className="px-3 py-2 align-top font-semibold text-slate-700">{group.period || "—"}</td>
+                        <td className="px-3 py-2 align-top font-semibold text-slate-700">{group.status || "—"}</td>
+                        <td className="px-3 py-2 align-top font-semibold text-slate-500">{group.notices.length}</td>
                         <td className="px-3 py-2 text-right">
                           <button
-                            aria-label="Remove notice"
+                            aria-label="Remove case"
                             className="inline-flex size-7 items-center justify-center rounded-md border border-rose-200 text-rose-600 hover:bg-rose-50"
                             onClick={(event) => {
                               event.stopPropagation();
-                              void deleteCase(row.id);
+                              void deleteCaseGroup(group);
                             }}
                             type="button"
                           >
@@ -355,8 +394,8 @@ export function GstTracker() {
                       </tr>
                       {isExpanded ? (
                         <tr className="border-b border-slate-100 bg-slate-50/60">
-                          <td className="px-4 py-4" colSpan={columns.length + 2}>
-                            <NoticeDetail row={row} />
+                          <td className="px-4 py-4" colSpan={6}>
+                            <CaseDetail group={group} />
                           </td>
                         </tr>
                       ) : null}
@@ -365,8 +404,8 @@ export function GstTracker() {
                 })
               ) : (
                 <tr>
-                  <td className="px-4 py-10 text-center text-sm font-bold text-slate-400" colSpan={columns.length + 2}>
-                    {isLoadingCases ? "Loading…" : "No notices saved yet. Click Get data to pull them from the portal."}
+                  <td className="px-4 py-10 text-center text-sm font-bold text-slate-400" colSpan={6}>
+                    {isLoadingCases ? "Loading…" : "No cases saved yet. Click Get data to pull them from the portal."}
                   </td>
                 </tr>
               )}
@@ -378,15 +417,43 @@ export function GstTracker() {
   );
 }
 
-function NoticeDetail({ row }: { row: GstCase }) {
-  const tabs = row.raw_payload?.detail?.tabs ?? [];
+function CaseDetail({ group }: { group: CaseGroup }) {
+  const tabs = group.tabs;
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap gap-x-8 gap-y-2 text-sm">
-        <DetailField label="Case ID" value={row.case_id} />
-        <DetailField label="Period" value={row.tax_period} />
-        <DetailField label="Status" value={row.status} />
+        <DetailField label="Case ID" value={group.caseId} />
+        <DetailField label="Period" value={group.period} />
+        <DetailField label="Status" value={group.status} />
+      </div>
+
+      <div className="space-y-2">
+        <p className="text-xs font-black uppercase tracking-wide text-navy-700">Notices &amp; Orders in this case</p>
+        <div className="overflow-auto rounded-lg border border-slate-200 bg-white">
+          <table className="w-full border-collapse text-left text-xs">
+            <thead className="bg-slate-100 font-black uppercase tracking-wide text-slate-600">
+              <tr>
+                {noticeColumns.map((column) => (
+                  <th className="whitespace-nowrap border-b border-slate-200 px-2 py-1.5" key={String(column.key)}>
+                    {column.label}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {group.notices.map((notice) => (
+                <tr className="border-b border-slate-100 last:border-b-0" key={notice.id}>
+                  {noticeColumns.map((column) => (
+                    <td className="px-2 py-1.5 align-top font-semibold text-slate-700" key={String(column.key)}>
+                      {formatCell(column.key, notice[column.key])}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {tabs.length ? (
@@ -424,7 +491,7 @@ function NoticeDetail({ row }: { row: GstCase }) {
           </div>
         ))
       ) : (
-        <p className="text-xs font-semibold text-slate-400">No detail captured for this notice yet.</p>
+        <p className="text-xs font-semibold text-slate-400">No sub-tab detail captured for this case yet.</p>
       )}
     </div>
   );
