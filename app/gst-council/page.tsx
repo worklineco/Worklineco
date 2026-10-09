@@ -11,11 +11,12 @@ export default function GstCouncilPage() {
     <main className="flex h-screen flex-col bg-[#f4f6fa]">
       <header className="flex items-center justify-between gap-2 border-b border-slate-200 bg-white px-3 py-1">
         <span className="inline-flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wide text-navy-800">
-          <svg aria-hidden="true" className="size-3.5 text-navy-700" fill="currentColor" viewBox="0 0 24 24">
-            <rect x="3.5" y="14.5" width="4.5" height="6.5" rx="1.2" />
-            <rect x="9.75" y="9.5" width="4.5" height="11.5" rx="1.2" />
-            <rect x="16" y="4" width="4.5" height="17" rx="1.2" />
-          </svg>
+          <span className="flex size-4 items-center justify-center rounded-[5px] bg-navy-700 text-white">
+            <svg aria-hidden="true" className="size-2.5" fill="none" viewBox="0 0 24 24">
+              <path d="M4 16l5-5 3 3 7-8" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M15 6h5v5" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </span>
           WorkLine Co
         </span>
         <Link

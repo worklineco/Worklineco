@@ -5,10 +5,9 @@ import { LoginLauncher } from "@/components/auth/login-launcher";
 function BrandMark({ className = "size-11" }: { className?: string }) {
   return (
     <span className={`flex ${className} items-center justify-center rounded-2xl bg-navy-700 text-white shadow-md`}>
-      <svg aria-hidden="true" className="size-2/3" fill="currentColor" viewBox="0 0 24 24">
-        <rect x="3.5" y="14.5" width="4.5" height="6.5" rx="1.2" />
-        <rect x="9.75" y="9.5" width="4.5" height="11.5" rx="1.2" />
-        <rect x="16" y="4" width="4.5" height="17" rx="1.2" />
+      <svg aria-hidden="true" className="size-2/3" fill="none" viewBox="0 0 24 24">
+        <path d="M4 16l5-5 3 3 7-8" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M15 6h5v5" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
       </svg>
     </span>
   );
