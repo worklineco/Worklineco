@@ -1602,7 +1602,7 @@ details.bg-dark summary::after{background:transparent;border-color:rgba(217,223,
   // Downloads: Claude downloads capability when granted; otherwise a direct download.
   var cap=null;
   if(window.claude&&window.claude.use){ try{ window.claude.use('downloads').then(function(d){cap=d;},function(){}); }catch(e){} }
-  var framed=false; try{ framed=window.self!==window.top; }catch(e){ framed=true; }
+  var framed=false;
   function fileLink(name){
     var csv=name.replace(/\.xlsx$/,'.csv');
     var a=document.createElement('a'); a.href='downloads/'+encodeURIComponent(csv); a.target='_blank'; a.rel='noopener';
