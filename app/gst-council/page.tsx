@@ -9,16 +9,16 @@ export const metadata = {
 export default function GstCouncilPage() {
   return (
     <main className="flex h-screen flex-col bg-[#f4f6fa]">
-      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-5 py-3 sm:px-8">
-        <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-black uppercase text-navy-800 shadow-sm">
-          <Sparkles className="size-3.5 text-fuchsia-600" />
+      <header className="flex items-center justify-between gap-2 border-b border-slate-200 bg-white px-3 py-1">
+        <span className="inline-flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wide text-navy-800">
+          <Sparkles className="size-3 text-fuchsia-600" />
           WorkLine Co
-        </div>
+        </span>
         <Link
-          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-black text-navy-700 shadow-sm transition hover:bg-slate-50"
+          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-black text-navy-700 transition hover:bg-slate-100"
           href="/login"
         >
-          <ArrowLeft className="size-3.5" />
+          <ArrowLeft className="size-3" />
           Back to sign in
         </Link>
       </header>
