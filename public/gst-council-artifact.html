@@ -1387,7 +1387,7 @@ details.bg-dark summary::after{background:transparent;border-color:rgba(217,223,
   <div class="vbox">
     <div class="vhead"><b id="vtitle"></b><button type="button" id="vclose" aria-label="Close">&times;</button></div>
     <div class="vframe" id="vframe"></div>
-    <div class="vfoot"><span id="vrange"></span><a id="vyt" href="#" target="_blank" rel="noopener">Open on YouTube</a></div>
+    <div id="vbar"><div id="vbarfill"></div></div><div class="vfoot"><span id="vrange"></span><span id="vtime"></span><a id="vyt" href="#" target="_blank" rel="noopener">Open on YouTube</a></div>
   </div>
 </div>
 <script>
@@ -1403,7 +1403,7 @@ details.bg-dark summary::after{background:transparent;border-color:rgba(217,223,
     document.getElementById('vtitle').textContent=(h?h.textContent.trim():'Press briefing')+(lab==='Q&A'||lab==='Penalty'||lab==='Cash ledger'?' \u00b7 '+lab:'');
     document.getElementById('vrange').textContent='Clip '+mmss(s)+' to '+mmss(e)+' \u00b7 Finance Minister\u2019s press briefing';
     document.getElementById('vyt').href=a.href;
-    fr.innerHTML='<iframe src="https://www.youtube-nocookie.com/embed/'+ID+'?start='+s+'&end='+e+'&autoplay=1&rel=0&modestbranding=1&playsinline=1" title="Press briefing clip" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe>';
+    fr.innerHTML='<iframe id="ytclip" src="https://www.youtube-nocookie.com/embed/'+ID+'?start='+s+'&end='+e+'&autoplay=1&rel=0&modestbranding=1&playsinline=1&enablejsapi=1&origin='+encodeURIComponent(location.origin)+'" title="Press briefing clip" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe>';
     m.classList.add('open'); document.body.style.overflow='hidden';
   });
   document.getElementById('vclose').addEventListener('click',close);
@@ -1412,5 +1412,49 @@ details.bg-dark summary::after{background:transparent;border-color:rgba(217,223,
 })();
 </script>
 
+
+<style id="wl-vbar">
+#vbar{height:6px;background:rgba(255,255,255,.18);border-radius:999px;overflow:hidden;margin:8px 0 2px}
+#vbarfill{height:100%;width:0;background:#5FC39B;transition:width .25s linear}
+#vtime{font-variant-numeric:tabular-nums;opacity:.85}
+</style>
+<script src="https://www.youtube.com/iframe_api"></script>
+<script id="wl-vbar-js">
+(function(){
+  var player=null,timer=null,S=0,E=0;
+  function mmss(x){x=Math.max(0,Math.floor(x));return Math.floor(x/60)+':'+('0'+(x%60)).slice(-2);}
+  function stop(){if(timer){clearInterval(timer);timer=null;}}
+  function track(){
+    stop();
+    var fill=document.getElementById('vbarfill'),tl=document.getElementById('vtime');
+    var len=Math.max(1,E-S);
+    if(fill)fill.style.width='0%';
+    if(tl)tl.textContent='0:00 / '+mmss(len);
+    timer=setInterval(function(){
+      if(!player||!player.getCurrentTime)return;
+      var cur=player.getCurrentTime()-S;if(cur<0)cur=0;if(cur>len)cur=len;
+      if(fill)fill.style.width=(cur/len*100)+'%';
+      if(tl)tl.textContent=mmss(cur)+' / '+mmss(len);
+    },250);
+  }
+  function attach(){
+    var ifr=document.getElementById('ytclip');
+    if(!ifr)return;
+    try{var u=new URL(ifr.src);S=+(u.searchParams.get('start')||0);E=+(u.searchParams.get('end')||S);}catch(e){}
+    if(!window.YT||!YT.Player)return;
+    try{player=new YT.Player('ytclip',{events:{onReady:track,onStateChange:function(ev){if(ev.data===YT.PlayerState.ENDED)stop();}}});}catch(e){}
+  }
+  window.onYouTubeIframeAPIReady=function(){if(document.getElementById('ytclip'))attach();};
+  function hook(){
+    var vf=document.getElementById('vframe');
+    if(!vf){setTimeout(hook,200);return;}
+    new MutationObserver(function(){
+      if(document.getElementById('ytclip')){setTimeout(attach,60);}
+      else{stop();player=null;var f=document.getElementById('vbarfill');if(f)f.style.width='0%';var t=document.getElementById('vtime');if(t)t.textContent='';}
+    }).observe(vf,{childList:true});
+  }
+  hook();
+})();
+</script>
 </body>
 </html>

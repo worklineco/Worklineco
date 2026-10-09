@@ -2,9 +2,13 @@
 
 import { getCurrentUser } from "@/lib/supabase/session";
 import { MessageCircle, X, Send, Upload } from "lucide-react";
+import { usePathname } from "next/navigation";
 import { useRef, useState } from "react";
 
+const hiddenRoutePrefixes = ["/login", "/gst-council"];
+
 export function FeedbackButton() {
+  const pathname = usePathname() ?? "";
   const [isOpen, setIsOpen] = useState(false);
   const [message, setMessage] = useState("");
   const [file, setFile] = useState<File | null>(null);
@@ -55,6 +59,10 @@ export function FeedbackButton() {
     } finally {
       setIsSubmitting(false);
     }
+  }
+
+  if (hiddenRoutePrefixes.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`))) {
+    return null;
   }
 
   return (
