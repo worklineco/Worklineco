@@ -29,18 +29,30 @@ export async function GET(request: Request) {
   const gstin = text(new URL(request.url).searchParams.get("gstin")).toUpperCase();
 
   // Clients (for the dropdown) come from Client Records — those with a GSTIN.
-  const clientsResult = await admin
-    .from("clients")
-    .select("id,name,custom_values")
-    .eq("organisation_id", organisationId)
-    .eq("custom_values->>source", activeSourceKey)
-    .limit(5000);
+  // Supabase caps a single response at 1,000 rows, so page through the whole
+  // register with a stable order instead of one capped query.
+  const clientRows: { custom_values: unknown; id: string; name: string | null }[] = [];
+  for (let from = 0; ; from += 1000) {
+    const page = await admin
+      .from("clients")
+      .select("id,name,custom_values")
+      .eq("organisation_id", organisationId)
+      .eq("custom_values->>source", activeSourceKey)
+      .order("id", { ascending: true })
+      .range(from, from + 999);
 
-  if (clientsResult.error) {
-    return NextResponse.json({ error: clientsResult.error.message }, { status: 500 });
+    if (page.error) {
+      return NextResponse.json({ error: page.error.message }, { status: 500 });
+    }
+
+    clientRows.push(...((page.data ?? []) as typeof clientRows));
+
+    if ((page.data ?? []).length < 1000) {
+      break;
+    }
   }
 
-  const clients = (clientsResult.data ?? [])
+  const clients = clientRows
     .map((row) => {
       const values = (row.custom_values ?? {}) as ClientCustomValues;
       const data = values ?? {};
