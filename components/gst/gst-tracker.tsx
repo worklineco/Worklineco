@@ -1,7 +1,7 @@
 "use client";
 
 import { AlertTriangle, ChevronDown, ChevronRight, Download, FileText, RefreshCw, Trash2 } from "lucide-react";
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type GstClient = { gstin: string; group: string; hasCredentials: boolean; name: string };
 type DetailTable = { headers: string[]; rows: string[][] };
@@ -217,6 +217,7 @@ export function GstTracker() {
   });
 
   const selectedClient = useMemo(() => clients.find((client) => client.gstin === selectedGstin) ?? null, [clients, selectedGstin]);
+  const watchTokenRef = useRef(0);
 
   useEffect(() => {
     fetch("/api/gst", { cache: "no-store" })
@@ -268,29 +269,54 @@ export function GstTracker() {
 
     setIsFetching(true);
     try {
-      const response = await fetch(`${HELPER_URL}/start`, {
-        body: JSON.stringify({ gstin: selectedGstin, sources }),
-        headers: { "Content-Type": "application/json" },
-        method: "POST"
-      });
-      const result = (await response.json().catch(() => ({}))) as { error?: string; message?: string };
-      if (!response.ok) {
-        setError(result.error ?? "The GST helper could not start the fetch.");
+      // The signed-in session fetches this client's GST login from Client
+      // Records and hands it to the local helper for this one run - no key
+      // file or Excel sheet is needed on this computer.
+      const loginResponse = await fetch(`/api/gst?gstin=${encodeURIComponent(selectedGstin)}&login=1`, { cache: "no-store" });
+      const loginResult = (await loginResponse.json().catch(() => ({}))) as {
+        login?: { clientName?: string; password?: string; userId?: string } | null;
+      };
+      const login = loginResult.login;
+      if (!loginResponse.ok || !login?.userId || !login?.password) {
+        setError("No GST ID / Password is saved for this client in Client Records. Add them there first.");
         return;
       }
-      setMessage(
-        result.message ??
-          "A browser window opened on the GST portal. Enter the CAPTCHA there — the helper will log in, open View Notices and Orders, and save the data. Then click Refresh."
-      );
-      scheduleRefreshes();
-    } catch {
-      // Helper isn't running yet — launch it via the WorkLine GST Helper
-      // protocol, which starts the helper and kicks off this fetch itself.
-      startHelperViaProtocol(selectedGstin);
-      setMessage(
-        "Starting the WorkLine GST Helper on this computer… if your browser asks to open “WorkLine GST Helper”, click Open. A portal window will appear — enter the CAPTCHA there and the data will save automatically."
-      );
-      void waitForHelperThenRefresh();
+
+      const startPayload = {
+        clientName: login.clientName ?? "",
+        gstPass: login.password,
+        gstUser: login.userId,
+        gstin: selectedGstin,
+        sources
+      };
+      const startedAt = Date.now();
+
+      try {
+        const response = await fetch(`${HELPER_URL}/start`, {
+          body: JSON.stringify(startPayload),
+          headers: { "Content-Type": "application/json" },
+          method: "POST"
+        });
+        const result = (await response.json().catch(() => ({}))) as { error?: string; message?: string };
+        if (!response.ok) {
+          setError(result.error ?? "The GST helper could not start the fetch.");
+          return;
+        }
+        setMessage(
+          result.message ??
+            "A browser window opened on the GST portal. Enter the CAPTCHA there — the helper will log in, open View Notices and Orders, and save the data. Then click Refresh."
+        );
+        scheduleRefreshes();
+        void watchAndSaveResults(selectedGstin, startPayload.clientName, sources, startedAt);
+      } catch {
+        // Helper isn't running yet — launch it via the WorkLine GST Helper
+        // protocol, then start the fetch (with the login) once it is up.
+        startHelperViaProtocol(selectedGstin);
+        setMessage(
+          "Starting the WorkLine GST Helper on this computer… if your browser asks to open “WorkLine GST Helper”, click Open. A portal window will appear — enter the CAPTCHA there and the data will save automatically."
+        );
+        void startWhenHelperReady(startPayload, sources, startedAt);
+      }
     } finally {
       setIsFetching(false);
     }
@@ -311,17 +337,28 @@ export function GstTracker() {
     }
   }
 
-  async function waitForHelperThenRefresh() {
-    // Give the helper a few seconds to come up, then confirm it's reachable.
+  async function startWhenHelperReady(
+    startPayload: { clientName: string; gstPass: string; gstUser: string; gstin: string; sources: SourceKey[] },
+    sources: SourceKey[],
+    startedAt: number
+  ) {
+    // Give the helper a few seconds to come up, then start the fetch with
+    // the login included.
     for (let attempt = 0; attempt < 8; attempt += 1) {
       await new Promise((resolve) => window.setTimeout(resolve, 2500));
       try {
         const health = await fetch(`${HELPER_URL}/health`, { cache: "no-store" });
         if (health.ok) {
+          await fetch(`${HELPER_URL}/start`, {
+            body: JSON.stringify(startPayload),
+            headers: { "Content-Type": "application/json" },
+            method: "POST"
+          }).catch(() => undefined);
           setMessage(
             "The portal is opening — enter the CAPTCHA in the browser window. The notices save automatically; this list refreshes on its own, or click Refresh."
           );
           scheduleRefreshes();
+          void watchAndSaveResults(startPayload.gstin, startPayload.clientName, sources, startedAt);
           return;
         }
       } catch {
@@ -331,6 +368,59 @@ export function GstTracker() {
     setError(
       "The WorkLine GST Helper didn’t start. Open it once from Tools → install/start the GST Helper, then click Get data again."
     );
+  }
+
+  async function watchAndSaveResults(gstin: string, clientName: string, sources: SourceKey[], startedAt: number) {
+    // Wait for the helper to finish the scrape (the user still types the
+    // CAPTCHA), then relay the extracted rows to WorkLine through the
+    // signed-in session - the helper itself never needs database keys.
+    const watchToken = (watchTokenRef.current += 1);
+    const deadline = Date.now() + 10 * 60 * 1000;
+
+    while (Date.now() < deadline) {
+      await new Promise((resolve) => window.setTimeout(resolve, 5000));
+      if (watchTokenRef.current !== watchToken) {
+        return;
+      }
+      try {
+        const response = await fetch(`${HELPER_URL}/latest?gstin=${encodeURIComponent(gstin)}`, { cache: "no-store" });
+        if (!response.ok) {
+          continue;
+        }
+        const output = (await response.json().catch(() => null)) as {
+          extractedAt?: string;
+          rows?: unknown[];
+          sources?: string[];
+        } | null;
+        const extractedAt = Date.parse(String(output?.extractedAt ?? ""));
+        if (!output || Number.isNaN(extractedAt) || extractedAt < startedAt - 60_000) {
+          continue;
+        }
+
+        const saveResponse = await fetch("/api/gst", {
+          body: JSON.stringify({
+            action: "sync",
+            clientName,
+            extractedAt: output.extractedAt,
+            gstin,
+            rows: output.rows ?? [],
+            sources: output.sources ?? sources
+          }),
+          headers: { "Content-Type": "application/json" },
+          method: "POST"
+        });
+        const saveResult = (await saveResponse.json().catch(() => ({}))) as { error?: string; saved?: number };
+        if (!saveResponse.ok) {
+          setError(saveResult.error ?? "Could not save the fetched notices to WorkLine.");
+          return;
+        }
+        setMessage(`Saved ${saveResult.saved ?? (output.rows ?? []).length} notice row(s) from the portal.`);
+        void loadCases(gstin);
+        return;
+      } catch {
+        // helper busy or not reachable - keep waiting
+      }
+    }
   }
 
   async function deleteCaseGroup(group: CaseGroup) {
