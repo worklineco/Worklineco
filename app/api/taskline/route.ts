@@ -2209,7 +2209,7 @@ type PendencyLeanRow = Record<string, string | null>;
  * workload, so it is served only to that login. Swap the email to move it, or
  * add entries to give another partner the same board for their team.
  */
-const teamFocusBoards: { email: string; team: string }[] = [{ email: "shuchis.dco@gmail.com", team: "Team 03" }];
+const teamFocusBoards: { email: string; team: string }[] = [{ email: "shuchi@dhaddaonline.com", team: "Team 03" }];
 
 function teamFocusBoardFor(user: User) {
   const email = String(user.email ?? "").trim().toLowerCase();
@@ -2554,7 +2554,7 @@ function errorMessage(error: unknown) {
 // ---------------------------------------------------------------------------
 
 const allocationAppUrl = (process.env.NEXT_PUBLIC_SITE_URL ?? process.env.NEXT_PUBLIC_APP_URL ?? "https://www.worklineco.com").replace(/\/+$/, "");
-const allocationEmailExcludedRecipients = new Set(["shuchis.dco@gmail.com"]);
+const allocationEmailExcludedRecipients = new Set(["shuchi@dhaddaonline.com"]);
 
 function resourceAllocationChanged(previous: string, next: string) {
   if (!next.trim()) {
@@ -2590,7 +2590,7 @@ function allocationNormalizeName(value: unknown) {
 }
 
 // "Pending for review" stage mail: Team 03 tasks only.
-const pendingReviewRecipient = "shuchis.dco@gmail.com";
+const pendingReviewRecipient = "shuchi@dhaddaonline.com";
 
 // One-off recovery: resend the task-creation mails (resource allocation,
 // name tag, senior-manager "new task added") for tasks created after the
