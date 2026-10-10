@@ -1586,12 +1586,27 @@ async function main() {
     return;
   }
 
-  // Prefer credentials from the WorkLine Client Records register (looked up by
-  // GSTIN). Fall back to the local Excel workbook only if that is unavailable.
+  // Credentials handed over by the WorkLine app (via the local helper) come
+  // first: with them, no Supabase key file or Excel workbook is needed on
+  // this computer. Then Client Records (needs local keys), then Excel.
   let client = null;
   let credentialSource = "";
 
-  if (options.expectedGstin) {
+  const providedUserId = cleanCell(process.env.WORKLINE_GST_LOGIN_ID || "");
+  const providedPassword = String(process.env.WORKLINE_GST_LOGIN_PASSWORD || "");
+  if (options.expectedGstin && providedUserId && providedPassword) {
+    client = {
+      clientName: cleanCell(process.env.WORKLINE_GST_CLIENT_NAME || ""),
+      gstin: options.expectedGstin,
+      organisationId: "",
+      password: providedPassword,
+      rowNumber: null,
+      userId: providedUserId,
+    };
+    credentialSource = "WorkLine (sent by the app)";
+  }
+
+  if (!client && options.expectedGstin) {
     try {
       client = await readClientFromClientRecords(options.expectedGstin);
       if (client) {
@@ -1701,6 +1716,7 @@ async function main() {
           gstin: client.gstin,
           source: "gst-portal-local-browser",
           extractedAt,
+          sources: options.sources,
           rows,
         },
       });
