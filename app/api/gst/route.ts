@@ -66,6 +66,28 @@ export async function GET(request: Request) {
     .filter((client) => client.gstin)
     .sort((a, b) => a.name.localeCompare(b.name));
 
+  // With login=1, also return the stored GST login for the requested GSTIN so
+  // the local helper can sign in without any key file on that computer. Only
+  // signed-in WorkLine users reach this - the same people who can already see
+  // GST-ID / GST-PASS on the Client Records register.
+  let login: { clientName: string; password: string; userId: string } | null = null;
+  if (gstin && new URL(request.url).searchParams.get("login") === "1") {
+    const match = clientRows.find((row) => {
+      const values = (row.custom_values ?? {}) as ClientCustomValues;
+      const data = values ?? {};
+      return text(data["GSTIN/UIN"]).toUpperCase() === gstin;
+    });
+    if (match) {
+      const values = (match.custom_values ?? {}) as ClientCustomValues;
+      const data = values ?? {};
+      const userId = text(data["GST-ID"]);
+      const password = text(data["GST-PASS"]);
+      if (userId && password) {
+        login = { clientName: text(data["Particulars"]) || text(match.name), password, userId };
+      }
+    }
+  }
+
   let cases: unknown[] = [];
   let lastScrapedAt: string | null = null;
 
@@ -99,7 +121,7 @@ export async function GET(request: Request) {
     }
   }
 
-  return NextResponse.json({ cases, clients, lastScrapedAt });
+  return NextResponse.json({ cases, clients, lastScrapedAt, login });
 }
 
 export async function POST(request: Request) {
@@ -116,14 +138,76 @@ export async function POST(request: Request) {
   const organisationId = organisation.organisationId;
 
   const payload = (await request.json().catch(() => ({}))) as {
+    action?: string;
     clientName?: string;
     case?: Record<string, unknown>;
+    extractedAt?: string;
     gstin?: string;
+    rows?: unknown[];
+    sources?: unknown[];
   };
 
   const gstin = text(payload.gstin).toUpperCase();
   if (!gstin) {
     return NextResponse.json({ error: "GSTIN is required." }, { status: 400 });
+  }
+
+  // action=sync: the GST Tracker page relays a whole scrape from the local
+  // helper. Replace the scraped sources' rows for this GSTIN - the same
+  // semantics the collector uses when it writes to the database directly -
+  // so the helper itself never needs database keys.
+  if (text(payload.action) === "sync") {
+    const rows = Array.isArray(payload.rows) ? payload.rows : [];
+    const syncRegistrationId = await ensureRegistration(admin, organisationId, gstin, text(payload.clientName) || gstin);
+    if (!syncRegistrationId) {
+      return NextResponse.json({ error: "Could not prepare the GST registration." }, { status: 500 });
+    }
+
+    const sourceTags = Array.from(
+      new Set(
+        (Array.isArray(payload.sources) && payload.sources.length
+          ? payload.sources.map((value) => text(value).toLowerCase())
+          : rows.map((row) => text((row as Record<string, unknown>).sourceTab).toLowerCase())
+        ).filter(Boolean)
+      )
+    );
+
+    if (sourceTags.length) {
+      const cleared = await admin
+        .from("gst_litigation_cases")
+        .delete()
+        .eq("organisation_id", organisationId)
+        .eq("gst_registration_id", syncRegistrationId)
+        .in("source", sourceTags);
+      if (cleared.error) {
+        return NextResponse.json({ error: cleared.error.message }, { status: 500 });
+      }
+    }
+
+    if (rows.length) {
+      const extractedAt = text(payload.extractedAt) || new Date().toISOString();
+      const inserted = await admin.from("gst_litigation_cases").insert(
+        rows.map((raw, index) => {
+          const row = (raw ?? {}) as Record<string, unknown>;
+          const normalized = normalizePortalRow(row, index);
+          return {
+            ...normalized,
+            case_id: normalized.case_id || normalized.ref_id || `row-${index + 1}`,
+            gst_registration_id: syncRegistrationId,
+            organisation_id: organisationId,
+            raw_payload: row,
+            scraped_at: extractedAt,
+            source: text(row.sourceTab) || "gst-portal-local-collector",
+            updated_at: new Date().toISOString()
+          };
+        })
+      );
+      if (inserted.error) {
+        return NextResponse.json({ error: inserted.error.message }, { status: 500 });
+      }
+    }
+
+    return NextResponse.json({ ok: true, saved: rows.length });
   }
 
   const registrationId = await ensureRegistration(admin, organisationId, gstin, text(payload.clientName) || gstin);
@@ -256,4 +340,53 @@ async function requireUser() {
     return { error: NextResponse.json({ error: "Not authenticated." }, { status: 401 }) };
   }
   return { user };
+}
+
+// Mirrors the collector's row normalization so synced rows look identical to
+// ones the collector used to write directly.
+function normalizePortalRow(row: Record<string, unknown>, index: number) {
+  return {
+    case_id: text(row.caseId) || null,
+    date_of_issue: parsePortalDate(row.dateOfIssue),
+    description: text(row.description) || null,
+    due_date: parsePortalDate(row.dueDate),
+    notice_type: text(row.typeOfNotice) || null,
+    ref_id: text(row.refId) || null,
+    reply_filing_status: text(row.replyFiling) || null,
+    section: text(row.section) || null,
+    serial_no: Number.parseInt(text(row.sNo), 10) || index + 1,
+    status: text(row.status) || null,
+    tax_period: text(row.taxPeriod) || null
+  };
+}
+
+function parsePortalDate(value: unknown) {
+  const cleaned = text(value).replace(/\s+/g, " ");
+  if (!cleaned || ["-", "na", "n/a"].includes(cleaned.toLowerCase())) {
+    return null;
+  }
+
+  const direct = new Date(cleaned);
+  if (!Number.isNaN(direct.getTime()) && /^\d{4}-\d{1,2}-\d{1,2}/.test(cleaned)) {
+    return direct.toISOString().slice(0, 10);
+  }
+
+  const match = cleaned.match(/^(\d{1,2})[-/.\s](\d{1,2})[-/.\s](\d{2,4})$/);
+  if (!match) {
+    return null;
+  }
+
+  const [, day, month, yearValue] = match;
+  const year = yearValue.length === 2 ? `20${yearValue}` : yearValue;
+  const date = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)));
+
+  if (
+    date.getUTCFullYear() !== Number(year) ||
+    date.getUTCMonth() !== Number(month) - 1 ||
+    date.getUTCDate() !== Number(day)
+  ) {
+    return null;
+  }
+
+  return date.toISOString().slice(0, 10);
 }
