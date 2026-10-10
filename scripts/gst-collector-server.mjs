@@ -63,7 +63,7 @@ function isAllowedOrigin(origin) {
   return !origin || ALLOWED_ORIGINS.has(origin);
 }
 
-function startCollector({ gstin, rowNumber, sources }) {
+function startCollector({ clientName, gstPass, gstUser, gstin, rowNumber, sources }) {
   const scriptPath = path.join(WORKLINE_GST_HOME, "scripts", "gst-portal-collector.mjs");
   const args = [scriptPath, "--login-only", "--auto-notices"];
 
@@ -98,6 +98,15 @@ function startCollector({ gstin, rowNumber, sources }) {
       env: {
         ...process.env,
         WORKLINE_GST_HOME,
+        // GST login handed over by the WorkLine app for this one run - kept
+        // in the child's environment only, never written to disk or logs.
+        ...(gstUser && gstPass
+          ? {
+              WORKLINE_GST_CLIENT_NAME: clientName || "",
+              WORKLINE_GST_LOGIN_ID: gstUser,
+              WORKLINE_GST_LOGIN_PASSWORD: gstPass,
+            }
+          : {}),
       },
     });
 
@@ -189,6 +198,9 @@ const server = http.createServer(async (request, response) => {
   try {
     const body = await readJson(request);
     const logPath = await startCollector({
+      clientName: typeof body.clientName === "string" ? body.clientName : "",
+      gstPass: typeof body.gstPass === "string" ? body.gstPass : "",
+      gstUser: typeof body.gstUser === "string" ? body.gstUser : "",
       gstin: body.gstin,
       rowNumber: Number.isInteger(body.rowNumber) ? body.rowNumber : null,
       sources: Array.isArray(body.sources) ? body.sources : null,
