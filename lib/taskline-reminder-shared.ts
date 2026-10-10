@@ -11,7 +11,7 @@
 // mapped team (keys are normalised team numbers - "3" matches "Team 03",
 // "Team-03", etc.). Edit this map to add or remove standing subscribers.
 export const extraDueRecipientsByTeam: Record<string, string[]> = {
-  "3": ["shuchis.dco@gmail.com"]
+  "3": ["shuchi@dhaddaonline.com"]
 };
 
 export function teamMatchKey(value: unknown) {
