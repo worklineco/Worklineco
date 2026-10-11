@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, ChevronDown, ChevronRight, Download, FileText, RefreshCw, Trash2 } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ChevronDown, ChevronRight, Download, FileText, Network, RefreshCw, Trash2 } from "lucide-react";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type GstClient = { gstin: string; group: string; hasCredentials: boolean; name: string };
@@ -192,6 +192,257 @@ function isoToDmy(value: string | null): string {
   return match ? `${match[3]}-${match[2]}-${match[1]}` : String(value);
 }
 
+// ---------------------------------------------------------------------------
+// Case Map — one row per case, charting the proceeding end to end the way the
+// firm's Excel tracker did: intimation -> show cause -> reply -> hearing ->
+// order -> payment -> appeal. A stage that never happened stays blank instead
+// of shifting the others along.
+
+const caseStages = ["Application", "Intimation", "Show Cause", "Reply", "Hearing", "Order", "Rectification", "Payment", "Appeal"] as const;
+type CaseStage = (typeof caseStages)[number];
+
+// Checked in order — the first match wins, so "Intimation for adjournment of
+// hearing" lands on Hearing rather than Intimation, and DRC-01A/-01C
+// (intimations that contain "drc-01") are caught before the Show Cause rule.
+const stageRules: [CaseStage, string[]][] = [
+  ["Appeal", ["appeal", "apl-01", "apl 01"]],
+  ["Rectification", ["rectif"]],
+  ["Payment", ["voluntary payment", "drc-03", "drc 03", "acknowledgement of acceptance", "payment towards demand"]],
+  ["Order", [
+    "order for determination", "summary order", "drc-07", "drc 07", "asmt-12", "asmt 12", "drop proceedings",
+    "proceedings dropped", "spl 05", "spl-05", "spl 07", "spl-07", "approval of waiver", "rejection of waiver",
+    "adt-02", "adt 02", "audit report", "order of amendment", "registration certificate", "order rectified",
+    "order for creation of demand", "order of rejection", "order of acceptance", "deemed approv", "letter of undertaking"
+  ]],
+  ["Hearing", ["personal hearing", "adjourn", "hearing"]],
+  ["Intimation", ["drc-01a", "drc-01c", "drc 01a", "drc 01c"]],
+  ["Show Cause", ["show cause", "drc-01 ", "drc-01)", "form gst drc-01", "spl-03", "spl 03"]],
+  ["Intimation", [
+    "asmt-10", "asmt 10", "adt-01", "adt 01", "discrepancy", "intimation", "itc mismatch", "return defaulter",
+    "seeking additional information", "notice"
+  ]]
+];
+
+function stageOf(text: string): CaseStage | null {
+  const blob = text.toLowerCase();
+  for (const [stage, keys] of stageRules) {
+    if (keys.some((key) => blob.includes(key))) {
+      return stage;
+    }
+  }
+  return null;
+}
+
+// Buckets a case into the categories that matter for tracking — same rules as
+// the firm's Excel tracker.
+function categoryOf(text: string): string {
+  const blob = text.toLowerCase();
+  if (blob.includes("voluntary payment") || blob.includes("drc-03") || blob.includes("drc 03")) {
+    return "Voluntary Payment";
+  }
+  if (blob.includes("rectif")) {
+    return "Rectification";
+  }
+  if (blob.includes("spl") || blob.includes("128a") || blob.includes("waiver")) {
+    return "Waiver / SPL 128A";
+  }
+  if (blob.includes("appeal")) {
+    return "Appeal";
+  }
+  if (blob.includes("audit")) {
+    return "Audit";
+  }
+  if (blob.includes("scrutiny") || blob.includes("asmt")) {
+    return "Scrutiny";
+  }
+  if (blob.includes("determination of tax") || blob.includes("drc-01") || blob.includes("demand")) {
+    return "Demand / Adjudication";
+  }
+  if (blob.includes("return defaulter") || blob.includes("not filing return")) {
+    return "Return Default";
+  }
+  if (blob.includes("registration certificate") || blob.includes("amendment")) {
+    return "Registration";
+  }
+  if (blob.includes("refund")) {
+    return "Refund";
+  }
+  if (blob.includes("letter of undertaking") || blob.includes("furnishing lut")) {
+    return "LUT";
+  }
+  if (blob.includes("penalty")) {
+    return "Penalty";
+  }
+  if (blob.includes("enforcement")) {
+    return "Enforcement";
+  }
+  if (blob.includes("order")) {
+    return "Order";
+  }
+  return "Other";
+}
+
+const closedWords = ["approved", "closed", "completed", "disposed", "dropped", "rejected"];
+
+// Reads ISO (yyyy-mm-dd) or portal (dd/mm/yyyy, dd-mm-yyyy) dates.
+function parseAnyDate(value: string | null | undefined): Date | null {
+  const text = String(value ?? "").trim();
+  let match = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (match) {
+    return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  }
+  match = text.match(/\b(\d{2})[-/](\d{2})[-/](\d{4})\b/);
+  if (match) {
+    return new Date(Number(match[3]), Number(match[2]) - 1, Number(match[1]));
+  }
+  return null;
+}
+
+function formatDmy(date: Date | null): string {
+  if (!date) {
+    return "";
+  }
+  const day = String(date.getDate()).padStart(2, "0");
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  return `${day}/${month}/${date.getFullYear()}`;
+}
+
+// Which stage a sub-tab row belongs to: the tab name decides where it can,
+// and the row's own wording decides the rest.
+function stageForTabRow(tabName: string, rowText: string): CaseStage | null {
+  const name = tabName.toUpperCase();
+  if (name.includes("REPL")) {
+    return "Reply";
+  }
+  if (name.includes("ORDER")) {
+    return "Order";
+  }
+  if (name.includes("RECTIF")) {
+    return "Rectification";
+  }
+  if (name.includes("APPEAL") || name.includes("APL")) {
+    return "Appeal";
+  }
+  if (name.includes("PAYMENT")) {
+    return "Payment";
+  }
+  if (name.includes("APPLICATION")) {
+    return "Application";
+  }
+  const byText = stageOf(rowText);
+  if (name.includes("ACK")) {
+    return byText ?? "Application";
+  }
+  return byText;
+}
+
+type CaseMapRow = {
+  caseId: string;
+  category: string;
+  chain: CaseStage[];
+  daysSince: number | null;
+  docs: number;
+  latest: string;
+  open: boolean;
+  period: string;
+  refs: { refs: string[]; stage: CaseStage }[];
+  stages: Partial<Record<CaseStage, string>>;
+  status: string;
+};
+
+function buildCaseMap(groups: CaseGroup[]): CaseMapRow[] {
+  const rows: CaseMapRow[] = [];
+  const today = new Date();
+
+  for (const group of groups) {
+    // A row with no Case ID is a notice whose case page was never reached —
+    // it stays in the cases list but is not a case to map.
+    if (!group.caseId || group.caseId === "—") {
+      continue;
+    }
+    const blob = group.notices.map((notice) => `${notice.notice_type ?? ""} ${notice.description ?? ""}`).join(" ");
+    const category = categoryOf(`${group.type} ${blob}`);
+    // A DRC-03 voluntary payment is a one-off, self-initiated payment with no
+    // notice -> order lifecycle to chart; it stays in the cases list only.
+    if (category === "Voluntary Payment") {
+      continue;
+    }
+
+    const stageDates = new Map<CaseStage, Date>();
+    const stageRefs = new Map<CaseStage, string[]>();
+    const allDates: Date[] = [];
+
+    const note = (stage: CaseStage | null, date: Date | null, ref: string) => {
+      if (date) {
+        allDates.push(date);
+      }
+      if (!stage) {
+        return;
+      }
+      // keep the EARLIEST date for a stage — that is when it started
+      const previous = stageDates.get(stage);
+      if (date && (!previous || date < previous)) {
+        stageDates.set(stage, date);
+      }
+      const cleanRef = ref.trim();
+      if (cleanRef) {
+        const list = stageRefs.get(stage) ?? [];
+        if (!list.includes(cleanRef)) {
+          list.push(cleanRef);
+          stageRefs.set(stage, list);
+        }
+      }
+    };
+
+    for (const notice of group.notices) {
+      const stage = stageOf(`${notice.notice_type ?? ""} ${notice.description ?? ""}`);
+      note(stage, parseAnyDate(notice.date_of_issue), notice.ref_id ?? "");
+    }
+    for (const tab of group.tabs) {
+      for (const table of tab.tables) {
+        for (const cells of table.rows) {
+          const text = cells.join("  ");
+          const reference = text.match(/\bZ[A-Z]\d{10,}[A-Z0-9]*\b/)?.[0] ?? "";
+          note(stageForTabRow(tab.name, text), parseAnyDate(text), reference);
+        }
+      }
+    }
+
+    const chain = caseStages.filter((stage) => stageDates.has(stage) || stageRefs.has(stage));
+    const latestDate = allDates.length ? allDates.reduce((a, b) => (a > b ? a : b)) : null;
+    const statusBlob = group.status.toLowerCase();
+    const open = !closedWords.some((word) => statusBlob.includes(word)) && !chain.includes("Order");
+
+    const stages: Partial<Record<CaseStage, string>> = {};
+    for (const [stage, date] of stageDates) {
+      stages[stage] = formatDmy(date);
+    }
+
+    rows.push({
+      caseId: group.caseId,
+      category,
+      chain,
+      daysSince: latestDate ? Math.floor((today.getTime() - latestDate.getTime()) / 86_400_000) : null,
+      docs: group.notices.length,
+      latest: formatDmy(latestDate),
+      open,
+      period: group.period,
+      refs: caseStages.filter((stage) => stageRefs.has(stage)).map((stage) => ({ refs: stageRefs.get(stage) ?? [], stage })),
+      stages,
+      status: group.status
+    });
+  }
+
+  // oldest untouched cases first among the open ones
+  rows.sort((a, b) => {
+    if (a.open !== b.open) {
+      return a.open ? -1 : 1;
+    }
+    return (b.daysSince ?? -1) - (a.daysSince ?? -1);
+  });
+  return rows;
+}
+
 export function GstTracker() {
   const [clients, setClients] = useState<GstClient[]>([]);
   const [selectedGstin, setSelectedGstin] = useState("");
@@ -202,6 +453,7 @@ export function GstTracker() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<"cases" | "map">("cases");
   const [filters, setFilters] = useState<{ caseId: string; openClosed: string; period: string; status: string; type: string }>({
     caseId: "",
     openClosed: "",
@@ -463,6 +715,7 @@ export function GstTracker() {
     }
     return matched ? `₹${total.toLocaleString("en-IN")}` : "—";
   };
+  const caseMapRows = viewMode === "map" ? buildCaseMap(caseGroups) : [];
   const filteredGroups = caseGroups.filter((group) => {
     const match = (value: string, filter: string) => !filter.trim() || value.toLowerCase().includes(filter.trim().toLowerCase());
     return (
@@ -545,16 +798,41 @@ export function GstTracker() {
       <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-2 px-1 pb-3">
           <h2 className="text-sm font-black text-navy-800">
-            {selectedClient ? `Cases — ${selectedClient.name}` : "Cases"}
+            {viewMode === "map" ? (selectedClient ? `Case Map — ${selectedClient.name}` : "Case Map") : selectedClient ? `Cases — ${selectedClient.name}` : "Cases"}
             <span className="ml-2 text-xs font-bold text-slate-400">
               {caseGroups.length} case{caseGroups.length === 1 ? "" : "s"} · {displayCases.length} notice{displayCases.length === 1 ? "" : "s"}
             </span>
           </h2>
-          {lastScrapedAt ? (
-            <span className="text-xs font-bold text-slate-400">Last updated {new Date(lastScrapedAt).toLocaleString("en-IN")}</span>
-          ) : null}
+          <div className="flex items-center gap-3">
+            {lastScrapedAt ? (
+              <span className="text-xs font-bold text-slate-400">Last updated {new Date(lastScrapedAt).toLocaleString("en-IN")}</span>
+            ) : null}
+            {viewMode === "map" ? (
+              <button
+                className="inline-flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-xs font-black text-slate-700 transition hover:bg-slate-50"
+                onClick={() => setViewMode("cases")}
+                type="button"
+              >
+                <ArrowLeft className="size-4" />
+                Back to cases
+              </button>
+            ) : (
+              <button
+                className="inline-flex h-9 items-center gap-2 rounded-lg bg-navy-700 px-3 text-xs font-black text-white transition hover:bg-navy-800 disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={!selectedGstin}
+                onClick={() => setViewMode("map")}
+                type="button"
+              >
+                <Network className="size-4" />
+                Case Map
+              </button>
+            )}
+          </div>
         </div>
 
+        {viewMode === "map" ? (
+          <CaseMapTable hasClient={Boolean(selectedGstin)} isLoading={isLoadingCases} rows={caseMapRows} />
+        ) : (
         <div className="overflow-auto rounded-lg border border-slate-200">
           <table className="w-full min-w-[1120px] border-collapse text-left text-sm">
             <thead className="bg-slate-100 text-[11px] font-black uppercase tracking-wide text-slate-600">
@@ -671,7 +949,111 @@ export function GstTracker() {
             </tbody>
           </table>
         </div>
+        )}
       </section>
+    </div>
+  );
+}
+
+// The Case Map table — one row per case, the stage chain across the top, the
+// same layout the firm's Excel tracker used.
+function CaseMapTable({ hasClient, isLoading, rows }: { hasClient: boolean; isLoading: boolean; rows: CaseMapRow[] }) {
+  const columnCount = 10 + caseStages.length;
+  return (
+    <div className="overflow-auto rounded-lg border border-slate-200">
+      <table className="w-full min-w-[1680px] border-collapse text-left text-xs">
+        <thead className="bg-navy-700 text-[10px] font-black uppercase tracking-wide text-white">
+          <tr>
+            <th className="whitespace-nowrap px-3 py-2">Case ID</th>
+            <th className="whitespace-nowrap px-3 py-2">Category</th>
+            <th className="whitespace-nowrap px-3 py-2">Tax Period</th>
+            <th className="whitespace-nowrap px-3 py-2">Case Status</th>
+            <th className="whitespace-nowrap px-3 py-2">Chain</th>
+            <th className="whitespace-nowrap px-3 py-2">Docs</th>
+            {caseStages.map((stage) => (
+              <th className="whitespace-nowrap px-3 py-2" key={stage}>
+                {stage}
+              </th>
+            ))}
+            <th className="whitespace-nowrap px-3 py-2">Latest Activity</th>
+            <th className="whitespace-nowrap px-3 py-2">Days Since</th>
+            <th className="whitespace-nowrap px-3 py-2">Open?</th>
+            <th className="whitespace-nowrap px-3 py-2">References</th>
+          </tr>
+        </thead>
+        <tbody>
+          {!hasClient ? (
+            <tr>
+              <td className="px-4 py-10 text-center text-sm font-bold text-slate-400" colSpan={columnCount}>
+                Select a client to see its case map.
+              </td>
+            </tr>
+          ) : rows.length ? (
+            rows.map((row) => (
+              <tr className="border-b border-slate-100 align-top last:border-b-0 odd:bg-white even:bg-slate-50/60" key={row.caseId}>
+                <td className="whitespace-nowrap px-3 py-2 font-bold text-navy-800">{row.caseId}</td>
+                <td className="px-3 py-2">
+                  <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-black uppercase ${categoryPillClass(row.category)}`}>
+                    {row.category}
+                  </span>
+                </td>
+                <td className="whitespace-nowrap px-3 py-2 font-semibold text-slate-700">{row.period || "—"}</td>
+                <td className="min-w-[180px] px-3 py-2 font-semibold text-slate-700">{row.status || "—"}</td>
+                <td className="min-w-[200px] px-3 py-2">
+                  {row.chain.length ? (
+                    <span className="flex flex-wrap items-center gap-1">
+                      {row.chain.map((stage, index) => (
+                        <Fragment key={stage}>
+                          {index ? <span className="text-slate-400">→</span> : null}
+                          <span className="inline-flex rounded-full bg-navy-50 px-2 py-0.5 text-[10px] font-black text-navy-700">{stage}</span>
+                        </Fragment>
+                      ))}
+                    </span>
+                  ) : (
+                    <span className="text-slate-400">(no dated stage)</span>
+                  )}
+                </td>
+                <td className="px-3 py-2 text-center font-bold text-slate-600">{row.docs}</td>
+                {caseStages.map((stage) => (
+                  <td className="whitespace-nowrap px-3 py-2 font-semibold text-slate-700" key={stage}>
+                    {row.stages[stage] ?? "—"}
+                  </td>
+                ))}
+                <td className="whitespace-nowrap px-3 py-2 font-bold text-navy-800">{row.latest || "—"}</td>
+                <td className="whitespace-nowrap px-3 py-2 text-center font-bold text-slate-600">{row.daysSince ?? "—"}</td>
+                <td className="px-3 py-2">
+                  <span
+                    className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-black ${
+                      row.open ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"
+                    }`}
+                  >
+                    {row.open ? "Yes" : "No"}
+                  </span>
+                </td>
+                <td className="min-w-[260px] px-3 py-2">
+                  {row.refs.length ? (
+                    <span className="flex flex-col gap-0.5">
+                      {row.refs.map((entry) => (
+                        <span className="font-semibold text-slate-600" key={entry.stage}>
+                          <span className="font-black text-navy-700">{entry.stage}:</span> {entry.refs.join(", ")}
+                        </span>
+                      ))}
+                    </span>
+                  ) : (
+                    <span className="text-slate-400">—</span>
+                  )}
+                </td>
+              </tr>
+            ))
+          ) : (
+            <tr>
+              <td className="px-4 py-10 text-center text-sm font-bold text-slate-400" colSpan={columnCount}>
+                {isLoading ? "Loading…" : "No cases saved yet. Click Get data to pull them from the portal."}
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
     </div>
   );
 }
