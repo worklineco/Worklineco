@@ -831,7 +831,7 @@ export function GstTracker() {
         </div>
 
         {viewMode === "map" ? (
-          <CaseMapTable hasClient={Boolean(selectedGstin)} isLoading={isLoadingCases} rows={caseMapRows} />
+          <CaseMapCards hasClient={Boolean(selectedGstin)} isLoading={isLoadingCases} rows={caseMapRows} />
         ) : (
         <div className="overflow-auto rounded-lg border border-slate-200">
           <table className="w-full min-w-[1120px] border-collapse text-left text-sm">
@@ -955,105 +955,85 @@ export function GstTracker() {
   );
 }
 
-// The Case Map table — one row per case, the stage chain across the top, the
-// same layout the firm's Excel tracker used.
-function CaseMapTable({ hasClient, isLoading, rows }: { hasClient: boolean; isLoading: boolean; rows: CaseMapRow[] }) {
-  const columnCount = 10 + caseStages.length;
+// On-screen names for the stages, matching how the firm talks about them.
+const stageDisplayNames: Record<CaseStage, string> = {
+  Appeal: "Appeal",
+  Application: "Application",
+  Hearing: "Personal Hearing",
+  Intimation: "Intimation",
+  Order: "Order",
+  Payment: "Payment",
+  Rectification: "Rectification",
+  Reply: "Reply",
+  "Show Cause": "Show Cause Notice"
+};
+
+// The Case Map — one card per case, its stages stacked as a vertical
+// timeline: Intimation, Show Cause Notice, Reply, Personal Hearing, Order…
+function CaseMapCards({ hasClient, isLoading, rows }: { hasClient: boolean; isLoading: boolean; rows: CaseMapRow[] }) {
+  if (!hasClient) {
+    return <p className="rounded-lg border border-slate-200 px-4 py-10 text-center text-sm font-bold text-slate-400">Select a client to see its case map.</p>;
+  }
+  if (!rows.length) {
+    return (
+      <p className="rounded-lg border border-slate-200 px-4 py-10 text-center text-sm font-bold text-slate-400">
+        {isLoading ? "Loading…" : "No cases saved yet. Click Get data to pull them from the portal."}
+      </p>
+    );
+  }
   return (
-    <div className="overflow-auto rounded-lg border border-slate-200">
-      <table className="w-full min-w-[1680px] border-collapse text-left text-xs">
-        <thead className="bg-navy-700 text-[10px] font-black uppercase tracking-wide text-white">
-          <tr>
-            <th className="whitespace-nowrap px-3 py-2">Case ID</th>
-            <th className="whitespace-nowrap px-3 py-2">Category</th>
-            <th className="whitespace-nowrap px-3 py-2">Tax Period</th>
-            <th className="whitespace-nowrap px-3 py-2">Case Status</th>
-            <th className="whitespace-nowrap px-3 py-2">Chain</th>
-            <th className="whitespace-nowrap px-3 py-2">Docs</th>
-            {caseStages.map((stage) => (
-              <th className="whitespace-nowrap px-3 py-2" key={stage}>
-                {stage}
-              </th>
-            ))}
-            <th className="whitespace-nowrap px-3 py-2">Latest Activity</th>
-            <th className="whitespace-nowrap px-3 py-2">Days Since</th>
-            <th className="whitespace-nowrap px-3 py-2">Open?</th>
-            <th className="whitespace-nowrap px-3 py-2">References</th>
-          </tr>
-        </thead>
-        <tbody>
-          {!hasClient ? (
-            <tr>
-              <td className="px-4 py-10 text-center text-sm font-bold text-slate-400" colSpan={columnCount}>
-                Select a client to see its case map.
-              </td>
-            </tr>
-          ) : rows.length ? (
-            rows.map((row) => (
-              <tr className="border-b border-slate-100 align-top last:border-b-0 odd:bg-white even:bg-slate-50/60" key={row.caseId}>
-                <td className="whitespace-nowrap px-3 py-2 font-bold text-navy-800">{row.caseId}</td>
-                <td className="px-3 py-2">
-                  <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-black uppercase ${categoryPillClass(row.category)}`}>
-                    {row.category}
-                  </span>
-                </td>
-                <td className="whitespace-nowrap px-3 py-2 font-semibold text-slate-700">{row.period || "—"}</td>
-                <td className="min-w-[180px] px-3 py-2 font-semibold text-slate-700">{row.status || "—"}</td>
-                <td className="min-w-[200px] px-3 py-2">
-                  {row.chain.length ? (
-                    <span className="flex flex-wrap items-center gap-1">
-                      {row.chain.map((stage, index) => (
-                        <Fragment key={stage}>
-                          {index ? <span className="text-slate-400">→</span> : null}
-                          <span className="inline-flex rounded-full bg-navy-50 px-2 py-0.5 text-[10px] font-black text-navy-700">{stage}</span>
-                        </Fragment>
-                      ))}
-                    </span>
-                  ) : (
-                    <span className="text-slate-400">(no dated stage)</span>
-                  )}
-                </td>
-                <td className="px-3 py-2 text-center font-bold text-slate-600">{row.docs}</td>
-                {caseStages.map((stage) => (
-                  <td className="whitespace-nowrap px-3 py-2 font-semibold text-slate-700" key={stage}>
-                    {row.stages[stage] ?? "—"}
-                  </td>
-                ))}
-                <td className="whitespace-nowrap px-3 py-2 font-bold text-navy-800">{row.latest || "—"}</td>
-                <td className="whitespace-nowrap px-3 py-2 text-center font-bold text-slate-600">{row.daysSince ?? "—"}</td>
-                <td className="px-3 py-2">
-                  <span
-                    className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-black ${
-                      row.open ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"
-                    }`}
-                  >
-                    {row.open ? "Yes" : "No"}
-                  </span>
-                </td>
-                <td className="min-w-[260px] px-3 py-2">
-                  {row.refs.length ? (
-                    <span className="flex flex-col gap-0.5">
-                      {row.refs.map((entry) => (
-                        <span className="font-semibold text-slate-600" key={entry.stage}>
-                          <span className="font-black text-navy-700">{entry.stage}:</span> {entry.refs.join(", ")}
-                        </span>
-                      ))}
-                    </span>
-                  ) : (
-                    <span className="text-slate-400">—</span>
-                  )}
-                </td>
-              </tr>
-            ))
-          ) : (
-            <tr>
-              <td className="px-4 py-10 text-center text-sm font-bold text-slate-400" colSpan={columnCount}>
-                {isLoading ? "Loading…" : "No cases saved yet. Click Get data to pull them from the portal."}
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
+    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+      {rows.map((row) => (
+        <div className="flex flex-col rounded-xl border border-slate-200 bg-white p-4 shadow-sm" key={row.caseId}>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="text-sm font-black text-navy-800">{row.caseId}</span>
+            <span
+              className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-black ${
+                row.open ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"
+              }`}
+            >
+              {row.open ? "Open" : "Closed"}
+            </span>
+          </div>
+          <div className="mt-1.5 flex flex-wrap items-center gap-2">
+            <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-black uppercase ${categoryPillClass(row.category)}`}>
+              {row.category}
+            </span>
+            {row.period ? <span className="text-[11px] font-bold text-slate-500">{row.period}</span> : null}
+          </div>
+          <p className="mt-1.5 text-xs font-semibold text-slate-600">{row.status || "—"}</p>
+
+          <div className="mt-3 flex-1">
+            {row.chain.length ? (
+              row.chain.map((stage, index) => (
+                <div className="relative flex gap-3 pb-3 last:pb-0" key={stage}>
+                  {index < row.chain.length - 1 ? <span className="absolute left-[4.5px] top-3.5 h-full w-px bg-navy-100" /> : null}
+                  <span className="mt-1 size-2.5 shrink-0 rounded-full border-2 border-navy-600 bg-white" />
+                  <div className="min-w-0">
+                    <p className="text-xs font-black uppercase tracking-wide text-navy-700">
+                      {stageDisplayNames[stage]}
+                      {row.stages[stage] ? <span className="ml-2 font-bold normal-case tracking-normal text-slate-500">{row.stages[stage]}</span> : null}
+                    </p>
+                    {row.refs.find((entry) => entry.stage === stage) ? (
+                      <p className="break-words text-[11px] font-semibold text-slate-500">
+                        {row.refs.find((entry) => entry.stage === stage)?.refs.join(", ")}
+                      </p>
+                    ) : null}
+                  </div>
+                </div>
+              ))
+            ) : (
+              <p className="text-xs font-semibold text-slate-400">(no dated stage)</p>
+            )}
+          </div>
+
+          <p className="mt-3 border-t border-slate-100 pt-2 text-[11px] font-bold text-slate-500">
+            {row.docs} doc{row.docs === 1 ? "" : "s"}
+            {row.latest ? ` · latest ${row.latest}` : ""}
+            {row.daysSince !== null ? ` · ${row.daysSince} day${row.daysSince === 1 ? "" : "s"} ago` : ""}
+          </p>
+        </div>
+      ))}
     </div>
   );
 }
