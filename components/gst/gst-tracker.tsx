@@ -987,13 +987,12 @@ function CaseMapList({ groups, hasClient, isLoading, rows }: { groups: CaseGroup
             <th className="whitespace-nowrap border-b border-slate-200 px-3 py-2">Chain</th>
             <th className="whitespace-nowrap border-b border-slate-200 px-3 py-2">Open / Closed</th>
             <th className="whitespace-nowrap border-b border-slate-200 px-3 py-2">Latest Activity</th>
-            <th className="whitespace-nowrap border-b border-slate-200 px-3 py-2">Days Since</th>
           </tr>
         </thead>
         <tbody>
           {!hasClient ? (
             <tr>
-              <td className="px-4 py-10 text-center text-sm font-bold text-slate-400" colSpan={9}>
+              <td className="px-4 py-10 text-center text-sm font-bold text-slate-400" colSpan={8}>
                 Select a client to see its case map.
               </td>
             </tr>
@@ -1011,11 +1010,7 @@ function CaseMapList({ groups, hasClient, isLoading, rows }: { groups: CaseGroup
                       {isExpanded ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
                     </td>
                     <td className="whitespace-nowrap px-3 py-2 align-top font-bold text-navy-800">{row.caseId}</td>
-                    <td className="px-3 py-2 align-top">
-                      <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-black uppercase ${categoryPillClass(row.category)}`}>
-                        {row.category}
-                      </span>
-                    </td>
+                    <td className="px-3 py-2 align-top font-semibold text-slate-700">{row.category || "—"}</td>
                     <td className="whitespace-nowrap px-3 py-2 align-top font-semibold text-slate-700">{row.period || "—"}</td>
                     <td className="px-3 py-2 align-top font-semibold text-slate-700">{row.status || "—"}</td>
                     <td className="px-3 py-2 align-top">
@@ -1044,11 +1039,10 @@ function CaseMapList({ groups, hasClient, isLoading, rows }: { groups: CaseGroup
                       </span>
                     </td>
                     <td className="whitespace-nowrap px-3 py-2 align-top font-bold text-navy-800">{row.latest || "—"}</td>
-                    <td className="whitespace-nowrap px-3 py-2 align-top text-center font-bold text-slate-600">{row.daysSince ?? "—"}</td>
                   </tr>
                   {isExpanded ? (
                     <tr className="border-b border-slate-100 bg-slate-50/60">
-                      <td className="px-4 py-4" colSpan={9}>
+                      <td className="px-4 py-4" colSpan={8}>
                         <div className="space-y-4">
                           <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
                             <p className="text-xs font-black uppercase tracking-wide text-navy-700">Stage timeline</p>
@@ -1093,7 +1087,7 @@ function CaseMapList({ groups, hasClient, isLoading, rows }: { groups: CaseGroup
             })
           ) : (
             <tr>
-              <td className="px-4 py-10 text-center text-sm font-bold text-slate-400" colSpan={9}>
+              <td className="px-4 py-10 text-center text-sm font-bold text-slate-400" colSpan={8}>
                 {isLoading ? "Loading…" : "No cases saved yet. Click Get data to pull them from the portal."}
               </td>
             </tr>
