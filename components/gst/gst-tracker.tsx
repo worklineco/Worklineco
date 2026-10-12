@@ -6,7 +6,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "rea
 type GstClient = { gstin: string; group: string; hasCredentials: boolean; name: string };
 type DetailTable = { headers: string[]; rows: string[][] };
 type DetailTab = { name: string; tables: DetailTable[] };
-type RawPayload = { demandAmount?: string; detail?: { tabs?: DetailTab[] } } | null;
+type RawPayload = { againstOrderNo?: string; demandAmount?: string; detail?: { tabs?: DetailTab[] } } | null;
 type SourceKey = "appeal" | "notices" | "payment" | "spl";
 type GstCase = {
   case_id: string | null;
@@ -342,6 +342,7 @@ type CaseMapRow = {
   chain: CaseStage[];
   daysSince: number | null;
   docs: number;
+  folded: string[];
   latest: string;
   open: boolean;
   period: string;
@@ -350,7 +351,106 @@ type CaseMapRow = {
   status: string;
 };
 
-function buildCaseMap(groups: CaseGroup[]): CaseMapRow[] {
+// Appeal folding — an appeal gets its own case page on the portal, so it
+// would show twice: as the Appeal stage of the case it contests and as a case
+// of its own. When an appeal row carries the order number it was filed
+// against, its case folds into the case that owns that order — one row per
+// dispute, same as the firm's Excel tracker — and every merge is shown on the
+// parent so nothing disappears silently. An appeal whose contested order is
+// not in the tracker stays as its own row.
+function foldAppealGroups(groups: CaseGroup[]): { folded: Map<string, string[]>; groups: CaseGroup[] } {
+  const tokenPattern = /\b[A-Z]{2}\d{10,}[A-Z0-9]*\b/g;
+  const refOwner = new Map<string, string>();
+  for (const group of groups) {
+    if (!group.caseId || group.caseId === "—") {
+      continue;
+    }
+    for (const notice of group.notices) {
+      const texts = [notice.ref_id, notice.case_id, notice.description];
+      for (const tab of notice.raw_payload?.detail?.tabs ?? []) {
+        for (const table of tab.tables) {
+          for (const cells of table.rows) {
+            texts.push(cells.join(" "));
+          }
+        }
+      }
+      for (const text of texts) {
+        for (const token of String(text ?? "").toUpperCase().match(tokenPattern) ?? []) {
+          if (!refOwner.has(token)) {
+            refOwner.set(token, group.caseId);
+          }
+        }
+      }
+    }
+  }
+
+  const alias = new Map<string, string>();
+  for (const group of groups) {
+    if (!group.caseId || group.caseId === "—") {
+      continue;
+    }
+    const against = group.notices
+      .map((notice) => (notice.raw_payload?.againstOrderNo ?? "").trim().toUpperCase())
+      .find(Boolean);
+    if (!against) {
+      continue;
+    }
+    const parent = refOwner.get(against);
+    if (parent && parent !== group.caseId) {
+      alias.set(group.caseId, parent);
+    }
+  }
+
+  // Resolve chains (an appeal against an appeal order), with a cycle guard.
+  const resolved = new Map<string, string>();
+  for (const start of alias.keys()) {
+    const seen = new Set([start]);
+    let current = alias.get(start) ?? start;
+    while (alias.has(current) && !seen.has(current)) {
+      seen.add(current);
+      current = alias.get(current) ?? current;
+    }
+    if (current !== start) {
+      resolved.set(start, current);
+    }
+  }
+  if (!resolved.size) {
+    return { folded: new Map(), groups };
+  }
+
+  const folded = new Map<string, string[]>();
+  const out: CaseGroup[] = [];
+  const parentCopies = new Map<string, CaseGroup>();
+  for (const group of groups) {
+    if (resolved.has(group.caseId)) {
+      continue;
+    }
+    const copy = { ...group, notices: [...group.notices], tabs: [...group.tabs] };
+    out.push(copy);
+    if (!parentCopies.has(group.caseId)) {
+      parentCopies.set(group.caseId, copy);
+    }
+  }
+  for (const group of groups) {
+    const parentId = resolved.get(group.caseId);
+    if (!parentId) {
+      continue;
+    }
+    const parent = parentCopies.get(parentId);
+    if (!parent) {
+      out.push(group);
+      continue;
+    }
+    parent.notices.push(...group.notices);
+    parent.tabs.push(...group.tabs);
+    const list = folded.get(parentId) ?? [];
+    list.push(group.caseId);
+    folded.set(parentId, list);
+  }
+  return { folded, groups: out };
+}
+
+function buildCaseMap(groups: CaseGroup[], foldedByCase: Map<string, string[]> = new Map()): CaseMapRow[] {
   const rows: CaseMapRow[] = [];
   const today = new Date();
 
@@ -424,6 +524,7 @@ function buildCaseMap(groups: CaseGroup[]): CaseMapRow[] {
       chain,
       daysSince: latestDate ? Math.floor((today.getTime() - latestDate.getTime()) / 86_400_000) : null,
       docs: group.notices.length,
+      folded: foldedByCase.get(group.caseId) ?? [],
       latest: formatDmy(latestDate),
       open,
       period: group.period,
@@ -710,7 +811,8 @@ export function GstTracker() {
     }
     return matched ? `₹${total.toLocaleString("en-IN")}` : "—";
   };
-  const caseMapRows = viewMode === "map" ? buildCaseMap(caseGroups) : [];
+  const caseMapData = viewMode === "map" ? foldAppealGroups(caseGroups) : null;
+  const caseMapRows = caseMapData ? buildCaseMap(caseMapData.groups, caseMapData.folded) : [];
   const filteredGroups = caseGroups.filter((group) => {
     const match = (value: string, filter: string) => !filter.trim() || value.toLowerCase().includes(filter.trim().toLowerCase());
     return (
@@ -826,7 +928,7 @@ export function GstTracker() {
         </div>
 
         {viewMode === "map" ? (
-          <CaseMapList demandFor={demandForGroup} groups={caseGroups} hasClient={Boolean(selectedGstin)} isLoading={isLoadingCases} rows={caseMapRows} />
+          <CaseMapList demandFor={demandForGroup} groups={caseMapData ? caseMapData.groups : caseGroups} hasClient={Boolean(selectedGstin)} isLoading={isLoadingCases} rows={caseMapRows} />
         ) : (
         <div className="overflow-auto rounded-lg border border-slate-200">
           <table className="w-full min-w-[1120px] border-collapse text-left text-sm">
@@ -1069,6 +1171,11 @@ function CaseMapList({ demandFor, groups, hasClient, isLoading, rows }: { demand
                               {row.latest ? ` · latest ${row.latest}` : ""}
                               {row.daysSince !== null ? ` · ${row.daysSince} day${row.daysSince === 1 ? "" : "s"} ago` : ""}
                             </p>
+                            {row.folded.length ? (
+                              <p className="mt-1 text-[11px] font-bold text-amber-700">
+                                Appeal case{row.folded.length === 1 ? "" : "s"} {row.folded.join(", ")} folded into this case (filed against an order here).
+                              </p>
+                            ) : null}
                           </div>
                           {group ? <CaseMapProceedings group={group} /> : null}
                         </div>
