@@ -63,6 +63,24 @@ function isAllowedOrigin(origin) {
   return !origin || ALLOWED_ORIGINS.has(origin);
 }
 
+// One run per GSTIN at a time: the GST portal allows exactly ONE active
+// session per login, so a second run would end the first one mid-scrape.
+// A run older than 3 hours is assumed dead and no longer blocks.
+const activeRuns = new Map();
+const RUN_STALE_MS = 3 * 60 * 60 * 1000;
+
+function runningSince(runKey) {
+  const startedAt = activeRuns.get(runKey);
+  if (!startedAt) {
+    return null;
+  }
+  if (Date.now() - startedAt > RUN_STALE_MS) {
+    activeRuns.delete(runKey);
+    return null;
+  }
+  return startedAt;
+}
+
 function startCollector({ clientName, gstPass, gstUser, gstin, rowNumber, sources }) {
   const scriptPath = path.join(WORKLINE_GST_HOME, "scripts", "gst-portal-collector.mjs");
   const args = [scriptPath, "--login-only", "--auto-notices"];
@@ -110,11 +128,15 @@ function startCollector({ clientName, gstPass, gstUser, gstin, rowNumber, source
       },
     });
 
+    const runKey = String(gstin || "default").trim().toUpperCase();
+
     child.once("spawn", () => {
+      activeRuns.set(runKey, Date.now());
       resolve(logPath);
     });
 
     child.once("error", (error) => {
+      activeRuns.delete(runKey);
       logStream.write(`[${new Date().toISOString()}] Collector spawn failed: ${error.message}\n`);
       logStream.end();
       reject(error);
@@ -123,6 +145,7 @@ function startCollector({ clientName, gstPass, gstUser, gstin, rowNumber, source
     child.stdout.pipe(logStream, { end: false });
     child.stderr.pipe(logStream, { end: false });
     child.on("exit", (code, signal) => {
+      activeRuns.delete(runKey);
       logStream.write(`[${new Date().toISOString()}] Collector exited code=${code} signal=${signal}\n`);
       logStream.end();
     });
@@ -197,6 +220,19 @@ const server = http.createServer(async (request, response) => {
 
   try {
     const body = await readJson(request);
+    const runKey = String(body.gstin || "default").trim().toUpperCase();
+    if (runningSince(runKey)) {
+      sendJson(
+        response,
+        409,
+        {
+          error:
+            "A fetch for this client is already running on this computer. The GST portal allows one session per login, so a second run would end the first - wait for it to finish.",
+        },
+        origin,
+      );
+      return;
+    }
     const logPath = await startCollector({
       clientName: typeof body.clientName === "string" ? body.clientName : "",
       gstPass: typeof body.gstPass === "string" ? body.gstPass : "",
