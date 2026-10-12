@@ -8,7 +8,7 @@ import { chromium } from "playwright-core";
 import XLSX from "xlsx";
 import { getCollectorOutputDir, getDefaultWorkbookPath, getWorklineGstHome } from "./gst-helper-home.mjs";
 
-const COLLECTOR_VERSION = "2026-10-12-v65-merge-v18";
+const COLLECTOR_VERSION = "2026-10-12-v65-capture-v19";
 const GST_PORTAL_LOGIN_URL = "https://services.gst.gov.in/services/login";
 const WORKLINE_GST_HOME = getWorklineGstHome();
 const DEFAULT_WORKBOOK_PATH = getDefaultWorkbookPath();
@@ -915,21 +915,84 @@ async function clickApplicationSearch(page) {
 }
 
 // Reads the application result rows (skips "No Records Found").
+// Reads the My Applications results grid by its column headers, the same way
+// the firm's Excel tracker did: every application comes back as named fields
+// (ARN, filing date, status, and the order it was filed against) instead of
+// an unlabeled list of cells. The order number is what makes an appeal
+// traceable to the demand it contests.
 async function extractAppealResultRows(page) {
   return page.evaluate(() => {
     const clean = (value) => String(value ?? "").replace(/\s+/g, " ").trim();
-    const out = [];
+    const normalize = (value) => clean(value).replace(/[.:#*]/g, "").trim().toLowerCase();
+    const isVisible = (node) => Boolean(node.offsetWidth || node.offsetHeight || node.getClientRects().length);
+
+    const fieldFor = (header) => {
+      const name = normalize(header);
+      if (!name) {
+        return null;
+      }
+      if (name === "arn" || name.includes("application reference")) {
+        return "arn";
+      }
+      if (name.includes("against") || (name.includes("order") && (name.includes("no") || name.includes("number") || name.includes("id")))) {
+        return "orderNo";
+      }
+      if (name.includes("date")) {
+        return "filedOn";
+      }
+      if (name.includes("status")) {
+        return "status";
+      }
+      if (name.includes("type") || name.includes("category") || name.includes("description") || name.includes("form")) {
+        return "kind";
+      }
+      return null;
+    };
+
+    // Choose the visible table whose headers map best to the fields above.
+    let best = null;
+    let bestScore = 0;
     for (const table of document.querySelectorAll("table")) {
-      for (const tr of table.querySelectorAll("tbody tr")) {
-        const cells = [...tr.querySelectorAll("td")].map((td) => clean(td.innerText || td.textContent));
+      if (!isVisible(table)) {
+        continue;
+      }
+      const headerRow = table.tHead ? table.tHead.rows[0] : table.querySelector("tr");
+      if (!headerRow) {
+        continue;
+      }
+      const headers = [...headerRow.cells].map((cell) => clean(cell.innerText));
+      const score = headers.map(fieldFor).filter(Boolean).length;
+      if (score > bestScore) {
+        bestScore = score;
+        best = { headers, table };
+      }
+    }
+    if (!best) {
+      return [];
+    }
+
+    const fields = best.headers.map(fieldFor);
+    const out = [];
+    for (const body of best.table.tBodies) {
+      for (const tr of body.rows) {
+        const cells = [...tr.cells].map((td) => clean(td.innerText || td.textContent));
         if (cells.length < 2 || !cells.some(Boolean)) {
           continue;
         }
         if (/no records found/i.test(cells.join(" "))) {
           continue;
         }
+        const record = { arn: "", cells, filedOn: "", kind: "", orderNo: "", status: "" };
+        fields.forEach((field, index) => {
+          if (field && !record[field] && cells[index]) {
+            record[field] = cells[index];
+          }
+        });
         const anchor = tr.querySelector("a");
-        out.push({ arn: clean(anchor?.innerText || anchor?.textContent || cells[0]), cells });
+        if (!record.arn) {
+          record.arn = clean(anchor?.innerText || anchor?.textContent || cells[0]);
+        }
+        out.push(record);
       }
     }
     return out;
@@ -1001,7 +1064,7 @@ async function collectApplications(page, appType, startDmy) {
       const key = row.arn || row.cells.join("|");
       if (!seen.has(key)) {
         seen.add(key);
-        found.push({ arn: row.arn, cells: row.cells, from, to });
+        found.push({ arn: row.arn, cells: row.cells, filedOn: row.filedOn, from, kind: row.kind, orderNo: row.orderNo, status: row.status, to });
       }
     }
   }
@@ -1023,17 +1086,18 @@ async function collectApplications(page, appType, startDmy) {
     console.log(`  ${appType} ${index + 1}/${found.length} ${app.arn}: ${opened ? "opened" : "not opened"}`);
     if (opened) {
       const detail = await extractCaseDetail(page);
-      const dateCell = app.cells.find((cell) => /\d{1,2}\/\d{1,2}\/\d{2,4}/.test(cell)) || "";
+      const dateCell = app.filedOn || app.cells.find((cell) => /\d{1,2}\/\d{1,2}\/\d{2,4}/.test(cell)) || "";
       results.push({
+        againstOrderNo: app.orderNo || "",
         caseId: detail.caseId || app.arn,
         dateOfIssue: dateCell,
-        description: app.cells.slice(1).find(Boolean) || "",
+        description: app.kind || app.cells.slice(1).find(Boolean) || "",
         detail: { tabs: detail.tabs },
         refId: app.arn,
         replyFiling: "",
         section: "",
         sNo: "",
-        status: detail.status || "",
+        status: detail.status || app.status || "",
         taxPeriod: detail.period || "",
         typeOfNotice: appType
       });
@@ -2148,7 +2212,7 @@ async function main() {
         if (row.sourceTab === "payment") {
           continue;
         }
-        const texts = [row.refId, row.caseId, row.description];
+        const texts = [row.refId, row.caseId, row.description, row.againstOrderNo];
         for (const tab of row.detail?.tabs ?? []) {
           for (const table of tab.tables ?? []) {
             for (const cells of table.rows ?? []) {
