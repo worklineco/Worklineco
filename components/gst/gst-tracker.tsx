@@ -433,13 +433,8 @@ function buildCaseMap(groups: CaseGroup[]): CaseMapRow[] {
     });
   }
 
-  // oldest untouched cases first among the open ones
-  rows.sort((a, b) => {
-    if (a.open !== b.open) {
-      return a.open ? -1 : 1;
-    }
-    return (b.daysSince ?? -1) - (a.daysSince ?? -1);
-  });
+  // newest activity first; cases with no date at all sink to the bottom
+  rows.sort((a, b) => (a.daysSince ?? Number.MAX_SAFE_INTEGER) - (b.daysSince ?? Number.MAX_SAFE_INTEGER));
   return rows;
 }
 
@@ -831,7 +826,7 @@ export function GstTracker() {
         </div>
 
         {viewMode === "map" ? (
-          <CaseMapList groups={caseGroups} hasClient={Boolean(selectedGstin)} isLoading={isLoadingCases} rows={caseMapRows} />
+          <CaseMapList demandFor={demandForGroup} groups={caseGroups} hasClient={Boolean(selectedGstin)} isLoading={isLoadingCases} rows={caseMapRows} />
         ) : (
         <div className="overflow-auto rounded-lg border border-slate-200">
           <table className="w-full min-w-[1120px] border-collapse text-left text-sm">
@@ -971,7 +966,7 @@ const stageDisplayNames: Record<CaseStage, string> = {
 // The Case Map — a list like the cases table, one row per case. Clicking a
 // row opens the stage timeline (Intimation, Show Cause Notice, Reply,
 // Personal Hearing, Order…) plus the same case detail the cases view shows.
-function CaseMapList({ groups, hasClient, isLoading, rows }: { groups: CaseGroup[]; hasClient: boolean; isLoading: boolean; rows: CaseMapRow[] }) {
+function CaseMapList({ demandFor, groups, hasClient, isLoading, rows }: { demandFor: (group: CaseGroup) => string; groups: CaseGroup[]; hasClient: boolean; isLoading: boolean; rows: CaseMapRow[] }) {
   const [expandedCaseId, setExpandedCaseId] = useState<string | null>(null);
 
   return (
@@ -986,7 +981,7 @@ function CaseMapList({ groups, hasClient, isLoading, rows }: { groups: CaseGroup
             <th className="whitespace-nowrap border-b border-slate-200 px-3 py-2">Case Status</th>
             <th className="whitespace-nowrap border-b border-slate-200 px-3 py-2">Chain</th>
             <th className="whitespace-nowrap border-b border-slate-200 px-3 py-2">Open / Closed</th>
-            <th className="whitespace-nowrap border-b border-slate-200 px-3 py-2">Latest Activity</th>
+            <th className="whitespace-nowrap border-b border-slate-200 px-3 py-2">Demand Amount</th>
           </tr>
         </thead>
         <tbody>
@@ -1038,7 +1033,7 @@ function CaseMapList({ groups, hasClient, isLoading, rows }: { groups: CaseGroup
                         {row.open ? "Open" : "Closed"}
                       </span>
                     </td>
-                    <td className="whitespace-nowrap px-3 py-2 align-top font-bold text-navy-800">{row.latest || "—"}</td>
+                    <td className="whitespace-nowrap px-3 py-2 align-top font-black text-navy-800">{group ? demandFor(group) : "—"}</td>
                   </tr>
                   {isExpanded ? (
                     <tr className="border-b border-slate-100 bg-slate-50/60">
@@ -1046,26 +1041,24 @@ function CaseMapList({ groups, hasClient, isLoading, rows }: { groups: CaseGroup
                         <div className="space-y-4">
                           <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
                             <p className="text-xs font-black uppercase tracking-wide text-navy-700">Stage timeline</p>
-                            <div className="mt-3">
+                            <div className="mt-3 flex flex-wrap items-start gap-y-3">
                               {row.chain.length ? (
                                 row.chain.map((stage, index) => (
-                                  <div className="relative flex gap-3 pb-3 last:pb-0" key={stage}>
-                                    {index < row.chain.length - 1 ? <span className="absolute left-[4.5px] top-3.5 h-full w-px bg-navy-100" /> : null}
-                                    <span className="mt-1 size-2.5 shrink-0 rounded-full border-2 border-navy-600 bg-white" />
-                                    <div className="min-w-0">
-                                      <p className="text-xs font-black uppercase tracking-wide text-navy-700">
+                                  <Fragment key={stage}>
+                                    {index ? <span className="mx-2 mt-1 shrink-0 text-base font-black text-navy-200">→</span> : null}
+                                    <div className="min-w-[110px] max-w-[220px]">
+                                      <p className="flex items-center gap-1.5 text-xs font-black uppercase tracking-wide text-navy-700">
+                                        <span className="size-2 shrink-0 rounded-full border-2 border-navy-600 bg-white" />
                                         {stageDisplayNames[stage]}
-                                        {row.stages[stage] ? (
-                                          <span className="ml-2 font-bold normal-case tracking-normal text-slate-500">{row.stages[stage]}</span>
-                                        ) : null}
                                       </p>
+                                      {row.stages[stage] ? <p className="pl-3.5 text-[11px] font-bold text-slate-500">{row.stages[stage]}</p> : null}
                                       {row.refs.find((entry) => entry.stage === stage) ? (
-                                        <p className="break-words text-[11px] font-semibold text-slate-500">
+                                        <p className="break-words pl-3.5 text-[10px] font-semibold text-slate-400">
                                           {row.refs.find((entry) => entry.stage === stage)?.refs.join(", ")}
                                         </p>
                                       ) : null}
                                     </div>
-                                  </div>
+                                  </Fragment>
                                 ))
                               ) : (
                                 <p className="text-xs font-semibold text-slate-400">(no dated stage)</p>
@@ -1077,7 +1070,7 @@ function CaseMapList({ groups, hasClient, isLoading, rows }: { groups: CaseGroup
                               {row.daysSince !== null ? ` · ${row.daysSince} day${row.daysSince === 1 ? "" : "s"} ago` : ""}
                             </p>
                           </div>
-                          {group ? <CaseDetail group={group} /> : null}
+                          {group ? <CaseMapProceedings group={group} /> : null}
                         </div>
                       </td>
                     </tr>
@@ -1095,6 +1088,133 @@ function CaseMapList({ groups, hasClient, isLoading, rows }: { groups: CaseGroup
         </tbody>
       </table>
     </div>
+  );
+}
+
+// A row often appears under two sub-tabs (an intimation is also listed under
+// NOTICES); the Case Map shows one decisive stage per row instead of a pile
+// of pills. Checked in order - the most advanced stage wins.
+const proceedingStagePriority: [RegExp, string][] = [
+  [/ORDER/, "Order"],
+  [/RECTIF/, "Rectification"],
+  [/REPL/, "Reply"],
+  [/APPLICATION/, "Application"],
+  [/ACK/, "Acknowledgement"],
+  [/NOTICE/, "Notice"],
+  [/INTIMATION/, "Intimation"]
+];
+
+function proceedingStage(tabList: string): string {
+  const upper = tabList.toUpperCase();
+  for (const [pattern, label] of proceedingStagePriority) {
+    if (pattern.test(upper)) {
+      return label;
+    }
+  }
+  return tabList.split(",")[0]?.trim() || "—";
+}
+
+// The Case Map's streamlined proceedings: one stage pill per row, the columns
+// that answer "what, which document, when, due by when", documents folded
+// behind a count, rows in story order. The cases page keeps its full table.
+function CaseMapProceedings({ group }: { group: CaseGroup }) {
+  const combined = buildCombinedProceedings(group.tabs);
+  const lower = combined.columns.map((column) => column.toLowerCase());
+  const col = (pattern: RegExp) => lower.findIndex((column) => pattern.test(column));
+  const typeIndex = col(/^type/);
+  const refIndex = col(/reference number/);
+  const dateIndex = col(/issue date/);
+  const dueIndex = col(/due date/);
+  const attachIndex = col(/attach/);
+
+  const rows = combined.rows
+    .map((row) => ({
+      attachments: attachIndex >= 0 ? row.cells[attachIndex] ?? "" : "",
+      date: dateIndex >= 0 ? row.cells[dateIndex] ?? "" : "",
+      due: dueIndex >= 0 ? row.cells[dueIndex] ?? "" : "",
+      reference: refIndex >= 0 ? row.cells[refIndex] ?? "" : "",
+      stage: proceedingStage(row.category),
+      type: typeIndex >= 0 ? row.cells[typeIndex] ?? "" : ""
+    }))
+    .sort((a, b) => (parseAnyDate(a.date)?.getTime() ?? 0) - (parseAnyDate(b.date)?.getTime() ?? 0));
+
+  if (!rows.length) {
+    return <p className="text-xs font-semibold text-slate-400">No proceedings captured for this case yet.</p>;
+  }
+
+  return (
+    <div className="overflow-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+      <table className="w-full border-collapse text-left text-xs">
+        <thead className="bg-navy-700 text-[10px] font-black uppercase tracking-wide text-white">
+          <tr>
+            <th className="whitespace-nowrap px-3 py-2">Stage</th>
+            <th className="whitespace-nowrap px-3 py-2">Type</th>
+            <th className="whitespace-nowrap px-3 py-2">Reference Number</th>
+            <th className="whitespace-nowrap px-3 py-2">Date</th>
+            <th className="whitespace-nowrap px-3 py-2">Due Date</th>
+            <th className="whitespace-nowrap px-3 py-2">Documents</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, index) => (
+            <tr className={`border-b border-slate-100 last:border-b-0 ${index % 2 ? "bg-slate-50/60" : "bg-white"}`} key={index}>
+              <td className="whitespace-nowrap px-3 py-2 align-top">
+                <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-black uppercase ${categoryPillClass(row.stage)}`}>
+                  {row.stage}
+                </span>
+              </td>
+              <td className="px-3 py-2 align-top font-semibold text-slate-700">{row.type || "—"}</td>
+              <td className="whitespace-nowrap px-3 py-2 align-top font-semibold text-slate-700">{row.reference || "—"}</td>
+              <td className="whitespace-nowrap px-3 py-2 align-top font-semibold text-slate-700">{row.date || "—"}</td>
+              <td className="whitespace-nowrap px-3 py-2 align-top font-semibold text-slate-700">{row.due || "—"}</td>
+              <td className="min-w-[200px] px-3 py-2 align-top">
+                <CompactAttachments value={row.attachments} />
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// Documents fold behind a count so a reply with seven annexures stays one
+// row tall; opening the fold lists every file.
+function CompactAttachments({ value }: { value: string }) {
+  const trimmed = value.trim();
+  if (!trimmed || trimmed === "—" || trimmed.toLowerCase() === "-na-" || trimmed.toLowerCase() === "na") {
+    return <span className="text-slate-400">—</span>;
+  }
+  const files = trimmed
+    .split(/(?<=\.(?:pdf|png|jpe?g|xlsx?|docx?|zip))\s+/i)
+    .map((file) => file.trim())
+    .filter(Boolean);
+  if (files.length === 1) {
+    return (
+      <span className="inline-flex max-w-full items-center gap-1 rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-bold text-slate-600">
+        <FileText className="size-3 shrink-0 text-slate-400" />
+        <span className="truncate" title={files[0]}>
+          {files[0]}
+        </span>
+      </span>
+    );
+  }
+  return (
+    <details>
+      <summary className="cursor-pointer select-none text-[11px] font-black text-navy-700 hover:underline">
+        {files.length} files
+      </summary>
+      <span className="mt-1 flex flex-col gap-1">
+        {files.map((file, index) => (
+          <span className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-bold text-slate-600" key={index}>
+            <FileText className="size-3 shrink-0 text-slate-400" />
+            <span className="truncate" title={file}>
+              {file}
+            </span>
+          </span>
+        ))}
+      </span>
+    </details>
   );
 }
 
