@@ -8,7 +8,7 @@ import { chromium } from "playwright-core";
 import XLSX from "xlsx";
 import { getCollectorOutputDir, getDefaultWorkbookPath, getWorklineGstHome } from "./gst-helper-home.mjs";
 
-const COLLECTOR_VERSION = "2026-10-12-v65-capture-v19";
+const COLLECTOR_VERSION = "2026-10-12-v65-drill-v20";
 const GST_PORTAL_LOGIN_URL = "https://services.gst.gov.in/services/login";
 const WORKLINE_GST_HOME = getWorklineGstHome();
 const DEFAULT_WORKBOOK_PATH = getDefaultWorkbookPath();
@@ -446,8 +446,12 @@ async function clickPortalLinkByText(page, text, label) {
   const clicked = await page.evaluate((targetText) => {
     const normalize = (value) => String(value ?? "").replace(/\s+/g, " ").trim().toLowerCase();
     const target = normalize(targetText);
-    const link = [...document.querySelectorAll("a,button")]
-      .find((element) => normalize(element.innerText || element.textContent) === target);
+    const matches = [...document.querySelectorAll("a,button")]
+      .filter((element) => normalize(element.innerText || element.textContent) === target);
+    // A visible link first - the portal keeps every menu item in the DOM at
+    // all times, and clicking a hidden copy can navigate somewhere else.
+    const isShown = (element) => Boolean(element.offsetWidth || element.offsetHeight || element.getClientRects().length);
+    const link = matches.find(isShown) || matches[0];
 
     if (!link) {
       return false;
@@ -640,15 +644,144 @@ async function openCaseDetail(page, index) {
     .catch(() => false);
 }
 
-// Clicks a left sub-tab (INTIMATIONS / NOTICES / REPLIES / ORDERS) by exact text.
+// Opens a Services menu destination. The group headers (User Services /
+// Ledgers) are links of their own on the portal - clicking one navigates to
+// its FIRST page (User Services lands on Search HSN Code), which is exactly
+// the wrong turn the old flow took. So the destination link is clicked
+// directly after opening the Services menu; the group header is clicked only
+// as a fallback when the destination is not present at all.
+async function openPortalMenuItem(page, groupLabel, itemLabel) {
+  await clickPortalLinkByText(page, "Services", "Services");
+  await page.waitForTimeout(1_500);
+  if (await clickPortalLinkByText(page, itemLabel, itemLabel)) {
+    return true;
+  }
+  await clickPortalLinkByText(page, groupLabel, groupLabel);
+  await page.waitForTimeout(1_500);
+  return clickPortalLinkByText(page, itemLabel, itemLabel);
+}
+
+// The case page's own side tabs, enumerated from what is actually rendered -
+// the v65 method. Probing a fixed name list clicked already-active tabs and
+// missed anything new; enumerating clicks each real tab exactly once.
+const caseTabLabels = new Set([
+  "INTIMATIONS", "INTIMATION", "NOTICES", "REPLIES", "REPLY", "ORDERS",
+  "RECTIFICATION", "ADDITIONAL DOCUMENT", "WITHDRAWAL APPLICATION",
+  "REMAND DETAILS", "APPLICATIONS", "ACK./INTIMATION", "ACK/INTIMATION",
+  "ACKNOWLEDGEMENT", "REJOINDER", "PAYMENT DETAILS", "PAYMENTS",
+  "PROCEEDINGS", "ADDITIONAL NOTICES AND ORDERS", "REPORT", "REPORTS",
+  "APL-04 ORDERS", "APL 04 ORDERS"
+]);
+const caseTabPrefixes = ["ACK", "ACKNOWLEDGEMENT", "PAYMENT DETAIL", "UPLOAD OFFLINE"];
+
+async function listCaseTabs(page) {
+  const found = await page.evaluate(() => {
+    const out = [];
+    const seen = new Set();
+    for (const el of document.querySelectorAll("a, li, button, [role='tab'], [ng-click], [data-ng-click]")) {
+      const text = (el.innerText || "").replace(/\s+/g, " ").trim();
+      if (!text || text.length > 45) {
+        continue;
+      }
+      if (el.querySelectorAll("a, li, button").length) {
+        continue; // container, not a leaf
+      }
+      if (!(el.offsetWidth || el.offsetHeight)) {
+        continue; // not visible
+      }
+      const upper = text.toUpperCase();
+      if (seen.has(upper)) {
+        continue;
+      }
+      seen.add(upper);
+      const classes = `${el.className || ""} ${el.parentElement ? el.parentElement.className || "" : ""}`;
+      out.push({ active: /\bactive\b|\bselected\b/i.test(classes), text });
+    }
+    return out;
+  }).catch(() => []);
+  return found.filter((tab) => {
+    const upper = tab.text.toUpperCase();
+    return caseTabLabels.has(upper) || caseTabPrefixes.some((prefix) => upper.startsWith(prefix));
+  });
+}
+
+// Cheap signature of the visible tables, used to detect a tab redraw plus
+// whether data rows have landed yet.
+async function caseTabState(page) {
+  return page.evaluate(() => {
+    let rows = 0;
+    let bodyRows = 0;
+    let length = 0;
+    for (const table of document.querySelectorAll("table")) {
+      const body = table.querySelectorAll("tbody tr");
+      bodyRows += body.length;
+      length += (table.innerText || "").length;
+      for (const tr of body) {
+        const text = (tr.innerText || "").replace(/\s+/g, " ").trim();
+        if (!text || /no records? found/i.test(text)) {
+          continue;
+        }
+        if (tr.querySelectorAll("td").length >= 2) {
+          rows += 1;
+        }
+      }
+    }
+    return { fp: `${bodyRows}:${length}`, rows };
+  }).catch(() => null);
+}
+
+// Clicks a side tab and waits for the panel to actually change: a fixed sleep
+// is a guess - some tabs load slower (data would be missed) and empty tabs
+// are known empty long before the timeout (time would be wasted). Ported
+// from the Excel tracker's click_tab + wait_for_grid.
 async function clickSubTab(page, name) {
-  const locator = page.getByText(name, { exact: true }).first();
-  const count = await locator.count().catch(() => 0);
-  if (!count) {
+  const before = await caseTabState(page);
+  const clicked = await page.evaluate((label) => {
+    const normalize = (value) => String(value ?? "").replace(/\s+/g, " ").trim();
+    const candidates = [...document.querySelectorAll("a, li, button, [role='tab'], [ng-click], [data-ng-click]")]
+      .filter((el) => normalize(el.innerText) === label && (el.offsetWidth || el.offsetHeight));
+    // innermost match: a wrapper <li> also matches, clicking the leaf bubbles
+    candidates.sort((a, b) => a.querySelectorAll("*").length - b.querySelectorAll("*").length);
+    const el = candidates[0];
+    if (!el) {
+      return false;
+    }
+    el.scrollIntoView({ block: "center" });
+    el.click();
+    return true;
+  }, name).catch(() => false);
+  if (!clicked) {
     return false;
   }
-  await locator.scrollIntoViewIfNeeded().catch(() => {});
-  await locator.click({ timeout: 6_000 }).catch(() => {});
+
+  // 1. wait for the redraw
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    await page.waitForTimeout(200);
+    const now = await caseTabState(page);
+    if (!before || !now || now.fp !== before.fp) {
+      break;
+    }
+  }
+  // 2. wait for rows, or for the panel to sit still (an empty tab)
+  const started = Date.now();
+  let last = null;
+  let stableSince = Date.now();
+  while (Date.now() - started < 8_000) {
+    const state = await caseTabState(page);
+    if (!state) {
+      break;
+    }
+    if (state.rows > 0) {
+      break;
+    }
+    if (state.fp !== last) {
+      last = state.fp;
+      stableSince = Date.now();
+    } else if (Date.now() - stableSince >= 1_200 && Date.now() - started >= 1_000) {
+      break;
+    }
+    await page.waitForTimeout(200);
+  }
   return true;
 }
 
@@ -752,16 +885,28 @@ async function extractCaseDetail(page) {
   console.log(`    Detail caseId="${header.caseId}" period="${header.period}" status="${header.status}"`);
 
   const tabs = [];
-  for (const name of [
-    "INTIMATIONS", "NOTICES", "REPLIES", "ORDERS", "RECTIFICATION",
-    "ADDITIONAL DOCUMENT", "WITHDRAWAL APPLICATION", "REMAND DETAILS",
-    "APPLICATIONS", "ACK./INTIMATION", "ACK/INTIMATION", "ACKNOWLEDGEMENT", "INTIMATION", "REJOINDER"
-  ]) {
-    const clicked = await clickSubTab(page, name);
+  const sideTabs = await listCaseTabs(page);
+
+  // The default panel is already open - capture it before touching any tab,
+  // under the active tab's own name, so the active tab is never re-clicked.
+  const activeTab = sideTabs.find((tab) => tab.active);
+  const mainTables = await captureCaseTables(page);
+  if (mainTables.length) {
+    const mainName = (activeTab ? activeTab.text : sideTabs[0] ? sideTabs[0].text : "NOTICES").toUpperCase();
+    const rowTotal = mainTables.reduce((sum, table) => sum + table.rows.length, 0);
+    console.log(`    Sub-tab ${mainName} (default view): ${rowTotal} row(s).`);
+    tabs.push({ name: mainName, tables: mainTables });
+  }
+
+  for (const tab of sideTabs) {
+    const name = tab.text.toUpperCase();
+    if (tab.active || tabs.some((done) => done.name === name)) {
+      continue; // already captured as the default view
+    }
+    const clicked = await clickSubTab(page, tab.text);
     if (!clicked) {
       continue;
     }
-    await page.waitForTimeout(1_200);
     const tables = await captureCaseTables(page);
     const rowTotal = tables.reduce((sum, table) => sum + table.rows.length, 0);
     console.log(`    Sub-tab ${name}: ${rowTotal} row(s).`);
@@ -775,25 +920,64 @@ async function extractCaseDetail(page) {
 
 // Returns to the notices list: click the "View Notices and Orders" breadcrumb,
 // and if that doesn't land on the list, go the Services route again.
-async function returnToNoticesList(page) {
-  await clickPortalLinkByText(page, "View Notices and Orders", "View Notices and Orders (breadcrumb)").catch(() => false);
-  await page.waitForTimeout(2_000);
+// How many data rows the notices list currently shows (-1 = not on the list).
+async function countNoticeListRows(page) {
+  return page.evaluate(() => {
+    if (!/notice\s*\/?\s*demand order id/i.test(document.body ? document.body.innerText : "")) {
+      return -1;
+    }
+    let best = 0;
+    for (const table of document.querySelectorAll("table")) {
+      let count = 0;
+      for (const tr of table.querySelectorAll("tbody tr")) {
+        if (tr.querySelectorAll("td").length >= 2 && !/no records found/i.test(tr.innerText || "")) {
+          count += 1;
+        }
+      }
+      if (count > best) {
+        best = count;
+      }
+    }
+    return best;
+  }).catch(() => -1);
+}
 
-  const onList = await page
-    .evaluate(() => /notice\s*\/?\s*demand order id/i.test(document.body ? document.body.innerText : ""))
-    .catch(() => false);
-
-  if (!onList) {
-    await clickPortalLinkByText(page, "Services", "Services");
-    await page.waitForTimeout(1_500);
-    await clickPortalLinkByText(page, "User Services", "User Services");
-    await page.waitForTimeout(1_500);
-    await clickPortalLinkByText(page, "View Notices and Orders", "View Notices and Orders");
-    await page.waitForTimeout(2_000);
+async function returnToNoticesList(page, expectedRows = 0) {
+  // Already on the list with the rows intact? Nothing to do - the old flow
+  // re-clicked the breadcrumb and "100 rows per page" after EVERY row, which
+  // forced a pointless re-render each time.
+  let rows = await countNoticeListRows(page);
+  if (rows > 0 && (!expectedRows || rows >= expectedRows)) {
+    return;
   }
 
-  await clickPortalLinkByText(page, "100", "100 rows per page").catch(() => false);
-  await page.waitForTimeout(1_200);
+  await clickPortalLinkByText(page, "View Notices and Orders", "View Notices and Orders (breadcrumb)").catch(() => false);
+  for (let attempt = 0; attempt < 15; attempt += 1) {
+    await page.waitForTimeout(400);
+    rows = await countNoticeListRows(page);
+    if (rows >= 0) {
+      break;
+    }
+  }
+
+  if (rows < 0) {
+    await openPortalMenuItem(page, "User Services", "View Notices and Orders");
+    await page.waitForTimeout(2_000);
+    rows = await countNoticeListRows(page);
+  }
+
+  // Reapply the page size only when it actually reverted - the subtle failure
+  // is a non-empty 10-row table that silently stops the drill at row 10.
+  if (expectedRows && rows >= 0 && rows < expectedRows) {
+    await clickPortalLinkByText(page, "100", "100 rows per page").catch(() => false);
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      await page.waitForTimeout(400);
+      rows = await countNoticeListRows(page);
+      if (rows >= expectedRows) {
+        break;
+      }
+    }
+  }
 }
 
 const APPEAL_TYPE = "Appeal to Appellate Authority";
@@ -822,10 +1006,12 @@ function buildDateWindows(startDmy, days) {
 
 // Services > User Services > My Applications.
 async function goToMyApplications(page) {
-  await clickPortalLinkByText(page, "Services", "Services");
-  await page.waitForTimeout(2_000);
-  await clickPortalLinkByText(page, "User Services", "User Services");
-  await page.waitForTimeout(2_000);
+  if (await openPortalMenuItem(page, "User Services", "My Applications")) {
+    await page.waitForTimeout(2_000);
+    if (await page.locator("#up_type").count().catch(() => 0)) {
+      return true;
+    }
+  }
 
   const clicked = await page.evaluate(() => {
     const norm = (value) => String(value ?? "").replace(/\s+/g, " ").trim().toLowerCase();
@@ -842,7 +1028,10 @@ async function goToMyApplications(page) {
   }).catch(() => false);
 
   await page.waitForTimeout(2_500);
-  const ready = await page.locator("#up_type, select").first().count().catch(() => 0);
+  // #up_type is the My Applications type dropdown. Counting any <select> here
+  // passed on the WRONG page (Search HSN Code also has one), and the appeal
+  // searches then ran against a page with no application form at all.
+  const ready = await page.locator("#up_type").count().catch(() => 0);
   return clicked && ready > 0;
 }
 
@@ -1496,13 +1685,9 @@ async function harvestDemandPage(page, pageNo, demands) {
 async function collectPaymentTowardsDemand(page) {
   console.log("Payment towards Demand: navigating to Services > Ledgers > Payment towards Demand.");
   await waitForAuthenticatedPortal(page);
-  await clickPortalLinkByText(page, "Services", "Services");
-  await page.waitForTimeout(2_000);
-  await clickPortalLinkByText(page, "Ledgers", "Ledgers");
-  await page.waitForTimeout(2_000);
   const opened =
-    (await clickPortalLinkByText(page, "Payment towards Demand", "Payment towards Demand").catch(() => false)) ||
-    (await clickPortalLinkByText(page, "Payment Towards Demand", "Payment Towards Demand").catch(() => false));
+    (await openPortalMenuItem(page, "Ledgers", "Payment towards Demand")) ||
+    (await openPortalMenuItem(page, "Ledgers", "Payment Towards Demand"));
   if (!opened) {
     console.log("Payment towards Demand: menu item not found — skipping.");
     return [];
@@ -1581,13 +1766,7 @@ function skipDetailReason(row) {
 async function collectNoticesAndOrders(page) {
   await waitForAuthenticatedPortal(page);
 
-  await clickPortalLinkByText(page, "Services", "Services");
-  await page.waitForTimeout(2_000);
-
-  await clickPortalLinkByText(page, "User Services", "User Services");
-  await page.waitForTimeout(2_000);
-
-  await clickPortalLinkByText(page, "View Notices and Orders", "View Notices and Orders");
+  await openPortalMenuItem(page, "User Services", "View Notices and Orders");
   await page.waitForTimeout(2_500);
 
   await clickPortalLinkByText(page, "100", "100 rows per page");
@@ -1596,6 +1775,16 @@ async function collectNoticesAndOrders(page) {
   await logVisibleTableHeaders(page);
   const listRows = await extractNoticeTableRows(page);
   console.log(`Main table: ${listRows.length} row(s). Opening each View one by one...`);
+
+  // Siblings share a case page: once a case is drilled, every other list row
+  // whose reference that page mentions is served from memory instead of
+  // reopening the same page (~a third of all drills on real data). Ported
+  // from the Excel tracker, with its poisoning guards: a page with no Case ID
+  // is never cached, and a "case page" mentioning more than 25 known notices
+  // is the list page itself, not a case.
+  const caseCache = new Map();
+  const knownIds = new Set(listRows.map((row) => String(row.refId || "").trim()).filter(Boolean));
+  let reused = 0;
 
   for (let index = 0; index < listRows.length; index += 1) {
     // Some rows have nothing worth drilling (ported from the firm's Excel
@@ -1609,6 +1798,18 @@ async function collectNoticesAndOrders(page) {
       continue;
     }
 
+    const ownRef = String(listRows[index].refId || "").trim();
+    const cached = ownRef ? caseCache.get(ownRef) : null;
+    if (cached) {
+      listRows[index].caseId = cached.caseId || listRows[index].caseId;
+      listRows[index].taxPeriod = cached.period || listRows[index].taxPeriod;
+      listRows[index].status = cached.status || listRows[index].status;
+      listRows[index].detail = { tabs: cached.tabs };
+      reused += 1;
+      console.log(`  Row ${index + 1}/${listRows.length}: reused case page (${cached.caseId})`);
+      continue;
+    }
+
     const opened = await openCaseDetail(page, index);
     console.log(`  Row ${index + 1}/${listRows.length}: ${opened ? "opened case details" : "no detail page"}`);
 
@@ -1618,11 +1819,40 @@ async function collectNoticesAndOrders(page) {
       listRows[index].taxPeriod = detail.period || listRows[index].taxPeriod;
       listRows[index].status = detail.status || listRows[index].status;
       listRows[index].detail = { tabs: detail.tabs };
+
+      // Cache this case page against every known notice it mentions.
+      if (detail.caseId) {
+        const siblings = new Set();
+        for (const tab of detail.tabs) {
+          for (const table of tab.tables) {
+            for (const cells of table.rows) {
+              for (const cell of cells) {
+                const value = String(cell).trim();
+                if (knownIds.has(value)) {
+                  siblings.add(value);
+                }
+              }
+            }
+          }
+        }
+        if (siblings.size > 25) {
+          console.log(`    Not caching ${detail.caseId}: page mentions ${siblings.size} notices - looks like the list page.`);
+        } else {
+          for (const sibling of siblings) {
+            if (!caseCache.has(sibling)) {
+              caseCache.set(sibling, detail);
+            }
+          }
+        }
+      }
     }
 
-    await returnToNoticesList(page);
+    await returnToNoticesList(page, listRows.length);
   }
 
+  if (reused) {
+    console.log(`Case pages reused from cache: ${reused}.`);
+  }
   console.log(`Finished. Collected ${listRows.length} notice row(s) with detail.`);
   return listRows;
 }
