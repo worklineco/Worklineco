@@ -67,7 +67,9 @@ function isAllowedOrigin(origin) {
 // session per login, so a second run would end the first one mid-scrape.
 // A run older than 3 hours is assumed dead and no longer blocks.
 const activeRuns = new Map();
-const RUN_STALE_MS = 3 * 60 * 60 * 1000;
+// Backstop only - the lock is normally released the moment the scrape prints
+// its completion line. 20 minutes comfortably covers the slowest scrape.
+const RUN_STALE_MS = 20 * 60 * 1000;
 
 function runningSince(runKey) {
   const startedAt = activeRuns.get(runKey);
@@ -140,6 +142,18 @@ function startCollector({ clientName, gstPass, gstUser, gstin, rowNumber, source
       logStream.write(`[${new Date().toISOString()}] Collector spawn failed: ${error.message}\n`);
       logStream.end();
       reject(error);
+    });
+
+    // The collector keeps running after it finishes, on purpose, to hold the
+    // portal window open - so it never "exits". The scrape is DONE the moment
+    // it prints this line, which is the right time to release the per-GSTIN
+    // lock: a fresh run is fine now even though the old browser lingers.
+    let tail = "";
+    child.stdout.on("data", (chunk) => {
+      tail = (tail + chunk.toString()).slice(-400);
+      if (tail.includes("Keep this process running while the browser is in use.")) {
+        activeRuns.delete(runKey);
+      }
     });
 
     child.stdout.pipe(logStream, { end: false });
