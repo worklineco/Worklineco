@@ -8,7 +8,7 @@ import { chromium } from "playwright-core";
 import XLSX from "xlsx";
 import { getCollectorOutputDir, getDefaultWorkbookPath, getWorklineGstHome } from "./gst-helper-home.mjs";
 
-const COLLECTOR_VERSION = "2026-10-08-sources-v16";
+const COLLECTOR_VERSION = "2026-10-12-v65-merge-v18";
 const GST_PORTAL_LOGIN_URL = "https://services.gst.gov.in/services/login";
 const WORKLINE_GST_HOME = getWorklineGstHome();
 const DEFAULT_WORKBOOK_PATH = getDefaultWorkbookPath();
@@ -753,7 +753,8 @@ async function extractCaseDetail(page) {
 
   const tabs = [];
   for (const name of [
-    "INTIMATIONS", "NOTICES", "REPLIES", "ORDERS",
+    "INTIMATIONS", "NOTICES", "REPLIES", "ORDERS", "RECTIFICATION",
+    "ADDITIONAL DOCUMENT", "WITHDRAWAL APPLICATION", "REMAND DETAILS",
     "APPLICATIONS", "ACK./INTIMATION", "ACK/INTIMATION", "ACKNOWLEDGEMENT", "INTIMATION", "REJOINDER"
   ]) {
     const clicked = await clickSubTab(page, name);
@@ -970,7 +971,7 @@ async function returnToMyApplications(page) {
 
 // Searches My Applications for a given application type across 90-day windows,
 // then drills into each application's case page and captures its sub-tabs.
-async function collectApplications(page, appType) {
+async function collectApplications(page, appType, startDmy) {
   console.log(`Applications (${appType}): navigating to Services > User Services > My Applications.`);
   const reached = await goToMyApplications(page);
   if (!reached) {
@@ -979,8 +980,12 @@ async function collectApplications(page, appType) {
   }
 
   await selectAppealType(page, appType);
-  const windows = buildDateWindows(APPEAL_START_DATE, APPEAL_WINDOW_DAYS);
-  console.log(`Applications (${appType}): searching ${windows.length} window(s) of ${APPEAL_WINDOW_DAYS} days from ${APPEAL_START_DATE}.`);
+  // Start the 90-day windows from the earliest notice this run has seen
+  // instead of July 2017 - an application cannot predate the proceedings it
+  // belongs to, and this turns ~38 searches into a handful for most clients.
+  const startFrom = startDmy || APPEAL_START_DATE;
+  const windows = buildDateWindows(startFrom, APPEAL_WINDOW_DAYS);
+  console.log(`Applications (${appType}): searching ${windows.length} window(s) of ${APPEAL_WINDOW_DAYS} days from ${startFrom}.`);
 
   const found = [];
   const seen = new Set();
@@ -1042,6 +1047,388 @@ async function collectApplications(page, appType) {
 
 // Services > Ledgers > Payment towards Demand: captures each notice/order number
 // and its demand amount, so the tracker can show the demand against a case.
+// ---------------------------------------------------------------------------
+// Payment towards Demand (Services > Ledgers > Payment towards Demand).
+// Ported from the firm's Excel tracker (v65): the outstanding-demand grid is
+// read by its column headers across every pager page, and each non-zero tax
+// head's blue amount link is opened so the Tax / Interest / Penalty / Fee /
+// Others breakup comes along. Anything that does not parse cleanly is kept as
+// a problem note on the row rather than silently becoming a zero.
+
+const DEMAND_TAX_HEADS = ["Integrated Tax", "Central Tax", "State/UT Tax", "Cess"];
+const DEMAND_BREAKUP_FIELDS = ["Tax", "Interest", "Penalty", "Fee", "Others", "Total"];
+const MAX_DEMAND_PAGES = 20;
+
+function demandHeaderIndex(headers, ...names) {
+  const low = headers.map((header) => String(header || "").toLowerCase());
+  for (const name of names) {
+    const exact = low.indexOf(name.toLowerCase());
+    if (exact >= 0) {
+      return exact;
+    }
+  }
+  for (const name of names) {
+    const loose = low.findIndex((header) => header.includes(name.toLowerCase()));
+    if (loose >= 0) {
+      return loose;
+    }
+  }
+  return -1;
+}
+
+// "5,00,911" -> 500911 ; "" / "-" / "NA" -> 0 ; anything else -> null so the
+// row is flagged instead of a guessed figure landing in a money column.
+function demandAmountValue(text) {
+  const trimmed = String(text ?? "").replace(/₹/g, "").trim();
+  if (["", "-", "--", "NA", "N/A"].includes(trimmed)) {
+    return 0;
+  }
+  const plain = trimmed.replace(/,/g, "");
+  if (!/^-?\d+(\.\d+)?$/.test(plain)) {
+    return null;
+  }
+  const value = Number(plain);
+  return Number.isFinite(value) ? value : null;
+}
+
+// One round trip returns the whole grid: headers, every cell's text, and per
+// cell whether it holds the blue amount link plus which tax head that link
+// names in its own ng-click (authoritative - column order cannot drift).
+// GST renders ONE TBODY PER DEMAND, so all tBodies are walked, not just the
+// first.
+async function readDemandGrid(page) {
+  return page.evaluate(() => {
+    const clean = (value) => String(value ?? "").replace(/\s+/g, " ").trim();
+    const tables = [...document.querySelectorAll("table")];
+    const grid = tables.find((table) => ((table.tHead ? table.tHead.innerText : "").toLowerCase().includes("demand id")));
+    if (!grid) {
+      return null;
+    }
+    const headers = [];
+    const headerRow = grid.tHead ? grid.tHead.rows[0] : null;
+    if (headerRow) {
+      for (const cell of headerRow.cells) {
+        headers.push(clean(cell.innerText));
+      }
+    }
+    const amountSelector = 'a[data-ng-click^="openModal"], a[ng-click^="openModal"]';
+    const headOf = (link) => {
+      const attr = link.getAttribute("data-ng-click") || link.getAttribute("ng-click") || "";
+      const match = attr.match(/openModal\([^,]*,\s*'([^']+)'/);
+      return match ? match[1] : "";
+    };
+    const rows = [];
+    let index = 0;
+    for (const body of grid.tBodies) {
+      for (const tr of body.rows) {
+        if (!tr.offsetWidth && !tr.offsetHeight) {
+          continue;
+        }
+        const cells = [...tr.cells].map((td) => {
+          const link = td.querySelector(amountSelector);
+          return { clickable: Boolean(link), head: link ? headOf(link) : "", text: clean(td.innerText) };
+        });
+        rows.push({ cells, index });
+        index += 1;
+      }
+    }
+    return { headers, rows };
+  }).catch(() => null);
+}
+
+async function readDemandModal(page) {
+  return page.evaluate(() => {
+    const clean = (value) => String(value ?? "").replace(/\s+/g, " ").trim();
+    for (const modal of document.querySelectorAll(".modal, [role=dialog]")) {
+      if (getComputedStyle(modal).display === "none" || !(modal.offsetWidth || modal.offsetHeight)) {
+        continue;
+      }
+      const titleEl = modal.querySelector(".modal-title, h3, h4, h2");
+      const table = modal.querySelector("table");
+      if (!table || table.rows.length < 2) {
+        continue;
+      }
+      // This popup can put both the header row and the value row inside
+      // <thead> with no <tbody> at all - so headers come from row 0 and the
+      // values from the first tbody row when present, else row 1.
+      const headers = [...table.rows[0].cells].map((cell) => clean(cell.innerText));
+      const valueRow = table.tBodies.length && table.tBodies[0].rows.length ? table.tBodies[0].rows[0] : table.rows[1];
+      const values = [...valueRow.cells].map((cell) => clean(cell.innerText));
+      return { headers, title: titleEl ? clean(titleEl.innerText) : "", values };
+    }
+    return null;
+  }).catch(() => null);
+}
+
+async function waitForDemandModal(page, timeoutMs = 8_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const modal = await readDemandModal(page);
+    if (modal && modal.values && modal.values.length) {
+      return modal;
+    }
+    await page.waitForTimeout(200);
+  }
+  return null;
+}
+
+async function closeDemandModal(page) {
+  await page.evaluate(() => {
+    for (const modal of document.querySelectorAll(".modal, [role=dialog]")) {
+      if (getComputedStyle(modal).display === "none" || !(modal.offsetWidth || modal.offsetHeight)) {
+        continue;
+      }
+      const close = modal.querySelector(".close, [data-dismiss=modal], button.close, .modal-header button");
+      if (close) {
+        close.click();
+        return;
+      }
+    }
+  }).catch(() => undefined);
+  const deadline = Date.now() + 4_000;
+  while (Date.now() < deadline) {
+    if (!(await readDemandModal(page))) {
+      return;
+    }
+    await page.waitForTimeout(200);
+  }
+  // Last resort: hide leftover client-side markup so the next click lands.
+  await page.evaluate(() => {
+    document.querySelectorAll(".modal-backdrop").forEach((el) => el.remove());
+    document.querySelectorAll(".modal, [role=dialog]").forEach((el) => {
+      if (getComputedStyle(el).display !== "none") {
+        el.style.display = "none";
+      }
+    });
+    document.body.classList.remove("modal-open");
+  }).catch(() => undefined);
+  await page.waitForTimeout(400);
+}
+
+// Located fresh on every click: Angular re-renders the grid after a popup
+// closes, so a handle kept from before the popup is stale.
+async function clickDemandAmount(page, rowIndex, colIndex) {
+  return page.evaluate(({ col, row }) => {
+    const grid = [...document.querySelectorAll("table")].find((table) =>
+      ((table.tHead ? table.tHead.innerText : "").toLowerCase().includes("demand id"))
+    );
+    if (!grid) {
+      return "no-grid";
+    }
+    const rows = [];
+    for (const body of grid.tBodies) {
+      for (const tr of body.rows) {
+        if (tr.offsetWidth || tr.offsetHeight) {
+          rows.push(tr);
+        }
+      }
+    }
+    const tr = rows[row];
+    if (!tr) {
+      return "no-row";
+    }
+    const td = tr.cells[col];
+    if (!td) {
+      return "no-cell";
+    }
+    const link = td.querySelector('a[data-ng-click^="openModal"], a[ng-click^="openModal"]');
+    if (!link) {
+      return "not-clickable";
+    }
+    const attr = link.getAttribute("data-ng-click") || link.getAttribute("ng-click") || "";
+    const match = attr.match(/openModal\([^,]*,\s*'([^']+)'/);
+    link.scrollIntoView({ block: "center" });
+    link.click();
+    return `ok:${match ? match[1] : ""}`;
+  }, { col: colIndex, row: rowIndex }).catch((error) => `error: ${String(error && error.message).slice(0, 80)}`);
+}
+
+// The Demand IDs on screen - changing IDs is the only proof the page turned.
+async function demandFingerprint(page) {
+  const grid = await readDemandGrid(page);
+  if (!grid) {
+    return "";
+  }
+  const idIndex = demandHeaderIndex(grid.headers, "Demand ID", "Demand Id");
+  if (idIndex < 0) {
+    return "";
+  }
+  return grid.rows.map((row) => (row.cells[idIndex] ? row.cells[idIndex].text : "")).join("|");
+}
+
+// Scoped to the grid's own pager - an unscoped sweep for numeric links also
+// finds the language list, the footer and the breadcrumb.
+const DEMAND_PAGER_SELECTOR = "ul.ng-table-pagination a.page-link, ul.pagination a.page-link, .ng-table-pager a";
+
+async function demandPageNumbers(page) {
+  const numbers = await page.evaluate((selector) => {
+    const out = [];
+    for (const link of document.querySelectorAll(selector)) {
+      const text = (link.innerText || "").trim();
+      if (/^[0-9]+$/.test(text)) {
+        out.push(Number.parseInt(text, 10));
+      }
+    }
+    return out;
+  }, DEMAND_PAGER_SELECTOR).catch(() => []);
+  return [...new Set(numbers.filter((n) => n >= 1 && n <= MAX_DEMAND_PAGES))].sort((a, b) => a - b);
+}
+
+async function goToDemandPage(page, number) {
+  const before = await demandFingerprint(page);
+  const result = await page.evaluate(({ selector, wanted }) => {
+    for (const link of document.querySelectorAll(selector)) {
+      const text = (link.innerText || "").replace(/\s+/g, " ").trim();
+      if (text !== String(wanted)) {
+        continue;
+      }
+      const item = link.closest ? link.closest("li") : null;
+      const classes = `${link.className || ""} ${item ? item.className : ""}`.toLowerCase();
+      if (classes.includes("disabled")) {
+        return "disabled";
+      }
+      if (!link.offsetWidth && !link.offsetHeight) {
+        continue;
+      }
+      link.scrollIntoView({ block: "center" });
+      link.click();
+      return "ok";
+    }
+    return "not-found";
+  }, { selector: DEMAND_PAGER_SELECTOR, wanted: number }).catch(() => "error");
+  if (result !== "ok") {
+    console.log(`Payment towards Demand: page ${number}: ${result}.`);
+    return false;
+  }
+  for (let attempt = 0; attempt < 25; attempt += 1) {
+    await page.waitForTimeout(400);
+    const now = await demandFingerprint(page);
+    if (now && now !== before) {
+      return true;
+    }
+  }
+  console.log(`Payment towards Demand: clicked page ${number} but the rows did not change.`);
+  return false;
+}
+
+async function harvestDemandPage(page, pageNo, demands) {
+  const grid = await readDemandGrid(page);
+  if (!grid || !grid.headers.length) {
+    console.log(`Payment towards Demand: no demand grid on page ${pageNo}.`);
+    return 0;
+  }
+
+  const idIndex = demandHeaderIndex(grid.headers, "Demand ID", "Demand Id");
+  const dateIndex = demandHeaderIndex(grid.headers, "Demand Date", "Date");
+  if (idIndex < 0) {
+    console.log(`Payment towards Demand: Demand ID column missing (${grid.headers.join(", ")}).`);
+    return 0;
+  }
+  const headColumns = {};
+  for (const head of DEMAND_TAX_HEADS) {
+    headColumns[head] = demandHeaderIndex(grid.headers, head);
+  }
+
+  console.log(`Payment towards Demand: page ${pageNo}: ${grid.rows.length} demand(s).`);
+  let count = 0;
+
+  for (const row of grid.rows) {
+    const cellText = (index) => (index >= 0 && index < row.cells.length ? row.cells[index].text : "");
+    const demandId = cellText(idIndex);
+    if (!demandId) {
+      continue;
+    }
+
+    // Prefer the column each amount link declares in its own ng-click over
+    // the column the header happened to sit in.
+    const byAttr = {};
+    row.cells.forEach((cell, index) => {
+      if (cell.head) {
+        byAttr[cell.head] = index;
+      }
+    });
+
+    const record = { demandDate: cellText(dateIndex), demandId, grandTotal: 0, heads: {}, problems: [] };
+
+    for (const head of DEMAND_TAX_HEADS) {
+      const col = byAttr[head] ?? headColumns[head] ?? -1;
+      const shown = col >= 0 ? cellText(col) : "";
+      let amount = demandAmountValue(shown);
+      if (amount === null) {
+        record.problems.push(`${head}: grid amount unreadable (${shown})`);
+        amount = 0;
+      }
+      if (amount !== 0 || shown) {
+        record.heads[head] = { Amount: amount };
+      }
+      record.grandTotal += amount;
+
+      const clickable = col >= 0 && col < row.cells.length ? row.cells[col].clickable : false;
+      if (amount === 0 || !clickable) {
+        if (amount !== 0 && !clickable) {
+          record.problems.push(`${head}: ${shown} is not clickable`);
+        }
+        continue;
+      }
+
+      console.log(`Payment towards Demand: breakup ${demandId} - ${head} (${shown}).`);
+      const clickResult = await clickDemandAmount(page, row.index, col);
+      if (!String(clickResult).startsWith("ok")) {
+        record.problems.push(`${head}: could not click amount (${clickResult})`);
+        continue;
+      }
+      const clickedHead = String(clickResult).slice(3);
+      if (clickedHead && clickedHead !== head) {
+        record.problems.push(`${head}: clicked the ${clickedHead} link instead`);
+        await closeDemandModal(page);
+        continue;
+      }
+
+      await page.waitForTimeout(400);
+      const modal = await waitForDemandModal(page);
+      if (!modal) {
+        record.problems.push(`${head}: breakup popup never appeared`);
+        await closeDemandModal(page);
+        continue;
+      }
+
+      // The popup title names its head - verify this is not a leftover popup.
+      const title = (modal.title || "").toLowerCase();
+      if (title && !title.includes(head.split("/")[0].toLowerCase())) {
+        record.problems.push(`${head}: popup title says ${modal.title}`);
+        await closeDemandModal(page);
+        continue;
+      }
+
+      for (const field of DEMAND_BREAKUP_FIELDS) {
+        const fieldIndex = demandHeaderIndex(modal.headers, field);
+        if (fieldIndex < 0 || fieldIndex >= modal.values.length) {
+          continue;
+        }
+        const value = demandAmountValue(modal.values[fieldIndex]);
+        if (value === null) {
+          record.problems.push(`${head} ${field}: unreadable (${modal.values[fieldIndex]})`);
+          continue;
+        }
+        if (field !== "Total") {
+          record.heads[head][field] = value;
+        } else if (Math.abs(value - amount) > 0.51) {
+          // the popup Total must equal the figure printed in the grid
+          record.problems.push(`${head}: popup total ${value} != grid ${amount}`);
+        }
+      }
+
+      await closeDemandModal(page);
+      await page.waitForTimeout(900);
+    }
+
+    demands.push(record);
+    count += 1;
+  }
+
+  return count;
+}
+
 async function collectPaymentTowardsDemand(page) {
   console.log("Payment towards Demand: navigating to Services > Ledgers > Payment towards Demand.");
   await waitForAuthenticatedPortal(page);
@@ -1060,48 +1447,35 @@ async function collectPaymentTowardsDemand(page) {
 
   await logVisibleTableHeaders(page);
 
-  const demands = await page.evaluate(() => {
-    const clean = (value) => String(value ?? "").replace(/\s+/g, " ").trim();
-    const isVisible = (node) => Boolean(node.offsetWidth || node.offsetHeight || node.getClientRects().length);
-    const idPattern = /\b[A-Z]{2}\d{13,15}\b/; // demand / order ids like ZD0809..., AD0809...
-    const amountPattern = /^-?[₹\s]*[\d,]+(\.\d+)?$/;
-    const out = [];
-    for (const table of document.querySelectorAll("table")) {
-      if (!isVisible(table)) {
-        continue;
-      }
-      for (const tr of table.querySelectorAll("tbody tr")) {
-        const cells = [...tr.querySelectorAll("td")].map((td) => clean(td.innerText || td.textContent));
-        if (cells.length < 2 || !cells.some(Boolean)) {
-          continue;
-        }
-        if (/no records found/i.test(cells.join(" "))) {
-          continue;
-        }
-        const idCell = cells.find((cell) => idPattern.test(cell));
-        // The demand amount is the largest numeric cell on the row.
-        const amounts = cells
-          .filter((cell) => amountPattern.test(cell.replace(/[₹\s]/g, "")) && /\d/.test(cell))
-          .map((cell) => ({ raw: cell, value: Number(cell.replace(/[^\d.]/g, "")) }))
-          .filter((entry) => Number.isFinite(entry.value));
-        amounts.sort((a, b) => b.value - a.value);
-        if (idCell && amounts.length) {
-          out.push({ amount: amounts[0].raw, noticeNo: idCell, row: cells });
-        }
-      }
-    }
-    return out;
-  }).catch(() => []);
+  const demands = [];
+  let taken = await harvestDemandPage(page, 1, demands);
 
-  console.log(`Payment towards Demand: captured ${demands.length} demand row(s).`);
+  const pages = await demandPageNumbers(page);
+  console.log(`Payment towards Demand: pages found: ${pages.length ? pages.join(", ") : "[single page]"}.`);
+  for (const number of pages.filter((n) => n > 1)) {
+    if (!(await goToDemandPage(page, number))) {
+      break;
+    }
+    await page.waitForTimeout(1_000);
+    taken += await harvestDemandPage(page, number, demands);
+  }
+
+  console.log(`Payment towards Demand: captured ${taken} demand row(s).`);
+  const flagged = demands.filter((demand) => demand.problems.length);
+  if (flagged.length) {
+    console.log(`Payment towards Demand: ${flagged.length} row(s) carry a check note.`);
+  }
 
   return demands.map((demand) => ({
-    caseId: demand.noticeNo,
+    caseId: demand.demandId,
     dateOfIssue: "",
-    demandAmount: demand.amount,
+    demandAmount: String(demand.grandTotal),
+    demandBreakup: demand.heads,
+    demandDate: demand.demandDate,
+    demandProblems: demand.problems,
     description: "Payment towards Demand",
     detail: { tabs: [] },
-    refId: demand.noticeNo,
+    refId: demand.demandId,
     replyFiling: "",
     section: "",
     sNo: "",
@@ -1109,6 +1483,33 @@ async function collectPaymentTowardsDemand(page) {
     taxPeriod: "",
     typeOfNotice: "Demand"
   }));
+}
+
+// Categories and descriptions with no case page worth opening - Registration
+// and Return-Default notices, and rows whose View only holds a PDF. Matched
+// as lowercase substrings against Type + Description, same as the firm's
+// Excel tracker did.
+const skipDetailDescriptions = [
+  "summary order",
+  "notice for itc mismatch",
+  "drc-01c",
+  "notice to return defaulter"
+];
+
+function skipDetailReason(row) {
+  const blob = `${row.typeOfNotice || ""} ${row.description || ""}`.toLowerCase();
+  if (blob.includes("registration certificate") || blob.includes("amendment")) {
+    return "Registration";
+  }
+  if (blob.includes("return defaulter") || blob.includes("not filing return")) {
+    return "Return Default";
+  }
+  for (const text of skipDetailDescriptions) {
+    if (blob.includes(text)) {
+      return `PDF-only: ${text}`;
+    }
+  }
+  return "";
 }
 
 // Services > User Services > View Notices and Orders, show 100 rows, read the
@@ -1133,6 +1534,17 @@ async function collectNoticesAndOrders(page) {
   console.log(`Main table: ${listRows.length} row(s). Opening each View one by one...`);
 
   for (let index = 0; index < listRows.length; index += 1) {
+    // Some rows have nothing worth drilling (ported from the firm's Excel
+    // tracker): Registration and Return-Default notices land back on the list
+    // page or a page with no grid, and a few descriptions only carry a PDF
+    // behind View - no case page, no tabs. Skipping them keeps the row but
+    // saves most of the runtime.
+    const skipReason = skipDetailReason(listRows[index]);
+    if (skipReason) {
+      console.log(`  Row ${index + 1}/${listRows.length}: detail skipped (${skipReason})`);
+      continue;
+    }
+
     const opened = await openCaseDetail(page, index);
     console.log(`  Row ${index + 1}/${listRows.length}: ${opened ? "opened case details" : "no detail page"}`);
 
@@ -1701,10 +2113,72 @@ async function main() {
         }
       };
 
+      // Earliest notice date gathered so far (dd/mm/yyyy) - the application
+      // searches start from it rather than from July 2017.
+      const earliestNoticeDmy = () => {
+        let best = null;
+        for (const row of rows) {
+          const match = String(row.dateOfIssue || "").match(/(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
+          if (!match) {
+            continue;
+          }
+          const when = new Date(Date.UTC(Number(match[3]), Number(match[2]) - 1, Number(match[1])));
+          if (!best || when < best) {
+            best = when;
+          }
+        }
+        if (!best) {
+          return null;
+        }
+        return `${String(best.getUTCDate()).padStart(2, "0")}/${String(best.getUTCMonth() + 1).padStart(2, "0")}/${best.getUTCFullYear()}`;
+      };
+
       await runSource("notices", "Notices & Orders", () => collectNoticesAndOrders(page));
-      await runSource("appeal", "Appeal to Appellate Authority", () => collectApplications(page, "Appeal to Appellate Authority"));
-      await runSource("spl", "SPL (Waiver Scheme 128A)", () => collectApplications(page, "Application for Waiver Scheme under Section 128A"));
+      await runSource("appeal", "Appeal to Appellate Authority", () => collectApplications(page, "Appeal to Appellate Authority", earliestNoticeDmy()));
+      await runSource("spl", "SPL (Waiver Scheme 128A)", () => collectApplications(page, "Application for Waiver Scheme under Section 128A", earliestNoticeDmy()));
       await runSource("payment", "Payment towards Demand", () => collectPaymentTowardsDemand(page));
+
+      // Join each demand to the case that references it, the way the firm's
+      // Excel tracker did: a Demand ID that appears in any other row's
+      // reference, case id, description or sub-tab cells belongs to that
+      // row's case. Unmatched demands stay as their own rows.
+      const tokenOwners = new Map();
+      const tokenPattern = /\b[A-Z]{2}\d{10,}[A-Z0-9]*\b/g;
+      for (const row of rows) {
+        if (row.sourceTab === "payment") {
+          continue;
+        }
+        const texts = [row.refId, row.caseId, row.description];
+        for (const tab of row.detail?.tabs ?? []) {
+          for (const table of tab.tables ?? []) {
+            for (const cells of table.rows ?? []) {
+              texts.push(cells.join(" "));
+            }
+          }
+        }
+        for (const text of texts) {
+          for (const token of String(text || "").toUpperCase().match(tokenPattern) ?? []) {
+            if (!tokenOwners.has(token)) {
+              tokenOwners.set(token, row.caseId || row.refId || "");
+            }
+          }
+        }
+      }
+      let demandsMatched = 0;
+      for (const row of rows) {
+        if (row.sourceTab !== "payment") {
+          continue;
+        }
+        const owner = tokenOwners.get(String(row.refId || "").toUpperCase());
+        if (owner) {
+          row.matchedCaseId = owner;
+          demandsMatched += 1;
+        }
+      }
+      const demandRows = rows.filter((row) => row.sourceTab === "payment").length;
+      if (demandRows) {
+        console.log(`Payment towards Demand: ${demandsMatched} of ${demandRows} demand(s) matched a case in this run.`);
+      }
 
       const extractedAt = new Date().toISOString();
       const outputPath = await saveCollectorOutput({
