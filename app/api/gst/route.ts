@@ -172,13 +172,23 @@ export async function POST(request: Request) {
       )
     );
 
-    if (sourceTags.length) {
+    // Rows scraped before per-source tagging carry a generic source. They are
+    // the Notices & Orders scrape, so clear them whenever notices is synced -
+    // otherwise the fresh notices rows collide with the un-deleted old ones on
+    // their reference number. One successful resync tags everything properly.
+    const deleteTags = new Set(sourceTags);
+    if (deleteTags.has("notices")) {
+      deleteTags.add("gst-portal-local-collector");
+      deleteTags.add("gst-portal-local-browser");
+    }
+
+    if (deleteTags.size) {
       const cleared = await admin
         .from("gst_litigation_cases")
         .delete()
         .eq("organisation_id", organisationId)
         .eq("gst_registration_id", syncRegistrationId)
-        .in("source", sourceTags);
+        .in("source", Array.from(deleteTags));
       if (cleared.error) {
         return NextResponse.json({ error: cleared.error.message }, { status: 500 });
       }
