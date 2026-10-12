@@ -1408,7 +1408,7 @@ export default function PdfIndexingPage() {
       const zip = new JSZip();
       const outputs: SmartMergeOutput[] = [];
       const pageNumberState = pageNumberSettings ? createContinuousPageNumberState(pageNumberSettings) : null;
-      const preparedRows = await createGstatDocketPreparedRows(rows, pageNumberState, pdfFileMapRef.current);
+      const preparedRows = await createGstatDocketPreparedRows(rows, pageNumberState, pdfFileMapRef.current, setMessage);
       const groups = createGstatDocketGroups(preparedRows);
 
       for (const [groupIndex, group] of groups.entries()) {
@@ -2554,39 +2554,38 @@ async function loadTrueCopyStamp() {
 }
 
 type GstatDocketPreparedRow = {
-  bytes: Uint8Array;
+  pdf: PDFDocument;
   row: PdfFileRow;
 };
 
 async function createGstatDocketPreparedRows(
   rows: PdfFileRow[],
   pageNumberState: ContinuousPageNumberState | null,
-  fileMap: Map<string, File>
+  fileMap: Map<string, File>,
+  onProgress?: (message: string) => void
 ): Promise<GstatDocketPreparedRow[]> {
   const preparedRows: GstatDocketPreparedRow[] = [];
 
-  for (const row of rows) {
+  for (const [index, row] of rows.entries()) {
     const file = fileMap.get(row.id);
 
     if (!file) {
       throw new Error(`Missing file data for ${row.name}. Refresh the folder and try again.`);
     }
 
+    onProgress?.(`GSTAT Docket: preparing file ${index + 1} of ${rows.length}...`);
+    await waitForUiUpdate();
+
+    // Keep the loaded (and, if needed, page-numbered) document and copy its
+    // pages straight into the docket later. Serialising to bytes here and then
+    // re-parsing in the merge step doubled the work for every file.
     const sourcePdf = await loadPdfWithVisibleSignatures(file);
 
-    const rowPdf = await PDFDocument.create();
-    const copiedPages = await rowPdf.copyPages(sourcePdf, sourcePdf.getPageIndices());
-
-    copiedPages.forEach((page) => rowPdf.addPage(page));
-
     if (pageNumberState) {
-      await drawContinuousPageNumbers(rowPdf, pageNumberState);
+      await drawContinuousPageNumbers(sourcePdf, pageNumberState);
     }
 
-    preparedRows.push({
-      bytes: await rowPdf.save(),
-      row,
-    });
+    preparedRows.push({ pdf: sourcePdf, row });
   }
 
   return preparedRows;
@@ -2627,10 +2626,11 @@ async function createGstatDocketPdf(
   for (const preparedRow of rows) {
     const row = preparedRow.row;
     const startPageIndex = docketPdf.getPageCount();
-    const sourcePdf = await PDFDocument.load(preparedRow.bytes.slice(0), { ignoreEncryption: true });
+    const sourcePdf = preparedRow.pdf;
     const copiedPages = await docketPdf.copyPages(sourcePdf, sourcePdf.getPageIndices());
 
     copiedPages.forEach((page) => docketPdf.addPage(page));
+    await waitForUiUpdate();
 
     const endPageIndex = docketPdf.getPageCount() - 1;
 
