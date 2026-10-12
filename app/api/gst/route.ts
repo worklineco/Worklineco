@@ -190,14 +190,22 @@ export async function POST(request: Request) {
         rows.map((raw, index) => {
           const row = (raw ?? {}) as Record<string, unknown>;
           const normalized = normalizePortalRow(row, index);
+          const rowSource = text(row.sourceTab) || "gst-portal-local-collector";
+          // A demand shares its reference number with the order it belongs to,
+          // and references are unique per registration - so a payment row
+          // stores a prefixed reference. Its case_id keeps the plain demand id,
+          // which is what the tracker matches demands to cases by.
+          const refId =
+            rowSource === "payment" && normalized.ref_id ? `DMD-${normalized.ref_id}` : normalized.ref_id;
           return {
             ...normalized,
+            ref_id: refId,
             case_id: normalized.case_id || normalized.ref_id || `row-${index + 1}`,
             gst_registration_id: syncRegistrationId,
             organisation_id: organisationId,
             raw_payload: row,
             scraped_at: extractedAt,
-            source: text(row.sourceTab) || "gst-portal-local-collector",
+            source: rowSource,
             updated_at: new Date().toISOString()
           };
         })
