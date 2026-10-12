@@ -787,7 +787,9 @@ export function GstTracker() {
   for (const notice of cases) {
     if (notice.source === "payment") {
       const amount = notice.raw_payload?.demandAmount ?? "";
-      const ref = (notice.ref_id ?? notice.case_id ?? "").trim().toUpperCase();
+      // The stored reference is prefixed to keep it unique per registration;
+      // the plain demand id lives in case_id, which is what cases match on.
+      const ref = (notice.case_id ?? notice.ref_id ?? "").replace(/^DMD-/i, "").trim().toUpperCase();
       if (ref && amount) {
         paymentByRef.set(ref, amount);
       }
