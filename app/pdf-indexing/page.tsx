@@ -2410,19 +2410,88 @@ function createPdfBlob(bytes: Uint8Array) {
 }
 
 async function loadPdfWithVisibleSignatures(file: File) {
+  const sourceBytes = await file.arrayBuffer();
   let pdf: PDFDocument;
 
   try {
-    pdf = await PDFDocument.load(await file.arrayBuffer(), { ignoreEncryption: true });
+    pdf = await PDFDocument.load(sourceBytes.slice(0), { ignoreEncryption: true });
   } catch (error) {
     const detail = error instanceof Error ? error.message : "Unknown PDF parsing error.";
 
     throw new Error(`Could not read "${file.name}". This PDF appears to be damaged or not fully valid. Re-save or print it as a new PDF, then try again. Details: ${detail}`);
   }
 
+  // An encrypted source (DSC-signed and portal-issued PDFs usually are, even
+  // though they open normally in a viewer) cannot be copied as-is: the copied
+  // streams stay encrypted and every page comes out blank. Redraw such a file
+  // from page pictures instead, so the output shows exactly what the viewer
+  // shows - DSC stamp included.
+  if (pdf.isEncrypted) {
+    return rebuildProtectedPdfFromPagePictures(sourceBytes, file.name);
+  }
+
   flattenVisibleSignatureAppearances(pdf);
 
   return pdf;
+}
+
+async function rebuildProtectedPdfFromPagePictures(sourceBytes: ArrayBuffer, fileName: string) {
+  try {
+    const pdfjs = await import("pdfjs-dist");
+    pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
+    const renderedPdf = await pdfjs.getDocument({ data: sourceBytes.slice(0) }).promise;
+
+    try {
+      const rebuiltPdf = await PDFDocument.create();
+
+      for (let pageNumber = 1; pageNumber <= renderedPdf.numPages; pageNumber += 1) {
+        const sourcePage = await renderedPdf.getPage(pageNumber);
+        const pageSize = sourcePage.getViewport({ scale: 1 });
+        const renderViewport = sourcePage.getViewport({ scale: 2 });
+        const canvas = document.createElement("canvas");
+        const context = canvas.getContext("2d", { alpha: false });
+
+        if (!context) {
+          throw new Error("This browser could not prepare the protected PDF page.");
+        }
+
+        canvas.width = Math.max(1, Math.round(renderViewport.width));
+        canvas.height = Math.max(1, Math.round(renderViewport.height));
+        context.fillStyle = "#ffffff";
+        context.fillRect(0, 0, canvas.width, canvas.height);
+        await sourcePage.render({ canvasContext: context, viewport: renderViewport }).promise;
+
+        const jpegBlob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.85));
+
+        if (!jpegBlob) {
+          throw new Error("This browser could not copy the protected PDF page.");
+        }
+
+        const embeddedPage = await rebuiltPdf.embedJpg(await jpegBlob.arrayBuffer());
+        const outputPage = rebuiltPdf.addPage([pageSize.width, pageSize.height]);
+
+        outputPage.drawImage(embeddedPage, {
+          height: pageSize.height,
+          width: pageSize.width,
+          x: 0,
+          y: 0,
+        });
+
+        canvas.width = 1;
+        canvas.height = 1;
+      }
+
+      return rebuiltPdf;
+    } finally {
+      await renderedPdf.destroy();
+    }
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "Unknown PDF error.";
+
+    throw new Error(
+      `"${fileName}" is a protected PDF (DSC/encrypted), and its pages could not be copied or redrawn here. Remove the protection first - for example print it to a new PDF - and try again. Details: ${detail}`
+    );
+  }
 }
 
 async function appendFileToMergedPdf(targetPdf: PDFDocument, file: File) {
