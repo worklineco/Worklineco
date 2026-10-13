@@ -880,7 +880,13 @@ export function GstTracker() {
       if (!casesSort) {
         return 0;
       }
-      const delta = compareCellValues(caseCellValue(a, casesSort.key), caseCellValue(b, casesSort.key));
+      const valueA = caseCellValue(a, casesSort.key);
+      const valueB = caseCellValue(b, casesSort.key);
+      // Blanks sink to the bottom in BOTH directions.
+      if (isBlankCell(valueA) || isBlankCell(valueB)) {
+        return isBlankCell(valueA) && isBlankCell(valueB) ? 0 : isBlankCell(valueA) ? 1 : -1;
+      }
+      const delta = compareCellValues(valueA, valueB);
       return casesSort.dir === "asc" ? delta : -delta;
     });
   const toggleCasesSort = (key: string) =>
@@ -1343,7 +1349,13 @@ function CaseMapList({ demandFor, groups, hasClient, isLoading, onShowDemand, ro
       if (!mapSort) {
         return 0;
       }
-      const delta = compareCellValues(cellValue(a, mapSort.key), cellValue(b, mapSort.key));
+      const valueA = cellValue(a, mapSort.key);
+      const valueB = cellValue(b, mapSort.key);
+      // Blanks sink to the bottom in BOTH directions.
+      if (isBlankCell(valueA) || isBlankCell(valueB)) {
+        return isBlankCell(valueA) && isBlankCell(valueB) ? 0 : isBlankCell(valueA) ? 1 : -1;
+      }
+      const delta = compareCellValues(valueA, valueB);
       return mapSort.dir === "asc" ? delta : -delta;
     });
   const toggleMapSort = (key: string) =>
