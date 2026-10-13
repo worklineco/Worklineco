@@ -8,7 +8,7 @@ import { chromium } from "playwright-core";
 import XLSX from "xlsx";
 import { getCollectorOutputDir, getDefaultWorkbookPath, getWorklineGstHome } from "./gst-helper-home.mjs";
 
-const COLLECTOR_VERSION = "2026-10-13-v65-dates-v24";
+const COLLECTOR_VERSION = "2026-10-13-v65-dates-v25-demandkey";
 const GST_PORTAL_LOGIN_URL = "https://services.gst.gov.in/services/login";
 const WORKLINE_GST_HOME = getWorklineGstHome();
 const DEFAULT_WORKBOOK_PATH = getDefaultWorkbookPath();
@@ -286,6 +286,9 @@ async function readNoticeRowsFromOutput(filePath) {
     extractedAt: payload.extractedAt || new Date().toISOString(),
     gstin: String(payload.gstin || "").trim().toUpperCase(),
     rows,
+    sources: Array.isArray(payload.sources)
+      ? payload.sources.map((value) => String(value).trim().toLowerCase()).filter(Boolean)
+      : [],
   };
 }
 
@@ -2394,25 +2397,48 @@ async function syncRowsWithServiceRole({ clientName, extractedAt, gstin, organis
 
   const payload = dataRows.map((row, index) => {
     const normalized = normalizeExtractedRow(row, index);
+    const rowSource = row.sourceTab || "gst-portal-local-collector";
+    // A demand shares its reference number with the order it belongs to, and
+    // (organisation_id, gst_registration_id, ref_id, case_id) is unique - so a
+    // payment row stores a prefixed reference to avoid colliding with that
+    // order. This mirrors the server sync path in app/api/gst/route.ts; without
+    // it the insert fails on a duplicate key AFTER the delete above has already
+    // cleared the rows, leaving the client empty.
+    const refId = rowSource === "payment" && normalized.ref_id ? `DMD-${normalized.ref_id}` : normalized.ref_id;
     return {
       ...normalized,
+      ref_id: refId,
       case_id: normalized.case_id || normalized.ref_id || `row-${index + 1}`,
       gst_registration_id: registrationId,
       organisation_id: organisationId,
       raw_payload: row,
       scraped_at: extractedAt,
-      source: row.sourceTab || "gst-portal-local-collector",
+      source: rowSource,
       updated_at: new Date().toISOString(),
     };
   });
 
-  const { error: insertError } = await admin.from("gst_litigation_cases").insert(payload);
+  // Collapse any rows that still share the conflict key within this batch -
+  // Postgres rejects an upsert that would touch the same row twice in one
+  // command, so keep the last occurrence of each (ref_id, case_id).
+  const dedupedPayload = Array.from(
+    payload
+      .reduce((map, entry) => map.set(`${entry.ref_id ?? ""}||${entry.case_id ?? ""}`, entry), new Map())
+      .values()
+  );
+
+  // Upsert rather than a plain insert so that, even if two scraped rows share a
+  // reference and case id, the save still succeeds instead of failing and
+  // leaving the client empty after the delete above.
+  const { error: insertError } = await admin
+    .from("gst_litigation_cases")
+    .upsert(dedupedPayload, { onConflict: "organisation_id,gst_registration_id,ref_id,case_id" });
 
   if (insertError) {
     throw new Error(`Could not save litigation rows to WorkLine: ${insertError.message}`);
   }
 
-  return { insertedOrUpdated: payload.length, registrationId, skipped: false };
+  return { insertedOrUpdated: dedupedPayload.length, registrationId, skipped: false };
 }
 
 async function promptForWorkLineLogin(rl, options) {
@@ -2524,20 +2550,49 @@ async function main() {
 
   if (options.importNoticesFile) {
     const imported = await readNoticeRowsFromOutput(path.resolve(options.importNoticesFile));
-    options = {
-      ...options,
-      expectedGstin: options.expectedGstin || imported.gstin,
-      sync: true,
-    };
+    const gstin = String(options.expectedGstin || imported.gstin || "").trim().toUpperCase();
 
-    if (!options.expectedGstin) {
+    if (!gstin) {
       throw new Error("The notices file does not include a GSTIN. Pass --expect-gstin with the matching GSTIN.");
     }
 
+    // Preferred path: write straight to the database with the local
+    // service-role key - no WorkLine sign-in needed. This tags each row by its
+    // own source (notices / appeal / spl / payment) and prefixes demand
+    // references, exactly like a live scrape, so the restored data matches.
+    let organisationId = "";
+    let clientName = options.clientName || "";
+    try {
+      const record = await readClientFromClientRecords(gstin);
+      if (record) {
+        organisationId = record.organisationId || "";
+        clientName = clientName || record.clientName || "";
+      }
+    } catch (recordError) {
+      console.log(`Could not read organisation from Client Records: ${recordError.message}`);
+    }
+
+    if (organisationId && createAdminSupabaseClient()) {
+      const result = await syncRowsWithServiceRole({
+        clientName,
+        extractedAt: imported.extractedAt,
+        gstin,
+        organisationId,
+        rows: imported.rows,
+        sources: imported.sources && imported.sources.length ? imported.sources : undefined,
+      });
+      console.log(
+        `Imported ${result.insertedOrUpdated} rows into WorkLine registration ${result.registrationId} using the service-role key.`,
+      );
+      return;
+    }
+
+    // Fallback: no service-role key locally - sign in to WorkLine and upsert.
+    options = { ...options, expectedGstin: gstin, sync: true };
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
     options = await promptForWorkLineLogin(rl, options);
     const client = {
-      gstin: options.expectedGstin,
+      gstin,
       rowNumber: options.rowNumber || 2,
       userId: "",
       password: "",
