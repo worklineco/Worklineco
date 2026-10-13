@@ -2356,9 +2356,15 @@ async function syncRowsWithServiceRole({ clientName, extractedAt, gstin, organis
   }
 
   const dataRows = Array.isArray(rows) ? rows : [];
-  // Only these source tabs get replaced; anything else (e.g. manual) is kept.
-  const sourceTags =
-    sources && sources.length ? sources : [...new Set(dataRows.map((row) => row.sourceTab).filter(Boolean))];
+  // Only replace a source that actually produced rows in this run. The GST
+  // portal is flaky - the Notices page sometimes fails to load mid-run - and a
+  // source that scraped zero rows is almost always a failed fetch, not a
+  // genuine "nothing there". Deleting it would wipe good data (e.g. notices)
+  // and leave the client showing whatever source did succeed (e.g. appeal).
+  // So intersect the requested sources with the ones present in the batch.
+  const presentSources = new Set(dataRows.map((row) => row.sourceTab).filter(Boolean));
+  const requestedTags = sources && sources.length ? sources : [...presentSources];
+  const sourceTags = requestedTags.filter((tag) => presentSources.has(tag));
 
   const existing = await admin
     .from("gst_registrations")

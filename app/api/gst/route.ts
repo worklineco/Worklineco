@@ -163,14 +163,20 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Could not prepare the GST registration." }, { status: 500 });
     }
 
-    const sourceTags = Array.from(
-      new Set(
-        (Array.isArray(payload.sources) && payload.sources.length
-          ? payload.sources.map((value) => text(value).toLowerCase())
-          : rows.map((row) => text((row as Record<string, unknown>).sourceTab).toLowerCase())
-        ).filter(Boolean)
-      )
+    // Only replace a source that actually produced rows in this run. The GST
+    // portal is flaky, and a source that scraped zero rows is almost always a
+    // failed fetch rather than a genuine "nothing there" - deleting it would
+    // wipe good data (e.g. notices) and leave only whatever source succeeded
+    // (e.g. appeal). So intersect the requested sources with the ones present
+    // in this batch.
+    const presentSources = new Set(
+      rows.map((row) => text((row as Record<string, unknown>).sourceTab).toLowerCase()).filter(Boolean)
     );
+    const requestedTags =
+      Array.isArray(payload.sources) && payload.sources.length
+        ? payload.sources.map((value) => text(value).toLowerCase()).filter(Boolean)
+        : [...presentSources];
+    const sourceTags = Array.from(new Set(requestedTags.filter((tag) => presentSources.has(tag))));
 
     // Rows scraped before per-source tagging carry a generic source. They are
     // the Notices & Orders scrape, so clear them whenever notices is synced -
