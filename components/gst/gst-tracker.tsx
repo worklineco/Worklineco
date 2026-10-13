@@ -1,12 +1,22 @@
 "use client";
 
-import { AlertTriangle, ArrowLeft, ChevronDown, ChevronRight, Download, FileText, Network, RefreshCw, Trash2 } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ChevronDown, ChevronRight, Download, FileText, Network, RefreshCw, Trash2, X } from "lucide-react";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type GstClient = { gstin: string; group: string; hasCredentials: boolean; name: string };
 type DetailTable = { headers: string[]; rows: string[][] };
 type DetailTab = { name: string; tables: DetailTable[] };
-type RawPayload = { againstOrderNo?: string; demandAmount?: string; detail?: { tabs?: DetailTab[] } } | null;
+type RawPayload = {
+  againstOrderNo?: string;
+  demandAmount?: string;
+  demandBreakup?: Record<string, Record<string, number>>;
+  demandDate?: string;
+  demandProblems?: string[];
+  detail?: { tabs?: DetailTab[] };
+} | null;
+// One Payment-towards-Demand row, ready for the breakup popup: per tax head,
+// the figures the collector read from the portal's bifurcation popups.
+type DemandInfo = { amount: number; breakup: Record<string, Record<string, number>>; date: string; demandId: string; problems: string[] };
 type SourceKey = "appeal" | "notices" | "payment" | "spl";
 type GstCase = {
   case_id: string | null;
@@ -550,6 +560,7 @@ export function GstTracker() {
   const [error, setError] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<"cases" | "map">("cases");
+  const [demandPopup, setDemandPopup] = useState<{ caseId: string; demands: DemandInfo[] } | null>(null);
   const [filters, setFilters] = useState<{ caseId: string; openClosed: string; period: string; status: string; type: string }>({
     caseId: "",
     openClosed: "",
@@ -782,36 +793,56 @@ export function GstTracker() {
   }
 
   // Payment-towards-Demand rows aren't cases — they carry a demand amount keyed
-  // by notice/order number, shown as a column on the matching case.
-  const paymentByRef = new Map<string, string>();
+  // by notice/order number, shown as a column on the matching case. Clicking
+  // the amount opens the head-wise bifurcation the collector read from the
+  // portal's own popups (Tax / Interest / Penalty / Fee / Others per head).
+  const demandByRef = new Map<string, DemandInfo>();
   for (const notice of cases) {
     if (notice.source === "payment") {
-      const amount = notice.raw_payload?.demandAmount ?? "";
       // The stored reference is prefixed to keep it unique per registration;
       // the plain demand id lives in case_id, which is what cases match on.
       const ref = (notice.case_id ?? notice.ref_id ?? "").replace(/^DMD-/i, "").trim().toUpperCase();
+      const amount = Number(String(notice.raw_payload?.demandAmount ?? "").replace(/[^\d.]/g, "")) || 0;
       if (ref && amount) {
-        paymentByRef.set(ref, amount);
+        demandByRef.set(ref, {
+          amount,
+          breakup: notice.raw_payload?.demandBreakup ?? {},
+          date: notice.raw_payload?.demandDate ?? "",
+          demandId: ref,
+          problems: notice.raw_payload?.demandProblems ?? [],
+        });
       }
     }
   }
   const displayCases = cases.filter((notice) => notice.source !== "payment");
   const caseGroups = groupByCase(displayCases);
-  const demandForGroup = (group: CaseGroup): string => {
-    let total = 0;
-    let matched = false;
+  const demandsForGroup = (group: CaseGroup): DemandInfo[] => {
+    const found = new Map<string, DemandInfo>();
     for (const notice of group.notices) {
       const keys = [notice.ref_id, notice.case_id].map((value) => (value ?? "").trim().toUpperCase()).filter(Boolean);
       for (const key of keys) {
-        const amount = paymentByRef.get(key);
-        if (amount) {
-          matched = true;
-          total += Number(String(amount).replace(/[^\d.]/g, "")) || 0;
+        const demand = demandByRef.get(key);
+        if (demand) {
+          found.set(demand.demandId, demand);
           break;
         }
       }
     }
-    return matched ? `₹${total.toLocaleString("en-IN")}` : "—";
+    return [...found.values()];
+  };
+  const demandForGroup = (group: CaseGroup): string => {
+    const demands = demandsForGroup(group);
+    if (!demands.length) {
+      return "—";
+    }
+    const total = demands.reduce((sum, demand) => sum + demand.amount, 0);
+    return `₹${total.toLocaleString("en-IN")}`;
+  };
+  const showDemandBreakup = (group: CaseGroup) => {
+    const demands = demandsForGroup(group);
+    if (demands.length) {
+      setDemandPopup({ caseId: group.caseId || demands[0].demandId, demands });
+    }
   };
   const caseMapData = viewMode === "map" ? foldAppealGroups(caseGroups) : null;
   const caseMapRows = caseMapData ? buildCaseMap(caseMapData.groups, caseMapData.folded) : [];
@@ -828,6 +859,7 @@ export function GstTracker() {
 
   return (
     <div className="mt-6 space-y-4">
+      {demandPopup ? <DemandBreakupDialog caseId={demandPopup.caseId} demands={demandPopup.demands} onClose={() => setDemandPopup(null)} /> : null}
       <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <p className="text-[11px] font-black uppercase tracking-[0.16em] text-navy-600">GST Tracker</p>
         <h1 className="mt-1 text-2xl font-black text-navy-900">Notices &amp; Orders from the GST portal</h1>
@@ -930,7 +962,7 @@ export function GstTracker() {
         </div>
 
         {viewMode === "map" ? (
-          <CaseMapList demandFor={demandForGroup} groups={caseMapData ? caseMapData.groups : caseGroups} hasClient={Boolean(selectedGstin)} isLoading={isLoadingCases} rows={caseMapRows} />
+          <CaseMapList demandFor={demandForGroup} groups={caseMapData ? caseMapData.groups : caseGroups} hasClient={Boolean(selectedGstin)} isLoading={isLoadingCases} onShowDemand={showDemandBreakup} rows={caseMapRows} />
         ) : (
         <div className="overflow-auto rounded-lg border border-slate-200">
           <table className="w-full min-w-[1120px] border-collapse text-left text-sm">
@@ -1008,7 +1040,22 @@ export function GstTracker() {
                             {group.openClosed}
                           </span>
                         </td>
-                        <td className="px-3 py-2 align-top font-black text-navy-800">{demandForGroup(group)}</td>
+                        <td className="px-3 py-2 align-top font-black text-navy-800">
+                          {demandsForGroup(group).length ? (
+                            <button
+                              className="font-black text-navy-800 underline decoration-dotted underline-offset-2 hover:text-navy-600"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                showDemandBreakup(group);
+                              }}
+                              title="Show head-wise breakup"
+                            >
+                              {demandForGroup(group)}
+                            </button>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
                         <td className="px-3 py-2 align-top font-semibold text-slate-500">{group.notices.length}</td>
                         <td className="px-3 py-2 text-right">
                           <button
@@ -1070,7 +1117,99 @@ const stageDisplayNames: Record<CaseStage, string> = {
 // The Case Map — a list like the cases table, one row per case. Clicking a
 // row opens the stage timeline (Intimation, Show Cause Notice, Reply,
 // Personal Hearing, Order…) plus the same case detail the cases view shows.
-function CaseMapList({ demandFor, groups, hasClient, isLoading, rows }: { demandFor: (group: CaseGroup) => string; groups: CaseGroup[]; hasClient: boolean; isLoading: boolean; rows: CaseMapRow[] }) {
+const demandHeadOrder = ["Integrated Tax", "Central Tax", "State/UT Tax", "Cess"];
+const demandFieldOrder = ["Tax", "Interest", "Penalty", "Fee", "Others"];
+
+function formatRupees(value: number | undefined) {
+  if (value === undefined) {
+    return "—";
+  }
+  return `₹${value.toLocaleString("en-IN")}`;
+}
+
+// The GST portal's own bifurcation, as a popup: tax heads down the side, the
+// breakup (Tax / Interest / Penalty / Fee / Others) across, Total on the
+// right. A head whose popup the collector never opened (zero or not
+// clickable on the portal) shows its grid amount under Total and dashes for
+// the breakup fields.
+function DemandBreakupDialog({ caseId, demands, onClose }: { caseId: string; demands: DemandInfo[]; onClose: () => void }) {
+  return (
+    <div aria-modal className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4" onClick={onClose} role="dialog">
+      <div className="max-h-[85vh] w-full max-w-3xl overflow-auto rounded-xl border border-slate-200 bg-white p-5 shadow-xl" onClick={(event) => event.stopPropagation()}>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-xs font-black uppercase tracking-wide text-slate-500">Demand breakup</p>
+            <h3 className="text-lg font-black text-navy-800">{caseId}</h3>
+          </div>
+          <button aria-label="Close" className="inline-flex size-8 items-center justify-center rounded-md border border-slate-200 text-slate-500 hover:bg-slate-50" onClick={onClose}>
+            <X className="size-4" />
+          </button>
+        </div>
+        {demands.map((demand) => {
+          const heads = demandHeadOrder
+            .filter((head) => demand.breakup[head])
+            .concat(Object.keys(demand.breakup).filter((head) => !demandHeadOrder.includes(head)));
+          return (
+            <div className="mt-4" key={demand.demandId}>
+              <p className="text-sm font-bold text-slate-700">
+                Demand ID <span className="font-black text-navy-800">{demand.demandId}</span>
+                {demand.date ? <span className="font-semibold text-slate-500"> · dated {demand.date}</span> : null}
+              </p>
+              <div className="mt-2 overflow-auto rounded-lg border border-slate-200">
+                <table className="w-full min-w-[560px] border-collapse text-left text-sm">
+                  <thead className="bg-slate-100 text-[11px] font-black uppercase tracking-wide text-slate-600">
+                    <tr>
+                      <th className="border-b border-slate-200 px-3 py-2">Head</th>
+                      {demandFieldOrder.map((field) => (
+                        <th className="border-b border-slate-200 px-3 py-2 text-right" key={field}>
+                          {field}
+                        </th>
+                      ))}
+                      <th className="border-b border-slate-200 px-3 py-2 text-right">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {heads.length ? (
+                      heads.map((head) => (
+                        <tr className="border-b border-slate-100" key={head}>
+                          <td className="px-3 py-2 font-bold text-slate-700">{head}</td>
+                          {demandFieldOrder.map((field) => (
+                            <td className="px-3 py-2 text-right font-semibold text-slate-600" key={field}>
+                              {formatRupees(demand.breakup[head]?.[field])}
+                            </td>
+                          ))}
+                          <td className="px-3 py-2 text-right font-black text-navy-800">{formatRupees(demand.breakup[head]?.Amount)}</td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr className="border-b border-slate-100">
+                        <td className="px-3 py-2 font-semibold text-slate-500" colSpan={demandFieldOrder.length + 2}>
+                          No head-wise figures were stored for this demand — run Get data once more to pull the bifurcation.
+                        </td>
+                      </tr>
+                    )}
+                    <tr>
+                      <td className="px-3 py-2 font-black text-navy-800">Total</td>
+                      <td className="px-3 py-2" colSpan={demandFieldOrder.length} />
+                      <td className="px-3 py-2 text-right font-black text-navy-800">{formatRupees(demand.amount)}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              {demand.problems.length ? (
+                <p className="mt-2 rounded-md bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">
+                  Check notes from the portal read: {demand.problems.join("; ")}
+                </p>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function CaseMapList({ demandFor, groups, hasClient, isLoading, onShowDemand, rows }: { demandFor: (group: CaseGroup) => string; groups: CaseGroup[]; hasClient: boolean; isLoading: boolean; onShowDemand: (group: CaseGroup) => void; rows: CaseMapRow[] }) {
   const [expandedCaseId, setExpandedCaseId] = useState<string | null>(null);
 
   return (
@@ -1137,7 +1276,22 @@ function CaseMapList({ demandFor, groups, hasClient, isLoading, rows }: { demand
                         {row.open ? "Open" : "Closed"}
                       </span>
                     </td>
-                    <td className="whitespace-nowrap px-3 py-2 align-top font-black text-navy-800">{group ? demandFor(group) : "—"}</td>
+                    <td className="whitespace-nowrap px-3 py-2 align-top font-black text-navy-800">
+                      {group && demandFor(group) !== "—" ? (
+                        <button
+                          className="font-black text-navy-800 underline decoration-dotted underline-offset-2 hover:text-navy-600"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onShowDemand(group);
+                          }}
+                          title="Show head-wise breakup"
+                        >
+                          {demandFor(group)}
+                        </button>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
                   </tr>
                   {isExpanded ? (
                     <tr className="border-b border-slate-100 bg-slate-50/60">
