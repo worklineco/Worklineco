@@ -8,7 +8,7 @@ import { chromium } from "playwright-core";
 import XLSX from "xlsx";
 import { getCollectorOutputDir, getDefaultWorkbookPath, getWorklineGstHome } from "./gst-helper-home.mjs";
 
-const COLLECTOR_VERSION = "2026-10-13-v65-dates-v25-demandkey";
+const COLLECTOR_VERSION = "2026-10-13-v65-search-v26";
 const GST_PORTAL_LOGIN_URL = "https://services.gst.gov.in/services/login";
 const WORKLINE_GST_HOME = getWorklineGstHome();
 const DEFAULT_WORKBOOK_PATH = getDefaultWorkbookPath();
@@ -1255,15 +1255,27 @@ async function setApplicationDates(page, from, to) {
 async function clickApplicationSearch(page) {
   return page.evaluate(() => {
     const up = (value) => String(value ?? "").toUpperCase();
-    const el = [...document.querySelectorAll("button,a,input[type=submit],button[type=submit]")].find((candidate) =>
-      up(candidate.innerText || candidate.value || "").includes("SEARCH")
-    );
-    if (!el) {
-      return false;
+    const isShown = (el) => Boolean(el.offsetWidth || el.offsetHeight);
+    // v65's order: BUTTONS first, anchors second, submit inputs last. The
+    // page header's "Search Taxpayer" menu LINK also contains "SEARCH" and
+    // sits earlier in the DOM - scanning buttons and links together clicked
+    // that link, navigated away from the form, and left every later window
+    // with no date fields (the exact "no-field" trail in the log).
+    const groups = [
+      [...document.querySelectorAll("button")].filter((el) => up(el.innerText).includes("SEARCH")),
+      [...document.querySelectorAll("a")].filter((el) => up(el.innerText).includes("SEARCH")),
+      [...document.querySelectorAll("input[type=submit]")],
+      [...document.querySelectorAll("button[type=submit]")]
+    ];
+    for (const group of groups) {
+      const el = group.find(isShown);
+      if (el) {
+        el.scrollIntoView({ block: "center" });
+        el.click();
+        return true;
+      }
     }
-    el.scrollIntoView({ block: "center" });
-    el.click();
-    return true;
+    return false;
   }).catch(() => false);
 }
 
