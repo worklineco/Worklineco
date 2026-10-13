@@ -8,7 +8,7 @@ import { chromium } from "playwright-core";
 import XLSX from "xlsx";
 import { getCollectorOutputDir, getDefaultWorkbookPath, getWorklineGstHome } from "./gst-helper-home.mjs";
 
-const COLLECTOR_VERSION = "2026-10-13-v65-nav-v21";
+const COLLECTOR_VERSION = "2026-10-13-v65-exit-v22";
 const GST_PORTAL_LOGIN_URL = "https://services.gst.gov.in/services/login";
 const WORKLINE_GST_HOME = getWorklineGstHome();
 const DEFAULT_WORKBOOK_PATH = getDefaultWorkbookPath();
@@ -2651,9 +2651,16 @@ async function main() {
       }
     }
 
-    console.log("Keep this process running while the browser is in use.");
-    await new Promise(() => {});
-    return;
+    // Same ending as the firm's Excel tracker: the scrape is done, so close
+    // the portal window and exit instead of keeping the process alive. The
+    // output is already on disk, which is what the WorkLine page relays from.
+    console.log("Done. Closing the portal window.");
+    try {
+      await browser.close();
+    } catch {
+      // the window may already be gone
+    }
+    process.exit(0);
   }
 
   console.log("");
