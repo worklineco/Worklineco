@@ -8,7 +8,7 @@ import { chromium } from "playwright-core";
 import XLSX from "xlsx";
 import { getCollectorOutputDir, getDefaultWorkbookPath, getWorklineGstHome } from "./gst-helper-home.mjs";
 
-const COLLECTOR_VERSION = "2026-10-12-v65-drill-v20";
+const COLLECTOR_VERSION = "2026-10-13-v65-nav-v21";
 const GST_PORTAL_LOGIN_URL = "https://services.gst.gov.in/services/login";
 const WORKLINE_GST_HOME = getWorklineGstHome();
 const DEFAULT_WORKBOOK_PATH = getDefaultWorkbookPath();
@@ -644,21 +644,143 @@ async function openCaseDetail(page, index) {
     .catch(() => false);
 }
 
-// Opens a Services menu destination. The group headers (User Services /
-// Ledgers) are links of their own on the portal - clicking one navigates to
-// its FIRST page (User Services lands on Search HSN Code), which is exactly
-// the wrong turn the old flow took. So the destination link is clicked
-// directly after opening the Services menu; the group header is clicked only
-// as a fallback when the destination is not present at all.
-async function openPortalMenuItem(page, groupLabel, itemLabel) {
-  await clickPortalLinkByText(page, "Services", "Services");
-  await page.waitForTimeout(1_500);
-  if (await clickPortalLinkByText(page, itemLabel, itemLabel)) {
+const DASHBOARD_URL = "https://services.gst.gov.in/services/auth/dashboard";
+
+// Clicks a link/button ONLY when it is visible - never a hidden menu copy,
+// whose click reports success without navigating anywhere.
+async function clickVisiblePortalLink(page, label) {
+  return page.evaluate((wanted) => {
+    const norm = (value) => String(value ?? "").replace(/\s+/g, " ").trim().toLowerCase();
+    const isShown = (el) => Boolean(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    const el = [...document.querySelectorAll("a,button")]
+      .find((candidate) => norm(candidate.innerText) === norm(wanted) && isShown(candidate));
+    if (!el) {
+      return false;
+    }
+    el.scrollIntoView({ block: "center" });
+    el.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, cancelable: true, view: window }));
+    el.click();
     return true;
+  }, label).catch(() => false);
+}
+
+// The portal stacks modals after login (Aadhaar / e-KYC, then the Principal
+// Place of Business prompt), and they intercept menu clicks. Dismiss politely
+// with the labels the Excel tracker used - all of them decline, none changes a
+// setting - then hide whatever survives (client-side markup only).
+const popupDismissLabels = ["REMIND ME LATER", "NO, THANKS", "NO THANKS", "SKIP FOR NOW", "MAYBE LATER", "CLOSE"];
+
+async function ensureNoModal(page) {
+  for (let round = 0; round < 6; round += 1) {
+    const clicked = await page.evaluate((labels) => {
+      const clean = (value) => String(value ?? "").replace(/\s+/g, " ").trim().toUpperCase();
+      for (const el of document.querySelectorAll("button, a, input[type=button], input[type=submit]")) {
+        if (!(el.offsetWidth || el.offsetHeight)) {
+          continue;
+        }
+        const text = clean(el.innerText || el.value);
+        if (labels.some((label) => text.includes(label))) {
+          el.click();
+          return text.slice(0, 40);
+        }
+      }
+      return "";
+    }, popupDismissLabels).catch(() => "");
+    if (!clicked) {
+      break;
+    }
+    console.log(`Popup dismissed: ${clicked}.`);
+    await page.waitForTimeout(1_500);
   }
-  await clickPortalLinkByText(page, groupLabel, groupLabel);
-  await page.waitForTimeout(1_500);
-  return clickPortalLinkByText(page, itemLabel, itemLabel);
+  // Force-close leftovers: a lingering backdrop intercepts clicks even when
+  // the dialog itself looks gone. Hides markup only - never activates "Yes".
+  await page.evaluate(() => {
+    document.querySelectorAll(".modal-backdrop").forEach((el) => el.remove());
+    document.querySelectorAll(".modal, [role=dialog]").forEach((el) => {
+      if (getComputedStyle(el).display !== "none" && (el.offsetWidth || el.offsetHeight)) {
+        el.style.display = "none";
+      }
+    });
+    document.body.classList.remove("modal-open");
+  }).catch(() => undefined);
+}
+
+// Reaches a portal page exactly the way the firm's Excel tracker did:
+// dashboard first (no breadcrumbs there, so "Services" can only be the top
+// menu), clear any modal, click Services, open the group submenu - re-opening
+// Services when it does not appear - then find the destination link, keep its
+// own href, JS-click it, and if the click did not land NAVIGATE TO THE HREF
+// DIRECTLY. Every attempt ends with a check that the destination form really
+// loaded; the next attempt starts from the dashboard again.
+async function goToPortalPage(page, { groupLabel, hrefFragment, itemLabel, label, ready }) {
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    console.log(`${label}: menu attempt ${attempt}/3.`);
+    await page.goto(DASHBOARD_URL, { waitUntil: "domcontentloaded" }).catch(() => undefined);
+    await page.waitForTimeout(3_000);
+    await ensureNoModal(page);
+
+    await clickVisiblePortalLink(page, "Services");
+    await page.waitForTimeout(2_500);
+
+    // open_submenu: wait for the group entry, re-opening Services if a click
+    // did not register (4 x 6s instead of one dead 25s wait).
+    let groupOpen = false;
+    for (let tries = 0; tries < 4 && !groupOpen; tries += 1) {
+      for (let poll = 0; poll < 12 && !groupOpen; poll += 1) {
+        groupOpen = await clickVisiblePortalLink(page, groupLabel);
+        if (!groupOpen) {
+          await page.waitForTimeout(500);
+        }
+      }
+      if (!groupOpen) {
+        await clickVisiblePortalLink(page, "Services");
+        await page.waitForTimeout(2_000);
+      }
+    }
+    await page.waitForTimeout(2_500);
+
+    // The destination link: found by its own href first (authoritative), by
+    // text second; PRESENCE is enough - keep the href, JS-click the link.
+    const href = await page.evaluate(({ fragment, wanted }) => {
+      const norm = (value) => String(value ?? "").replace(/\s+/g, " ").trim().toLowerCase();
+      const anchors = [...document.querySelectorAll("a")];
+      const byHref = fragment ? anchors.find((a) => (a.getAttribute("href") || "").includes(fragment)) : null;
+      const byText = anchors.find((a) => norm(a.innerText) === norm(wanted));
+      const link = byHref || byText;
+      if (!link) {
+        return "";
+      }
+      link.scrollIntoView({ block: "center" });
+      link.click();
+      return link.href || "";
+    }, { fragment: hrefFragment, wanted: itemLabel }).catch(() => "");
+
+    await page.waitForTimeout(2_500);
+    if (await ready()) {
+      console.log(`${label}: page loaded (menu attempt ${attempt}).`);
+      return true;
+    }
+
+    // Navigating straight to the link's own href, if clicking did not land.
+    if (href) {
+      console.log(`${label}: trying the link href directly.`);
+      await page.goto(href, { waitUntil: "domcontentloaded" }).catch(() => undefined);
+      await page.waitForTimeout(3_000);
+      if (await ready()) {
+        console.log(`${label}: page loaded (direct href).`);
+        return true;
+      }
+    }
+
+    const denied = await page
+      .evaluate(() => /access denied/i.test(document.body ? document.body.innerText : ""))
+      .catch(() => false);
+    if (denied) {
+      console.log(`${label}: Access Denied - resetting via the dashboard.`);
+    }
+  }
+  console.log(`${label}: page not reachable after 3 attempts.`);
+  return false;
 }
 
 // The case page's own side tabs, enumerated from what is actually rendered -
@@ -961,8 +1083,13 @@ async function returnToNoticesList(page, expectedRows = 0) {
   }
 
   if (rows < 0) {
-    await openPortalMenuItem(page, "User Services", "View Notices and Orders");
-    await page.waitForTimeout(2_000);
+    await goToPortalPage(page, {
+      groupLabel: "User Services",
+      hrefFragment: "auth/viewnotice",
+      itemLabel: "View Notices and Orders",
+      label: "Notices & Orders (return)",
+      ready: async () => (await countNoticeListRows(page)) >= 0
+    });
     rows = await countNoticeListRows(page);
   }
 
@@ -1006,33 +1133,26 @@ function buildDateWindows(startDmy, days) {
 
 // Services > User Services > My Applications.
 async function goToMyApplications(page) {
-  if (await openPortalMenuItem(page, "User Services", "My Applications")) {
-    await page.waitForTimeout(2_000);
-    if (await page.locator("#up_type").count().catch(() => 0)) {
+  const reached = await goToPortalPage(page, {
+    groupLabel: "User Services",
+    hrefFragment: "litserv/auth/case/search",
+    itemLabel: "My Applications",
+    label: "My Applications",
+    // #up_type is the application-type dropdown - the one element that only
+    // the real My Applications search form has.
+    ready: async () => (await page.locator("#up_type").count().catch(() => 0)) > 0
+  });
+  if (!reached) {
+    return false;
+  }
+  // The page is up; give Angular a moment to fill the type dropdown.
+  for (let poll = 0; poll < 20; poll += 1) {
+    if (await page.locator("#up_type option").count().catch(() => 0)) {
       return true;
     }
+    await page.waitForTimeout(500);
   }
-
-  const clicked = await page.evaluate(() => {
-    const norm = (value) => String(value ?? "").replace(/\s+/g, " ").trim().toLowerCase();
-    const link = [...document.querySelectorAll("a")].find((anchor) => {
-      const href = anchor.getAttribute("href") || "";
-      return norm(anchor.innerText || anchor.textContent) === "my applications" || href.includes("litserv/auth/case/search");
-    });
-    if (!link) {
-      return false;
-    }
-    link.scrollIntoView({ block: "center" });
-    link.click();
-    return true;
-  }).catch(() => false);
-
-  await page.waitForTimeout(2_500);
-  // #up_type is the My Applications type dropdown. Counting any <select> here
-  // passed on the WRONG page (Search HSN Code also has one), and the appeal
-  // searches then ran against a page with no application form at all.
-  const ready = await page.locator("#up_type").count().catch(() => 0);
-  return clicked && ready > 0;
+  return true;
 }
 
 // Selects an application type in the My Applications dropdown.
@@ -1685,14 +1805,19 @@ async function harvestDemandPage(page, pageNo, demands) {
 async function collectPaymentTowardsDemand(page) {
   console.log("Payment towards Demand: navigating to Services > Ledgers > Payment towards Demand.");
   await waitForAuthenticatedPortal(page);
-  const opened =
-    (await openPortalMenuItem(page, "Ledgers", "Payment towards Demand")) ||
-    (await openPortalMenuItem(page, "Ledgers", "Payment Towards Demand"));
+  const opened = await goToPortalPage(page, {
+    groupLabel: "Ledgers",
+    hrefFragment: "paymenttowardsdemand",
+    itemLabel: "Payment towards Demand",
+    label: "Payment towards Demand",
+    // the outstanding-demand grid, identified by its own header
+    ready: async () => (await readDemandGrid(page)) !== null
+  });
   if (!opened) {
-    console.log("Payment towards Demand: menu item not found — skipping.");
+    console.log("Payment towards Demand: page not reachable — skipping.");
     return [];
   }
-  await page.waitForTimeout(2_500);
+  await page.waitForTimeout(1_000);
 
   await logVisibleTableHeaders(page);
 
@@ -1766,8 +1891,17 @@ function skipDetailReason(row) {
 async function collectNoticesAndOrders(page) {
   await waitForAuthenticatedPortal(page);
 
-  await openPortalMenuItem(page, "User Services", "View Notices and Orders");
-  await page.waitForTimeout(2_500);
+  const reachedNotices = await goToPortalPage(page, {
+    groupLabel: "User Services",
+    hrefFragment: "auth/viewnotice",
+    itemLabel: "View Notices and Orders",
+    label: "Notices & Orders",
+    ready: async () => (await countNoticeListRows(page)) >= 0
+  });
+  if (!reachedNotices) {
+    console.log("Notices & Orders: list not reachable — skipping.");
+    return [];
+  }
 
   await clickPortalLinkByText(page, "100", "100 rows per page");
   await page.waitForTimeout(1_500);
