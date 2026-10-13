@@ -1043,7 +1043,7 @@ export function GstTracker() {
                         <td className="px-3 py-2 align-top font-black text-navy-800">
                           {demandsForGroup(group).length ? (
                             <button
-                              className="font-black text-navy-800 underline decoration-dotted underline-offset-2 hover:text-navy-600"
+                              className="font-black text-sky-700 transition hover:text-sky-900 hover:underline"
                               onClick={(event) => {
                                 event.stopPropagation();
                                 showDemandBreakup(group);
@@ -1279,7 +1279,7 @@ function CaseMapList({ demandFor, groups, hasClient, isLoading, onShowDemand, ro
                     <td className="whitespace-nowrap px-3 py-2 align-top font-black text-navy-800">
                       {group && demandFor(group) !== "—" ? (
                         <button
-                          className="font-black text-navy-800 underline decoration-dotted underline-offset-2 hover:text-navy-600"
+                          className="font-black text-sky-700 transition hover:text-sky-900 hover:underline"
                           onClick={(event) => {
                             event.stopPropagation();
                             onShowDemand(group);
