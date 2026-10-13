@@ -476,7 +476,7 @@ export function BillingRegister() {
         (!showMarkedForReviewOnly || String(record.billing_status ?? "").trim().toLowerCase() === "marked for review") &&
         (!filters.status || record.billing_status === filters.status) &&
         (!filters.receiptStatus || record.receiving_status === filters.receiptStatus) &&
-        (!filters.team || record.owner_team === filters.team) &&
+        (!filters.team || canonicalTeamLabel(record.owner_team) === canonicalTeamLabel(filters.team)) &&
         (!filters.source || record.source_module === filters.source)
       );
     }).sort((first, second) => {
@@ -1122,7 +1122,7 @@ export function BillingRegister() {
       [importActionColumn]: "Update",
       "Billing ID": record.id ?? "",
       "S.No.": record.serial_no ?? index + 1,
-      Team: record.owner_team,
+      Team: canonicalTeamLabel(record.owner_team),
       "Task Code": record.task_code ?? "",
       "Added Date": formatDateForExport(record.created_at),
       "Pushed From Sheet": formatSourceModule(record.source_module),
@@ -2549,6 +2549,10 @@ function getDisplayValue(record: BillingRecord, column: BillingColumn, matters: 
     return formatSourceModule(value);
   }
 
+  if (column.field === "owner_team") {
+    return canonicalTeamLabel(value);
+  }
+
   if (column.type === "money" || column.field === "total") {
     return formatMoney(value as number);
   }
@@ -2558,6 +2562,18 @@ function getDisplayValue(record: BillingRecord, column: BillingColumn, matters: 
   }
 
   return String(value ?? "");
+}
+
+// "team 04", "Team-04" and "Team 04" are the same team typed differently —
+// show and filter them under one canonical "Team NN" label (the same
+// normalisation TaskLine uses), so the data stops splitting across spellings.
+function canonicalTeamLabel(value: unknown) {
+  const raw = String(value ?? "").trim();
+  const digits = raw.match(/\d+/);
+  if (digits) {
+    return `Team ${String(parseInt(digits[0], 10)).padStart(2, "0")}`;
+  }
+  return raw;
 }
 
 function formatSourceModule(value: unknown) {
