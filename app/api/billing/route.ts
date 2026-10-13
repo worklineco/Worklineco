@@ -776,6 +776,36 @@ async function fetchAllBillingRecords(
   }
 }
 
+// Team names are typed inconsistently in the data ("Team 04", "team 04",
+// "Team-04") and the SQL .in() match is exact, so a user scoped to one
+// spelling silently lost rows saved under another. Same fix as TaskLine:
+// expand each allowed team into its common spellings before querying.
+function billingTeamVariants(value: unknown) {
+  const current = String(value ?? "").trim();
+  const digits = current.match(/\d+/)?.[0];
+
+  if (!digits) {
+    return current ? [current] : [];
+  }
+
+  const teamNumber = Number.parseInt(digits, 10);
+  const padded = String(teamNumber).padStart(2, "0");
+
+  return Array.from(new Set([
+    current,
+    `Team-${padded}`,
+    `Team -${padded}`,
+    `Team ${padded}`,
+    `Team-${teamNumber}`,
+    `Team -${teamNumber}`,
+    `Team ${teamNumber}`,
+    `team-${padded}`,
+    `team ${padded}`,
+    `team-${teamNumber}`,
+    `team ${teamNumber}`
+  ]));
+}
+
 async function selectBillingRecordsPage(
   admin: ReturnType<typeof createAdminClient>,
   organisationId: string,
@@ -787,7 +817,7 @@ async function selectBillingRecordsPage(
   let query = admin.from(tableName).select(columns).eq("organisation_id", organisationId);
 
   if (!access.canViewAll && access.teams.length) {
-    query = query.in("owner_team", access.teams);
+    query = query.in("owner_team", Array.from(new Set(access.teams.flatMap(billingTeamVariants))));
   }
 
   const orderedQuery = columns.includes("serial_no")
@@ -805,7 +835,7 @@ function loadGstatMatters(admin: ReturnType<typeof createAdminClient>, access: A
     .order("row_number", { ascending: true });
 
   if (!access.canViewAll && access.teams.length) {
-    query = query.in("data->>Person handling", access.teams);
+    query = query.in("data->>Person handling", Array.from(new Set(access.teams.flatMap(billingTeamVariants))));
   }
 
   return query;
