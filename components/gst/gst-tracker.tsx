@@ -1,7 +1,8 @@
 "use client";
 
-import { AlertTriangle, ArrowLeft, ChevronDown, ChevronRight, Download, FileText, Network, RefreshCw, Trash2, X } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowLeft, ArrowUp, ChevronDown, ChevronRight, Download, FileText, Filter, Network, RefreshCw, Search, Trash2, X } from "lucide-react";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 type GstClient = { gstin: string; group: string; hasCredentials: boolean; name: string };
 type DetailTable = { headers: string[]; rows: string[][] };
@@ -561,6 +562,9 @@ export function GstTracker() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<"cases" | "map">("cases");
   const [demandPopup, setDemandPopup] = useState<{ caseId: string; demands: DemandInfo[] } | null>(null);
+  const [casesSort, setCasesSort] = useState<GstSortState>(null);
+  const [casesValueFilters, setCasesValueFilters] = useState<Record<string, string[]>>({});
+  const casesMenu = useGstFilterMenu();
   const [filters, setFilters] = useState<{ caseId: string; openClosed: string; period: string; status: string; type: string }>({
     caseId: "",
     openClosed: "",
@@ -846,7 +850,19 @@ export function GstTracker() {
   };
   const caseMapData = viewMode === "map" ? foldAppealGroups(caseGroups) : null;
   const caseMapRows = caseMapData ? buildCaseMap(caseMapData.groups, caseMapData.folded) : [];
-  const filteredGroups = caseGroups.filter((group) => {
+  const caseCellValue = (group: CaseGroup, key: string): string => {
+    switch (key) {
+      case "caseId": return group.caseId;
+      case "type": return group.type;
+      case "period": return group.period;
+      case "status": return group.status;
+      case "openClosed": return group.openClosed;
+      case "demand": return demandForGroup(group);
+      case "notices": return String(group.notices.length);
+      default: return "";
+    }
+  };
+  const matchesTextFilters = (group: CaseGroup) => {
     const match = (value: string, filter: string) => !filter.trim() || value.toLowerCase().includes(filter.trim().toLowerCase());
     return (
       match(group.caseId, filters.caseId) &&
@@ -855,11 +871,79 @@ export function GstTracker() {
       match(group.status, filters.status) &&
       match(group.openClosed, filters.openClosed)
     );
-  });
+  };
+  const matchesValueFilters = (group: CaseGroup, exceptKey?: string) =>
+    Object.entries(casesValueFilters).every(([key, values]) => key === exceptKey || !values.length || values.includes(caseCellValue(group, key)));
+  const filteredGroups = caseGroups
+    .filter((group) => matchesTextFilters(group) && matchesValueFilters(group))
+    .sort((a, b) => {
+      if (!casesSort) {
+        return 0;
+      }
+      const delta = compareCellValues(caseCellValue(a, casesSort.key), caseCellValue(b, casesSort.key));
+      return casesSort.dir === "asc" ? delta : -delta;
+    });
+  const toggleCasesSort = (key: string) =>
+    setCasesSort((current) => (!current || current.key !== key ? { dir: "asc", key } : current.dir === "asc" ? { dir: "desc", key } : null));
+  const openCasesFilter = (key: string, anchor: HTMLElement) => {
+    // Excel-style: list the values that survive every OTHER active filter.
+    const source = caseGroups.filter((group) => matchesTextFilters(group) && matchesValueFilters(group, key));
+    const options = [...new Set(source.map((group) => caseCellValue(group, key)))].sort(compareCellValues);
+    casesMenu.open(key, anchor, options, casesValueFilters[key] ?? []);
+  };
+  const applyCasesFilter = () => {
+    const menu = casesMenu.menu;
+    if (!menu) {
+      return;
+    }
+    const selectedAll = menu.options.every((value) => casesMenu.draft.includes(value));
+    setCasesValueFilters((current) => ({ ...current, [menu.key]: selectedAll ? [] : menu.options.filter((value) => casesMenu.draft.includes(value)) }));
+    casesMenu.close();
+  };
+  const clearCasesFilter = () => {
+    const menu = casesMenu.menu;
+    if (menu) {
+      setCasesValueFilters((current) => ({ ...current, [menu.key]: [] }));
+    }
+    casesMenu.close();
+  };
+  const caseColumns: { key: string; label: string }[] = [
+    { key: "caseId", label: "Case ID" },
+    { key: "type", label: "Type" },
+    { key: "period", label: "Tax Period" },
+    { key: "status", label: "Status" },
+    { key: "openClosed", label: "Open / Closed" },
+    { key: "demand", label: "Demand Amount" },
+    { key: "notices", label: "Notices" }
+  ];
 
   return (
     <div className="mt-6 space-y-4">
       {demandPopup ? <DemandBreakupDialog caseId={demandPopup.caseId} demands={demandPopup.demands} onClose={() => setDemandPopup(null)} /> : null}
+      {casesMenu.menu ? (
+        <GstFilterMenu
+          columnLabel={caseColumns.find((column) => column.key === casesMenu.menu?.key)?.label ?? ""}
+          draft={casesMenu.draft}
+          hasFilter={Boolean(casesValueFilters[casesMenu.menu.key]?.length)}
+          menuPos={casesMenu.menu.menuPos}
+          onApply={applyCasesFilter}
+          onCancel={casesMenu.close}
+          onClear={clearCasesFilter}
+          onSearchChange={casesMenu.setSearch}
+          onSortAsc={() => {
+            setCasesSort({ dir: "asc", key: casesMenu.menu?.key ?? "" });
+            casesMenu.close();
+          }}
+          onSortDesc={() => {
+            setCasesSort({ dir: "desc", key: casesMenu.menu?.key ?? "" });
+            casesMenu.close();
+          }}
+          onToggleAll={casesMenu.toggleAll}
+          onToggleValue={casesMenu.toggleValue}
+          search={casesMenu.search}
+          visibleOptions={casesMenu.visibleOptions}
+        />
+      ) : null}
       <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <p className="text-[11px] font-black uppercase tracking-[0.16em] text-navy-600">GST Tracker</p>
         <h1 className="mt-1 text-2xl font-black text-navy-900">Notices &amp; Orders from the GST portal</h1>
@@ -969,13 +1053,18 @@ export function GstTracker() {
             <thead className="bg-slate-100 text-[11px] font-black uppercase tracking-wide text-slate-600">
               <tr>
                 <th className="w-8 border-b border-slate-200 px-2 py-2" />
-                <th className="whitespace-nowrap border-b border-slate-200 px-3 py-2">Case ID</th>
-                <th className="whitespace-nowrap border-b border-slate-200 px-3 py-2">Type</th>
-                <th className="whitespace-nowrap border-b border-slate-200 px-3 py-2">Tax Period</th>
-                <th className="whitespace-nowrap border-b border-slate-200 px-3 py-2">Status</th>
-                <th className="whitespace-nowrap border-b border-slate-200 px-3 py-2">Open / Closed</th>
-                <th className="whitespace-nowrap border-b border-slate-200 px-3 py-2">Demand Amount</th>
-                <th className="whitespace-nowrap border-b border-slate-200 px-3 py-2">Notices</th>
+                {caseColumns.map((column) => (
+                  <th className="whitespace-nowrap border-b border-slate-200 px-3 py-2" key={column.key}>
+                    <GstColumnHeader
+                      hasFilter={Boolean(casesValueFilters[column.key]?.length)}
+                      isAsc={casesSort?.key === column.key && casesSort.dir === "asc"}
+                      isDesc={casesSort?.key === column.key && casesSort.dir === "desc"}
+                      label={column.label}
+                      onOpenFilter={(anchor) => openCasesFilter(column.key, anchor)}
+                      onToggleSort={() => toggleCasesSort(column.key)}
+                    />
+                  </th>
+                ))}
                 <th className="border-b border-slate-200 px-3 py-2" />
               </tr>
               <tr className="bg-white">
@@ -1209,22 +1298,131 @@ function DemandBreakupDialog({ caseId, demands, onClose }: { caseId: string; dem
   );
 }
 
+const caseMapColumns: { key: string; label: string }[] = [
+  { key: "caseId", label: "Case ID" },
+  { key: "category", label: "Category" },
+  { key: "period", label: "Tax Period" },
+  { key: "status", label: "Case Status" },
+  { key: "chain", label: "Chain" },
+  { key: "openClosed", label: "Open / Closed" },
+  { key: "demand", label: "Demand Amount" }
+];
+
 function CaseMapList({ demandFor, groups, hasClient, isLoading, onShowDemand, rows }: { demandFor: (group: CaseGroup) => string; groups: CaseGroup[]; hasClient: boolean; isLoading: boolean; onShowDemand: (group: CaseGroup) => void; rows: CaseMapRow[] }) {
   const [expandedCaseId, setExpandedCaseId] = useState<string | null>(null);
+  const [mapSort, setMapSort] = useState<GstSortState>(null);
+  const [mapValueFilters, setMapValueFilters] = useState<Record<string, string[]>>({});
+  const [mapTextFilters, setMapTextFilters] = useState<Record<string, string>>({});
+  const mapMenu = useGstFilterMenu();
+
+  const cellValue = (row: CaseMapRow, key: string): string => {
+    switch (key) {
+      case "caseId": return row.caseId;
+      case "category": return row.category;
+      case "period": return row.period;
+      case "status": return row.status;
+      case "chain": return row.chain.map((stage) => stageDisplayNames[stage]).join(" → ");
+      case "openClosed": return row.open ? "Open" : "Closed";
+      case "demand": {
+        const group = groups.find((candidate) => candidate.caseId === row.caseId);
+        return group ? demandFor(group) : "—";
+      }
+      default: return "";
+    }
+  };
+  const matchesTextFilters = (row: CaseMapRow) =>
+    caseMapColumns.every((column) => {
+      const filter = (mapTextFilters[column.key] ?? "").trim().toLowerCase();
+      return !filter || cellValue(row, column.key).toLowerCase().includes(filter);
+    });
+  const matchesValueFilters = (row: CaseMapRow, exceptKey?: string) =>
+    Object.entries(mapValueFilters).every(([key, values]) => key === exceptKey || !values.length || values.includes(cellValue(row, key)));
+  const visibleRows = rows
+    .filter((row) => matchesTextFilters(row) && matchesValueFilters(row))
+    .sort((a, b) => {
+      if (!mapSort) {
+        return 0;
+      }
+      const delta = compareCellValues(cellValue(a, mapSort.key), cellValue(b, mapSort.key));
+      return mapSort.dir === "asc" ? delta : -delta;
+    });
+  const toggleMapSort = (key: string) =>
+    setMapSort((current) => (!current || current.key !== key ? { dir: "asc", key } : current.dir === "asc" ? { dir: "desc", key } : null));
+  const openMapFilter = (key: string, anchor: HTMLElement) => {
+    const source = rows.filter((row) => matchesTextFilters(row) && matchesValueFilters(row, key));
+    const options = [...new Set(source.map((row) => cellValue(row, key)))].sort(compareCellValues);
+    mapMenu.open(key, anchor, options, mapValueFilters[key] ?? []);
+  };
+  const applyMapFilter = () => {
+    const menu = mapMenu.menu;
+    if (!menu) {
+      return;
+    }
+    const selectedAll = menu.options.every((value) => mapMenu.draft.includes(value));
+    setMapValueFilters((current) => ({ ...current, [menu.key]: selectedAll ? [] : menu.options.filter((value) => mapMenu.draft.includes(value)) }));
+    mapMenu.close();
+  };
+  const clearMapFilter = () => {
+    const menu = mapMenu.menu;
+    if (menu) {
+      setMapValueFilters((current) => ({ ...current, [menu.key]: [] }));
+    }
+    mapMenu.close();
+  };
 
   return (
     <div className="overflow-auto rounded-lg border border-slate-200">
+      {mapMenu.menu ? (
+        <GstFilterMenu
+          columnLabel={caseMapColumns.find((column) => column.key === mapMenu.menu?.key)?.label ?? ""}
+          draft={mapMenu.draft}
+          hasFilter={Boolean(mapValueFilters[mapMenu.menu.key]?.length)}
+          menuPos={mapMenu.menu.menuPos}
+          onApply={applyMapFilter}
+          onCancel={mapMenu.close}
+          onClear={clearMapFilter}
+          onSearchChange={mapMenu.setSearch}
+          onSortAsc={() => {
+            setMapSort({ dir: "asc", key: mapMenu.menu?.key ?? "" });
+            mapMenu.close();
+          }}
+          onSortDesc={() => {
+            setMapSort({ dir: "desc", key: mapMenu.menu?.key ?? "" });
+            mapMenu.close();
+          }}
+          onToggleAll={mapMenu.toggleAll}
+          onToggleValue={mapMenu.toggleValue}
+          search={mapMenu.search}
+          visibleOptions={mapMenu.visibleOptions}
+        />
+      ) : null}
       <table className="w-full min-w-[1120px] border-collapse text-left text-sm">
         <thead className="bg-slate-100 text-[11px] font-black uppercase tracking-wide text-slate-600">
           <tr>
             <th className="w-8 border-b border-slate-200 px-2 py-2" />
-            <th className="whitespace-nowrap border-b border-slate-200 px-3 py-2">Case ID</th>
-            <th className="whitespace-nowrap border-b border-slate-200 px-3 py-2">Category</th>
-            <th className="whitespace-nowrap border-b border-slate-200 px-3 py-2">Tax Period</th>
-            <th className="whitespace-nowrap border-b border-slate-200 px-3 py-2">Case Status</th>
-            <th className="whitespace-nowrap border-b border-slate-200 px-3 py-2">Chain</th>
-            <th className="whitespace-nowrap border-b border-slate-200 px-3 py-2">Open / Closed</th>
-            <th className="whitespace-nowrap border-b border-slate-200 px-3 py-2">Demand Amount</th>
+            {caseMapColumns.map((column) => (
+              <th className="whitespace-nowrap border-b border-slate-200 px-3 py-2" key={column.key}>
+                <GstColumnHeader
+                  hasFilter={Boolean(mapValueFilters[column.key]?.length)}
+                  isAsc={mapSort?.key === column.key && mapSort.dir === "asc"}
+                  isDesc={mapSort?.key === column.key && mapSort.dir === "desc"}
+                  label={column.label}
+                  onOpenFilter={(anchor) => openMapFilter(column.key, anchor)}
+                  onToggleSort={() => toggleMapSort(column.key)}
+                />
+              </th>
+            ))}
+          </tr>
+          <tr className="bg-white">
+            <th className="border-b border-slate-200 px-1 py-1" />
+            {caseMapColumns.map((column) => (
+              <th className="border-b border-slate-200 px-1 py-1" key={column.key}>
+                <FilterInput
+                  onChange={(value) => setMapTextFilters((previous) => ({ ...previous, [column.key]: value }))}
+                  value={mapTextFilters[column.key] ?? ""}
+                />
+              </th>
+            ))}
           </tr>
         </thead>
         <tbody>
@@ -1234,8 +1432,8 @@ function CaseMapList({ demandFor, groups, hasClient, isLoading, onShowDemand, ro
                 Select a client to see its case map.
               </td>
             </tr>
-          ) : rows.length ? (
-            rows.map((row) => {
+          ) : visibleRows.length ? (
+            visibleRows.map((row) => {
               const isExpanded = expandedCaseId === row.caseId;
               const group = groups.find((candidate) => candidate.caseId === row.caseId);
               return (
@@ -1696,6 +1894,212 @@ function buildCombinedProceedings(tabs: DetailTab[]) {
   }));
 
   return { columns, rows };
+}
+
+// ---------------------------------------------------------------------------
+// TaskLine-style column controls: click a header to sort (asc → desc → off),
+// or open its funnel menu for Sort A-Z / Z-A and an Excel-like checkbox list
+// of the values that survive every OTHER active filter.
+
+type GstSortState = { dir: "asc" | "desc"; key: string } | null;
+
+function isBlankCell(value: string) {
+  const trimmed = value.trim();
+  return !trimmed || trimmed === "—";
+}
+
+// Numeric-aware compare: amounts ("₹1,29,56,348") and counts sort as numbers,
+// dd-mm-yyyy dates sort as dates, text sorts alphabetically, blanks sink.
+function compareCellValues(a: string, b: string) {
+  if (isBlankCell(a) || isBlankCell(b)) {
+    return isBlankCell(a) && isBlankCell(b) ? 0 : isBlankCell(a) ? 1 : -1;
+  }
+  const dmy = /^(\d{1,2})-(\d{1,2})-(\d{4})$/;
+  const dateA = a.trim().match(dmy);
+  const dateB = b.trim().match(dmy);
+  if (dateA && dateB) {
+    const keyOf = (m: RegExpMatchArray) => `${m[3]}${m[2].padStart(2, "0")}${m[1].padStart(2, "0")}`;
+    return keyOf(dateA).localeCompare(keyOf(dateB));
+  }
+  const numA = Number(a.replace(/[₹,\s]/g, ""));
+  const numB = Number(b.replace(/[₹,\s]/g, ""));
+  if (Number.isFinite(numA) && Number.isFinite(numB)) {
+    return numA - numB;
+  }
+  return a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
+}
+
+type GstFilterMenuState = { key: string; menuPos: { left: number; maxHeight: number; top: number }; options: string[] };
+
+function useGstFilterMenu() {
+  const [menu, setMenu] = useState<GstFilterMenuState | null>(null);
+  const [draft, setDraft] = useState<string[]>([]);
+  const [search, setSearch] = useState("");
+
+  const open = (key: string, anchor: HTMLElement, options: string[], selected: string[]) => {
+    const rect = anchor.getBoundingClientRect();
+    const width = 288;
+    const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
+    const top = rect.bottom + 4;
+    const maxHeight = Math.max(240, window.innerHeight - top - 16);
+    setMenu({ key, menuPos: { left, maxHeight, top }, options });
+    setDraft(selected.length ? [...selected] : [...options]);
+    setSearch("");
+  };
+  const close = () => {
+    setMenu(null);
+    setDraft([]);
+    setSearch("");
+  };
+  const visibleOptions = menu
+    ? menu.options.filter((value) => !search.trim() || (value || "(Blank)").toLowerCase().includes(search.trim().toLowerCase()))
+    : [];
+  const toggleValue = (value: string) =>
+    setDraft((current) => (current.includes(value) ? current.filter((item) => item !== value) : [...current, value]));
+  const toggleAll = () =>
+    setDraft((current) =>
+      visibleOptions.every((value) => current.includes(value))
+        ? current.filter((value) => !visibleOptions.includes(value))
+        : [...new Set([...current, ...visibleOptions])]
+    );
+
+  return { close, draft, menu, open, search, setSearch, toggleAll, toggleValue, visibleOptions };
+}
+
+function GstColumnHeader({ hasFilter, isAsc, isDesc, label, onOpenFilter, onToggleSort }: {
+  hasFilter: boolean;
+  isAsc: boolean;
+  isDesc: boolean;
+  label: string;
+  onOpenFilter: (anchor: HTMLElement) => void;
+  onToggleSort: () => void;
+}) {
+  return (
+    <div className="flex items-center gap-1">
+      <button className="flex min-w-0 flex-1 items-center justify-between gap-1 text-left" onClick={onToggleSort} title={`Sort by ${label}`} type="button">
+        <span className="min-w-0 whitespace-nowrap leading-tight">{label}</span>
+        <span className="flex shrink-0 flex-col leading-none">
+          <ArrowUp className={`size-3 ${isAsc ? "text-navy-700" : "text-slate-300"}`} />
+          <ArrowDown className={`-mt-1 size-3 ${isDesc ? "text-navy-700" : "text-slate-300"}`} />
+        </span>
+      </button>
+      <button
+        aria-label={`Filter ${label}`}
+        className={`inline-flex size-5 shrink-0 items-center justify-center rounded border transition ${
+          hasFilter ? "border-navy-600 bg-navy-600 text-white" : "border-slate-300 bg-white text-slate-500 hover:bg-slate-100"
+        }`}
+        onClick={(event) => onOpenFilter(event.currentTarget)}
+        title={`Filter ${label}`}
+        type="button"
+      >
+        <Filter className="size-3" />
+      </button>
+    </div>
+  );
+}
+
+function GstFilterMenu({ columnLabel, draft, hasFilter, menuPos, onApply, onCancel, onClear, onSearchChange, onSortAsc, onSortDesc, onToggleAll, onToggleValue, search, visibleOptions }: {
+  columnLabel: string;
+  draft: string[];
+  hasFilter: boolean;
+  menuPos: { left: number; maxHeight: number; top: number };
+  onApply: () => void;
+  onCancel: () => void;
+  onClear: () => void;
+  onSearchChange: (value: string) => void;
+  onSortAsc: () => void;
+  onSortDesc: () => void;
+  onToggleAll: () => void;
+  onToggleValue: (value: string) => void;
+  search: string;
+  visibleOptions: string[];
+}) {
+  if (typeof document === "undefined") {
+    return null;
+  }
+
+  const allVisibleSelected = visibleOptions.length > 0 && visibleOptions.every((value) => draft.includes(value));
+  const someVisibleSelected = visibleOptions.some((value) => draft.includes(value)) && !allVisibleSelected;
+
+  return createPortal(
+    <>
+      <div className="fixed inset-0 z-[999]" onClick={onCancel} />
+      <div
+        className="fixed z-[1000] flex w-72 flex-col overflow-hidden rounded-lg border border-slate-300 bg-white p-2 text-left normal-case tracking-normal text-slate-900 shadow-2xl"
+        style={{ left: menuPos.left, maxHeight: menuPos.maxHeight, top: menuPos.top }}
+      >
+        <div className="shrink-0 space-y-1 border-b border-slate-200 pb-2">
+          <button className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm font-semibold transition hover:bg-slate-100" onClick={onSortAsc} type="button">
+            <span className="flex w-8 items-center justify-center text-xs font-black text-navy-700">A-Z</span>
+            Sort A to Z
+          </button>
+          <button className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm font-semibold transition hover:bg-slate-100" onClick={onSortDesc} type="button">
+            <span className="flex w-8 items-center justify-center text-xs font-black text-navy-700">Z-A</span>
+            Sort Z to A
+          </button>
+        </div>
+
+        <button
+          className="mt-2 flex w-full shrink-0 items-center gap-2 rounded-md px-2 py-2 text-sm font-semibold text-slate-500 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-300 disabled:hover:bg-white"
+          disabled={!hasFilter}
+          onClick={onClear}
+          type="button"
+        >
+          <X className="size-4" />
+          Clear Filter From &quot;{columnLabel}&quot;
+        </button>
+
+        <div className="mt-2 flex shrink-0 justify-end gap-2">
+          <button className="inline-flex h-9 items-center justify-center rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50" onClick={onCancel} type="button">
+            Cancel
+          </button>
+          <button className="inline-flex h-9 items-center justify-center rounded-md bg-navy-700 px-4 text-sm font-semibold text-white transition hover:bg-navy-800" onClick={onApply} type="button">
+            OK
+          </button>
+        </div>
+
+        <div className="mt-2 flex shrink-0 items-center gap-2 rounded-md border border-slate-300 px-2 py-1.5">
+          <Search className="size-4 text-slate-400" />
+          <input
+            className="min-w-0 flex-1 bg-transparent text-sm font-semibold outline-none placeholder:text-slate-400"
+            onChange={(event) => onSearchChange(event.target.value)}
+            placeholder="Search"
+            value={search}
+          />
+        </div>
+
+        <div className="mt-2 min-h-0 flex-1 overflow-y-auto overscroll-contain border border-slate-200 bg-slate-50 p-2">
+          <label className="flex cursor-pointer items-center gap-2 text-sm font-semibold text-slate-950">
+            <input
+              checked={allVisibleSelected}
+              className="size-4 accent-navy-700"
+              onChange={onToggleAll}
+              ref={(input) => {
+                if (input) {
+                  input.indeterminate = someVisibleSelected;
+                }
+              }}
+              type="checkbox"
+            />
+            (Select All)
+          </label>
+          <div className="mt-1 space-y-1">
+            {visibleOptions.length ? (
+              visibleOptions.map((value) => (
+                <label className="flex cursor-pointer items-center gap-2 text-sm font-semibold text-slate-950" key={value || "(blank)"}>
+                  <input checked={draft.includes(value)} className="size-4 accent-navy-700" onChange={() => onToggleValue(value)} type="checkbox" />
+                  <span className="min-w-0 truncate" title={value || "(Blank)"}>{value || "(Blank)"}</span>
+                </label>
+              ))
+            ) : (
+              <p className="py-6 text-center text-sm font-semibold text-slate-500">No values found</p>
+            )}
+          </div>
+        </div>
+      </div>
+    </>,
+    document.body
+  );
 }
 
 function FilterInput({ onChange, value }: { onChange: (value: string) => void; value: string }) {
