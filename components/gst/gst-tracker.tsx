@@ -1593,22 +1593,62 @@ function proceedingStage(tabList: string): string {
 function CaseMapProceedings({ group }: { group: CaseGroup }) {
   const combined = buildCombinedProceedings(group.tabs);
   const lower = combined.columns.map((column) => column.toLowerCase());
-  const col = (pattern: RegExp) => lower.findIndex((column) => pattern.test(column));
-  const typeIndex = col(/^type/);
-  const refIndex = col(/reference number/);
-  const dateIndex = col(/issue date/);
-  const dueIndex = col(/due date/);
-  const attachIndex = col(/attach/);
+  const usable = (cell: string | undefined) => {
+    const trimmed = (cell ?? "").trim();
+    return trimmed && trimmed !== "—" && !/^-?na-?$/i.test(trimmed) ? trimmed : "";
+  };
+
+  // Each portal page names its columns differently (an appeal page says
+  // "Date of Order" and "Type of Documents" where a notice page says "Issue
+  // Date" and "Type"), so every field is found under ANY of its spellings,
+  // in priority order, and whatever is left over shows as extra detail lines.
+  const typePatterns = [/^type$/, /^type(?! of documents)/, /order category/, /notice type|form description/, /type of documents/, /description/];
+  const datePatterns = [/issue date/, /date of order|order date/, /filed on|date of filing|date of application/, /^date$/];
+  const duePatterns = [/due date/];
+  const refPatterns = [/reference number/];
+  const docPatterns = [/attach/, /view documents/, /^documents?$/];
+  const noisePattern = /^s\.? ?no|^sr\.? ?no|serial/;
 
   const rows = combined.rows
-    .map((row) => ({
-      attachments: attachIndex >= 0 ? row.cells[attachIndex] ?? "" : "",
-      date: dateIndex >= 0 ? row.cells[dateIndex] ?? "" : "",
-      due: dueIndex >= 0 ? row.cells[dueIndex] ?? "" : "",
-      reference: refIndex >= 0 ? row.cells[refIndex] ?? "" : "",
-      stage: proceedingStage(row.category),
-      type: typeIndex >= 0 ? row.cells[typeIndex] ?? "" : ""
-    }))
+    .map((row) => {
+      const picked = new Set<number>();
+      const pick = (patterns: RegExp[]) => {
+        for (const pattern of patterns) {
+          for (let index = 0; index < lower.length; index += 1) {
+            if (!picked.has(index) && pattern.test(lower[index]) && usable(row.cells[index])) {
+              picked.add(index);
+              return usable(row.cells[index]);
+            }
+          }
+        }
+        return "";
+      };
+      const type = pick(typePatterns);
+      const reference = pick(refPatterns);
+      const date = pick(datePatterns);
+      const due = pick(duePatterns);
+      const docParts: string[] = [];
+      lower.forEach((column, index) => {
+        if (docPatterns.some((pattern) => pattern.test(column))) {
+          const cell = usable(row.cells[index]);
+          picked.add(index);
+          if (cell) {
+            docParts.push(cell);
+          }
+        }
+      });
+      const extras: { label: string; value: string }[] = [];
+      combined.columns.forEach((column, index) => {
+        if (picked.has(index) || noisePattern.test(lower[index])) {
+          return;
+        }
+        const cell = usable(row.cells[index]);
+        if (cell) {
+          extras.push({ label: column, value: cell });
+        }
+      });
+      return { attachments: docParts.join(" "), date, due, extras, reference, stage: proceedingStage(row.category), type };
+    })
     .sort((a, b) => (parseAnyDate(a.date)?.getTime() ?? 0) - (parseAnyDate(b.date)?.getTime() ?? 0));
 
   if (!rows.length) {
@@ -1636,7 +1676,18 @@ function CaseMapProceedings({ group }: { group: CaseGroup }) {
                   {row.stage}
                 </span>
               </td>
-              <td className="px-3 py-2 align-top font-semibold text-slate-700">{row.type || "—"}</td>
+              <td className="px-3 py-2 align-top font-semibold text-slate-700">
+                {row.type || "—"}
+                {row.extras.length ? (
+                  <span className="mt-1 flex flex-col gap-0.5">
+                    {row.extras.map((extra) => (
+                      <span className="text-[10px] font-semibold text-slate-400" key={extra.label}>
+                        <span className="font-bold text-slate-500">{extra.label}:</span> {extra.value}
+                      </span>
+                    ))}
+                  </span>
+                ) : null}
+              </td>
               <td className="whitespace-nowrap px-3 py-2 align-top font-semibold text-slate-700">{row.reference || "—"}</td>
               <td className="whitespace-nowrap px-3 py-2 align-top font-semibold text-slate-700">{row.date || "—"}</td>
               <td className="whitespace-nowrap px-3 py-2 align-top font-semibold text-slate-700">{row.due || "—"}</td>
