@@ -8,7 +8,7 @@ import { chromium } from "playwright-core";
 import XLSX from "xlsx";
 import { getCollectorOutputDir, getDefaultWorkbookPath, getWorklineGstHome } from "./gst-helper-home.mjs";
 
-const COLLECTOR_VERSION = "2026-10-13-v65-click-v23";
+const COLLECTOR_VERSION = "2026-10-13-v65-dates-v24";
 const GST_PORTAL_LOGIN_URL = "https://services.gst.gov.in/services/login";
 const WORKLINE_GST_HOME = getWorklineGstHome();
 const DEFAULT_WORKBOOK_PATH = getDefaultWorkbookPath();
@@ -1182,31 +1182,75 @@ async function selectAppealType(page, label) {
   return ok;
 }
 
-// Fills the From/To date fields (Angular inputs need value + events set).
-async function setApplicationDates(page, from, to) {
-  await page.evaluate(({ from: fromValue, to: toValue }) => {
-    const setValue = (names, value) => {
-      for (const name of names) {
-        const el = document.querySelector(`[name='${name}']`) || document.getElementById(name);
-        if (el) {
-          el.removeAttribute("readonly");
-          el.value = value;
-          el.dispatchEvent(new Event("input", { bubbles: true }));
-          el.dispatchEvent(new Event("change", { bubbles: true }));
-          el.dispatchEvent(new Event("blur", { bubbles: true }));
-          return true;
+// Writes one date into a My Applications picker field THE v65 WAY. Setting
+// the DOM value is not enough: these inputs are driven by a datepicker
+// widget, and the AngularJS ng-model can stay EMPTY while the field looks
+// right - the search then runs with no dates and returns nothing. v65 hit and
+// documented exactly this, and fixed it by pushing the value into the ngModel
+// controller itself and verifying it stuck (sync_angular_model).
+async function setAngularDate(page, names, value) {
+  return page.evaluate(({ names: wanted, value: dmy }) => {
+    let el = null;
+    for (const name of wanted) {
+      el = document.querySelector(`[name='${name}']`) || document.getElementById(name);
+      if (el && (el.offsetWidth || el.offsetHeight)) {
+        break;
+      }
+      el = null;
+    }
+    if (!el) {
+      return "no-field";
+    }
+    el.removeAttribute("readonly");
+    el.value = dmy;
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+    el.dispatchEvent(new Event("blur", { bubbles: true }));
+    try {
+      if (window.angular) {
+        const ngEl = window.angular.element(el);
+        const ctrl = ngEl.controller("ngModel");
+        if (ctrl) {
+          if (String(ctrl.$viewValue ?? "").trim() !== dmy) {
+            ctrl.$setViewValue(dmy);
+            ctrl.$render();
+            const scope = ngEl.scope();
+            if (scope && !scope.$$phase) {
+              scope.$apply();
+            }
+          }
+          const view = String(ctrl.$viewValue ?? "").trim();
+          if (view !== dmy) {
+            return `model-not-set:${view}`;
+          }
         }
       }
-      return false;
-    };
-    setValue(["fromdate", "fmdt", "from_date"], fromValue);
-    setValue(["todate", "todt", "to_date"], toValue);
-  }, { from, to }).catch(() => {});
-  await page.waitForTimeout(600);
+    } catch (error) {
+      return `model-error:${String(error).slice(0, 60)}`;
+    }
+    return "ok";
+  }, { names, value }).catch(() => "error");
+}
+
+async function setApplicationDates(page, from, to) {
+  const fromResult = await setAngularDate(page, ["fromdate", "fmdt", "from_date"], from);
+  const toResult = await setAngularDate(page, ["todate", "todt", "to_date"], to);
+  if (fromResult !== "ok" || toResult !== "ok") {
+    console.log(`  Date fields ${from}-${to}: from=${fromResult} to=${toResult}.`);
+  }
+  // Blur the picker so its popup closes before Search is clicked (v65 does
+  // the same; an open calendar intercepts the Search click).
+  await page.evaluate(() => {
+    if (document.activeElement && document.activeElement.blur) {
+      document.activeElement.blur();
+    }
+  }).catch(() => undefined);
+  await page.waitForTimeout(800);
+  return fromResult === "ok" && toResult === "ok";
 }
 
 async function clickApplicationSearch(page) {
-  const clicked = await page.evaluate(() => {
+  return page.evaluate(() => {
     const up = (value) => String(value ?? "").toUpperCase();
     const el = [...document.querySelectorAll("button,a,input[type=submit],button[type=submit]")].find((candidate) =>
       up(candidate.innerText || candidate.value || "").includes("SEARCH")
@@ -1218,8 +1262,88 @@ async function clickApplicationSearch(page) {
     el.click();
     return true;
   }).catch(() => false);
-  await page.waitForTimeout(2_500);
-  return clicked;
+}
+
+// ---------------------------------------------------------------------------
+// Waiting for a search response, the v65 way. Waiting for "rows appear" is
+// wrong in BOTH directions: an empty window burns the whole timeout, and the
+// PREVIOUS search's rows still in the DOM read as a hit before the response
+// has even arrived (that is how a type inherits another type's results). So
+// completed XHRs are counted instead: the search is done when the count moves
+// and Angular's $http queue is idle.
+
+async function installXhrCounter(page) {
+  return page.evaluate(() => {
+    if (!window.__gst) {
+      window.__gst = { done: 0 };
+      const send = XMLHttpRequest.prototype.send;
+      XMLHttpRequest.prototype.send = function (...args) {
+        try {
+          this.addEventListener("loadend", () => {
+            window.__gst.done += 1;
+          });
+        } catch {
+          // counting only - never let the hook break the page's own XHR
+        }
+        return send.apply(this, args);
+      };
+    }
+    return window.__gst.done;
+  }).catch(() => null);
+}
+
+async function waitForSearchResponse(page, before, timeoutMs = 20_000) {
+  if (before === null || before === undefined) {
+    return { hooked: false };
+  }
+  const deadline = Date.now() + timeoutMs;
+  let landed = false;
+  while (Date.now() < deadline) {
+    const state = await page.evaluate(() => {
+      let pending = -1;
+      try {
+        if (window.angular) {
+          pending = window.angular.element(document.body).injector().get("$http").pendingRequests.length;
+        }
+      } catch {
+        pending = -1;
+      }
+      return { done: window.__gst ? window.__gst.done : null, pending };
+    }).catch(() => null);
+    if (!state || state.done === null || state.done < before) {
+      // the page navigated and took the hook with it
+      return { hooked: false, navigated: true };
+    }
+    if (state.done > before) {
+      landed = true;
+      if ((state.pending ?? -1) <= 0) {
+        await page.waitForTimeout(400); // let the $digest paint the table
+        return { hooked: true, responded: true };
+      }
+    }
+    await page.waitForTimeout(150);
+  }
+  return { hooked: true, responded: landed, timeout: true };
+}
+
+// One search cycle: dates in (model-verified), counter armed, Search clicked,
+// response awaited, rows read only when the portal actually answered.
+async function runApplicationSearch(page, from, to) {
+  await setApplicationDates(page, from, to);
+  const before = await installXhrCounter(page);
+  if (!(await clickApplicationSearch(page))) {
+    console.log(`  ${from}-${to}: search button not found.`);
+    return { responded: false, rows: [] };
+  }
+  const outcome = await waitForSearchResponse(page, before);
+  if (outcome.hooked && !outcome.responded) {
+    console.log(`  ${from}-${to}: the portal did not answer - ignoring stale rows.`);
+    return { responded: false, rows: [] };
+  }
+  if (!outcome.hooked) {
+    await page.waitForTimeout(2_500); // hook unavailable; the old fixed wait
+  }
+  return { responded: true, rows: await extractAppealResultRows(page) };
 }
 
 // Reads the application result rows (skips "No Records Found").
@@ -1340,6 +1464,11 @@ async function returnToMyApplications(page) {
   }
 }
 
+// Applications already absorbed in this run, across ALL types - an ARN seen
+// under Appeal must not be re-absorbed when a stale row survives into the
+// SPL searches (v65 dedupes against its global APPLICATIONS list this way).
+const harvestedApplicationKeys = new Set();
+
 // Searches My Applications for a given application type across 90-day windows,
 // then drills into each application's case page and captures its sub-tabs.
 async function collectApplications(page, appType, startDmy) {
@@ -1359,21 +1488,22 @@ async function collectApplications(page, appType, startDmy) {
   console.log(`Applications (${appType}): searching ${windows.length} window(s) of ${APPEAL_WINDOW_DAYS} days from ${startFrom}.`);
 
   const found = [];
-  const seen = new Set();
   for (const [from, to] of windows) {
-    await setApplicationDates(page, from, to);
-    await clickApplicationSearch(page);
-    await page.waitForTimeout(1_200);
-    const rows = await extractAppealResultRows(page);
-    if (rows.length) {
-      console.log(`  Appeals ${from}-${to}: ${rows.length} application(s).`);
-    }
+    const { rows } = await runApplicationSearch(page, from, to);
+    let fresh = 0;
     for (const row of rows) {
       const key = row.arn || row.cells.join("|");
-      if (!seen.has(key)) {
-        seen.add(key);
+      // The dedupe set spans ALL application types (v65's absorb rule): rows
+      // still on screen from the previous type's last search would otherwise
+      // be absorbed again as this type's results.
+      if (!harvestedApplicationKeys.has(key)) {
+        harvestedApplicationKeys.add(key);
         found.push({ arn: row.arn, cells: row.cells, filedOn: row.filedOn, from, kind: row.kind, orderNo: row.orderNo, status: row.status, to });
+        fresh += 1;
       }
+    }
+    if (rows.length) {
+      console.log(`  ${from}-${to}: ${rows.length} row(s) on screen, ${fresh} new.`);
     }
   }
 
@@ -1386,9 +1516,9 @@ async function collectApplications(page, appType, startDmy) {
       await returnToMyApplications(page);
     }
     await selectAppealType(page, appType);
-    await setApplicationDates(page, app.from, app.to);
-    await clickApplicationSearch(page);
-    await page.waitForTimeout(1_200);
+    // Re-search the exact window that returned this application - that window
+    // is KNOWN to return it (v65's drill-down rule).
+    await runApplicationSearch(page, app.from, app.to);
 
     const opened = await openAppealRow(page, app.arn);
     console.log(`  ${appType} ${index + 1}/${found.length} ${app.arn}: ${opened ? "opened" : "not opened"}`);
