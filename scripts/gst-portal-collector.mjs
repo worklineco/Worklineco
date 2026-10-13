@@ -8,7 +8,7 @@ import { chromium } from "playwright-core";
 import XLSX from "xlsx";
 import { getCollectorOutputDir, getDefaultWorkbookPath, getWorklineGstHome } from "./gst-helper-home.mjs";
 
-const COLLECTOR_VERSION = "2026-10-13-v65-exit-v22";
+const COLLECTOR_VERSION = "2026-10-13-v65-click-v23";
 const GST_PORTAL_LOGIN_URL = "https://services.gst.gov.in/services/login";
 const WORKLINE_GST_HOME = getWorklineGstHome();
 const DEFAULT_WORKBOOK_PATH = getDefaultWorkbookPath();
@@ -646,22 +646,24 @@ async function openCaseDetail(page, index) {
 
 const DASHBOARD_URL = "https://services.gst.gov.in/services/auth/dashboard";
 
-// Clicks a link/button ONLY when it is visible - never a hidden menu copy,
-// whose click reports success without navigating anywhere.
-async function clickVisiblePortalLink(page, label) {
-  return page.evaluate((wanted) => {
-    const norm = (value) => String(value ?? "").replace(/\s+/g, " ").trim().toLowerCase();
-    const isShown = (el) => Boolean(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
-    const el = [...document.querySelectorAll("a,button")]
-      .find((candidate) => norm(candidate.innerText) === norm(wanted) && isShown(candidate));
-    if (!el) {
-      return false;
-    }
-    el.scrollIntoView({ block: "center" });
-    el.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, cancelable: true, view: window }));
-    el.click();
+// A REAL mouse click, exactly like v65's ActionChains: move the pointer onto
+// the element (the hover is what opens the portal's dropdown menus), pause a
+// second, then click with the actual mouse. A synthetic JS click on a menu
+// GROUP header ("User Services" / "Ledgers") made the browser follow the
+// header's own href - the Search HSN Code page - because no real hover ever
+// happened; a real hover-click lets the menu script swallow the click and
+// keep the dropdown open instead.
+async function realClickPortalLink(page, label) {
+  try {
+    const link = page.locator(`a:text-is("${label}"):visible, button:text-is("${label}"):visible`).first();
+    await link.waitFor({ state: "visible", timeout: 6_000 });
+    await link.hover({ timeout: 5_000 });
+    await page.waitForTimeout(1_000);
+    await link.click({ timeout: 5_000 });
     return true;
-  }, label).catch(() => false);
+  } catch {
+    return false;
+  }
 }
 
 // The portal stacks modals after login (Aadhaar / e-KYC, then the Principal
@@ -719,21 +721,18 @@ async function goToPortalPage(page, { groupLabel, hrefFragment, itemLabel, label
     await page.waitForTimeout(3_000);
     await ensureNoModal(page);
 
-    await clickVisiblePortalLink(page, "Services");
+    await realClickPortalLink(page, "Services");
     await page.waitForTimeout(2_500);
 
-    // open_submenu: wait for the group entry, re-opening Services if a click
-    // did not register (4 x 6s instead of one dead 25s wait).
+    // open_submenu: wait for the group entry (real hover + click, the v65
+    // way), re-opening Services if the dropdown never appeared (4 x 6s
+    // instead of one dead 25s wait).
     let groupOpen = false;
     for (let tries = 0; tries < 4 && !groupOpen; tries += 1) {
-      for (let poll = 0; poll < 12 && !groupOpen; poll += 1) {
-        groupOpen = await clickVisiblePortalLink(page, groupLabel);
-        if (!groupOpen) {
-          await page.waitForTimeout(500);
-        }
-      }
+      groupOpen = await realClickPortalLink(page, groupLabel);
       if (!groupOpen) {
-        await clickVisiblePortalLink(page, "Services");
+        console.log(`${label}: submenu not open - reopening Services (${tries + 1}/4).`);
+        await realClickPortalLink(page, "Services");
         await page.waitForTimeout(2_000);
       }
     }
