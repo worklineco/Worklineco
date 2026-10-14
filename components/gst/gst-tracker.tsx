@@ -750,7 +750,9 @@ export function GstTracker() {
     // CAPTCHA), then relay the extracted rows to WorkLine through the
     // signed-in session - the helper itself never needs database keys.
     const watchToken = (watchTokenRef.current += 1);
-    const deadline = Date.now() + 10 * 60 * 1000;
+    // Long enough for a big client plus the hand-typed login - a full
+    // Sanganeriya run takes ~13 minutes before the output lands.
+    const deadline = Date.now() + 30 * 60 * 1000;
 
     while (Date.now() < deadline) {
       await new Promise((resolve) => window.setTimeout(resolve, 5000));
@@ -762,11 +764,16 @@ export function GstTracker() {
         if (!response.ok) {
           continue;
         }
-        const output = (await response.json().catch(() => null)) as {
+        const envelope = (await response.json().catch(() => null)) as {
           extractedAt?: string;
+          payload?: { extractedAt?: string; rows?: unknown[]; sources?: string[] };
           rows?: unknown[];
           sources?: string[];
         } | null;
+        // The helper's /latest wraps the collector output in { fileName,
+        // modifiedAt, payload } - reading extractedAt off the top level made
+        // every poll skip, so the page never auto-saved a finished scrape.
+        const output = envelope?.payload ?? envelope;
         const extractedAt = Date.parse(String(output?.extractedAt ?? ""));
         if (!output || Number.isNaN(extractedAt) || extractedAt < startedAt - 60_000) {
           continue;
