@@ -8,7 +8,7 @@ import { chromium } from "playwright-core";
 import XLSX from "xlsx";
 import { getCollectorOutputDir, getDefaultWorkbookPath, getWorklineGstHome } from "./gst-helper-home.mjs";
 
-const COLLECTOR_VERSION = "2026-10-14-v65-search-v27-emptywindows";
+const COLLECTOR_VERSION = "2026-10-14-v65-search-v28-clientpaging";
 const GST_PORTAL_LOGIN_URL = "https://services.gst.gov.in/services/login";
 const WORKLINE_GST_HOME = getWorklineGstHome();
 const DEFAULT_WORKBOOK_PATH = getDefaultWorkbookPath();
@@ -2375,20 +2375,33 @@ async function readClientFromClientRecords(gstin) {
     return null;
   }
 
-  const { data, error } = await admin
-    .from("clients")
-    .select("name,organisation_id,custom_values")
-    .eq("custom_values->>source", CLIENT_RECORDS_SOURCE)
-    .limit(5000);
+  // Supabase caps a single response at 1,000 rows, so page through the whole
+  // Client Records register. A single .limit(5000) silently stopped at 1,000,
+  // which made clients past that point look missing (the collector then failed
+  // with "No client in Client Records has GSTIN ...").
+  let match = null;
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await admin
+      .from("clients")
+      .select("name,organisation_id,custom_values")
+      .eq("custom_values->>source", CLIENT_RECORDS_SOURCE)
+      .order("id", { ascending: true })
+      .range(from, from + 999);
 
-  if (error) {
-    throw new Error(`Could not read Client Records from WorkLine: ${error.message}`);
+    if (error) {
+      throw new Error(`Could not read Client Records from WorkLine: ${error.message}`);
+    }
+
+    const page = data ?? [];
+    match = page.find((row) => {
+      const values = row.custom_values ?? {};
+      return String(values["GSTIN/UIN"] ?? "").trim().toUpperCase() === expectedGstin;
+    });
+
+    if (match || page.length < 1000) {
+      break;
+    }
   }
-
-  const match = (data ?? []).find((row) => {
-    const values = row.custom_values ?? {};
-    return String(values["GSTIN/UIN"] ?? "").trim().toUpperCase() === expectedGstin;
-  });
 
   if (!match) {
     throw new Error(`No client in Client Records has GSTIN ${expectedGstin}.`);

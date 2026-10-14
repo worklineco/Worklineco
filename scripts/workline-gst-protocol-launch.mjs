@@ -98,13 +98,15 @@ async function ensureHelperRunning(home) {
 
 async function main() {
   const home = getWorklineGstHome();
-  const { gstin } = parseProtocolUrl(process.argv[2] || "");
+  // The GSTIN is parsed for backwards compatibility but no longer used to kick
+  // off a scrape here: this launcher only makes sure the helper is running.
+  // Starting a scrape from here would POST /start WITHOUT the GST login, so the
+  // collector would fall back to a Client Records lookup and exit before the
+  // portal window ever opens. The WorkLine app sends the real /start with the
+  // client's login as soon as the helper is ready.
+  parseProtocolUrl(process.argv[2] || "");
 
   await ensureHelperRunning(home);
-
-  if (gstin) {
-    await requestJson("POST", "/start", { gstin });
-  }
 }
 
 main().catch((error) => {
