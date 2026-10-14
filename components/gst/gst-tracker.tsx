@@ -931,8 +931,7 @@ export function GstTracker() {
     { key: "period", label: "Tax Period" },
     { key: "status", label: "Status" },
     { key: "openClosed", label: "Open / Closed" },
-    { key: "demand", label: "Demand Amount" },
-    { key: "notices", label: "Notices" }
+    { key: "demand", label: "Demand Amount" }
   ];
 
   return (
@@ -1112,13 +1111,12 @@ export function GstTracker() {
                 </th>
                 <th className="border-b border-slate-200 px-1 py-1" />
                 <th className="border-b border-slate-200 px-1 py-1" />
-                <th className="border-b border-slate-200 px-1 py-1" />
               </tr>
             </thead>
             <tbody>
               {!selectedGstin ? (
                 <tr>
-                  <td className="px-4 py-10 text-center text-sm font-bold text-slate-400" colSpan={9}>
+                  <td className="px-4 py-10 text-center text-sm font-bold text-slate-400" colSpan={8}>
                     Select a client to see its cases.
                   </td>
                 </tr>
@@ -1163,7 +1161,6 @@ export function GstTracker() {
                             "—"
                           )}
                         </td>
-                        <td className="px-3 py-2 align-top font-semibold text-slate-500">{group.notices.length}</td>
                         <td className="px-3 py-2 text-right">
                           <button
                             aria-label="Remove case"
@@ -1180,7 +1177,7 @@ export function GstTracker() {
                       </tr>
                       {isExpanded ? (
                         <tr className="border-b border-slate-100 bg-slate-50/60">
-                          <td className="px-4 py-4" colSpan={9}>
+                          <td className="px-4 py-4" colSpan={8}>
                             <CaseDetail group={group} />
                           </td>
                         </tr>
@@ -1190,7 +1187,7 @@ export function GstTracker() {
                 })
               ) : (
                 <tr>
-                  <td className="px-4 py-10 text-center text-sm font-bold text-slate-400" colSpan={9}>
+                  <td className="px-4 py-10 text-center text-sm font-bold text-slate-400" colSpan={8}>
                     {isLoadingCases
                       ? "Loading…"
                       : cases.length
@@ -1756,7 +1753,7 @@ function CompactAttachments({ value }: { value: string }) {
 
 function CaseDetail({ group }: { group: CaseGroup }) {
   const tabs = group.tabs;
-  const combined = buildCombinedProceedings(tabs);
+  const sections = buildProceedingsByCategory(tabs);
 
   return (
     <div className="space-y-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -1809,50 +1806,51 @@ function CaseDetail({ group }: { group: CaseGroup }) {
         </div>
       </details>
 
-      {combined.rows.length ? (
-        <div className="space-y-2">
+      {sections.length ? (
+        <div className="space-y-3">
           <p className="text-xs font-black uppercase tracking-wide text-navy-700">Case proceedings</p>
-          <div className="overflow-auto rounded-lg border border-slate-200 shadow-sm">
-            <table className="w-full border-collapse text-left text-xs">
-              <thead className="bg-navy-700 text-[10px] font-black uppercase tracking-wide text-white">
-                <tr>
-                  <th className="whitespace-nowrap px-3 py-2">Category</th>
-                  {combined.columns.map((header, headerIndex) => (
-                    <th className="whitespace-nowrap px-3 py-2" key={headerIndex}>
-                      {header || "—"}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {combined.rows.map((row, rowIndex) => (
-                  <tr className={`border-b border-slate-100 last:border-b-0 ${rowIndex % 2 ? "bg-slate-50/60" : "bg-white"}`} key={rowIndex}>
-                    <td className="whitespace-nowrap px-3 py-2 align-top">
-                      <span className="flex flex-wrap gap-1">
-                        {row.category.split(",").map((name, nameIndex) => (
-                          <span
-                            className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-black uppercase ${categoryPillClass(name)}`}
-                            key={nameIndex}
-                          >
-                            {name.trim()}
-                          </span>
+          {sections.map((section, sectionIndex) => (
+            <div className="space-y-1.5" key={sectionIndex}>
+              <span
+                className={`inline-flex rounded-full border px-2.5 py-0.5 text-[10px] font-black uppercase ${categoryPillClass(section.category)}`}
+              >
+                {section.category}
+              </span>
+              {section.tables.map((table, tableIndex) => (
+                <div className="overflow-auto rounded-lg border border-slate-200 shadow-sm" key={tableIndex}>
+                  <table className="w-full border-collapse text-left text-xs">
+                    <thead className="bg-navy-700 text-[10px] font-black uppercase tracking-wide text-white">
+                      <tr>
+                        {table.headers.map((header, headerIndex) => (
+                          <th className="whitespace-nowrap px-3 py-2" key={headerIndex}>
+                            {header || "—"}
+                          </th>
                         ))}
-                      </span>
-                    </td>
-                    {row.cells.map((cell, cellIndex) => (
-                      <td className="px-3 py-2 align-top font-semibold text-slate-700" key={cellIndex}>
-                        {combined.columns[cellIndex]?.toLowerCase() === "attachments" ? (
-                          <AttachmentCell value={cell} />
-                        ) : (
-                          cell || "—"
-                        )}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {table.rows.map((row, rowIndex) => (
+                        <tr
+                          className={`border-b border-slate-100 last:border-b-0 ${rowIndex % 2 ? "bg-slate-50/60" : "bg-white"}`}
+                          key={rowIndex}
+                        >
+                          {table.headers.map((header, cellIndex) => (
+                            <td className="px-3 py-2 align-top font-semibold text-slate-700" key={cellIndex}>
+                              {/attachment|document/i.test(header) ? (
+                                <AttachmentCell value={row[cellIndex] ?? ""} />
+                              ) : (
+                                (row[cellIndex] ?? "").trim() || "—"
+                              )}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ))}
+            </div>
+          ))}
         </div>
       ) : (
         <p className="text-xs font-semibold text-slate-400">No sub-tab detail captured for this case yet.</p>
@@ -1969,6 +1967,43 @@ function buildCombinedProceedings(tabs: DetailTab[]) {
   }));
 
   return { columns, rows };
+}
+
+// Keeps each sub-tab's own tables intact instead of forcing every column into
+// one wide grid (which left most cells blank). Each section is a sub-tab, with
+// its original tables, exact portal headers, blank/duplicate rows removed, and
+// ragged rows padded so no captured cell is ever dropped.
+function buildProceedingsByCategory(tabs: DetailTab[]): { category: string; tables: DetailTable[] }[] {
+  const sections: { category: string; tables: DetailTable[] }[] = [];
+  for (const tab of tabs) {
+    const tables: DetailTable[] = [];
+    for (const table of tab.tables) {
+      const seen = new Set<string>();
+      const rows: string[][] = [];
+      for (const cells of table.rows) {
+        const trimmed = cells.map((cell) => (cell ?? "").trim());
+        if (!trimmed.some(Boolean)) {
+          continue;
+        }
+        const key = trimmed.join("||");
+        if (seen.has(key)) {
+          continue;
+        }
+        seen.add(key);
+        rows.push(cells);
+      }
+      if (!rows.length) {
+        continue;
+      }
+      const colCount = Math.max(table.headers.length, ...rows.map((row) => row.length));
+      const headers = Array.from({ length: colCount }, (_, index) => (table.headers[index] ?? "").trim());
+      tables.push({ headers, rows });
+    }
+    if (tables.length) {
+      sections.push({ category: tab.name, tables });
+    }
+  }
+  return sections;
 }
 
 // ---------------------------------------------------------------------------

@@ -10,7 +10,7 @@ import { chromium } from "playwright-core";
 import XLSX from "xlsx";
 import { getCollectorOutputDir, getDefaultWorkbookPath, getWorklineGstHome } from "./gst-helper-home.mjs";
 
-const COLLECTOR_VERSION = "2026-10-14-v65-search-v32-humanlogin";
+const COLLECTOR_VERSION = "2026-10-14-v65-search-v33-subtabs-appealorder";
 const GST_PORTAL_LOGIN_URL = "https://services.gst.gov.in/services/login";
 const WORKLINE_GST_HOME = getWorklineGstHome();
 const DEFAULT_WORKBOOK_PATH = getDefaultWorkbookPath();
@@ -1058,10 +1058,11 @@ async function captureCaseTables(page) {
         continue;
       }
       const headers = pickHeader(table);
-      const headerText = headers.join(" ").toLowerCase();
-      if (!/type|reference|issue date|due date|section|attachment|order|notice|reply/.test(headerText)) {
-        continue;
-      }
+      // Capture EVERY data table on the panel. The sub-tab we are on is already
+      // the filter, so restricting to tables whose header matched a fixed word
+      // list used to silently drop a tab's grid (e.g. NOTICES) whenever its
+      // columns were worded differently. We still skip the tiny banner tables
+      // (Legal Name / Trade Name, case header) below by requiring real rows.
       const bodyRows = [...table.querySelectorAll("tbody tr")];
       const dataRows = (bodyRows.length ? bodyRows : [...table.querySelectorAll("tr")]).filter((tr) => !tr.querySelector("th"));
       const rows = [];
@@ -1128,32 +1129,66 @@ async function extractCaseDetail(page) {
 
   const tabs = [];
   const sideTabs = await listCaseTabs(page);
-
-  // The default panel is already open - capture it before touching any tab,
-  // under the active tab's own name, so the active tab is never re-clicked.
   const activeTab = sideTabs.find((tab) => tab.active);
-  const mainTables = await captureCaseTables(page);
-  if (mainTables.length) {
-    const mainName = (activeTab ? activeTab.text : sideTabs[0] ? sideTabs[0].text : "NOTICES").toUpperCase();
-    const rowTotal = mainTables.reduce((sum, table) => sum + table.rows.length, 0);
-    console.log(`    Sub-tab ${mainName} (default view): ${rowTotal} row(s).`);
-    tabs.push({ name: mainName, tables: mainTables });
+
+  // Only name the already-open panel when we actually know which tab is active;
+  // guessing "the first tab" used to store one tab's grid under another tab's
+  // name and then skip the real one (that is how NOTICES went missing).
+  if (activeTab) {
+    const mainTables = await captureCaseTables(page);
+    if (mainTables.length) {
+      const mainName = activeTab.text.toUpperCase();
+      const rowTotal = mainTables.reduce((sum, table) => sum + table.rows.length, 0);
+      console.log(`    Sub-tab ${mainName} (default view): ${rowTotal} row(s).`);
+      tabs.push({ name: mainName, tables: mainTables });
+    }
   }
 
-  for (const tab of sideTabs) {
-    const name = tab.text.toUpperCase();
-    if (tab.active || tabs.some((done) => done.name === name)) {
-      continue; // already captured as the default view
+  // Visit every sub-tab the page actually shows, plus the standard ones even if
+  // enumeration missed them (a tab that is not in this list just won't be
+  // found and is skipped). Click each (except the one already captured), and
+  // retry a capture that comes back empty - the panel sometimes redraws slowly.
+  const important = [
+    "APPLICATIONS", "INTIMATIONS", "INTIMATION", "NOTICES", "REPLIES", "REPLY", "ORDERS",
+    "RECTIFICATION", "ADDITIONAL DOCUMENT", "WITHDRAWAL APPLICATION", "REMAND DETAILS",
+    "ACK./INTIMATION", "ACK/INTIMATION", "ACKNOWLEDGEMENT", "REJOINDER", "PROCEEDINGS",
+  ];
+  const targets = [];
+  const seenTarget = new Set();
+  for (const label of [...sideTabs.map((tab) => tab.text), ...important]) {
+    const key = label.toUpperCase();
+    if (!seenTarget.has(key)) {
+      seenTarget.add(key);
+      targets.push(label);
     }
-    const clicked = await clickSubTab(page, tab.text);
+  }
+
+  for (const label of targets) {
+    const name = label.toUpperCase();
+    if (tabs.some((done) => done.name === name)) {
+      continue; // already captured (the active default panel)
+    }
+    const clicked = await clickSubTab(page, label);
     if (!clicked) {
       continue;
     }
-    const tables = await captureCaseTables(page);
+    let tables = await captureCaseTables(page);
+    if (!tables.length) {
+      await page.waitForTimeout(1_200);
+      tables = await captureCaseTables(page);
+    }
     const rowTotal = tables.reduce((sum, table) => sum + table.rows.length, 0);
     console.log(`    Sub-tab ${name}: ${rowTotal} row(s).`);
     if (tables.length) {
       tabs.push({ name, tables });
+    }
+  }
+
+  // Last resort: if no tab was clickable at all, keep whatever is on screen.
+  if (!tabs.length) {
+    const fallback = await captureCaseTables(page);
+    if (fallback.length) {
+      tabs.push({ name: "DETAILS", tables: fallback });
     }
   }
 
@@ -1637,6 +1672,28 @@ const harvestedApplicationKeys = new Set();
 
 // Searches My Applications for a given application type across 90-day windows,
 // then drills into each application's case page and captures its sub-tabs.
+// Pulls the order number an appeal is filed against out of its Case Details.
+// On the Applications tab the portal shows "Order Under Appeal - Assessment
+// Demand Order" with the order's document, whose name carries the order number
+// (e.g. DRC07_ORDER_ZD080224058591E_...). We return that ZD number so the
+// tracker can link the appeal to the order's case.
+function extractOrderUnderAppeal(detail) {
+  const orderPattern = /ZD\d{8,}[A-Z0-9]*/g;
+  for (const tab of detail?.tabs ?? []) {
+    for (const table of tab.tables ?? []) {
+      const blob = [...(table.headers ?? []), ...(table.rows ?? []).flat()].join(" ");
+      if (!/order under appeal|assessment demand order|order under rectification/i.test(blob)) {
+        continue;
+      }
+      const matches = blob.toUpperCase().match(orderPattern);
+      if (matches && matches.length) {
+        return matches[0];
+      }
+    }
+  }
+  return "";
+}
+
 async function collectApplications(page, appType, startDmy, options = {}) {
   const { gstin = "", outputDir = OUTPUT_DIR, searchEmpty = false } = options;
   console.log(`Applications (${appType}): navigating to Services > User Services > My Applications.`);
@@ -1723,8 +1780,15 @@ async function collectApplications(page, appType, startDmy, options = {}) {
     if (opened) {
       const detail = await extractCaseDetail(page);
       const dateCell = app.filedOn || app.cells.find((cell) => /\d{1,2}\/\d{1,2}\/\d{2,4}/.test(cell)) || "";
+      // The order the appeal is filed against: its number (e.g. ZD080224058591E)
+      // sits in the "Order Under Appeal" row of the Applications tab. Capturing
+      // it lets the tracker fold this appeal under that order's case.
+      const orderUnderAppeal = extractOrderUnderAppeal(detail);
+      if (orderUnderAppeal) {
+        console.log(`    Order under appeal: ${orderUnderAppeal}`);
+      }
       results.push({
-        againstOrderNo: app.orderNo || "",
+        againstOrderNo: orderUnderAppeal || app.orderNo || "",
         caseId: detail.caseId || app.arn,
         dateOfIssue: dateCell,
         description: app.kind || app.cells.slice(1).find(Boolean) || "",
