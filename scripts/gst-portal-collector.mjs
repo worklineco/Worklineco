@@ -8,7 +8,7 @@ import { chromium } from "playwright-core";
 import XLSX from "xlsx";
 import { getCollectorOutputDir, getDefaultWorkbookPath, getWorklineGstHome } from "./gst-helper-home.mjs";
 
-const COLLECTOR_VERSION = "2026-10-14-v65-search-v29-captchagrace";
+const COLLECTOR_VERSION = "2026-10-14-v65-search-v30-antibot";
 const GST_PORTAL_LOGIN_URL = "https://services.gst.gov.in/services/login";
 const WORKLINE_GST_HOME = getWorklineGstHome();
 const DEFAULT_WORKBOOK_PATH = getDefaultWorkbookPath();
@@ -293,23 +293,51 @@ async function readNoticeRowsFromOutput(filePath) {
   };
 }
 
+// Returns a Playwright browser CONTEXT (not a Browser). The GST portal sits
+// behind an Akamai firewall that returns "The requested URL was rejected" when
+// it spots an automated browser. Two things give Playwright away: the
+// --enable-automation switch (and the AutomationControlled blink flag) and
+// navigator.webdriver === true. We drop both, and use a PERSISTENT profile so
+// the Akamai trust cookies set on the first successful load are reused on later
+// runs instead of arriving as a brand-new "bot" every time.
 async function launchChrome() {
-  const launchOptions = {
+  const userDataDir = path.join(WORKLINE_GST_HOME, "chrome-profile");
+  const base = {
     headless: false,
-    args: ["--start-maximized"],
+    args: ["--start-maximized", "--disable-blink-features=AutomationControlled"],
+    ignoreDefaultArgs: ["--enable-automation"],
+  };
+  const contextOptions = { acceptDownloads: true, viewport: null };
+  const maskWebdriver = () => {
+    // Hide the automation flag the firewall checks for.
+    Object.defineProperty(navigator, "webdriver", { get: () => undefined });
   };
 
-  try {
-    return await chromium.launch({ ...launchOptions, channel: "chrome" });
-  } catch {
+  // Preferred: a persistent profile that keeps cookies between runs.
+  for (const channel of ["chrome", "msedge"]) {
     try {
-      return await chromium.launch({ ...launchOptions, channel: "msedge" });
-    } catch (error) {
-      throw new Error(
-        `Could not launch Chrome or Edge through Playwright. Install Chrome/Edge and try again. Original error: ${error.message}`,
-      );
+      const context = await chromium.launchPersistentContext(userDataDir, { ...base, ...contextOptions, channel });
+      await context.addInitScript(maskWebdriver);
+      return context;
+    } catch {
+      // profile locked or channel missing - try the next option
     }
   }
+
+  // Fallback: a fresh (non-persistent) profile if the persistent one is locked
+  // - e.g. a previous portal window is still open.
+  for (const channel of ["chrome", "msedge"]) {
+    try {
+      const browser = await chromium.launch({ ...base, channel });
+      const context = await browser.newContext(contextOptions);
+      await context.addInitScript(maskWebdriver);
+      return context;
+    } catch {
+      // try the next browser channel
+    }
+  }
+
+  throw new Error("Could not launch Chrome or Edge through Playwright. Close any open portal window and try again, or install Chrome/Edge.");
 }
 
 async function fillFirstVisible(page, selectors, value, label) {
@@ -407,10 +435,11 @@ async function waitForCaptchaAndSubmit(page) {
   // viewport, so we never need to scroll again after this.
   await page.evaluate(() => window.scrollTo({ top: 0, behavior: "auto" })).catch(() => {});
 
-  // Grace period: once the field looks complete, wait a few seconds before
-  // submitting so there is time to finish typing or fix a wrong character,
-  // instead of the login firing the instant the 6th character lands.
-  const GRACE_MS = 5_000;
+  // Take the time you need: the login is NOT fired the instant the field has
+  // enough characters. It submits only after you have STOPPED typing for a few
+  // seconds, so you can type the CAPTCHA at your own pace and correct it freely.
+  // The timer resets on every change, so there is never a rush once you start.
+  const SETTLE_MS = 4_000;
 
   for (const selector of selectors) {
     const locator = page.locator(selector);
@@ -427,30 +456,22 @@ async function waitForCaptchaAndSubmit(page) {
       // Focus WITHOUT scrolling the element into view - a plain focus() makes
       // the browser jump to the field, which is part of the up/down movement.
       await input.evaluate((element) => element.focus({ preventScroll: true })).catch(() => {});
-      console.log("Focused CAPTCHA field. Type the CAPTCHA in the browser; login submits a few seconds after it looks complete.");
+      console.log("Focused CAPTCHA field. Type the CAPTCHA in the browser at your own pace; login submits a few seconds after you stop typing.");
 
-      let completeSince = 0;
+      let lastValue = null;
+      let stableSince = Date.now();
       while (true) {
-        const value = await input.inputValue().catch(() => "");
-        if (value.trim().length >= 6) {
-          if (!completeSince) {
-            completeSince = Date.now();
-            console.log("CAPTCHA looks complete — submitting in 5 seconds (finish or correct it now).");
-          } else if (Date.now() - completeSince >= GRACE_MS) {
-            // Re-read in case it was corrected during the grace period.
-            const finalValue = await input.inputValue().catch(() => "");
-            if (finalValue.trim().length >= 6) {
-              console.log("CAPTCHA entered.");
-              return clickGstLoginButton(page, "GST portal login button");
-            }
-            completeSince = 0;
-          }
-        } else {
-          // Cleared or shortened again - reset the grace timer.
-          completeSince = 0;
+        const value = (await input.inputValue().catch(() => "")).trim();
+        if (value !== lastValue) {
+          // Still typing / correcting - restart the settle timer.
+          lastValue = value;
+          stableSince = Date.now();
         }
-
-        await page.waitForTimeout(500);
+        if (value.length >= 6 && Date.now() - stableSince >= SETTLE_MS) {
+          console.log("CAPTCHA entered.");
+          return clickGstLoginButton(page, "GST portal login button");
+        }
+        await page.waitForTimeout(400);
       }
     }
   }
@@ -2784,9 +2805,8 @@ async function main() {
     console.log("Supabase sync is enabled. Only extracted litigation rows will be sent to WorkLine.");
   }
 
-  const browser = await launchChrome();
-  const context = await browser.newContext({ acceptDownloads: true, viewport: null });
-  const page = await context.newPage();
+  const context = await launchChrome();
+  const page = context.pages()[0] ?? (await context.newPage());
 
   await page.goto(GST_PORTAL_LOGIN_URL, { waitUntil: "domcontentloaded" });
   await page.waitForLoadState("load", { timeout: 20_000 }).catch(() => {});
@@ -2964,7 +2984,7 @@ async function main() {
     // output is already on disk, which is what the WorkLine page relays from.
     console.log("Done. Closing the portal window.");
     try {
-      await browser.close();
+      await context.close();
     } catch {
       // the window may already be gone
     }
