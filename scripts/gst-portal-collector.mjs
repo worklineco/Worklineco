@@ -10,7 +10,7 @@ import { chromium } from "playwright-core";
 import XLSX from "xlsx";
 import { getCollectorOutputDir, getDefaultWorkbookPath, getWorklineGstHome } from "./gst-helper-home.mjs";
 
-const COLLECTOR_VERSION = "2026-10-14-v65-search-v31-realchrome-cdp";
+const COLLECTOR_VERSION = "2026-10-14-v65-search-v32-humanlogin";
 const GST_PORTAL_LOGIN_URL = "https://services.gst.gov.in/services/login";
 const WORKLINE_GST_HOME = getWorklineGstHome();
 const DEFAULT_WORKBOOK_PATH = getDefaultWorkbookPath();
@@ -393,12 +393,20 @@ async function fillFirstVisible(page, selectors, value, label) {
         const visible = await input.isVisible({ timeout: 500 }).catch(() => false);
 
         if (visible) {
-          await input.fill(value);
-          await input.evaluate((element) => {
-            element.dispatchEvent(new Event("input", { bubbles: true }));
-            element.dispatchEvent(new Event("change", { bubbles: true }));
-            element.dispatchEvent(new Event("blur", { bubbles: true }));
-          }).catch(() => {});
+          // Type like a person: a real mouse click to focus, then character by
+          // character with a small delay. The portal's firewall watches for
+          // fields that get populated with no keystrokes (a dead giveaway of a
+          // bot) and rejects the login, so we never use the instant fill() for
+          // the sign-in fields. Fall back to fill() only if typing fails.
+          await input.click({ timeout: 2_000 }).catch(() => {});
+          await input.fill("").catch(() => {});
+          const typed = await input
+            .pressSequentially(value, { delay: 70 })
+            .then(() => true)
+            .catch(() => false);
+          if (!typed) {
+            await input.fill(value).catch(() => {});
+          }
           console.log(`Filled ${label}.`);
           return true;
         }
@@ -530,6 +538,28 @@ async function waitForAuthenticatedPortal(page) {
     null,
     { timeout: 45_000 },
   ).catch(() => {});
+}
+
+// Waits for the user to finish signing in BY HAND in the real Chrome window.
+// Landing on an /auth/ URL (or seeing the Dashboard) means we are through. We
+// let the person type the CAPTCHA and click LOGIN themselves because the
+// portal's firewall rejects a login that was submitted programmatically.
+async function waitForManualLogin(page, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const signedIn = await page
+      .evaluate(() => {
+        const text = document.body ? document.body.innerText : "";
+        return location.href.includes("/auth/") || /dashboard/i.test(text);
+      })
+      .catch(() => false);
+    if (signedIn) {
+      console.log("Signed in. Continuing with the scrape.");
+      return true;
+    }
+    await page.waitForTimeout(1_000);
+  }
+  return false;
 }
 
 
@@ -2886,12 +2916,16 @@ async function main() {
 
   if (options.loginOnly) {
     console.log("");
-    console.log("GST portal opened and credentials were filled from Excel.");
-    console.log("Clicking GST portal login button so CAPTCHA can load.");
-    await clickGstLoginButton(page, "GST portal login button");
-    await waitForCaptchaAndSubmit(page);
+    console.log("GST portal opened. The user ID and password have been typed in for you.");
+    console.log("In the Chrome window: type the CAPTCHA and click LOGIN yourself.");
+    console.log("Signing in by hand is what keeps the portal firewall from blocking the login.");
 
     if (options.autoNotices) {
+      const signedIn = await waitForManualLogin(page, 6 * 60_000);
+      if (!signedIn) {
+        console.log("Login was not completed in time — nothing was scraped. Click Get data again when ready.");
+        process.exit(0);
+      }
       await waitForAuthenticatedPortal(page);
 
       const selectedSources = new Set(options.sources);
