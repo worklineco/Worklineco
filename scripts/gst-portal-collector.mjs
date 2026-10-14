@@ -1,3 +1,5 @@
+import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -8,7 +10,7 @@ import { chromium } from "playwright-core";
 import XLSX from "xlsx";
 import { getCollectorOutputDir, getDefaultWorkbookPath, getWorklineGstHome } from "./gst-helper-home.mjs";
 
-const COLLECTOR_VERSION = "2026-10-14-v65-search-v30-antibot";
+const COLLECTOR_VERSION = "2026-10-14-v65-search-v31-realchrome-cdp";
 const GST_PORTAL_LOGIN_URL = "https://services.gst.gov.in/services/login";
 const WORKLINE_GST_HOME = getWorklineGstHome();
 const DEFAULT_WORKBOOK_PATH = getDefaultWorkbookPath();
@@ -293,51 +295,89 @@ async function readNoticeRowsFromOutput(filePath) {
   };
 }
 
-// Returns a Playwright browser CONTEXT (not a Browser). The GST portal sits
-// behind an Akamai firewall that returns "The requested URL was rejected" when
-// it spots an automated browser. Two things give Playwright away: the
-// --enable-automation switch (and the AutomationControlled blink flag) and
-// navigator.webdriver === true. We drop both, and use a PERSISTENT profile so
-// the Akamai trust cookies set on the first successful load are reused on later
-// runs instead of arriving as a brand-new "bot" every time.
+const CDP_PORT = Number(process.env.WORKLINE_GST_CDP_PORT || 48791);
+const CDP_PROFILE_DIR = path.join(WORKLINE_GST_HOME, "chrome-cdp-profile");
+
+// Locate a real Chrome (or Edge) executable to start as a NORMAL browser.
+function findBrowserExecutable() {
+  const localAppData = process.env.LOCALAPPDATA || "";
+  const programFiles = process.env["ProgramFiles"] || "C:\\Program Files";
+  const programFilesX86 = process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)";
+  const candidates = [
+    process.env.WORKLINE_GST_CHROME_PATH,
+    path.join(programFiles, "Google\\Chrome\\Application\\chrome.exe"),
+    path.join(programFilesX86, "Google\\Chrome\\Application\\chrome.exe"),
+    localAppData ? path.join(localAppData, "Google\\Chrome\\Application\\chrome.exe") : "",
+    path.join(programFiles, "Microsoft\\Edge\\Application\\msedge.exe"),
+    path.join(programFilesX86, "Microsoft\\Edge\\Application\\msedge.exe"),
+  ].filter(Boolean);
+  return candidates.find((candidate) => existsSync(candidate)) || null;
+}
+
+// Is a Chrome already listening on the DevTools port we use?
+async function cdpEndpointReady(port) {
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/json/version`, { signal: AbortSignal.timeout(1_500) });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+// Returns a Playwright browser CONTEXT backed by the user's REAL Chrome.
+//
+// The GST portal's Akamai firewall returns "The requested URL was rejected" for
+// any browser Playwright launches itself, because that browser runs in
+// automation mode. Instead we start an ordinary Chrome process (the same
+// chrome.exe the user runs by hand) with a DevTools port and ATTACH to it over
+// CDP. To Akamai this is a normal Chrome, so it is trusted the same way the
+// user's manual browsing is. A dedicated profile folder keeps the portal's
+// trust and sign-in between runs. (Chrome blocks the DevTools port on the
+// default profile, so a separate --user-data-dir is required.)
 async function launchChrome() {
-  const userDataDir = path.join(WORKLINE_GST_HOME, "chrome-profile");
-  const base = {
-    headless: false,
-    args: ["--start-maximized", "--disable-blink-features=AutomationControlled"],
-    ignoreDefaultArgs: ["--enable-automation"],
-  };
-  const contextOptions = { acceptDownloads: true, viewport: null };
-  const maskWebdriver = () => {
-    // Hide the automation flag the firewall checks for.
-    Object.defineProperty(navigator, "webdriver", { get: () => undefined });
-  };
+  let ready = await cdpEndpointReady(CDP_PORT);
 
-  // Preferred: a persistent profile that keeps cookies between runs.
-  for (const channel of ["chrome", "msedge"]) {
-    try {
-      const context = await chromium.launchPersistentContext(userDataDir, { ...base, ...contextOptions, channel });
-      await context.addInitScript(maskWebdriver);
-      return context;
-    } catch {
-      // profile locked or channel missing - try the next option
+  if (!ready) {
+    const exe = findBrowserExecutable();
+    if (!exe) {
+      throw new Error(
+        "Could not find Chrome or Edge. Install Chrome, or set WORKLINE_GST_CHROME_PATH to the full path of chrome.exe.",
+      );
+    }
+    const child = spawn(
+      exe,
+      [
+        `--remote-debugging-port=${CDP_PORT}`,
+        `--user-data-dir=${CDP_PROFILE_DIR}`,
+        "--no-first-run",
+        "--no-default-browser-check",
+        "--start-maximized",
+        // Open the login page as a NORMAL Chrome navigation, so the request the
+        // firewall inspects most closely is not driven by the automation
+        // protocol at all.
+        GST_PORTAL_LOGIN_URL,
+      ],
+      { detached: true, stdio: "ignore", windowsHide: false },
+    );
+    child.unref();
+
+    const deadline = Date.now() + 30_000;
+    while (Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      ready = await cdpEndpointReady(CDP_PORT);
+      if (ready) {
+        break;
+      }
     }
   }
 
-  // Fallback: a fresh (non-persistent) profile if the persistent one is locked
-  // - e.g. a previous portal window is still open.
-  for (const channel of ["chrome", "msedge"]) {
-    try {
-      const browser = await chromium.launch({ ...base, channel });
-      const context = await browser.newContext(contextOptions);
-      await context.addInitScript(maskWebdriver);
-      return context;
-    } catch {
-      // try the next browser channel
-    }
+  if (!ready) {
+    throw new Error("Chrome did not start with the DevTools port. Close any WorkLine GST Chrome window and try again.");
   }
 
-  throw new Error("Could not launch Chrome or Edge through Playwright. Close any open portal window and try again, or install Chrome/Edge.");
+  const browser = await chromium.connectOverCDP(`http://127.0.0.1:${CDP_PORT}`);
+  const context = browser.contexts()[0] ?? (await browser.newContext({ acceptDownloads: true }));
+  return context;
 }
 
 async function fillFirstVisible(page, selectors, value, label) {
@@ -2808,7 +2848,12 @@ async function main() {
   const context = await launchChrome();
   const page = context.pages()[0] ?? (await context.newPage());
 
-  await page.goto(GST_PORTAL_LOGIN_URL, { waitUntil: "domcontentloaded" });
+  // Chrome was started pointing at the login page, so it is already loading (or
+  // loaded) as a normal navigation. Only navigate here if it is somewhere else
+  // - e.g. a reused window left on another page from the previous run.
+  if (!page.url().includes("services.gst.gov.in")) {
+    await page.goto(GST_PORTAL_LOGIN_URL, { waitUntil: "domcontentloaded" }).catch(() => {});
+  }
   await page.waitForLoadState("load", { timeout: 20_000 }).catch(() => {});
 
   await fillFirstVisible(
@@ -2979,14 +3024,15 @@ async function main() {
       }
     }
 
-    // Same ending as the firm's Excel tracker: the scrape is done, so close
-    // the portal window and exit instead of keeping the process alive. The
-    // output is already on disk, which is what the WorkLine page relays from.
-    console.log("Done. Closing the portal window.");
+    // The scrape is done. DISCONNECT from the real Chrome but leave the window
+    // open: keeping it alive preserves the portal's trust for the next run (so
+    // the firewall does not have to be won over again) and lets the next run
+    // attach instantly instead of starting a new browser.
+    console.log("Done. Leaving the Chrome window open so the next run reuses this trusted session.");
     try {
-      await context.close();
+      await context.browser()?.close();
     } catch {
-      // the window may already be gone
+      // disconnect only - the real Chrome process keeps running
     }
     process.exit(0);
   }
