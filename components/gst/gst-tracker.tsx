@@ -645,11 +645,23 @@ export function GstTracker() {
         return;
       }
 
+      // Appeal / SPL searches skip the 90-day date ranges that returned no
+      // records last time. Offer to re-check those known-empty ranges too.
+      let searchEmpty = false;
+      if (sources.includes("appeal") || sources.includes("spl")) {
+        searchEmpty = window.confirm(
+          "Appeal / SPL: also re-check the date ranges that previously found no records?\n\n" +
+            "OK = re-check every date range (slower)\n" +
+            "Cancel = search only new ranges and skip the known-empty ones (faster)"
+        );
+      }
+
       const startPayload = {
         clientName: login.clientName ?? "",
         gstPass: login.password,
         gstUser: login.userId,
         gstin: selectedGstin,
+        searchEmpty,
         sources
       };
       const startedAt = Date.now();
@@ -701,7 +713,7 @@ export function GstTracker() {
   }
 
   async function startWhenHelperReady(
-    startPayload: { clientName: string; gstPass: string; gstUser: string; gstin: string; sources: SourceKey[] },
+    startPayload: { clientName: string; gstPass: string; gstUser: string; gstin: string; searchEmpty: boolean; sources: SourceKey[] },
     sources: SourceKey[],
     startedAt: number
   ) {

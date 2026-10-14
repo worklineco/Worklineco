@@ -83,7 +83,7 @@ function runningSince(runKey) {
   return startedAt;
 }
 
-function startCollector({ clientName, gstPass, gstUser, gstin, rowNumber, sources }) {
+function startCollector({ clientName, gstPass, gstUser, gstin, rowNumber, searchEmpty, sources }) {
   const scriptPath = path.join(WORKLINE_GST_HOME, "scripts", "gst-portal-collector.mjs");
   const args = [scriptPath, "--login-only", "--auto-notices"];
 
@@ -93,6 +93,10 @@ function startCollector({ clientName, gstPass, gstUser, gstin, rowNumber, source
 
   if (rowNumber) {
     args.push("--row", String(rowNumber));
+  }
+
+  if (searchEmpty) {
+    args.push("--search-empty");
   }
 
   if (Array.isArray(sources) && sources.length) {
@@ -253,6 +257,7 @@ const server = http.createServer(async (request, response) => {
       gstUser: typeof body.gstUser === "string" ? body.gstUser : "",
       gstin: body.gstin,
       rowNumber: Number.isInteger(body.rowNumber) ? body.rowNumber : null,
+      searchEmpty: body.searchEmpty === true,
       sources: Array.isArray(body.sources) ? body.sources : null,
     });
 

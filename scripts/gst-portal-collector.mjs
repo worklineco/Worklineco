@@ -8,7 +8,7 @@ import { chromium } from "playwright-core";
 import XLSX from "xlsx";
 import { getCollectorOutputDir, getDefaultWorkbookPath, getWorklineGstHome } from "./gst-helper-home.mjs";
 
-const COLLECTOR_VERSION = "2026-10-13-v65-search-v26";
+const COLLECTOR_VERSION = "2026-10-14-v65-search-v27-emptywindows";
 const GST_PORTAL_LOGIN_URL = "https://services.gst.gov.in/services/login";
 const WORKLINE_GST_HOME = getWorklineGstHome();
 const DEFAULT_WORKBOOK_PATH = getDefaultWorkbookPath();
@@ -134,6 +134,7 @@ function parseArgs() {
     outputDir: path.resolve(args.get("out") || OUTPUT_DIR),
     rowNumber: args.has("row") ? Number(args.get("row")) : null,
     saveHtml: parseBooleanFlag(args.get("save-html")),
+    searchEmpty: parseBooleanFlag(args.get("search-empty")),
     sources: String(args.get("sources") || "notices,appeal,spl,payment")
       .split(",")
       .map((source) => source.trim().toLowerCase())
@@ -1133,6 +1134,39 @@ function buildDateWindows(startDmy, days) {
   return windows.length ? windows : [[startDmy, fmt(end)]];
 }
 
+// dd/mm/yyyy -> UTC millis, for comparing window boundaries.
+function dmyToUtc(dmy) {
+  const [d, m, y] = String(dmy || "").split("/").map(Number);
+  return Date.UTC(y, (m || 1) - 1, d || 1);
+}
+
+// Appeal / SPL "empty window" memory. The My Applications search is run in
+// 90-day windows; most come back with no records. We remember the windows that
+// returned nothing (per application type, per GSTIN) so later runs skip them,
+// unless the user asks to re-check them. The file lives next to the scrape
+// output so it travels with the helper.
+function emptyWindowsFile(outputDir, gstin) {
+  return path.join(outputDir, `application-empty-windows-${String(gstin || "").trim().toUpperCase()}.json`);
+}
+
+async function loadEmptyWindows(outputDir, gstin) {
+  try {
+    const raw = await fs.readFile(emptyWindowsFile(outputDir, gstin), "utf8");
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+async function saveEmptyWindows(outputDir, gstin, store) {
+  try {
+    await fs.writeFile(emptyWindowsFile(outputDir, gstin), `${JSON.stringify(store, null, 2)}\n`, "utf8");
+  } catch (error) {
+    console.log(`Could not save empty-window memory: ${error.message}`);
+  }
+}
+
 // Services > User Services > My Applications.
 async function goToMyApplications(page) {
   const reached = await goToPortalPage(page, {
@@ -1486,7 +1520,8 @@ const harvestedApplicationKeys = new Set();
 
 // Searches My Applications for a given application type across 90-day windows,
 // then drills into each application's case page and captures its sub-tabs.
-async function collectApplications(page, appType, startDmy) {
+async function collectApplications(page, appType, startDmy, options = {}) {
+  const { gstin = "", outputDir = OUTPUT_DIR, searchEmpty = false } = options;
   console.log(`Applications (${appType}): navigating to Services > User Services > My Applications.`);
   const reached = await goToMyApplications(page);
   if (!reached) {
@@ -1499,12 +1534,39 @@ async function collectApplications(page, appType, startDmy) {
   // instead of July 2017 - an application cannot predate the proceedings it
   // belongs to, and this turns ~38 searches into a handful for most clients.
   const startFrom = startDmy || APPEAL_START_DATE;
-  const windows = buildDateWindows(startFrom, APPEAL_WINDOW_DAYS);
-  console.log(`Applications (${appType}): searching ${windows.length} window(s) of ${APPEAL_WINDOW_DAYS} days from ${startFrom}.`);
+  // Build the windows on a FIXED grid from 01/07/2017 and drop the ones that
+  // end before the earliest notice. Fixing the grid keeps each window's
+  // from|to key stable between runs, which is what the empty-window memory
+  // below is keyed on - otherwise a shifting start date would never match a
+  // remembered window.
+  const startBound = dmyToUtc(startFrom);
+  const gridWindows = buildDateWindows(APPEAL_START_DATE, APPEAL_WINDOW_DAYS).filter(
+    ([, to]) => dmyToUtc(to) >= startBound
+  );
+
+  // Remembered empty windows for this application type: skip them unless the
+  // user asked (via the Get data popup) to re-check the known-empty ranges.
+  const emptyStore = await loadEmptyWindows(outputDir, gstin);
+  const emptySet = new Set(Array.isArray(emptyStore[appType]) ? emptyStore[appType] : []);
+  const windows = searchEmpty ? gridWindows : gridWindows.filter(([from, to]) => !emptySet.has(`${from}|${to}`));
+  const skipped = gridWindows.length - windows.length;
+  console.log(
+    `Applications (${appType}): ${gridWindows.length} window(s) of ${APPEAL_WINDOW_DAYS} days from ${startFrom}. ${
+      searchEmpty ? "Re-checking all ranges" : `Skipping ${skipped} previously-empty window(s)`
+    }.`
+  );
 
   const found = [];
   for (const [from, to] of windows) {
     const { rows } = await runApplicationSearch(page, from, to);
+    // Update the memory: a window that returned nothing is remembered as empty
+    // (skipped next time); one that now has rows is cleared from the memory.
+    const windowKey = `${from}|${to}`;
+    if (rows.length === 0) {
+      emptySet.add(windowKey);
+    } else {
+      emptySet.delete(windowKey);
+    }
     let fresh = 0;
     for (const row of rows) {
       const key = row.arn || row.cells.join("|");
@@ -1521,6 +1583,10 @@ async function collectApplications(page, appType, startDmy) {
       console.log(`  ${from}-${to}: ${rows.length} row(s) on screen, ${fresh} new.`);
     }
   }
+
+  // Persist the updated empty-window memory for next time.
+  emptyStore[appType] = [...emptySet];
+  await saveEmptyWindows(outputDir, gstin, emptyStore);
 
   console.log(`Applications (${appType}): ${found.length} unique application(s) found. Opening each...`);
 
@@ -2764,8 +2830,9 @@ async function main() {
       };
 
       await runSource("notices", "Notices & Orders", () => collectNoticesAndOrders(page));
-      await runSource("appeal", "Appeal to Appellate Authority", () => collectApplications(page, "Appeal to Appellate Authority", earliestNoticeDmy()));
-      await runSource("spl", "SPL (Waiver Scheme 128A)", () => collectApplications(page, "Application for Waiver Scheme under Section 128A", earliestNoticeDmy()));
+      const appOptions = { gstin: client.gstin, outputDir: options.outputDir, searchEmpty: options.searchEmpty };
+      await runSource("appeal", "Appeal to Appellate Authority", () => collectApplications(page, "Appeal to Appellate Authority", earliestNoticeDmy(), appOptions));
+      await runSource("spl", "SPL (Waiver Scheme 128A)", () => collectApplications(page, "Application for Waiver Scheme under Section 128A", earliestNoticeDmy(), appOptions));
       await runSource("payment", "Payment towards Demand", () => collectPaymentTowardsDemand(page));
 
       // Join each demand to the case that references it, the way the firm's
