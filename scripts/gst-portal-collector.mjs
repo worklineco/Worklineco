@@ -8,7 +8,7 @@ import { chromium } from "playwright-core";
 import XLSX from "xlsx";
 import { getCollectorOutputDir, getDefaultWorkbookPath, getWorklineGstHome } from "./gst-helper-home.mjs";
 
-const COLLECTOR_VERSION = "2026-10-14-v65-search-v28-clientpaging";
+const COLLECTOR_VERSION = "2026-10-14-v65-search-v29-captchagrace";
 const GST_PORTAL_LOGIN_URL = "https://services.gst.gov.in/services/login";
 const WORKLINE_GST_HOME = getWorklineGstHome();
 const DEFAULT_WORKBOOK_PATH = getDefaultWorkbookPath();
@@ -402,6 +402,16 @@ async function waitForCaptchaAndSubmit(page) {
     "input[aria-label*='Captcha' i]",
   ];
 
+  // Settle the page at the top once so it stops bouncing up and down while the
+  // user reads the CAPTCHA and types. Everything on the login form fits in one
+  // viewport, so we never need to scroll again after this.
+  await page.evaluate(() => window.scrollTo({ top: 0, behavior: "auto" })).catch(() => {});
+
+  // Grace period: once the field looks complete, wait a few seconds before
+  // submitting so there is time to finish typing or fix a wrong character,
+  // instead of the login firing the instant the 6th character lands.
+  const GRACE_MS = 5_000;
+
   for (const selector of selectors) {
     const locator = page.locator(selector);
     const count = await locator.count().catch(() => 0);
@@ -414,14 +424,30 @@ async function waitForCaptchaAndSubmit(page) {
         continue;
       }
 
-      await input.focus();
-      console.log("Focused CAPTCHA field. Type CAPTCHA in the browser; login will submit automatically.");
+      // Focus WITHOUT scrolling the element into view - a plain focus() makes
+      // the browser jump to the field, which is part of the up/down movement.
+      await input.evaluate((element) => element.focus({ preventScroll: true })).catch(() => {});
+      console.log("Focused CAPTCHA field. Type the CAPTCHA in the browser; login submits a few seconds after it looks complete.");
 
+      let completeSince = 0;
       while (true) {
         const value = await input.inputValue().catch(() => "");
         if (value.trim().length >= 6) {
-          console.log("CAPTCHA entered.");
-          return clickGstLoginButton(page, "GST portal login button");
+          if (!completeSince) {
+            completeSince = Date.now();
+            console.log("CAPTCHA looks complete — submitting in 5 seconds (finish or correct it now).");
+          } else if (Date.now() - completeSince >= GRACE_MS) {
+            // Re-read in case it was corrected during the grace period.
+            const finalValue = await input.inputValue().catch(() => "");
+            if (finalValue.trim().length >= 6) {
+              console.log("CAPTCHA entered.");
+              return clickGstLoginButton(page, "GST portal login button");
+            }
+            completeSince = 0;
+          }
+        } else {
+          // Cleared or shortened again - reset the grace timer.
+          completeSince = 0;
         }
 
         await page.waitForTimeout(500);
