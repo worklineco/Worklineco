@@ -10,7 +10,7 @@ import { chromium } from "playwright-core";
 import XLSX from "xlsx";
 import { getCollectorOutputDir, getDefaultWorkbookPath, getWorklineGstHome } from "./gst-helper-home.mjs";
 
-const COLLECTOR_VERSION = "2026-10-14-v65-search-v33-subtabs-appealorder";
+const COLLECTOR_VERSION = "2026-10-14-v65-search-v34-reusefix";
 const GST_PORTAL_LOGIN_URL = "https://services.gst.gov.in/services/login";
 const WORKLINE_GST_HOME = getWorklineGstHome();
 const DEFAULT_WORKBOOK_PATH = getDefaultWorkbookPath();
@@ -2940,55 +2940,73 @@ async function main() {
   }
 
   const context = await launchChrome();
-  const page = context.pages()[0] ?? (await context.newPage());
+  // Prefer a tab already on the GST portal; otherwise the first tab, or a new
+  // one. A reused window may have several tabs open from earlier runs.
+  const page =
+    context.pages().find((candidate) => /services\.gst\.gov\.in/.test(candidate.url())) ??
+    context.pages()[0] ??
+    (await context.newPage());
+  await page.bringToFront().catch(() => {});
 
-  // Chrome was started pointing at the login page, so it is already loading (or
-  // loaded) as a normal navigation. Only navigate here if it is somewhere else
-  // - e.g. a reused window left on another page from the previous run.
-  if (!page.url().includes("services.gst.gov.in")) {
+  // Reusing a window that is already signed in? Skip the whole login step.
+  const alreadyAuthenticated = /\/services\/auth\//.test(page.url());
+
+  // Make sure we are on the login page before signing in. On a fresh launch
+  // Chrome already opened it; on a reused window sitting on another page (or the
+  // firewall's reject page) navigate there now - the profile is warm by then,
+  // so the navigation is accepted.
+  if (!alreadyAuthenticated && !/\/services\/login/.test(page.url())) {
     await page.goto(GST_PORTAL_LOGIN_URL, { waitUntil: "domcontentloaded" }).catch(() => {});
   }
   await page.waitForLoadState("load", { timeout: 20_000 }).catch(() => {});
 
-  await fillFirstVisible(
-    page,
-    [
-      "input#username",
-      "input[name='user_name']",
-      "input[name='username']",
-      "input[formcontrolname='username']",
-      "input[placeholder*='Username' i]",
-      "input[type='text']",
-    ],
-    client.userId,
-    "GST user ID",
-  );
+  if (!alreadyAuthenticated) {
+    await fillFirstVisible(
+      page,
+      [
+        "input#username",
+        "input[name='user_name']",
+        "input[name='username']",
+        "input[formcontrolname='username']",
+        "input[placeholder*='Username' i]",
+        "input[type='text']",
+      ],
+      client.userId,
+      "GST user ID",
+    );
 
-  await fillFirstVisible(
-    page,
-    [
-      "input#user_pass",
-      "input#password",
-      "input[name='user_pass']",
-      "input[name='password']",
-      "input[placeholder*='Password' i]",
-      "input[type='password']",
-    ],
-    client.password,
-    "GST password",
-  );
+    await fillFirstVisible(
+      page,
+      [
+        "input#user_pass",
+        "input#password",
+        "input[name='user_pass']",
+        "input[name='password']",
+        "input[placeholder*='Password' i]",
+        "input[type='password']",
+      ],
+      client.password,
+      "GST password",
+    );
+  }
 
   if (options.loginOnly) {
-    console.log("");
-    console.log("GST portal opened. The user ID and password have been typed in for you.");
-    console.log("In the Chrome window: type the CAPTCHA and click LOGIN yourself.");
-    console.log("Signing in by hand is what keeps the portal firewall from blocking the login.");
+    if (alreadyAuthenticated) {
+      console.log("Chrome is already signed in to the portal — continuing without a fresh login.");
+    } else {
+      console.log("");
+      console.log("GST portal opened. The user ID and password have been typed in for you.");
+      console.log("In the Chrome window: type the CAPTCHA and click LOGIN yourself.");
+      console.log("Signing in by hand is what keeps the portal firewall from blocking the login.");
+    }
 
     if (options.autoNotices) {
-      const signedIn = await waitForManualLogin(page, 6 * 60_000);
-      if (!signedIn) {
-        console.log("Login was not completed in time — nothing was scraped. Click Get data again when ready.");
-        process.exit(0);
+      if (!alreadyAuthenticated) {
+        const signedIn = await waitForManualLogin(page, 6 * 60_000);
+        if (!signedIn) {
+          console.log("Login was not completed in time — nothing was scraped. Click Get data again when ready.");
+          process.exit(0);
+        }
       }
       await waitForAuthenticatedPortal(page);
 
