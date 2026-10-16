@@ -2,7 +2,7 @@
 
 import { ArrowDown, ArrowUp, ArrowUpDown, Filter, ChevronDown, Download, History, Link2, Maximize2, Menu, Pencil, Pin, Plus, RotateCcw, Search, Settings2, ShieldCheck, Trash2, Upload, X } from "lucide-react";
 import type { ComponentType } from "react";
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BillingColumnFilter } from "@/components/billing/billing-column-filter";
 import { SearchableSelect, type SelectOption } from "@/components/shared/searchable-select";
 import { getCached, setCached } from "@/lib/data-cache";
@@ -365,9 +365,66 @@ export function BillingRegister() {
   const [valueFilters, setValueFilters] = useState<Record<string, string[]>>({});
   const [sort, setSort] = useState<{ field: BillingColumn["field"]; direction: "asc" | "desc" } | null>(null);
   const [filterMenu, setFilterMenu] = useState<{ column: BillingColumn; left: number; bottom: number } | null>(null);
+  // One predicate for every filter on the register. `exceptField` leaves out
+  // that column's own text and value filters - Excel-style, so a filter menu
+  // lists the values that survive every OTHER active filter, and values you
+  // filtered out here can still be re-ticked.
+  const recordMatchesFilters = useCallback((record: BillingRecord, exceptField?: string) => {
+    const search = filters.search.trim().toLowerCase();
+    const matchesSearch =
+      !search ||
+      [
+        record.client,
+        record.gstin,
+        record.description,
+        record.invoice_no,
+        record.memo_no,
+        record.owner_team,
+        record.source_module,
+        record.pushed_by,
+        record.billing_status,
+        record.receiving_status,
+        getMatterLabel(record, matters)
+      ].some((value) => String(value ?? "").toLowerCase().includes(search));
+
+    // Apply every typed column filter, including ones on columns that were
+    // hidden afterwards — otherwise a hidden column's filter still counts as
+    // active but silently stops narrowing the rows.
+    const matchesColumnFilters = Object.entries(columnFilters).every(([field, rawFilter]) => {
+      const filter = String(rawFilter ?? "").trim().toLowerCase();
+      const column = billingColumnByKey.get(field);
+
+      if (field === exceptField || !filter || !column || column.field === "actions") {
+        return true;
+      }
+
+      return getDisplayValue(record, column, matters).toLowerCase().includes(filter);
+    });
+
+    return (
+      matchesSearch &&
+      matchesColumnFilters &&
+      Object.entries(valueFilters).every(([field, values]) => {
+        if (field === exceptField) {
+          return true;
+        }
+        const column = billingColumnByKey.get(field);
+        return !column || values.includes(getBillingFilterValue(record, column, matters));
+      }) &&
+      (!showMarkedForReviewOnly || String(record.billing_status ?? "").trim().toLowerCase() === "marked for review") &&
+      (!filters.status || record.billing_status === filters.status) &&
+      (!filters.receiptStatus || record.receiving_status === filters.receiptStatus) &&
+      (!filters.team || canonicalTeamLabel(record.owner_team) === canonicalTeamLabel(filters.team)) &&
+      (!filters.source || record.source_module === filters.source)
+    );
+  }, [filters, columnFilters, valueFilters, showMarkedForReviewOnly, matters]);
   const filterOptions = useMemo(() => filterMenu
-    ? Array.from(new Set(records.map((record) => getBillingFilterValue(record, filterMenu.column, matters)))).sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }))
-    : [], [filterMenu, records, matters]);
+    ? Array.from(new Set(
+        records
+          .filter((record) => recordMatchesFilters(record, String(filterMenu.column.field)))
+          .map((record) => getBillingFilterValue(record, filterMenu.column, matters))
+      )).sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }))
+    : [], [filterMenu, records, matters, recordMatchesFilters]);
   // Client picker options from the Client Records register, in the same
   // "Name — GSTIN — State" format the GSTR-9 9C dialog uses. The value stays
   // the plain client name, which drives the GSTIN/Group autofill.
@@ -433,53 +490,7 @@ export function BillingRegister() {
     [visibleBillingColumns]
   );
   const filteredRecords = useMemo(() => {
-    const search = filters.search.trim().toLowerCase();
-
-    return records.filter((record) => {
-      const matchesSearch =
-        !search ||
-        [
-          record.client,
-          record.gstin,
-          record.description,
-          record.invoice_no,
-          record.memo_no,
-          record.owner_team,
-          record.source_module,
-          record.pushed_by,
-          record.billing_status,
-          record.receiving_status,
-          getMatterLabel(record, matters)
-        ].some((value) => String(value ?? "").toLowerCase().includes(search));
-
-      // Apply every typed column filter, including ones on columns that were
-      // hidden afterwards — otherwise a hidden column's filter still counts as
-      // active but silently stops narrowing the rows.
-      const matchesColumnFilters = Object.entries(columnFilters).every(([field, rawFilter]) => {
-        const filter = String(rawFilter ?? "").trim().toLowerCase();
-        const column = billingColumnByKey.get(field);
-
-        if (!filter || !column || column.field === "actions") {
-          return true;
-        }
-
-        return getDisplayValue(record, column, matters).toLowerCase().includes(filter);
-      });
-
-      return (
-        matchesSearch &&
-        matchesColumnFilters &&
-        Object.entries(valueFilters).every(([field, values]) => {
-          const column = billingColumnByKey.get(field);
-          return !column || values.includes(getBillingFilterValue(record, column, matters));
-        }) &&
-        (!showMarkedForReviewOnly || String(record.billing_status ?? "").trim().toLowerCase() === "marked for review") &&
-        (!filters.status || record.billing_status === filters.status) &&
-        (!filters.receiptStatus || record.receiving_status === filters.receiptStatus) &&
-        (!filters.team || canonicalTeamLabel(record.owner_team) === canonicalTeamLabel(filters.team)) &&
-        (!filters.source || record.source_module === filters.source)
-      );
-    }).sort((first, second) => {
+    return records.filter((record) => recordMatchesFilters(record)).sort((first, second) => {
       if (!sort) return 0;
       const column = billingColumnByKey.get(String(sort.field));
       if (!column || column.field === "actions") return 0;
@@ -499,7 +510,7 @@ export function BillingRegister() {
       }
       return sort.direction === "asc" ? compared : -compared;
     });
-  }, [columnFilters, valueFilters, sort, filters, matters, records, showMarkedForReviewOnly]);
+  }, [recordMatchesFilters, sort, matters, records]);
   function applyValueFilter(values: string[] | undefined) {
     if (!filterMenu) return;
     const field = String(filterMenu.column.field);
