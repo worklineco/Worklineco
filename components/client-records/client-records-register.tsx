@@ -20,11 +20,12 @@ import {
 import Link from "next/link";
 import type { ComponentType } from "react";
 import { LoadingIndicator } from "@/components/shared/loading-indicator";
-import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { getCached, setCached } from "@/lib/data-cache";
 import { useRegisterEditAccess, viewOnlyRegisterMessage } from "@/lib/use-register-access";
 import { ViewOnlyAccessDialog } from "@/components/shared/view-only-access-dialog";
+import { ClientRecordEditor } from "@/components/client-records/client-record-editor";
 import * as XLSX from "xlsx-js-style";
 
 type RegisterRow = Record<string, string | number>;
@@ -73,6 +74,10 @@ const columns = [
   "PAN/IT No.",
   "Client Type"
 ];
+// Autobilling fields live only in the editor modal (not in the table or the
+// Excel import/export), but persist on the record alongside the columns above.
+const editorOnlyFields = ["Autobilling", "Billing Date", "Fixed Monthly Amount"];
+const editorFields = [...columns, ...editorOnlyFields];
 const importActionColumn = "Import Action";
 const importActionOptions = ["Add", "Update", "Delete"];
 const maxDeleteRows = 10;
@@ -122,7 +127,19 @@ export function ClientRecordsRegister() {
   const [isTrashOpen, setIsTrashOpen] = useState(false);
   const [isAuditOpen, setIsAuditOpen] = useState(false);
   const [isActionsOpen, setIsActionsOpen] = useState(false);
+  const [isEditorSaving, setIsEditorSaving] = useState(false);
+  const [toast, setToast] = useState<{ text: string; tone: "error" | "success" } | null>(null);
+  // Groups the user added in this session through "Add New Group", available
+  // in the dropdown before any record with that group has been saved.
+  const [extraGroups, setExtraGroups] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const toastTimerRef = useRef<number | null>(null);
+
+  const showToast = useCallback((text: string, tone: "error" | "success" = "success") => {
+    setToast({ text, tone });
+    if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = window.setTimeout(() => setToast(null), 3500);
+  }, []);
 
   const dataHydratedRef = useRef(false);
 
@@ -131,6 +148,21 @@ export function ClientRecordsRegister() {
   }, []);
 
   const visibleRows = useMemo<RegisterRow[]>(() => withSerial(rows), [rows]);
+  // Built once from the loaded records (plus groups added this session) and
+  // reused by the editor dropdown - no fetch when the dropdown opens.
+  const groupOptions = useMemo(() => {
+    const names = new Set<string>(extraGroups);
+    for (const row of rows) {
+      const group = String(row.Group ?? "").trim();
+      if (group) names.add(group);
+    }
+    return Array.from(names).sort((first, second) => first.localeCompare(second));
+  }, [extraGroups, rows]);
+  const addGroupOption = useCallback((group: string) => {
+    const trimmed = group.trim();
+    if (!trimmed) return;
+    setExtraGroups((current) => (current.some((item) => item.toLowerCase() === trimmed.toLowerCase()) ? current : [...current, trimmed]));
+  }, []);
   const filteredRows = useMemo<RegisterRow[]>(() => {
     const searchValue = search.trim().toLowerCase();
     let nextRows = visibleRows.filter((row) => {
@@ -533,23 +565,69 @@ export function ClientRecordsRegister() {
     });
   }
 
-  async function saveEditor(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function handleEditorSave(values: Record<string, string>) {
+    if (!editor || isEditorSaving) return;
 
-    if (!editor) return;
+    if (!canEditRegisterRef.current) {
+      setMessage(viewOnlyRegisterMessage);
+      return;
+    }
+
+    const currentEditor: EditorState = { ...editor, row: { ...editor.row, ...values } };
 
     if (!editor.rowId) {
-      const saved = await saveAction(
-        { action: "add", row: editor.row },
-        "Added client record."
-      );
+      // Optimistic add: show the row and close the modal immediately; the
+      // actual save runs in the background and only the new row is inserted.
+      setIsEditorSaving(true);
+      const tempId = `temp-${Date.now()}`;
+      const optimisticRow: RegisterRow = { ...currentEditor.row, id: tempId };
+      const previousRows = rows;
+      const optimisticRows = [...rows, optimisticRow];
 
-      if (saved) setEditor(null);
+      setRows(optimisticRows);
+      setCached("client-records", { rows: optimisticRows, trashRows });
+      setEditor(null);
+      showToast("Saved");
+
+      try {
+        const response = await fetch("/api/client-records/managed", {
+          body: JSON.stringify({ action: "add", row: currentEditor.row }),
+          headers: { "Content-Type": "application/json" },
+          method: "POST"
+        });
+        const result = (await response.json()) as SaveActionResult;
+
+        if (!response.ok) {
+          throw new Error(result.error ?? "Could not save client record.");
+        }
+
+        setRows((current) => {
+          const savedRows = current.map((row) =>
+            String(row.id) === tempId && result.row ? { ...optimisticRow, ...result.row } : row
+          );
+          setCached("client-records", { rows: savedRows, trashRows });
+          return savedRows;
+        });
+
+        if (result.auditLog) {
+          setAuditLogs((current) => [result.auditLog!, ...current].slice(0, 50));
+        }
+      } catch (error) {
+        console.error("Client record add error:", error);
+        // Roll back, reopen the modal with the user's data intact, explain.
+        setRows(previousRows);
+        setCached("client-records", { rows: previousRows, trashRows });
+        setEditor(currentEditor);
+        const text = error instanceof Error ? error.message : "Could not save client record.";
+        setMessage(text);
+        showToast(text, "error");
+      } finally {
+        setIsEditorSaving(false);
+      }
       return;
     }
 
     const rowId = editor.rowId;
-    const currentEditor = editor;
     const previousRows = rows;
     const previousRow =
       rows.find((row) => String(row.id) === rowId) ??
@@ -567,7 +645,7 @@ export function ClientRecordsRegister() {
     setRows(optimisticRows);
     setCached("client-records", { rows: optimisticRows, trashRows });
     setEditor(null);
-    setMessage("Saving client record...");
+    showToast("Saved");
 
     try {
       const response = await fetch("/api/client-records/managed", {
@@ -851,51 +929,26 @@ export function ClientRecordsRegister() {
       />
 
       {editor ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-navy-700/45 p-4">
-          <form className="max-h-[90vh] w-full max-w-5xl overflow-auto rounded-[28px] bg-white p-5 shadow-2xl" onSubmit={saveEditor}>
-            <div className="flex items-center justify-between gap-3 border-b border-slate-200 pb-4">
-              <h3 className="text-xl font-black text-slate-950">{editor.rowId ? "Edit Client Record" : "Add Client Record"}</h3>
-              <button className={`${buttonClass} h-9 px-3`} onClick={() => setEditor(null)} type="button">
-                <X className="size-4" />
-                Close
-              </button>
-            </div>
-            <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-              {columns.filter((column) => column !== "S.no.").map((column) => (
-                <label className="block" key={column}>
-                  <span className="text-xs font-black uppercase text-slate-500">{clientColumnLabel(column)}</span>
-                  {column === "Client Type" ? (
-                    <select
-                      className="input mt-2"
-                      onChange={(event) =>
-                        setEditor((current) =>
-                          current ? { ...current, row: { ...current.row, [column]: event.target.value } } : current
-                        )
-                      }
-                      value={String(editor.row[column] ?? "")}
-                    >
-                      <option value="">Select</option>
-                      <option value="One-Time">One-Time</option>
-                      <option value="Retainer">Retainer</option>
-                    </select>
-                  ) : (
-                    <input
-                      className="input mt-2"
-                      onChange={(event) =>
-                        setEditor((current) =>
-                          current ? { ...current, row: { ...current.row, [column]: event.target.value } } : current
-                        )
-                      }
-                      value={String(editor.row[column] ?? "")}
-                    />
-                  )}
-                </label>
-              ))}
-            </div>
-            <button className="mt-5 inline-flex h-12 items-center justify-center rounded-2xl bg-navy-700 px-5 text-sm font-black text-white" type="submit">
-              Save Client Record
-            </button>
-          </form>
+        <ClientRecordEditor
+          groupOptions={groupOptions}
+          initialRow={editor.row}
+          isSaving={isEditorSaving}
+          key={editor.rowId ?? "new"}
+          onAddGroup={addGroupOption}
+          onClose={() => setEditor(null)}
+          onSave={(values) => void handleEditorSave(values)}
+          title={editor.rowId ? "Edit Client Record" : "Add Client Record"}
+        />
+      ) : null}
+
+      {toast ? (
+        <div
+          className={`fixed bottom-5 right-5 z-[1200] rounded-xl px-4 py-3 text-sm font-black text-white shadow-2xl ${
+            toast.tone === "error" ? "bg-rose-600" : "bg-emerald-600"
+          }`}
+          role="status"
+        >
+          {toast.text}
         </div>
       ) : null}
     </section>
@@ -990,7 +1043,7 @@ function clientColumnLabel(column: string) {
 }
 
 function createBlankRow() {
-  return [importActionColumn, ...columns].reduce<RegisterRow>((row, column) => {
+  return [importActionColumn, ...editorFields].reduce<RegisterRow>((row, column) => {
     if (column === importActionColumn) {
       row[column] = "Add";
       return row;
@@ -1002,7 +1055,7 @@ function createBlankRow() {
 }
 
 function stripInternalFields(row: RegisterRow) {
-  return columns.reduce<RegisterRow>((record, column) => {
+  return editorFields.reduce<RegisterRow>((record, column) => {
     record[column] = row[column] ?? "";
     return record;
   }, {});
