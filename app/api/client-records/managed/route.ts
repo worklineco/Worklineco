@@ -37,6 +37,10 @@ const columns = [
   "PAN/IT No.",
   "Client Type"
 ];
+// Autobilling fields are edited in the record modal and persisted in
+// custom_values like every other column, but stay out of the Excel flows.
+const autobillingColumns = ["Autobilling", "Billing Date", "Fixed Monthly Amount"];
+const storedColumns = [...columns, ...autobillingColumns];
 
 export async function GET() {
   const auth = await requireUser();
@@ -89,8 +93,15 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: inserted.error.message }, { status: 500 });
     }
 
-    await writeAuditLog(admin, organisation.organisationId, auth.user.id, "client_record.add", null, row);
-    return loadResponse(admin, organisation.organisationId);
+    const audit = await writeAuditLog(admin, organisation.organisationId, auth.user.id, "client_record.add", null, row);
+    const insertedRecord = (inserted.data ?? [])[0] as ClientRecord | undefined;
+
+    // Return only the new row so the table can insert it in place instead of
+    // reloading every record.
+    return NextResponse.json({
+      ...(audit.data ? { auditLog: audit.data } : {}),
+      ...(insertedRecord ? { row: normalizeClientRow(insertedRecord, 0) } : {})
+    });
   }
 
   if (action === "update") {
@@ -650,7 +661,7 @@ async function requireUser() {
 function normalizeClientRow(client: ClientRecord, index: number) {
   const customValues = client.custom_values ?? {};
 
-  return columns.reduce<RegisterRow>((row, column) => {
+  return storedColumns.reduce<RegisterRow>((row, column) => {
     if (column === "S.no.") {
       row[column] = customValues[column] || customValues["Sl No."] || index + 1;
     } else if (column === "Particulars") {
@@ -667,7 +678,7 @@ function normalizeClientRow(client: ClientRecord, index: number) {
 }
 
 function normalizeIncomingRow(row: RegisterRow, index: number) {
-  return columns.reduce<RegisterRow>((record, column) => {
+  return storedColumns.reduce<RegisterRow>((record, column) => {
     record[column] = column === "S.no." ? row[column] || row["Sl No."] || index + 1 : row[column] ?? "";
     return record;
   }, {});
@@ -722,7 +733,7 @@ function normalizeLookupValue(value: unknown) {
 
 function buildClientRecordPatch(existing: ClientRecord, incoming: RegisterRow, blankMeansKeep: boolean) {
   const values = existing.custom_values ?? {};
-  return columns
+  return storedColumns
     .filter((column) => column !== "S.no.")
     .reduce<RegisterRow>((patch, column) => {
       const next = normalizeCellValue(incoming[column]);
