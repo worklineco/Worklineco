@@ -7,6 +7,10 @@
     {
       "path": "/api/cron/task-due-reminders",
       "schedule": "30 3 * * *"
+    },
+    {
+      "path": "/api/cron/autobilling",
+      "schedule": "40 3 * * *"
     }
   ]
 }
