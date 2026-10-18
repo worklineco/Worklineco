@@ -7,9 +7,10 @@ export const maxDuration = 300;
 // Autobilling: retainer clients whose record sets Autobilling = Yes get a
 // billing entry automatically every month on their chosen billing day. When a
 // month is shorter than the chosen day (the 31st in February, say), the entry
-// is created on that month's last day. Entries carry a deterministic
-// task_code (AB-YYYYMM-<client>) so a re-run or overlapping run can never
-// create the same month's bill twice.
+// is created on that month's last day. Entries are numbered RAB-YYYYMM-01,
+// RAB-YYYYMM-02, ... (Retainer Auto Billing) within each month, and each
+// entry's remarks carry a hidden [AB <client id>] marker so a re-run can
+// never create the same client's bill twice in one month.
 
 type ClientRow = {
   custom_values: Record<string, string | number> | null;
@@ -51,26 +52,37 @@ export async function GET(request: Request) {
     return NextResponse.json({ created: 0, date: today.key, due: 0, skipped: 0 });
   }
 
-  // One month, one bill: skip clients whose entry for this month exists.
+  // One month, one bill: this month's autobilling entries carry an
+  // [AB <client id>] marker in remarks - skip clients already billed.
   const monthKey = `${today.year}${String(today.month).padStart(2, "0")}`;
-  const codes = dueClients.map((client) => autobillingCode(monthKey, client.id));
-  const existing = await admin.from(billingTableName).select("task_code").in("task_code", codes);
+  const existing = await admin
+    .from(billingTableName)
+    .select("task_code,remarks")
+    .like("task_code", `RAB-${monthKey}-%`);
 
   if (existing.error) {
     return NextResponse.json({ error: existing.error.message }, { status: 500 });
   }
 
-  const existingCodes = new Set((existing.data ?? []).map((row) => String((row as { task_code?: string }).task_code ?? "")));
-  const toCreate = dueClients.filter((client) => !existingCodes.has(autobillingCode(monthKey, client.id)));
+  const existingRows = (existing.data ?? []) as Array<{ remarks?: string; task_code?: string }>;
+  const billedClientIds = new Set<string>();
+  for (const row of existingRows) {
+    const marker = /\[AB ([0-9a-fA-F-]+)\]/.exec(String(row.remarks ?? ""));
+    if (marker) billedClientIds.add(marker[1].toLowerCase());
+  }
+
+  const toCreate = dueClients.filter((client) => !billedClientIds.has(client.id.toLowerCase()));
+  let sequence = existingRows.length + 1;
   let created = 0;
   const failures: string[] = [];
 
   for (const client of toCreate) {
-    const result = await createBillingEntry(admin, client, today, monthKey);
+    const result = await createBillingEntry(admin, client, today, monthKey, sequence);
 
     if (result.error) {
       failures.push(`${client.name}: ${result.error}`);
     } else {
+      sequence = result.nextSequence;
       created += 1;
     }
   }
@@ -112,14 +124,17 @@ async function createBillingEntry(
   admin: ReturnType<typeof createAdminClient>,
   client: ClientRow,
   today: { day: number; key: string; month: number; monthName: string; year: number },
-  monthKey: string
+  monthKey: string,
+  startSequence: number
 ) {
   const values = client.custom_values ?? {};
   const amount = Number(String(values["Fixed Monthly Amount"] ?? "").replace(/[,\s₹]/g, ""));
 
   if (!(amount > 0)) {
-    return { error: "No fixed monthly amount on the client record." };
+    return { error: "No fixed monthly amount on the client record.", nextSequence: startSequence };
   }
+
+  let sequence = startSequence;
 
   const now = new Date().toISOString();
   let record: Record<string, unknown> = {
@@ -153,24 +168,30 @@ async function createBillingEntry(
     receiving_date: null,
     receiving_status: "Pending",
     registration_type: text(values["Registration Type"]),
-    remarks: `Created automatically on billing day ${today.day}.`,
+    remarks: `Created automatically on billing day ${today.day}. [AB ${client.id}]`,
     serial_no: 0,
     sgst: 0,
     source_module: "autobilling",
-    task_code: autobillingCode(monthKey, client.id),
+    task_code: autobillingCode(monthKey, sequence),
     total: amount,
     updated_at: now,
     voucher_type: "Proforma Invoice"
   };
 
   // Serial numbers are unique across the whole table, so take the table-wide
-  // max and retry a clash with a fresh number, as the billing API does.
-  for (let attempt = 0; attempt < 4; attempt += 1) {
-    record = { ...record, serial_no: (await nextTableSerial(admin)) + attempt };
+  // max and retry a clash with a fresh number, as the billing API does. A
+  // clash on the RAB code means another run took that sequence number, so
+  // move to the next one and retry.
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    record = {
+      ...record,
+      serial_no: (await nextTableSerial(admin)) + attempt,
+      task_code: autobillingCode(monthKey, sequence)
+    };
     const inserted = await admin.from(billingTableName).insert(record);
 
     if (!inserted.error) {
-      return { error: null };
+      return { error: null, nextSequence: sequence + 1 };
     }
 
     const message = String(inserted.error.message ?? "");
@@ -184,19 +205,19 @@ async function createBillingEntry(
       continue;
     }
 
-    const isDuplicateSerial = (inserted.error.code === "23505" || /duplicate key value/i.test(message)) && /serial_no/i.test(message);
+    const isDuplicate = inserted.error.code === "23505" || /duplicate key value/i.test(message);
 
-    if (!isDuplicateSerial) {
-      // A duplicate task_code means another run created this month's bill
-      // between our check and this insert - that is a success, not an error.
-      if ((inserted.error.code === "23505" || /duplicate key value/i.test(message)) && /task_code/i.test(message)) {
-        return { error: null };
-      }
-      return { error: message };
+    if (isDuplicate && /task_code/i.test(message)) {
+      sequence += 1;
+      continue;
+    }
+
+    if (!(isDuplicate && /serial_no/i.test(message))) {
+      return { error: message, nextSequence: sequence };
     }
   }
 
-  return { error: "Could not assign a serial number." };
+  return { error: "Could not assign a serial number.", nextSequence: sequence };
 }
 
 async function nextTableSerial(admin: ReturnType<typeof createAdminClient>) {
@@ -209,8 +230,9 @@ async function nextTableSerial(admin: ReturnType<typeof createAdminClient>) {
   return Number((data?.[0] as { serial_no?: number } | undefined)?.serial_no ?? 0) + 1;
 }
 
-function autobillingCode(monthKey: string, clientId: string) {
-  return `AB-${monthKey}-${clientId.replace(/-/g, "").slice(0, 10).toUpperCase()}`;
+// RAB = Retainer Auto Billing: RAB-202602-01, RAB-202602-02, ... per month.
+function autobillingCode(monthKey: string, sequence: number) {
+  return `RAB-${monthKey}-${String(sequence).padStart(2, "0")}`;
 }
 
 function text(value: unknown) {
