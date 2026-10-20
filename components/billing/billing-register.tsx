@@ -348,7 +348,20 @@ export function BillingRegister() {
   const [matters, setMatters] = useState<GstatMatter[]>([]);
   const [message, setMessage] = useState("");
   const [records, setRecords] = useState<BillingRecord[]>([]);
-  const [savingCell, setSavingCell] = useState<InlineEditor | null>(null);
+  // Background-save machinery: saves run per row, chained one after another,
+  // while every cell shows its new value instantly. pendingCellEdits keeps
+  // the edits not yet confirmed so a server merge never wipes a newer value.
+  const pendingRowSavesRef = useRef(new Map<string, Promise<void>>());
+  const pendingCellEditsRef = useRef(new Map<string, Map<BillingField, string>>());
+  const lastSavedRowRef = useRef(new Map<string, BillingRecord>());
+  const latestRecordsRef = useRef<BillingRecord[]>([]);
+  const inFlightSavesRef = useRef(0);
+  const addSavingRef = useRef(false);
+  const editSavingRef = useRef(false);
+
+  useEffect(() => {
+    latestRecordsRef.current = records;
+  }, [records]);
   const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null);
   const [tablePage, setTablePage] = useState(1);
   const [trashRecords, setTrashRecords] = useState<TrashRecord[]>([]);
@@ -568,7 +581,7 @@ export function BillingRegister() {
       if (document.visibilityState !== "visible" || isFullTableLoading) {
         return;
       }
-      if (addDraft || editDraft || inlineEditor || savingCell) {
+      if (addDraft || editDraft || inlineEditor || inFlightSavesRef.current) {
         return;
       }
       if (Date.now() - lastAutoRefreshRef.current < 30_000) {
@@ -587,7 +600,7 @@ export function BillingRegister() {
       window.removeEventListener("focus", refresh);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [viewMode, isAccessDenied, addDraft, editDraft, inlineEditor, savingCell, isFullTableLoading]);
+  }, [viewMode, isAccessDenied, addDraft, editDraft, inlineEditor, isFullTableLoading]);
 
   useEffect(() => {
     void loadBilling();
@@ -841,21 +854,39 @@ export function BillingRegister() {
       return;
     }
 
-    setMessage("Creating billing row...");
+    if (addSavingRef.current) {
+      return;
+    }
+
+    // Optimistic add: the row appears and the form closes instantly; the
+    // save runs in the background and only this row is swapped in after.
+    addSavingRef.current = true;
+    const draft = enrichBillingRecord(addDraft, clientRecords);
+    const tempId = `temp-${Date.now()}`;
+    const optimisticRecord = normalizeRecord({ ...draft, id: tempId });
+
+    setRecords((currentRecords) => [optimisticRecord, ...currentRecords]);
+    setAddDraft(null);
+    setMessage("Billing row added.");
 
     try {
-      const saved = await saveRecord(enrichBillingRecord(addDraft, clientRecords));
-      setRecords((currentRecords) => [normalizeRecord(saved), ...currentRecords]);
-      setAddDraft(null);
-      setMessage("Billing row added.");
-      void loadBilling();
+      const saved = normalizeRecord(await saveRecord(draft));
+      setRecords((currentRecords) =>
+        currentRecords.map((item) => (item.id === tempId ? saved : item))
+      );
+      void loadBillingActivity();
     } catch (error) {
+      // Roll back, reopen the form with the data intact, explain.
+      setRecords((currentRecords) => currentRecords.filter((item) => item.id !== tempId));
+      setAddDraft(draft);
       setMessage(error instanceof Error ? error.message : "Could not add billing row.");
+    } finally {
+      addSavingRef.current = false;
     }
   }
 
-  async function saveInlineEditor(valueOverride?: string) {
-    if (!inlineEditor || savingCell) {
+  function saveInlineEditor(valueOverride?: string) {
+    if (!inlineEditor) {
       return;
     }
 
@@ -867,35 +898,112 @@ export function BillingRegister() {
     }
 
     const rawValue = valueOverride ?? inlineEditorValueRef.current;
-    const nextRecord = enrichBillingRecord(
-      prepareRecordUpdate(record, inlineEditor.field, rawValue),
-      clientRecords,
-      inlineEditor.field
-    );
+    const nextRecord = applyFieldToRecord(record, inlineEditor.field, rawValue);
 
     if (String(record[inlineEditor.field] ?? "") === String(nextRecord[inlineEditor.field] ?? "")) {
       setInlineEditor(null);
       return;
     }
 
-    setSavingCell(inlineEditor);
+    const { field, recordId } = inlineEditor;
     setInlineEditor(null);
     setRecords((currentRecords) =>
-      currentRecords.map((item) => (item.id === record.id ? nextRecord : item))
+      currentRecords.map((item) => (item.id === recordId ? nextRecord : item))
     );
+    queueCellSave(recordId, field, rawValue);
+  }
 
-    try {
-      const saved = normalizeRecord(await saveRecord(nextRecord));
-      setRecords((currentRecords) =>
-        currentRecords.map((item) => (item.id === saved.id ? saved : item))
-      );
-      setMessage(`Saved ${getColumnLabel(inlineEditor.field)}.`);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Could not save billing cell.");
-      await loadBilling();
-    } finally {
-      setSavingCell(null);
+  // One field applied onto a record, with the same enrichment the old save
+  // paths used (client lookups, GSTAT matter links, recalculated totals).
+  function applyFieldToRecord(base: BillingRecord, field: BillingField, rawValue: string) {
+    let next = enrichBillingRecord(prepareRecordUpdate(base, field, rawValue), clientRecords, field);
+
+    if (field === "gstat_appeal_id") {
+      const matter = matters.find((item) => item.id === rawValue);
+      next = {
+        ...next,
+        client: matter?.client || next.client,
+        description: matter?.matter_description || next.description,
+        gstin: matter?.gstin || next.gstin,
+        owner_team: access.canViewAll ? matter?.owner_team || next.owner_team : next.owner_team
+      };
+      next = enrichBillingRecord(next, clientRecords, "gstin");
     }
+
+    return next;
+  }
+
+  // Cell saves are instant on screen and run in the background, chained per
+  // row: each save is rebuilt on top of the last server response plus any
+  // edits still pending, so quick consecutive edits never wait or clash.
+  function queueCellSave(recordId: string, field: BillingField, rawValue: string) {
+    const pending = pendingCellEditsRef.current.get(recordId) ?? new Map<BillingField, string>();
+    pending.set(field, rawValue);
+    pendingCellEditsRef.current.set(recordId, pending);
+
+    const previous = pendingRowSavesRef.current.get(recordId) ?? Promise.resolve();
+    const run = previous
+      .then(async () => {
+        const edits = pendingCellEditsRef.current.get(recordId);
+
+        // An earlier chained save may already have carried this edit along.
+        if (!edits?.has(field)) {
+          return;
+        }
+
+        const base =
+          lastSavedRowRef.current.get(recordId) ??
+          latestRecordsRef.current.find((item) => item.id === recordId);
+
+        if (!base) {
+          return;
+        }
+
+        inFlightSavesRef.current += 1;
+
+        try {
+          const applied = new Map(edits);
+          let payload = base;
+          for (const [editField, editValue] of applied) {
+            payload = applyFieldToRecord(payload, editField, editValue);
+          }
+
+          const saved = normalizeRecord(await saveRecord(payload));
+          lastSavedRowRef.current.set(recordId, saved);
+
+          for (const [editField, editValue] of applied) {
+            if (edits.get(editField) === editValue) {
+              edits.delete(editField);
+            }
+          }
+
+          // Re-apply any edits made while this save was in flight, so the
+          // server response never wipes a newer value off the screen.
+          setRecords((currentRecords) =>
+            currentRecords.map((item) => {
+              if (item.id !== recordId) {
+                return item;
+              }
+              let merged = saved;
+              for (const [editField, editValue] of edits) {
+                merged = applyFieldToRecord(merged, editField, editValue);
+              }
+              return merged;
+            })
+          );
+          setMessage(`Saved ${getColumnLabel(field)}.`);
+        } finally {
+          inFlightSavesRef.current -= 1;
+        }
+      })
+      .catch(async (error) => {
+        pendingCellEditsRef.current.delete(recordId);
+        lastSavedRowRef.current.delete(recordId);
+        setMessage(error instanceof Error ? error.message : "Could not save billing cell.");
+        await loadBilling();
+      });
+
+    pendingRowSavesRef.current.set(recordId, run);
   }
 
   function startInlineEdit(record: BillingRecord, field: BillingField, value: string) {
@@ -942,36 +1050,17 @@ export function BillingRegister() {
     }
   }
 
-  async function saveDirectField(record: BillingRecord, field: BillingField, rawValue: string) {
-    let nextRecord = enrichBillingRecord(prepareRecordUpdate(record, field, rawValue), clientRecords, field);
-
-    if (field === "gstat_appeal_id") {
-      const matter = matters.find((item) => item.id === rawValue);
-
-      nextRecord = {
-        ...nextRecord,
-        client: matter?.client || nextRecord.client,
-        description: matter?.matter_description || nextRecord.description,
-        gstin: matter?.gstin || nextRecord.gstin,
-        owner_team: access.canViewAll ? matter?.owner_team || nextRecord.owner_team : nextRecord.owner_team
-      };
-      nextRecord = enrichBillingRecord(nextRecord, clientRecords, "gstin");
+  function saveDirectField(record: BillingRecord, field: BillingField, rawValue: string) {
+    if (!record.id) {
+      return;
     }
+
+    const nextRecord = applyFieldToRecord(record, field, rawValue);
 
     setRecords((currentRecords) =>
       currentRecords.map((item) => (item.id === record.id ? nextRecord : item))
     );
-
-    try {
-      const saved = normalizeRecord(await saveRecord(nextRecord));
-      setRecords((currentRecords) =>
-        currentRecords.map((item) => (item.id === saved.id ? saved : item))
-      );
-      setMessage(`Saved ${getColumnLabel(field)}.`);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Could not save billing cell.");
-      await loadBilling();
-    }
+    queueCellSave(record.id, field, rawValue);
   }
 
   async function saveRecord(record: BillingRecord) {
@@ -1021,17 +1110,39 @@ export function BillingRegister() {
       return;
     }
 
-    setMessage("Saving billing row...");
+    if (editSavingRef.current) {
+      return;
+    }
+
+    // Optimistic update: the row changes and the form closes instantly; a
+    // failure rolls the row back and reopens the form with the data intact.
+    editSavingRef.current = true;
+    const draft = enrichBillingRecord(editDraft, clientRecords);
+    const previous = records.find((item) => item.id === draft.id);
+    const optimisticRecord = normalizeRecord(draft);
+
+    setRecords((currentRecords) =>
+      currentRecords.map((item) => (item.id === draft.id ? optimisticRecord : item))
+    );
+    setEditDraft(null);
+    setMessage("Billing row updated.");
 
     try {
-      const saved = normalizeRecord(await saveRecord(enrichBillingRecord(editDraft, clientRecords)));
+      const saved = normalizeRecord(await saveRecord(draft));
+      lastSavedRowRef.current.set(String(saved.id), saved);
       setRecords((currentRecords) =>
         currentRecords.map((item) => (item.id === saved.id ? saved : item))
       );
-      setEditDraft(null);
-      setMessage("Billing row updated.");
     } catch (error) {
+      if (previous) {
+        setRecords((currentRecords) =>
+          currentRecords.map((item) => (item.id === previous.id ? previous : item))
+        );
+      }
+      setEditDraft(draft);
       setMessage(error instanceof Error ? error.message : "Could not update billing row.");
+    } finally {
+      editSavingRef.current = false;
     }
   }
 
@@ -1481,7 +1592,6 @@ export function BillingRegister() {
                     onHistory={openRowHistory}
                     onSave={saveInlineEditor}
                     record={record}
-                    savingCell={savingCell}
                     serialNumber={pageStart + rowIndex}
                   />
                 ))
@@ -1592,7 +1702,6 @@ type BillingRowProps = {
   onHistory: (record: BillingRecord) => void;
   onSave: (valueOverride?: string) => void;
   record: BillingRecord;
-  savingCell: InlineEditor | null;
   serialNumber: number;
 };
 
@@ -1611,8 +1720,7 @@ function billingRowPropsEqual(previous: BillingRowProps, next: BillingRowProps) 
     previous.matters === next.matters &&
     previous.access === next.access &&
     previous.serialNumber === next.serialNumber &&
-    rowEditorKey(previous.inlineEditor, previous.record.id) === rowEditorKey(next.inlineEditor, next.record.id) &&
-    rowEditorKey(previous.savingCell, previous.record.id) === rowEditorKey(next.savingCell, next.record.id)
+    rowEditorKey(previous.inlineEditor, previous.record.id) === rowEditorKey(next.inlineEditor, next.record.id)
   );
 }
 
@@ -1631,7 +1739,6 @@ const BillingRow = memo(function BillingRow({
   onHistory,
   onSave,
   record,
-  savingCell,
   serialNumber
 }: BillingRowProps) {
   return (
@@ -1653,7 +1760,6 @@ const BillingRow = memo(function BillingRow({
           onDirectSave={(field, value) => onDirectSave(record, field, value)}
           onSave={onSave}
           record={record}
-          savingCell={savingCell}
           serialNumber={serialNumber}
         />
       ))}
@@ -1676,7 +1782,6 @@ function BillingCell({
   onDirectSave,
   onSave,
   record,
-  savingCell,
   serialNumber
 }: {
   access: AccessScope;
@@ -1693,7 +1798,6 @@ function BillingCell({
   onDirectSave: (field: BillingField, value: string) => void;
   onSave: (valueOverride?: string) => void;
   record: BillingRecord;
-  savingCell: InlineEditor | null;
   serialNumber: number;
 }) {
   const isActions = column.field === "actions";
@@ -1716,7 +1820,6 @@ function BillingCell({
     (!access.canViewAll && column.field === "owner_team") ||
     (isAccountsOnly && !access.canEditAccountsFields);
   const isEditing = Boolean(inlineEditor && inlineEditor.recordId === record.id && inlineEditor.field === field);
-  const isSaving = Boolean(savingCell && savingCell.recordId === record.id && savingCell.field === field);
   const editorValue = isEditing ? inlineEditor?.value ?? "" : "";
   const displayValue =
     column.field === "serial_no" ? String(record.task_code ?? "").trim() || String(serialNumber) : getDisplayValue(record, column, matters);
@@ -1813,7 +1916,7 @@ function BillingCell({
           className={`block w-full min-w-0 rounded px-1.5 text-left ${
             field === "client" ? "min-h-8 whitespace-normal break-words py-1 leading-tight" : "h-8 truncate"
           } ${isReadOnly ? "cursor-default" : "cursor-text hover:bg-slate-50 hover:ring-1 hover:ring-navy-200"}`}
-          disabled={isReadOnly || isSaving}
+          disabled={isReadOnly}
           onClick={() => {
             if (!isReadOnly && record.id) {
               onEdit(field, column.type === "date" ? formatDateForInput(record[field]) : String(record[field] ?? ""));
@@ -1822,7 +1925,7 @@ function BillingCell({
           title={String(displayValue || "")}
           type="button"
         >
-          {isSaving ? "Saving..." : displayValue || "-"}
+          {displayValue || "-"}
         </button>
       )}
     </td>
