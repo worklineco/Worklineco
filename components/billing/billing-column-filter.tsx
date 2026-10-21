@@ -126,13 +126,13 @@ export function BillingColumnFilter({ label, anchor, options, selected, onApply,
         <Search className="size-4 text-slate-400" />
         <input ref={searchRef} aria-label="Search filter values" className="min-w-0 flex-1 text-sm outline-none" placeholder="Search" value={query} onChange={(event) => setQuery(event.target.value)} />
       </div>
-      <div className="min-h-0 flex-1 border border-slate-200 bg-slate-50 p-2">
-        <label className="flex items-center gap-2 text-sm font-semibold" style={{ height: optionRowHeight }}>
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden border border-slate-200 bg-slate-50 p-2">
+        <label className="flex shrink-0 items-center gap-2 text-sm font-semibold" style={{ height: optionRowHeight }}>
           <input type="checkbox" checked={allSelected} ref={(node) => { if (node) node.indeterminate = someSelected; }} onChange={toggleAll} />
           (Select All)
         </label>
         <div
-          className="overflow-auto"
+          className="min-h-0 flex-1 overflow-auto"
           onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
           ref={listRef}
           style={{ maxHeight: optionListHeight }}
