@@ -2198,7 +2198,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                                   onSave={saveInlineEditor}
                                   value={inlineEditor.value}
                                 />
-                              ) : isInlineEditing && column.key === "Appeal By" ? (
+                              ) : isInlineEditing && (column.key === "Appeal By" || column.key === "Bill raised") ? (
                                 <select
                                   autoFocus
                                   className="h-7 w-full rounded-md border border-navy-300 bg-white px-1 text-[11px] font-bold text-slate-950 outline-none ring-2 ring-navy-100"
@@ -2207,7 +2207,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                                   value={inlineEditor.value}
                                 >
                                   <option value="">Select</option>
-                                  {appealByOptions.map((option) => (
+                                  {(column.key === "Bill raised" ? ["Yes", "No"] : appealByOptions).map((option) => (
                                     <option key={option} value={option}>{option}</option>
                                   ))}
                                 </select>
