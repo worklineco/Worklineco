@@ -325,7 +325,14 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
   const [filterSearch, setFilterSearch] = useState("");
   const [draftFilterValues, setDraftFilterValues] = useState<string[]>([]);
   const [inlineEditor, setInlineEditor] = useState<InlineEditorState | null>(null);
-  const [savingInlineCell, setSavingInlineCell] = useState<{ columnKey: string; rowIndex: number } | null>(null);
+  // Background-save machinery (same as the Billing register): saves run per
+  // row, chained one after another, while every cell shows its new value
+  // instantly. pendingCellEdits keeps the edits not yet confirmed so a server
+  // merge never wipes a newer value, and no edit is ever dropped.
+  const pendingRowSavesRef = useRef(new Map<string, Promise<void>>());
+  const pendingCellEditsRef = useRef(new Map<string, Map<string, string | number>>());
+  const lastSavedRowRef = useRef(new Map<string, AppealRow>());
+  const latestRowsRef = useRef<AppealRow[]>([]);
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [isEditorReadOnly, setIsEditorReadOnly] = useState(false);
   const [billingDraft, setBillingDraft] = useState<BillingDraft | null>(null);
@@ -342,9 +349,12 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
   const [, startRowsTransition] = useTransition();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const inlineSaveCancelledRef = useRef(false);
-  const inlineSaveInFlightRef = useRef(false);
   const dataHydratedRef = useRef(false);
   const appealDeepLinkHandledRef = useRef(false);
+
+  useEffect(() => {
+    latestRowsRef.current = rows;
+  }, [rows]);
 
   useEffect(() => {
     const embedded = new URLSearchParams(window.location.search).get("embed") === "1";
@@ -1448,7 +1458,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
     setInlineEditor(null);
   }
 
-  async function saveInlineEditor(valueOverride?: string) {
+  function saveInlineEditor(valueOverride?: string) {
     if (!canEditRegisterRef.current) {
       setMessage(viewOnlyRegisterMessage);
       return;
@@ -1459,7 +1469,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
       return;
     }
 
-    if (!inlineEditor || savingInlineCell || inlineSaveInFlightRef.current) {
+    if (!inlineEditor) {
       return;
     }
 
@@ -1483,54 +1493,149 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
       return;
     }
 
+    const { columnKey, rowIndex } = inlineEditor;
     const nextData = applyPersonHandlingForAccess(
       {
         ...row.data,
-        [inlineEditor.columnKey]: nextValue,
-        Sno: row.row_number || inlineEditor.rowIndex + 1
+        [columnKey]: nextValue,
+        Sno: row.row_number || rowIndex + 1
       },
       userAccess
     );
-    const optimisticRow = normalizeRow({ ...row, data: nextData }, inlineEditor.rowIndex);
+    const optimisticRow = normalizeRow({ ...row, data: nextData }, rowIndex);
 
-    inlineSaveInFlightRef.current = true;
-    setSavingInlineCell({ columnKey: inlineEditor.columnKey, rowIndex: inlineEditor.rowIndex });
+    // The cell shows its new value instantly; the save runs in the
+    // background. The old version silently DROPPED any edit made while a
+    // save was still in flight - the queue below keeps every edit.
     setInlineEditor(null);
     startRowsTransition(() => {
       setRows((currentRows) =>
-        currentRows.map((currentRow, index) => (index === inlineEditor.rowIndex ? optimisticRow : currentRow))
+        currentRows.map((currentRow, index) => (index === rowIndex ? optimisticRow : currentRow))
       );
     });
 
-    const response = await fetch("/api/gstat", {
-      body: JSON.stringify({
-        id: row.id,
-        row,
-        rowData: nextData
-      }),
-      headers: { "Content-Type": "application/json" },
-      method: "PATCH"
-    });
-    const result = (await response.json()) as { error?: string; row?: AppealRow };
-
-    if (!response.ok || !result.row) {
-      setMessage(result.error ?? "Could not save GSTAT cell.");
-      inlineSaveInFlightRef.current = false;
-      setSavingInlineCell(null);
-      await loadRows();
-      return;
+    if (row.id) {
+      queueCellSave(String(row.id), columnKey, nextValue);
+    } else {
+      void saveNewRowInline(row, nextData, columnKey, rowIndex);
     }
+  }
 
-    startRowsTransition(() => {
-      setRows((currentRows) =>
-        currentRows.map((currentRow, index) =>
-          index === inlineEditor.rowIndex ? normalizeRow(result.row!, inlineEditor.rowIndex) : currentRow
-        )
-      );
-    });
-    inlineSaveInFlightRef.current = false;
-    setSavingInlineCell(null);
-    setMessage(`Saved ${inlineEditor.columnKey} for row ${inlineEditor.rowIndex + 1}.`);
+  // A row that has not reached the server yet (no id) is created directly,
+  // exactly as the old inline save did.
+  async function saveNewRowInline(
+    row: AppealRow,
+    nextData: Record<string, string | number>,
+    columnKey: string,
+    rowIndex: number
+  ) {
+    try {
+      const response = await fetch("/api/gstat", {
+        body: JSON.stringify({ id: row.id, row, rowData: nextData }),
+        headers: { "Content-Type": "application/json" },
+        method: "PATCH"
+      });
+      const result = (await response.json()) as { error?: string; row?: AppealRow };
+
+      if (!response.ok || !result.row) {
+        throw new Error(result.error ?? "Could not save GSTAT cell.");
+      }
+
+      if (result.row.id) {
+        lastSavedRowRef.current.set(String(result.row.id), result.row);
+      }
+
+      startRowsTransition(() => {
+        setRows((currentRows) =>
+          currentRows.map((currentRow, index) => (index === rowIndex ? normalizeRow(result.row!, rowIndex) : currentRow))
+        );
+      });
+      setMessage(`Saved ${columnKey} for row ${rowIndex + 1}.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not save GSTAT cell.");
+      await loadRows();
+    }
+  }
+
+  // Cell saves are chained per row in the background: each save is rebuilt
+  // on top of the last server response plus any edits still pending, so
+  // quick consecutive edits never wait, never clash and are never lost.
+  function queueCellSave(rowId: string, columnKey: string, nextValue: string | number) {
+    const pending = pendingCellEditsRef.current.get(rowId) ?? new Map<string, string | number>();
+    pending.set(columnKey, nextValue);
+    pendingCellEditsRef.current.set(rowId, pending);
+
+    const previous = pendingRowSavesRef.current.get(rowId) ?? Promise.resolve();
+    const run = previous
+      .then(async () => {
+        const edits = pendingCellEditsRef.current.get(rowId);
+
+        // An earlier chained save may already have carried this edit along.
+        if (!edits?.has(columnKey)) {
+          return;
+        }
+
+        const baseRow =
+          lastSavedRowRef.current.get(rowId) ??
+          latestRowsRef.current.find((item) => String(item.id ?? "") === rowId);
+
+        if (!baseRow) {
+          return;
+        }
+
+        const applied = new Map(edits);
+        const payloadData = applyPersonHandlingForAccess(
+          {
+            ...baseRow.data,
+            ...Object.fromEntries(applied),
+            Sno: baseRow.row_number || 1
+          },
+          userAccess
+        );
+        const response = await fetch("/api/gstat", {
+          body: JSON.stringify({ id: rowId, row: baseRow, rowData: payloadData }),
+          headers: { "Content-Type": "application/json" },
+          method: "PATCH"
+        });
+        const result = (await response.json()) as { error?: string; row?: AppealRow };
+
+        if (!response.ok || !result.row) {
+          throw new Error(result.error ?? "Could not save GSTAT cell.");
+        }
+
+        lastSavedRowRef.current.set(rowId, result.row);
+
+        for (const [editKey, editValue] of applied) {
+          if (edits.get(editKey) === editValue) {
+            edits.delete(editKey);
+          }
+        }
+
+        // Re-apply edits made while this save was in flight, so the server
+        // response never wipes a newer value off the screen.
+        startRowsTransition(() => {
+          setRows((currentRows) =>
+            currentRows.map((currentRow, index) => {
+              if (String(currentRow.id ?? "") !== rowId) {
+                return currentRow;
+              }
+              const merged = edits.size
+                ? { ...result.row!, data: { ...result.row!.data, ...Object.fromEntries(edits) } }
+                : result.row!;
+              return normalizeRow(merged, index);
+            })
+          );
+        });
+        setMessage(`Saved ${columnKey}.`);
+      })
+      .catch(async (error) => {
+        pendingCellEditsRef.current.delete(rowId);
+        lastSavedRowRef.current.delete(rowId);
+        setMessage(error instanceof Error ? error.message : "Could not save GSTAT cell.");
+        await loadRows();
+      });
+
+    pendingRowSavesRef.current.set(rowId, run);
   }
 
   async function saveEditor() {
@@ -1564,7 +1669,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
 
     setIsSavingEditor(true);
     setEditor(null);
-    setMessage(`Saving row ${rowIndex + 1}...`);
+    setMessage(`Saved row ${rowIndex + 1}.`);
     startRowsTransition(() => {
       setRows((currentRows) => {
         if (editor.isNew) {
@@ -1593,18 +1698,16 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
       return;
     }
 
-    startRowsTransition(() => {
-      setRows((currentRows) => {
-        if (editor.isNew) {
-          return currentRows.map((currentRow, index) =>
-            index === rowIndex ? normalizeRow(result.row!, rowIndex) : currentRow
-          );
-        }
+    if (result.row.id) {
+      lastSavedRowRef.current.set(String(result.row.id), result.row);
+    }
 
-        return currentRows.map((currentRow, index) =>
+    startRowsTransition(() => {
+      setRows((currentRows) =>
+        currentRows.map((currentRow, index) =>
           index === rowIndex ? normalizeRow(result.row!, rowIndex) : currentRow
-        );
-      });
+        )
+      );
     });
     setIsSavingEditor(false);
     setMessage(`Saved row ${rowIndex + 1}. Audit log updated.`);
@@ -2051,8 +2154,6 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                           const isInlineEditable = canInlineEdit(column.key, userAccess);
                           const isInlineEditing =
                             inlineEditor?.rowIndex === originalIndex && inlineEditor.columnKey === column.key;
-                          const isSavingInline =
-                            savingInlineCell?.rowIndex === originalIndex && savingInlineCell.columnKey === column.key;
                           const isDuplicateDrc07 = hasDuplicateDrc07 && column.key === "DRC 07 No";
                           const isDuplicateOia = hasDuplicateOia && column.key === "OIA No";
                           const isBlankNtbdReason =
@@ -2142,7 +2243,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                                       ? "text-slate-400 ring-1 ring-dashed ring-slate-200"
                                       : ""
                                   }`}
-                                  disabled={!isInlineEditable || Boolean(isSavingInline)}
+                                  disabled={!isInlineEditable}
                                   onClick={() => openInlineEditor(originalIndex, column, cellValue)}
                                   title={
                                     isDuplicateDrc07
@@ -2155,13 +2256,11 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
                                   }
                                   type="button"
                                 >
-                                  {isSavingInline
-                                    ? "Saving..."
-                                    : isRequiredBlank
-                                      ? "Required"
-                                      : isBillingInlineColumn && isBlankCell(displayValue)
-                                        ? "Click to edit"
-                                        : displayValue ?? ""}
+                                  {isRequiredBlank
+                                    ? "Required"
+                                    : isBillingInlineColumn && isBlankCell(displayValue)
+                                      ? "Click to edit"
+                                      : displayValue ?? ""}
                                 </button>
                               )}
                             </td>
