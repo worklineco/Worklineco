@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import { Search, X } from "lucide-react";
 
@@ -16,14 +16,15 @@ type Props = {
 
 // Windowed list: with thousands of values, only the rows in view are
 // rendered, so typing in the search stays smooth.
-const optionRowHeight = 28;
-const optionListHeight = 220;
+const optionRowHeight = 30;
+const optionListHeight = 340;
 
 export function BillingColumnFilter({ label, anchor, options, selected, onApply, onSort, onClose }: Props) {
   const [query, setQuery] = useState("");
   const [search, setSearch] = useState("");
   const [draft, setDraft] = useState(() => selected ?? options);
   const [scrollTop, setScrollTop] = useState(0);
+  const [highlight, setHighlight] = useState(-1);
   const menuRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -51,6 +52,7 @@ export function BillingColumnFilter({ label, anchor, options, selected, onApply,
   useEffect(() => {
     listRef.current?.scrollTo({ top: 0 });
     setScrollTop(0);
+    setHighlight(-1);
   }, [search]);
 
   useEffect(() => {
@@ -90,12 +92,53 @@ export function BillingColumnFilter({ label, anchor, options, selected, onApply,
   }, [onApply, onClose]);
 
   if (typeof document === "undefined") return null;
-  const top = Math.max(8, Math.min(anchor.bottom + 4, window.innerHeight - 420));
-  const left = Math.max(8, Math.min(anchor.left, window.innerWidth - 296));
+  const top = Math.max(8, Math.min(anchor.bottom + 4, window.innerHeight - 560));
+  const left = Math.max(8, Math.min(anchor.left, window.innerWidth - 328));
   const buttonClass = "w-full rounded-md px-2 py-2 text-left text-sm font-semibold hover:bg-slate-100";
 
   function toggleValue(value: string) {
     setDraft((current) => current.includes(value) ? current.filter((item) => item !== value) : [...current, value]);
+  }
+
+  function applyDraft() {
+    onApply(options.every((value) => draftSet.has(value)) ? undefined : draft);
+  }
+
+  // Arrow keys walk the value list from anywhere in the menu (including the
+  // search box); Space ticks the highlighted value, Enter applies.
+  function moveHighlight(delta: number) {
+    setHighlight((current) => {
+      const next = Math.max(0, Math.min(visible.length - 1, (current < 0 ? -1 : current) + delta));
+      const list = listRef.current;
+      if (list) {
+        const rowTop = next * optionRowHeight;
+        if (rowTop < list.scrollTop) list.scrollTop = rowTop;
+        else if (rowTop + optionRowHeight > list.scrollTop + list.clientHeight) {
+          list.scrollTop = rowTop + optionRowHeight - list.clientHeight;
+        }
+      }
+      return next;
+    });
+  }
+
+  function handleMenuKeyDown(event: ReactKeyboardEvent) {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      moveHighlight(1);
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      moveHighlight(-1);
+    } else if (event.key === " " && event.target !== searchRef.current && highlight >= 0 && visible[highlight] !== undefined) {
+      event.preventDefault();
+      toggleValue(visible[highlight]);
+    } else if (event.key === "Enter") {
+      event.preventDefault();
+      if (highlight >= 0 && visible[highlight] !== undefined && event.target !== searchRef.current) {
+        toggleValue(visible[highlight]);
+      } else {
+        applyDraft();
+      }
+    }
   }
 
   function toggleAll() {
@@ -113,7 +156,7 @@ export function BillingColumnFilter({ label, anchor, options, selected, onApply,
   const windowed = visible.slice(windowStart, windowEnd);
 
   return createPortal(
-    <div ref={menuRef} role="dialog" aria-label={`Filter ${label}`} className="fixed z-[1000] flex w-72 flex-col overflow-hidden rounded-lg border border-slate-300 bg-white p-2 text-slate-900 shadow-2xl" style={{ top, left, maxHeight: window.innerHeight - top - 8 }}>
+    <div ref={menuRef} role="dialog" aria-label={`Filter ${label}`} className="fixed z-[1000] flex w-80 flex-col overflow-hidden rounded-lg border border-slate-300 bg-white p-2 text-slate-900 shadow-2xl" onKeyDown={handleMenuKeyDown} style={{ top, left, maxHeight: window.innerHeight - top - 8 }}>
       <div className="flex shrink-0 items-center justify-between border-b border-slate-200 pb-2">
         <span className="truncate text-sm font-bold" title={label}>{label}</span>
         <button aria-label="Close filter" onClick={onClose} type="button"><X className="size-4" /></button>
@@ -140,12 +183,20 @@ export function BillingColumnFilter({ label, anchor, options, selected, onApply,
           {visible.length ? (
             <div style={{ height: visible.length * optionRowHeight, position: "relative" }}>
               <div style={{ position: "absolute", top: windowStart * optionRowHeight, width: "100%" }}>
-                {windowed.map((value) => (
-                  <label key={value} className="flex items-center gap-2 text-sm" style={{ height: optionRowHeight }}>
-                    <input type="checkbox" checked={draftSet.has(value)} onChange={() => toggleValue(value)} />
-                    <span className="truncate" title={value || "(Blanks)"}>{value || "(Blanks)"}</span>
-                  </label>
-                ))}
+                {windowed.map((value, windowIndex) => {
+                  const optionIndex = windowStart + windowIndex;
+                  return (
+                    <label
+                      key={value}
+                      className={`flex items-center gap-2 rounded px-1 text-sm ${optionIndex === highlight ? "bg-navy-100 ring-1 ring-navy-300" : ""}`}
+                      onMouseEnter={() => setHighlight(optionIndex)}
+                      style={{ height: optionRowHeight }}
+                    >
+                      <input type="checkbox" checked={draftSet.has(value)} onChange={() => toggleValue(value)} />
+                      <span className="truncate" title={value || "(Blanks)"}>{value || "(Blanks)"}</span>
+                    </label>
+                  );
+                })}
               </div>
             </div>
           ) : (
@@ -155,7 +206,7 @@ export function BillingColumnFilter({ label, anchor, options, selected, onApply,
       </div>
       <div className="mt-2 flex shrink-0 justify-end gap-2">
         <button className="rounded-md border px-3 py-2 text-sm font-semibold" onClick={onClose} type="button">Cancel</button>
-        <button className="rounded-md bg-navy-700 px-4 py-2 text-sm font-semibold text-white" onClick={() => onApply(options.every((value) => draftSet.has(value)) ? undefined : draft)} type="button">Apply</button>
+        <button className="rounded-md bg-navy-700 px-4 py-2 text-sm font-semibold text-white" onClick={applyDraft} type="button">Apply</button>
       </div>
     </div>, document.body
   );
