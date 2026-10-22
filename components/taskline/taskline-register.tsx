@@ -5,6 +5,7 @@ import Link from "next/link";
 import type { ComponentType, PointerEvent as ReactPointerEvent } from "react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { filterOptionHighlightClass, useFilterMenuKeys } from "@/components/shared/filter-menu-keys";
 import * as XLSX from "xlsx-js-style";
 import { clearCached, getCached, setCached } from "@/lib/data-cache";
 import { downloadImportTemplate } from "@/lib/import-template";
@@ -757,7 +758,7 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
 
   function openColumnFilter(key: string, anchor: HTMLElement) {
     const rect = anchor.getBoundingClientRect();
-    const width = 288;
+    const width = 320;
     const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
     const top = rect.bottom + 4;
     const maxHeight = Math.max(240, window.innerHeight - top - 16);
@@ -5281,6 +5282,12 @@ function TaskLineFilterMenu({
   search: string;
   visibleOptions: string[];
 }) {
+  const { handleMenuKeyDown, highlight, setHighlight } = useFilterMenuKeys({
+    itemCount: visibleOptions.length,
+    onApply,
+    onToggleIndex: (index) => onToggleValue(visibleOptions[index])
+  });
+
   if (typeof document === "undefined") {
     return null;
   }
@@ -5290,8 +5297,9 @@ function TaskLineFilterMenu({
 
   return createPortal(
     <div
-      className="fixed z-[1000] flex w-72 flex-col overflow-hidden rounded-lg border border-slate-300 bg-white p-2 text-left text-slate-900 shadow-2xl"
+      className="fixed z-[1000] flex w-80 flex-col overflow-hidden rounded-lg border border-slate-300 bg-white p-2 text-left text-slate-900 shadow-2xl"
       data-taskline-filter-menu="true"
+      onKeyDown={handleMenuKeyDown}
       style={{ left: menuPos.left, maxHeight: menuPos.maxHeight, top: menuPos.top }}
     >
       <div className="shrink-0 space-y-1 border-b border-slate-200 pb-2">
@@ -5346,7 +5354,7 @@ function TaskLineFilterMenu({
         <Search className="size-4 text-slate-400" />
         <input
           className="min-w-0 flex-1 bg-transparent text-sm font-semibold outline-none placeholder:text-slate-400"
-          onChange={(event) => onSearchChange(event.target.value)}
+          onChange={(event) => { setHighlight(-1); onSearchChange(event.target.value); }}
           placeholder="Search"
           value={search}
         />
@@ -5371,8 +5379,8 @@ function TaskLineFilterMenu({
           {isLoading ? (
             <p className="py-6 text-center text-sm font-semibold text-slate-500"><LoadingIndicator label="Loading values..." /></p>
           ) : visibleOptions.length ? (
-            visibleOptions.map((value) => (
-              <label className="flex cursor-pointer items-center gap-2 text-sm font-semibold text-slate-950" key={value || "(blank)"}>
+            visibleOptions.map((value, optionIndex) => (
+              <label className={`flex cursor-pointer items-center gap-2 px-1 text-sm font-semibold text-slate-950${filterOptionHighlightClass(optionIndex === highlight)}`} data-filter-option={optionIndex} key={value || "(blank)"} onMouseEnter={() => setHighlight(optionIndex)}>
                 <input checked={draft.includes(value)} className="size-4 accent-navy-700" onChange={() => onToggleValue(value)} type="checkbox" />
                 <span className="min-w-0 truncate" title={value || "(Blank)"}>{value || "(Blank)"}</span>
               </label>
