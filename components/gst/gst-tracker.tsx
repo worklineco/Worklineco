@@ -3,6 +3,7 @@
 import { AlertTriangle, ArrowDown, ArrowLeft, ArrowUp, ChevronDown, ChevronRight, Download, FileText, Filter, Network, RefreshCw, Search, Trash2, X } from "lucide-react";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { filterOptionHighlightClass, useFilterMenuKeys } from "@/components/shared/filter-menu-keys";
 
 type GstClient = { gstin: string; group: string; hasCredentials: boolean; name: string };
 type DetailTable = { headers: string[]; rows: string[][] };
@@ -2055,7 +2056,7 @@ function useGstFilterMenu() {
 
   const open = (key: string, anchor: HTMLElement, options: string[], selected: string[]) => {
     const rect = anchor.getBoundingClientRect();
-    const width = 288;
+    const width = 320;
     const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
     const top = rect.bottom + 4;
     const maxHeight = Math.max(240, window.innerHeight - top - 16);
@@ -2131,6 +2132,12 @@ function GstFilterMenu({ columnLabel, draft, hasFilter, menuPos, onApply, onCanc
   search: string;
   visibleOptions: string[];
 }) {
+  const { handleMenuKeyDown, highlight, setHighlight } = useFilterMenuKeys({
+    itemCount: visibleOptions.length,
+    onApply,
+    onToggleIndex: (index) => onToggleValue(visibleOptions[index])
+  });
+
   if (typeof document === "undefined") {
     return null;
   }
@@ -2142,7 +2149,8 @@ function GstFilterMenu({ columnLabel, draft, hasFilter, menuPos, onApply, onCanc
     <>
       <div className="fixed inset-0 z-[999]" onClick={onCancel} />
       <div
-        className="fixed z-[1000] flex w-72 flex-col overflow-hidden rounded-lg border border-slate-300 bg-white p-2 text-left normal-case tracking-normal text-slate-900 shadow-2xl"
+        className="fixed z-[1000] flex w-80 flex-col overflow-hidden rounded-lg border border-slate-300 bg-white p-2 text-left normal-case tracking-normal text-slate-900 shadow-2xl"
+        onKeyDown={handleMenuKeyDown}
         style={{ left: menuPos.left, maxHeight: menuPos.maxHeight, top: menuPos.top }}
       >
         <div className="shrink-0 space-y-1 border-b border-slate-200 pb-2">
@@ -2179,7 +2187,7 @@ function GstFilterMenu({ columnLabel, draft, hasFilter, menuPos, onApply, onCanc
           <Search className="size-4 text-slate-400" />
           <input
             className="min-w-0 flex-1 bg-transparent text-sm font-semibold outline-none placeholder:text-slate-400"
-            onChange={(event) => onSearchChange(event.target.value)}
+            onChange={(event) => { setHighlight(-1); onSearchChange(event.target.value); }}
             placeholder="Search"
             value={search}
           />
@@ -2202,8 +2210,8 @@ function GstFilterMenu({ columnLabel, draft, hasFilter, menuPos, onApply, onCanc
           </label>
           <div className="mt-1 space-y-1">
             {visibleOptions.length ? (
-              visibleOptions.map((value) => (
-                <label className="flex cursor-pointer items-center gap-2 text-sm font-semibold text-slate-950" key={value || "(blank)"}>
+              visibleOptions.map((value, optionIndex) => (
+                <label className={`flex cursor-pointer items-center gap-2 px-1 text-sm font-semibold text-slate-950${filterOptionHighlightClass(optionIndex === highlight)}`} data-filter-option={optionIndex} key={value || "(blank)"} onMouseEnter={() => setHighlight(optionIndex)}>
                   <input checked={draft.includes(value)} className="size-4 accent-navy-700" onChange={() => onToggleValue(value)} type="checkbox" />
                   <span className="min-w-0 truncate" title={value || "(Blank)"}>{value || "(Blank)"}</span>
                 </label>
