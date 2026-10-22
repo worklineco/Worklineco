@@ -26,6 +26,7 @@ import { getCached, setCached } from "@/lib/data-cache";
 import { useRegisterEditAccess, viewOnlyRegisterMessage } from "@/lib/use-register-access";
 import { ViewOnlyAccessDialog } from "@/components/shared/view-only-access-dialog";
 import { ClientRecordEditor } from "@/components/client-records/client-record-editor";
+import { filterOptionHighlightClass, useFilterMenuKeys } from "@/components/shared/filter-menu-keys";
 import * as XLSX from "xlsx-js-style";
 
 type RegisterRow = Record<string, string | number>;
@@ -411,7 +412,7 @@ export function ClientRecordsRegister() {
     setFilterSearch("");
     setFilterDraft(valueFilters[column]?.length ? [...valueFilters[column]] : options);
     const rect = anchor.getBoundingClientRect();
-    const width = 288;
+    const width = 320;
     const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
     const top = rect.bottom + 4;
     setFilterMenuPos({ left, maxHeight: Math.max(240, window.innerHeight - top - 16), top });
@@ -999,12 +1000,18 @@ function ClientFilterMenu({
   search: string;
   visibleOptions: string[];
 }) {
+  const { handleMenuKeyDown, highlight, setHighlight } = useFilterMenuKeys({
+    itemCount: visibleOptions.length,
+    onApply,
+    onToggleIndex: (index) => onToggleValue(visibleOptions[index])
+  });
+
   if (typeof document === "undefined") return null;
   const allVisibleSelected = visibleOptions.length > 0 && visibleOptions.every((value) => draft.includes(value));
   const someVisibleSelected = visibleOptions.some((value) => draft.includes(value)) && !allVisibleSelected;
 
   return createPortal(
-    <div className="fixed z-[1000] flex w-72 flex-col overflow-hidden rounded-lg border border-slate-300 bg-white p-2 text-left text-slate-900 shadow-2xl" data-client-filter-menu="true" style={{ left: menuPos.left, maxHeight: menuPos.maxHeight, top: menuPos.top }}>
+    <div className="fixed z-[1000] flex w-80 flex-col overflow-hidden rounded-lg border border-slate-300 bg-white p-2 text-left text-slate-900 shadow-2xl" data-client-filter-menu="true" onKeyDown={handleMenuKeyDown} style={{ left: menuPos.left, maxHeight: menuPos.maxHeight, top: menuPos.top }}>
       <div className="shrink-0 space-y-1 border-b border-slate-200 pb-2">
         <button className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm font-semibold hover:bg-slate-100" onClick={onSortAsc} type="button"><span className="w-8 text-xs font-black text-navy-700">A-Z</span>Sort A to Z</button>
         <button className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm font-semibold hover:bg-slate-100" onClick={onSortDesc} type="button"><span className="w-8 text-xs font-black text-navy-700">Z-A</span>Sort Z to A</button>
@@ -1016,7 +1023,7 @@ function ClientFilterMenu({
       </div>
       <div className="mt-2 flex shrink-0 items-center gap-2 rounded-md border border-slate-300 px-2 py-1.5">
         <Search className="size-4 text-slate-400" />
-        <input className="min-w-0 flex-1 bg-transparent text-sm font-semibold outline-none" onChange={(event) => onSearchChange(event.target.value)} placeholder="Search" value={search} />
+        <input className="min-w-0 flex-1 bg-transparent text-sm font-semibold outline-none" onChange={(event) => { setHighlight(-1); onSearchChange(event.target.value); }} placeholder="Search" value={search} />
       </div>
       <div className="mt-2 min-h-0 flex-1 overflow-y-auto border border-slate-200 bg-slate-50 p-2">
         <label className="flex cursor-pointer items-center gap-2 text-sm font-semibold text-slate-950">
@@ -1024,8 +1031,8 @@ function ClientFilterMenu({
           (Select All)
         </label>
         <div className="mt-1 space-y-1">
-          {visibleOptions.length ? visibleOptions.map((value) => (
-            <label className="flex cursor-pointer items-center gap-2 text-sm font-semibold text-slate-950" key={value || "(blank)"}>
+          {visibleOptions.length ? visibleOptions.map((value, optionIndex) => (
+            <label className={`flex cursor-pointer items-center gap-2 px-1 text-sm font-semibold text-slate-950${filterOptionHighlightClass(optionIndex === highlight)}`} data-filter-option={optionIndex} key={value || "(blank)"} onMouseEnter={() => setHighlight(optionIndex)}>
               <input checked={draft.includes(value)} className="size-4 accent-navy-700" onChange={() => onToggleValue(value)} type="checkbox" />
               <span className="min-w-0 truncate" title={value || "(Blank)"}>{value || "(Blank)"}</span>
             </label>
