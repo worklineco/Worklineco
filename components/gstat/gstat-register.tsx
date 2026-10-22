@@ -5,6 +5,7 @@ import { getCurrentUser } from "@/lib/supabase/session";
 import { getCached, setCached } from "@/lib/data-cache";
 import { useRegisterEditAccess, viewOnlyRegisterMessage } from "@/lib/use-register-access";
 import { ViewOnlyAccessDialog } from "@/components/shared/view-only-access-dialog";
+import { filterOptionHighlightClass, useFilterMenuKeys } from "@/components/shared/filter-menu-keys";
 import { readPrimaryTeam, readUserTeams, teamIsAllowed } from "@/lib/user-teams";
 import { ArrowDown, ArrowLeft, ArrowUp, Check, ChevronDown, Pin, ChevronUp, Download, Expand, ExternalLink, FileSpreadsheet, FileText, Filter, History, Menu, Pencil, Plus, ReceiptText, Search, Settings2, Trash2, Upload, X } from "lucide-react";
 import { LoadingIndicator } from "@/components/shared/loading-indicator";
@@ -594,7 +595,7 @@ export function GstatRegister({ isMaximized = false }: { isMaximized?: boolean }
     const options = getUniqueColumnFilterOptions(rows, column, columnFilterOptionLimit);
     const appliedValues = columnValueFilters[column.key];
     const rect = anchor.getBoundingClientRect();
-    const menuWidth = 288;
+    const menuWidth = 320;
     const viewportPadding = 12;
     const menuChromeHeight = 196;
     const minListHeight = 110;
@@ -3282,6 +3283,11 @@ function ExcelColumnHeader({
   sortState: SortState;
   visibleOptions: ColumnFilterOption[];
 }) {
+  const { handleMenuKeyDown, highlight, setHighlight } = useFilterMenuKeys({
+    itemCount: visibleOptions.length,
+    onApply: () => onApplyFilter(column),
+    onToggleIndex: (index) => onToggleDraftFilterValue(visibleOptions[index].key)
+  });
   const isAscending = sortState?.columnKey === column.key && sortState.direction === "asc";
   const isDescending = sortState?.columnKey === column.key && sortState.direction === "desc";
   const hasFilter = Boolean(columnValueFilters[column.key]?.length);
@@ -3333,8 +3339,9 @@ function ExcelColumnHeader({
 
       {isOpen && menuPosition && typeof document !== "undefined" ? createPortal(
         <div
-          className="fixed z-[1000] w-72 overflow-hidden rounded-lg border border-slate-300 bg-white p-2 text-left text-slate-900 shadow-2xl"
+          className="fixed z-[1000] w-80 overflow-hidden rounded-lg border border-slate-300 bg-white p-2 text-left text-slate-900 shadow-2xl"
           data-gstat-filter-menu="true"
+          onKeyDown={handleMenuKeyDown}
           style={{
             left: menuPosition.left,
             top: menuPosition.top
@@ -3396,7 +3403,7 @@ function ExcelColumnHeader({
             <Search className="size-4 text-slate-400" />
             <input
               className="min-w-0 flex-1 bg-transparent text-sm font-semibold outline-none placeholder:text-slate-400"
-              onChange={(event) => onFilterSearchChange(event.target.value)}
+              onChange={(event) => { setHighlight(-1); onFilterSearchChange(event.target.value); }}
               placeholder="Search"
               value={filterSearch}
             />
@@ -3419,8 +3426,8 @@ function ExcelColumnHeader({
             </label>
             <div className="mt-1 space-y-1">
               {visibleOptions.length ? (
-                visibleOptions.map((option) => (
-                  <label className="flex cursor-pointer items-center gap-2 text-sm font-semibold text-slate-950" key={option.key}>
+                visibleOptions.map((option, optionIndex) => (
+                  <label className={`flex cursor-pointer items-center gap-2 px-1 text-sm font-semibold text-slate-950${filterOptionHighlightClass(optionIndex === highlight)}`} data-filter-option={optionIndex} key={option.key} onMouseEnter={() => setHighlight(optionIndex)}>
                     <input
                       checked={draftFilterValues.includes(option.key)}
                       className="size-4 accent-slate-950"
