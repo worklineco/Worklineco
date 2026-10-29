@@ -269,6 +269,13 @@ window.__run=run; window.addEventListener('resize',()=>{clearTimeout(window.__rt
 .glance .tile, .dco-issue { transition: transform .18s ease, box-shadow .18s ease; }
 .glance .tile:hover, .dco-issue:hover { transform: translateY(-2px); box-shadow: 0 10px 26px rgba(43,51,96,.14); }
 @media (prefers-reduced-motion: reduce) { .wl-js .wl-reveal { opacity: 1; transform: none; transition: none; } #wlprog { transition: none; } }
+/* One-time shine sweep across the masthead, and a soft count-up cue. */
+.mast { position: relative; overflow: hidden; }
+@keyframes wlShine { 0% { transform: translateX(-130%) skewX(-18deg); opacity: 0; } 12% { opacity: 1; } 100% { transform: translateX(320%) skewX(-18deg); opacity: 0; } }
+.mast::after { content: ""; position: absolute; top: 0; left: 0; width: 45%; height: 100%; background: linear-gradient(90deg, transparent, rgba(255,255,255,.10), transparent); transform: translateX(-130%) skewX(-18deg); animation: wlShine 2.6s ease-out .35s 1; pointer-events: none; z-index: 0; }
+.mast > * { position: relative; z-index: 1; }
+.glance .tile .n { transition: color .2s ease; }
+@media (prefers-reduced-motion: reduce) { .mast::after { animation: none; display: none; } }
 </style>
 
 <div style="position:sticky;top:0;z-index:9999;display:flex;align-items:center;justify-content:space-between;gap:10px;background:#fff;border:1px solid #D9DFEE;border-radius:8px;padding:7px 14px;margin-bottom:14px;box-shadow:0 2px 8px rgba(43,51,96,.12);font-family:Roboto,Arial,sans-serif"><span style="font-weight:700;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:#2B3360">WorkLine Co</span><a href="/resources" style="font-weight:700;font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:#2B3360;text-decoration:none">&larr; Back to Resource Center</a></div>
@@ -297,9 +304,9 @@ window.__run=run; window.addEventListener('resize',()=>{clearTimeout(window.__rt
     <button class="dco-tab" role="tab" data-tab="board" aria-selected="false" id="tab-board">Discussion board</button>
     <button class="dco-tab" role="tab" data-tab="pipeline" aria-selected="false" id="tab-pipeline">Pipeline</button>
     <button class="dco-tab" role="tab" data-tab="sector" aria-selected="false" id="tab-sector">Industry impact</button>
+    <button class="dco-tab" role="tab" data-tab="deep" aria-selected="false" id="tab-deep">Deep dives</button>
     <button class="dco-tab" role="tab" data-tab="fa26" aria-selected="false" id="tab-fa26">Finance Act 2026</button>
     <button class="dco-tab" role="tab" data-tab="faq" aria-selected="false" id="tab-faq">FAQ library</button>
-    <button class="dco-tab" role="tab" data-tab="deep" aria-selected="false" id="tab-deep">Deep dives</button>
     <button class="dco-tab" role="tab" data-tab="ar" aria-selected="false" id="tab-ar">Annual return</button>
     <button class="dco-tab" role="tab" data-tab="rules" aria-selected="false" id="tab-rules">Earlier v. amended</button>
     <button class="dco-tab" role="tab" data-tab="instruments" aria-selected="false" id="tab-instruments">Instruments</button>
@@ -1657,12 +1664,22 @@ document.querySelectorAll('.dco-fafaq').forEach((b) => b.addEventListener('click
 <script>
 (function(){
   var h=document.documentElement; h.classList.add('wl-js');
+  var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   var bar=document.getElementById('wlprog');
   function prog(){ var m=(h.scrollHeight-h.clientHeight)||1; bar.style.width=Math.min(100,Math.max(0,(h.scrollTop/m)*100))+'%'; }
   window.addEventListener('scroll',prog,{passive:true}); window.addEventListener('resize',prog); prog();
-  var io=null; try{ io=new IntersectionObserver(function(es){ es.forEach(function(e){ if(e.isIntersecting){ e.target.classList.add('wl-in'); io.unobserve(e.target); } }); },{threshold:.08, rootMargin:'0px 0px -5% 0px'}); }catch(_){ }
-  function tag(){ if(!io) return; document.querySelectorAll('.dco-issue').forEach(function(el){ if(!el.classList.contains('wl-reveal')){ el.classList.add('wl-reveal'); io.observe(el); } }); }
-  tag(); window.addEventListener('load',tag); setInterval(tag,1200);
+  var io=null; try{ io=new IntersectionObserver(function(es){ es.forEach(function(e){ if(e.isIntersecting){ e.target.classList.add('wl-in'); io.unobserve(e.target); } }); },{threshold:.06, rootMargin:'0px 0px -4% 0px'}); }catch(_){ }
+  var sel='.dco-issue, .dco-tablebox, .indbody, .dco-deepbody';
+  function tag(){ if(!io) return; document.querySelectorAll(sel).forEach(function(el){ if(!el.classList.contains('wl-reveal')){ el.classList.add('wl-reveal'); io.observe(el); } }); }
+  function revealAll(){ document.querySelectorAll('.wl-reveal').forEach(function(el){ el.classList.add('wl-in'); }); }
+  // Count the key figures up from zero (integers only; dates/amounts left alone).
+  function countUp(){ if(reduce) return; document.querySelectorAll('.glance .tile .n, .indstats b').forEach(function(el){ if(el.dataset.wlCount) return; var raw=(el.textContent||'').trim(); if(!/^\d{1,4}$/.test(raw)) return; var t=parseInt(raw,10); if(!(t>0)) return; el.dataset.wlCount='1'; var s=null,d=900; function step(ts){ if(!s)s=ts; var p=Math.min(1,(ts-s)/d); el.textContent=Math.round(t*(1-Math.pow(1-p,3))); if(p<1) requestAnimationFrame(step); else el.textContent=String(t); } requestAnimationFrame(step); }); }
+  function pass(){ tag(); countUp(); }
+  pass(); window.addEventListener('load',pass); setInterval(pass,1200);
+  // Safety net: content inside a tab must never stay hidden. Force-reveal after
+  // a tab switch and, as a backstop, a few seconds after load.
+  document.addEventListener('click', function(e){ if(e.target && e.target.closest && e.target.closest('.dco-tab')){ setTimeout(function(){ pass(); revealAll(); }, 90); } }, true);
+  setTimeout(revealAll, 3000);
 })();
 </script>
 </body></html>
