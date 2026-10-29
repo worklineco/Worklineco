@@ -2,13 +2,10 @@ import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 
 export const metadata = {
-  description: "Resource Board — curated resources and references from Dhadda & Co.",
+  description: "Resource Board — Compendium: 57th GST Council Meeting, from Dhadda & Co.",
   title: "Resource Board — WorkLine Co"
 };
 
-// When the board's exported HTML is saved to /public/resource-board-artifact.html,
-// replace the placeholder block below with:
-//   <iframe className="w-full flex-1 min-h-0 border-0 bg-white" src="/resource-board-artifact.html" title="Resource Board" />
 export default function ResourceBoardPage() {
   return (
     <main className="flex h-screen flex-col bg-[#f4f6fa]">
@@ -31,15 +28,11 @@ export default function ResourceBoardPage() {
         </Link>
       </header>
 
-      <div className="flex flex-1 items-center justify-center px-6">
-        <div className="max-w-md rounded-3xl border border-slate-200 bg-white p-10 text-center shadow-sm">
-          <p className="text-xs font-black uppercase tracking-[0.2em] text-fuchsia-600">Coming soon</p>
-          <h1 className="mt-2 text-2xl font-black text-navy-900">Resource Board is being prepared</h1>
-          <p className="mt-3 text-sm font-semibold leading-6 text-slate-600">
-            This board will be published here shortly, open to everyone — no login needed.
-          </p>
-        </div>
-      </div>
+      <iframe
+        className="w-full flex-1 min-h-0 border-0 bg-white"
+        src="/resource-board-artifact.html"
+        title="Resource Board"
+      />
     </main>
   );
 }
