@@ -8,8 +8,8 @@ export const metadata = {
 
 export default function ResourceBoardPage() {
   return (
-    <main className="flex h-[100dvh] flex-col overflow-x-hidden bg-[#f4f6fa]">
-      <header className="flex items-center justify-between gap-2 border-b border-slate-200 bg-white px-3 py-1">
+    <main className="flex h-[100dvh] flex-col overflow-hidden bg-[#f4f6fa]">
+      <header className="flex shrink-0 items-center justify-between gap-2 border-b border-slate-200 bg-white px-3 py-1">
         <span className="inline-flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wide text-navy-800">
           <span className="flex size-4 items-center justify-center rounded-[5px] bg-navy-700 text-white">
             <svg aria-hidden="true" className="size-2.5" fill="none" viewBox="0 0 24 24">
@@ -28,14 +28,16 @@ export default function ResourceBoardPage() {
         </Link>
       </header>
 
-      {/* width:1px + minWidth:100% keeps iOS Safari from sizing the iframe to
-          its content (which caused the horizontal misfit on iPhones). */}
-      <iframe
-        className="min-h-0 flex-1 border-0 bg-white"
-        src="/resource-board-artifact.html"
-        style={{ minWidth: "100%", width: "1px" }}
-        title="Resource Board"
-      />
+      {/* An absolutely-positioned iframe gives it an explicit box (width + height)
+          that iOS Safari respects, so it no longer sizes itself to its content
+          and overflow the viewport on iPhone. */}
+      <div className="relative min-h-0 flex-1">
+        <iframe
+          className="absolute inset-0 h-full w-full border-0 bg-white"
+          src="/resource-board-artifact.html"
+          title="Compendium: 57th GST Council Meeting"
+        />
+      </div>
     </main>
   );
 }

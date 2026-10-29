@@ -11,7 +11,7 @@ const featured = {
   gradient: "from-navy-800 via-navy-700 to-sky-600",
   href: "/resources/board",
   icon: LayoutDashboard,
-  title: "Compendium : 57th GST Council Meeting"
+  title: "Compendium on Amendments in pursuance of 57th GST Council Meeting"
 };
 
 const archives = [
