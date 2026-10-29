@@ -8,7 +8,7 @@ export const metadata = {
 
 export default function ResourceBoardPage() {
   return (
-    <main className="flex h-screen flex-col bg-[#f4f6fa]">
+    <main className="flex h-[100dvh] flex-col overflow-x-hidden bg-[#f4f6fa]">
       <header className="flex items-center justify-between gap-2 border-b border-slate-200 bg-white px-3 py-1">
         <span className="inline-flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wide text-navy-800">
           <span className="flex size-4 items-center justify-center rounded-[5px] bg-navy-700 text-white">
@@ -28,9 +28,12 @@ export default function ResourceBoardPage() {
         </Link>
       </header>
 
+      {/* width:1px + minWidth:100% keeps iOS Safari from sizing the iframe to
+          its content (which caused the horizontal misfit on iPhones). */}
       <iframe
-        className="w-full flex-1 min-h-0 border-0 bg-white"
+        className="min-h-0 flex-1 border-0 bg-white"
         src="/resource-board-artifact.html"
+        style={{ minWidth: "100%", width: "1px" }}
         title="Resource Board"
       />
     </main>
