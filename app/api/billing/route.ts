@@ -361,7 +361,7 @@ export async function POST(request: Request) {
       cleaned: cleanRecord(row, auth.user.id, organisation.organisationId, access, { allowAccountsFields: true }),
       raw: row
     }));
-    const addRows = await assignSerialNumbers(
+    let addRows = await assignSerialNumbers(
       admin,
       organisation.organisationId,
       importRows.filter((row) => row.action === "add").map((row) => row.cleaned)
@@ -376,6 +376,17 @@ export async function POST(request: Request) {
       inserted = addRows.length
         ? await admin.from(tableName).insert(addRows.map(stripCompatibilityColumns)).select("*")
         : { data: [], error: null };
+    }
+
+    // Same serial-collision recovery as a single save: renumber the new rows
+    // from the whole table's highest serial and retry.
+    for (let attempt = 0; attempt < 3 && inserted.error && isDuplicateSerial(inserted.error) && addRows.length; attempt += 1) {
+      const start = await nextTableSerial(admin);
+      addRows = addRows.map((row, index) => ({ ...row, serial_no: start + index }));
+      inserted = await admin.from(tableName).insert(addRows).select("*");
+      if (inserted.error && isMissingCompatibilityColumn(inserted.error)) {
+        inserted = await admin.from(tableName).insert(addRows.map(stripCompatibilityColumns)).select("*");
+      }
     }
 
     if (inserted.error) {
@@ -605,11 +616,23 @@ export async function POST(request: Request) {
     }
   }
 
-  const [createRecord] = await assignSerialNumbers(admin, organisation.organisationId, [cleaned]);
+  let [createRecord] = await assignSerialNumbers(admin, organisation.organisationId, [cleaned]);
   let saved = await admin.from(tableName).insert(createRecord).select("*").single();
 
   if (saved.error && isMissingCompatibilityColumn(saved.error)) {
     saved = await admin.from(tableName).insert(stripCompatibilityColumns(createRecord)).select("*").single();
+  }
+
+  // The serial number is picked as "highest + 1", so two saves made at the
+  // same moment - or a serial already used elsewhere in the table - bounce
+  // off the unique index and the row never saves. Take a fresh number from
+  // the WHOLE table and try again instead of surfacing the raw error.
+  for (let attempt = 0; attempt < 3 && saved.error && isDuplicateSerial(saved.error); attempt += 1) {
+    createRecord = { ...createRecord, serial_no: (await nextTableSerial(admin)) + attempt };
+    saved = await admin.from(tableName).insert(createRecord).select("*").single();
+    if (saved.error && isMissingCompatibilityColumn(saved.error)) {
+      saved = await admin.from(tableName).insert(stripCompatibilityColumns(createRecord)).select("*").single();
+    }
   }
 
   if (saved.error) {
@@ -1211,6 +1234,25 @@ function formatMatter(matter: GstatMatter) {
 
 function canAccessRecord(record: StoredBillingRecord, access: AccessScope) {
   return access.canViewAll || !access.teams.length || teamIsAllowed(record.owner_team, access.teams);
+}
+
+// The serial_no unique index covers the whole table, so a retry must take its
+// next number from the table-wide maximum, not just this organisation's.
+function isDuplicateSerial(error: { code?: string; message?: string } | null) {
+  if (!error) {
+    return false;
+  }
+  const message = String(error.message ?? "");
+  return (error.code === "23505" || /duplicate key value/i.test(message)) && /serial_no/i.test(message);
+}
+
+async function nextTableSerial(admin: ReturnType<typeof createAdminClient>) {
+  const { data } = await admin
+    .from(tableName)
+    .select("serial_no")
+    .order("serial_no", { ascending: false, nullsFirst: false })
+    .limit(1);
+  return Number(data?.[0]?.serial_no ?? 0) + 1;
 }
 
 async function assignSerialNumbers<T extends Record<string, unknown>>(

@@ -727,11 +727,18 @@ async function getBillRaisedAppealIds(admin: ReturnType<typeof createAdminClient
 }
 
 function markBillRaised<T extends AppealRow>(rows: T[], billRaisedAppealIds: Set<string>) {
+  // "Yes" comes from either a linked billing record OR a value saved by hand
+  // on the register. The old version recomputed purely from linked billing
+  // records, which silently wiped manual No -> Yes edits on every load.
   return rows.map((row) => ({
     ...row,
     data: {
       ...(row.data ?? {}),
-      "Bill raised": row.id && billRaisedAppealIds.has(row.id) ? "Yes" : "No"
+      "Bill raised":
+        (row.id && billRaisedAppealIds.has(row.id)) ||
+        String(row.data?.["Bill raised"] ?? "").trim().toLowerCase() === "yes"
+          ? "Yes"
+          : "No"
     }
   }));
 }

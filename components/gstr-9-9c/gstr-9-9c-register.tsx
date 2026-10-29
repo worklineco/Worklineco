@@ -7,6 +7,7 @@ import { ViewOnlyAccessDialog } from "@/components/shared/view-only-access-dialo
 import allocationData from "@/lib/data/gstr-9-9c-allocations-25-26.json";
 import { useRegisterEditAccess } from "@/lib/use-register-access";
 import { SearchableSelect } from "@/components/shared/searchable-select";
+import { filterOptionHighlightClass, useFilterMenuKeys } from "@/components/shared/filter-menu-keys";
 import { getCached, setCached } from "@/lib/data-cache";
 import { normalizeTeam } from "@/lib/user-teams";
 
@@ -341,7 +342,7 @@ export function GstrNineNineCRegister({ workbook }: { workbook: GstrWorkbookData
   function openColumnFilter(columnIndex: number, clickPoint: { clientX: number; clientY: number }) {
     const options = getUniqueColumnFilterOptions(activeSheet.rows, columnIndex, columnFilterOptionLimit);
     const appliedValues = columnValueFilters[columnIndex];
-    const menuWidth = 288;
+    const menuWidth = 320;
     const viewportPadding = 12;
     const menuChromeHeight = 196;
     const minListHeight = 110;
@@ -899,6 +900,11 @@ function ColumnHeader({
   sortState: SortState;
   visibleOptions: ColumnFilterOption[];
 }) {
+  const { handleMenuKeyDown, highlight, setHighlight } = useFilterMenuKeys({
+    itemCount: visibleOptions.length,
+    onApply: () => onApplyFilter(columnIndex),
+    onToggleIndex: (index) => onToggleDraftFilterValue(visibleOptions[index].key)
+  });
   const isAscending = sortState?.columnIndex === columnIndex && sortState.direction === "asc";
   const isDescending = sortState?.columnIndex === columnIndex && sortState.direction === "desc";
   const visibleValueKeys = visibleOptions.map((option) => option.key);
@@ -937,8 +943,9 @@ function ColumnHeader({
 
       {isOpen && menuPosition && typeof document !== "undefined" ? createPortal(
         <div
-          className="fixed z-[1000] w-72 overflow-hidden rounded-lg border border-slate-300 bg-white p-2 text-left normal-case tracking-normal text-slate-900 shadow-2xl"
+          className="fixed z-[1000] w-80 overflow-hidden rounded-lg border border-slate-300 bg-white p-2 text-left normal-case tracking-normal text-slate-900 shadow-2xl"
           data-gstr-filter-menu="true"
+          onKeyDown={handleMenuKeyDown}
           style={{ left: menuPosition.left, top: menuPosition.top }}
         >
           <div className="space-y-1 border-b border-slate-200 pb-2">
@@ -998,7 +1005,7 @@ function ColumnHeader({
             <input
               autoFocus
               className="min-w-0 flex-1 bg-transparent text-sm font-semibold outline-none placeholder:text-slate-400"
-              onChange={(event) => onFilterSearchChange(event.target.value)}
+              onChange={(event) => { setHighlight(-1); onFilterSearchChange(event.target.value); }}
               placeholder="Search"
               value={filterSearch}
             />
@@ -1019,8 +1026,8 @@ function ColumnHeader({
             </label>
             <div className="mt-1 space-y-1">
               {visibleOptions.length ? (
-                visibleOptions.map((option) => (
-                  <label className="flex cursor-pointer items-center gap-2 text-sm font-semibold text-slate-950" key={option.key}>
+                visibleOptions.map((option, optionIndex) => (
+                  <label className={`flex cursor-pointer items-center gap-2 px-1 text-sm font-semibold text-slate-950${filterOptionHighlightClass(optionIndex === highlight)}`} data-filter-option={optionIndex} key={option.key} onMouseEnter={() => setHighlight(optionIndex)}>
                     <input
                       checked={draftFilterValues.includes(option.key)}
                       className="size-4 accent-slate-950"
