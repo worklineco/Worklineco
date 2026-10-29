@@ -9,7 +9,7 @@ export const metadata = {
 // The latest resource is featured at the top. Older editions live under Archives.
 const featured = {
   gradient: "from-navy-800 via-navy-700 to-sky-600",
-  href: "/resources/board",
+  href: "/resource-board-artifact.html",
   icon: LayoutDashboard,
   title: "Compendium on Amendments in pursuance of 57th GST Council Meeting"
 };
@@ -17,14 +17,14 @@ const featured = {
 const archives = [
   {
     gradient: "from-sky-600 via-blue-700 to-navy-800",
-    href: "/gst-council",
+    href: "/gst-council-artifact.html",
     icon: Megaphone,
     key: "gst-council-57",
     title: "57th GST Council"
   },
   {
     gradient: "from-navy-700 via-blue-800 to-sky-700",
-    href: "/resources/gst-council-56",
+    href: "/gst-council-56/index.html",
     icon: Megaphone,
     key: "gst-council-56",
     title: "56th GST Council"
@@ -65,8 +65,9 @@ export default function ResourceCenterPage() {
           </h1>
         </div>
 
-        {/* Featured (latest) */}
-        <Link
+        {/* Featured (latest) - links straight to the self-contained page so it
+            scrolls natively on every device (no iframe). */}
+        <a
           className={`group relative mt-6 flex flex-1 min-h-[260px] flex-col justify-between overflow-hidden rounded-[28px] bg-gradient-to-br ${featured.gradient} p-8 text-white shadow-[0_24px_60px_rgba(30,58,138,0.32)] ring-1 ring-white/20 transition hover:shadow-[0_30px_76px_rgba(30,58,138,0.48)] sm:p-10`}
           href={featured.href}
         >
@@ -91,7 +92,7 @@ export default function ResourceCenterPage() {
             Open the compendium
             <ArrowRight className="size-5 transition group-hover:translate-x-1" />
           </span>
-        </Link>
+        </a>
 
         {/* Archives */}
         <p className="mt-7 inline-flex items-center gap-2 text-xs font-black uppercase tracking-[0.18em] text-slate-500">
@@ -102,7 +103,7 @@ export default function ResourceCenterPage() {
           {archives.map((resource) => {
             const Icon = resource.icon;
             return (
-              <Link
+              <a
                 className={`group relative flex min-h-[170px] flex-col justify-between overflow-hidden rounded-[24px] bg-gradient-to-br ${resource.gradient} p-6 text-white shadow-[0_20px_50px_rgba(30,58,138,0.28)] ring-1 ring-white/20 transition hover:shadow-[0_26px_66px_rgba(30,58,138,0.42)]`}
                 href={resource.href}
                 key={resource.key}
@@ -118,7 +119,7 @@ export default function ResourceCenterPage() {
                   Open
                   <ArrowRight className="size-4 transition group-hover:translate-x-1" />
                 </span>
-              </Link>
+              </a>
             );
           })}
         </div>
