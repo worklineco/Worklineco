@@ -5,7 +5,7 @@ import { MessageCircle, X, Send, Upload } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { useRef, useState } from "react";
 
-const hiddenRoutePrefixes = ["/login", "/gst-council"];
+const hiddenRoutePrefixes = ["/login", "/gst-council", "/resources"];
 
 export function FeedbackButton() {
   const pathname = usePathname() ?? "";

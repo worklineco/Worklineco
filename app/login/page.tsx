@@ -1,4 +1,4 @@
-import { ArrowRight, Megaphone, Sparkles } from "lucide-react";
+import { ArrowRight, LayoutGrid, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { LoginLauncher } from "@/components/auth/login-launcher";
 
@@ -53,10 +53,10 @@ export default function LoginPage() {
             </p>
           </section>
 
-          {/* Flashy 57th GST Council banner */}
+          {/* Flashy Resource Center banner */}
           <Link
             className="group relative flex h-full min-h-[340px] flex-col justify-center overflow-hidden rounded-[32px] bg-gradient-to-br from-amber-400 via-fuchsia-500 to-violet-700 p-8 text-white shadow-[0_30px_80px_rgba(126,34,206,0.45)] ring-1 ring-white/30 transition hover:shadow-[0_36px_96px_rgba(126,34,206,0.6)] sm:p-10"
-            href="/gst-council"
+            href="/resources"
           >
             <span className="pointer-events-none absolute -right-16 -top-16 size-56 rounded-full bg-white/25 blur-3xl" />
             <span className="pointer-events-none absolute -bottom-20 -left-10 size-64 rounded-full bg-amber-300/40 blur-3xl" />
@@ -64,22 +64,22 @@ export default function LoginPage() {
             <span className="relative flex flex-col gap-5">
               <span className="flex flex-wrap items-center gap-3">
                 <span className="flex size-14 items-center justify-center rounded-2xl bg-white/20 ring-1 ring-white/40 backdrop-blur">
-                  <Megaphone className="size-7" />
+                  <LayoutGrid className="size-7" />
                 </span>
                 <span className="inline-flex animate-pulse items-center gap-1.5 rounded-full bg-emerald-300 px-4 py-1.5 text-sm font-black uppercase tracking-wide text-emerald-950 shadow">
                   <Sparkles className="size-4" />
-                  Updated
+                  New
                 </span>
               </span>
 
-              <span className="block text-5xl font-black leading-[1.02] tracking-tight drop-shadow-sm sm:text-6xl xl:text-7xl">57th GST Council</span>
+              <span className="block text-5xl font-black leading-[1.02] tracking-tight drop-shadow-sm sm:text-6xl xl:text-7xl">Resource Center</span>
 
               <span className="block max-w-xl text-lg font-bold leading-7 text-white/95 sm:text-xl">
-                Key reforms &amp; agenda from the latest meeting. Open to everyone — no login needed.
+                Resources, references and the latest updates — including the 57th GST Council. Open to everyone — no login needed.
               </span>
 
               <span className="mt-1 inline-flex w-fit items-center gap-2 rounded-2xl bg-white px-6 py-3.5 text-base font-black text-violet-700 shadow-lg transition group-hover:gap-3.5">
-                View the updates
+                Explore resources
                 <ArrowRight className="size-5 transition group-hover:translate-x-1" />
               </span>
             </span>
