@@ -15,7 +15,7 @@ function BrandMark({ className = "size-11" }: { className?: string }) {
 
 export default function LoginPage() {
   return (
-    <main className="min-h-screen bg-gradient-to-br from-[#eef1f8] via-white to-[#f3eefb] px-4 py-5 text-slate-950 sm:px-6" style={{ zoom: 1.25 }}>
+    <main className="min-h-screen bg-gradient-to-br from-[#eef1f8] via-white to-[#eaf1fb] px-4 py-5 text-slate-950 sm:px-6" style={{ zoom: 1.25 }}>
       <div className="mx-auto flex min-h-[calc(100vh-2.5rem)] max-w-7xl flex-col">
         {/* Top bar: firm lockup + Login */}
         <header className="flex items-center justify-between gap-4">
@@ -33,7 +33,7 @@ export default function LoginPage() {
         <div className="my-auto grid items-center gap-10 py-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
           <section>
             <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-black uppercase tracking-wide text-navy-800 shadow-sm">
-              <Sparkles className="size-3.5 text-fuchsia-600" />
+              <Sparkles className="size-3.5 text-sky-600" />
               The firm's command center
             </span>
 
@@ -42,7 +42,7 @@ export default function LoginPage() {
 
             <div className="mt-5 flex items-center gap-3">
               <BrandMark className="size-14" />
-              <span className="bg-gradient-to-r from-navy-700 via-fuchsia-600 to-violet-700 bg-clip-text text-5xl font-black tracking-tight text-transparent xl:text-6xl">
+              <span className="bg-gradient-to-r from-navy-700 via-blue-700 to-sky-600 bg-clip-text text-5xl font-black tracking-tight text-transparent xl:text-6xl">
                 WorkLine
               </span>
             </div>
@@ -53,20 +53,20 @@ export default function LoginPage() {
             </p>
           </section>
 
-          {/* Flashy Resource Center banner */}
+          {/* Resource Center banner (blue / white) */}
           <Link
-            className="group relative flex h-full min-h-[340px] flex-col justify-center overflow-hidden rounded-[32px] bg-gradient-to-br from-amber-400 via-fuchsia-500 to-violet-700 p-8 text-white shadow-[0_30px_80px_rgba(126,34,206,0.45)] ring-1 ring-white/30 transition hover:shadow-[0_36px_96px_rgba(126,34,206,0.6)] sm:p-10"
+            className="group relative flex h-full min-h-[340px] flex-col justify-center overflow-hidden rounded-[32px] bg-gradient-to-br from-navy-800 via-navy-700 to-sky-600 p-8 text-white shadow-[0_30px_80px_rgba(30,58,138,0.4)] ring-1 ring-white/20 transition hover:shadow-[0_36px_96px_rgba(30,58,138,0.55)] sm:p-10"
             href="/resources"
           >
-            <span className="pointer-events-none absolute -right-16 -top-16 size-56 rounded-full bg-white/25 blur-3xl" />
-            <span className="pointer-events-none absolute -bottom-20 -left-10 size-64 rounded-full bg-amber-300/40 blur-3xl" />
+            <span className="pointer-events-none absolute -right-16 -top-16 size-56 rounded-full bg-white/20 blur-3xl" />
+            <span className="pointer-events-none absolute -bottom-20 -left-10 size-64 rounded-full bg-sky-400/30 blur-3xl" />
 
             <span className="relative flex flex-col gap-5">
               <span className="flex flex-wrap items-center gap-3">
-                <span className="flex size-14 items-center justify-center rounded-2xl bg-white/20 ring-1 ring-white/40 backdrop-blur">
+                <span className="flex size-14 items-center justify-center rounded-2xl bg-white/15 ring-1 ring-white/30 backdrop-blur">
                   <LayoutGrid className="size-7" />
                 </span>
-                <span className="inline-flex animate-pulse items-center gap-1.5 rounded-full bg-emerald-300 px-4 py-1.5 text-sm font-black uppercase tracking-wide text-emerald-950 shadow">
+                <span className="inline-flex animate-pulse items-center gap-1.5 rounded-full bg-sky-300 px-4 py-1.5 text-sm font-black uppercase tracking-wide text-navy-900 shadow">
                   <Sparkles className="size-4" />
                   New
                 </span>
@@ -75,10 +75,10 @@ export default function LoginPage() {
               <span className="block text-5xl font-black leading-[1.02] tracking-tight drop-shadow-sm sm:text-6xl xl:text-7xl">Resource Center</span>
 
               <span className="block max-w-xl text-lg font-bold leading-7 text-white/95 sm:text-xl">
-                Resources, references and the latest updates — including the 57th GST Council. Open to everyone — no login needed.
+                Resources, references and the latest updates.
               </span>
 
-              <span className="mt-1 inline-flex w-fit items-center gap-2 rounded-2xl bg-white px-6 py-3.5 text-base font-black text-violet-700 shadow-lg transition group-hover:gap-3.5">
+              <span className="mt-1 inline-flex w-fit items-center gap-2 rounded-2xl bg-white px-6 py-3.5 text-base font-black text-navy-800 shadow-lg transition group-hover:gap-3.5">
                 Explore resources
                 <ArrowRight className="size-5 transition group-hover:translate-x-1" />
               </span>

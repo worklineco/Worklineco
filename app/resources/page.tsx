@@ -12,7 +12,7 @@ const resources = [
   {
     blurb: "A living board of our latest resources, references and working notes — open to everyone.",
     cta: "Open the board",
-    gradient: "from-sky-400 via-indigo-500 to-violet-700",
+    gradient: "from-navy-800 via-navy-700 to-sky-600",
     href: "/resources/board",
     icon: LayoutDashboard,
     isNew: true,
@@ -22,7 +22,7 @@ const resources = [
   {
     blurb: "Key reforms and agenda from the latest meeting. Open to everyone — no login needed.",
     cta: "View the updates",
-    gradient: "from-amber-400 via-fuchsia-500 to-violet-700",
+    gradient: "from-sky-600 via-blue-700 to-navy-800",
     href: "/gst-council",
     icon: Megaphone,
     isNew: false,
@@ -33,7 +33,7 @@ const resources = [
 
 export default function ResourceCenterPage() {
   return (
-    <main className="min-h-screen bg-gradient-to-br from-[#eef1f8] via-white to-[#f3eefb] text-slate-950">
+    <main className="min-h-screen bg-gradient-to-br from-[#eef1f8] via-white to-[#eaf1fb] text-slate-950">
       <header className="flex items-center justify-between gap-2 border-b border-slate-200 bg-white/80 px-4 py-2 backdrop-blur">
         <span className="inline-flex items-center gap-2 text-xs font-black uppercase tracking-wide text-navy-800">
           <span className="flex size-6 items-center justify-center rounded-md bg-navy-700 text-white">
@@ -55,7 +55,7 @@ export default function ResourceCenterPage() {
 
       <div className="mx-auto max-w-6xl px-5 py-10 sm:px-8 sm:py-14">
         <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-black uppercase tracking-wide text-navy-800 shadow-sm">
-          <Sparkles className="size-3.5 text-fuchsia-600" />
+          <Sparkles className="size-3.5 text-sky-600" />
           Resource Center
         </span>
         <h1 className="mt-4 text-4xl font-black leading-tight tracking-tight text-navy-900 sm:text-5xl">
@@ -70,7 +70,7 @@ export default function ResourceCenterPage() {
             const Icon = resource.icon;
             return (
               <Link
-                className={`group relative flex min-h-[260px] flex-col justify-between overflow-hidden rounded-[28px] bg-gradient-to-br ${resource.gradient} p-7 text-white shadow-[0_24px_60px_rgba(76,29,149,0.35)] ring-1 ring-white/30 transition hover:shadow-[0_30px_76px_rgba(76,29,149,0.5)]`}
+                className={`group relative flex min-h-[260px] flex-col justify-between overflow-hidden rounded-[28px] bg-gradient-to-br ${resource.gradient} p-7 text-white shadow-[0_24px_60px_rgba(30,58,138,0.32)] ring-1 ring-white/20 transition hover:shadow-[0_30px_76px_rgba(30,58,138,0.48)]`}
                 href={resource.href}
                 key={resource.key}
               >
@@ -81,7 +81,7 @@ export default function ResourceCenterPage() {
                     <Icon className="size-6" />
                   </span>
                   {resource.isNew ? (
-                    <span className="inline-flex animate-pulse items-center gap-1.5 rounded-full bg-emerald-300 px-3 py-1 text-xs font-black uppercase tracking-wide text-emerald-950 shadow">
+                    <span className="inline-flex animate-pulse items-center gap-1.5 rounded-full bg-sky-300 px-3 py-1 text-xs font-black uppercase tracking-wide text-navy-900 shadow">
                       <Sparkles className="size-3.5" />
                       New
                     </span>
@@ -93,7 +93,7 @@ export default function ResourceCenterPage() {
                   <span className="mt-2 block max-w-md text-sm font-bold leading-6 text-white/95">{resource.blurb}</span>
                 </span>
 
-                <span className="relative mt-5 inline-flex w-fit items-center gap-2 rounded-2xl bg-white px-5 py-2.5 text-sm font-black text-violet-700 shadow-lg transition group-hover:gap-3.5">
+                <span className="relative mt-5 inline-flex w-fit items-center gap-2 rounded-2xl bg-white px-5 py-2.5 text-sm font-black text-navy-800 shadow-lg transition group-hover:gap-3.5">
                   {resource.cta}
                   <ArrowRight className="size-4 transition group-hover:translate-x-1" />
                 </span>
