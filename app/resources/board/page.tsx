@@ -2,8 +2,8 @@ import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 
 export const metadata = {
-  description: "Compendium: 57th GST Council Meeting, from Dhadda & Co.",
-  title: "Compendium: 57th GST Council Meeting — WorkLine Co"
+  description: "Compendium on Amendments in pursuance of 57th GST Council Meeting, from Dhadda & Co.",
+  title: "Compendium on Amendments in pursuance of 57th GST Council Meeting — WorkLine Co"
 };
 
 export default function ResourceBoardPage() {
