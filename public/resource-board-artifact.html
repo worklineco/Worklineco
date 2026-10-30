@@ -194,7 +194,7 @@ window.__run=run; let w=innerWidth; window.addEventListener('resize',()=>{ if(in
 .dco-fq-item .qt span { font-size: .63rem; letter-spacing: .06em; text-transform: uppercase; border: 1px solid var(--line); border-radius: 2px; padding: 0 6px; color: var(--muted); }
 /* industry */
 .ind { display: grid; grid-template-columns: minmax(13rem, 16rem) minmax(0, 1fr); gap: 16px; align-items: start; }
-@media (max-width: 900px) { .ind { grid-template-columns: 1fr; } }
+@media (max-width: 900px) { .ind { grid-template-columns: minmax(0, 1fr); } .indnav, .indbody, .indhead, .indstats, .card, .dco-tablebox { min-width: 0; max-width: 100%; } .indnav button { white-space: normal; } }
 .indnav { border: 1px solid var(--line); border-radius: 4px; background: var(--surface); overflow: hidden; max-height: 82vh; overflow-y: auto; position: sticky; top: 8px; }
 .indnav .g { font-size: .62rem; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); padding: 10px 12px 4px; background: var(--bg); border-bottom: 1px solid var(--line); }
 .indnav button { appearance: none; display: grid; grid-template-columns: 1fr auto; gap: 6px; width: 100%; text-align: left; font: inherit; font-size: .84rem; padding: 7px 12px; border: 0; border-bottom: 1px solid var(--line); background: var(--surface); color: var(--ink); cursor: pointer; }
@@ -206,7 +206,7 @@ window.__run=run; let w=innerWidth; window.addEventListener('resize',()=>{ if(in
 .indhead h3 { font-family: var(--display); font-weight: 500; font-size: 1.55rem; margin: 4px 0 6px; line-height: 1.2; }
 .indhead p { margin: 0; color: var(--on-ink-dim); font-size: .92rem; line-height: 1.5; max-width: 80ch; }
 .indstats { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-top: 0; }
-@media (max-width: 640px) { .indstats { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 640px) { .indstats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .indstats div { background: var(--surface); padding: 9px 12px; }
 .indstats b { display: block; font-family: var(--mono); font-size: 1.15rem; font-weight: 600; }
 .indstats span { font-size: .64rem; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
@@ -1330,7 +1330,18 @@ ${m.stats && m.stats.length ? `<div class="glance">${m.stats.map((s) => `<div><b
     try {
       if (dl) { await dl.save({ filename, data }); return 'Offered ' + filename + ' for download.'; }
       const blob = data instanceof Blob ? data : new Blob([data], { type: 'text/html' });
-      const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = filename; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+      const url = URL.createObjectURL(blob);
+      // iOS Safari ignores the <a download> attribute for blobs, so nothing
+      // happens. Open the file in a new tab instead - the user can then Save to
+      // Files / Print to PDF from the Share sheet.
+      const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+      if (isIOS) {
+        const w = window.open(url, '_blank');
+        if (!w) { location.href = url; }
+        setTimeout(() => URL.revokeObjectURL(url), 15000);
+        return 'Opened ' + filename + ' — use Share to save it.';
+      }
+      const a = document.createElement('a'); a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 4000);
       return 'Downloaded ' + filename + '.';
     } catch (e) { return e && e.code === 'declined' ? 'Download cancelled.' : 'Download is not available in this view.'; }
   };
