@@ -1337,15 +1337,16 @@ ${m.stats && m.stats.length ? `<div class="glance">${m.stats.map((s) => `<div><b
       const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
       if (isIOS) {
         // iOS Safari ignores <a download> for blobs and blocks window.open after
-        // the async export. Navigating to a data: URL (not gesture-restricted)
-        // is handled reliably - iOS opens the file with a Share button so it can
-        // be saved to Files or printed to PDF. (Falls back to the blob URL.)
-        try {
-          const reader = new FileReader();
-          reader.onload = () => { location.href = reader.result; };
-          reader.onerror = () => { location.href = url; };
-          reader.readAsDataURL(blob);
-        } catch (_) { location.href = url; }
+        // the async export. A tab is pre-opened on the button tap (see the
+        // capturing listener below) so we can load the file into it here; if
+        // that tab exists we use it, otherwise we navigate the current tab to
+        // the blob (blob: navigation is allowed; data: is not). Word opens with
+        // a Share button (Save to Files); the PDF page opens with Print.
+        const w = window.__dcoWin; window.__dcoWin = null;
+        if (w && !w.closed) {
+          try { w.location.href = url; return 'Opened ' + filename + ' in a new tab — use Share to save it.'; } catch (_) {}
+        }
+        location.href = url;
         return 'Opening ' + filename + ' — use the Share button to save it.';
       }
       const a = document.createElement('a'); a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 4000);
@@ -1869,6 +1870,10 @@ document.querySelectorAll('.dco-fafaq').forEach((b) => b.addEventListener('click
 <style>#wlprog{position:fixed;top:0;left:0;height:3px;width:0;background:linear-gradient(90deg,#4C5796,#2B3360);z-index:10000;transition:width .12s ease}@media(prefers-reduced-motion:reduce){#wlprog{transition:none}}</style>
 <div id="wlprog" aria-hidden="true"></div>
 <script>
-(function(){var h=document.documentElement;var reduce=window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches;var bar=document.getElementById('wlprog');function prog(){var m=(h.scrollHeight-h.clientHeight)||1;bar.style.width=Math.min(100,Math.max(0,(h.scrollTop/m)*100))+'%';}window.addEventListener('scroll',prog,{passive:true});window.addEventListener('resize',prog);prog();function cu(){if(reduce)return;document.querySelectorAll('.glance .n').forEach(function(el){if(el.dataset.wlCount)return;var raw=(el.textContent||'').trim();if(!/^\d{1,4}$/.test(raw))return;var t=parseInt(raw,10);if(!(t>0))return;el.dataset.wlCount='1';var s=null,d=900;function step(ts){if(!s)s=ts;var p=Math.min(1,(ts-s)/d);el.textContent=Math.round(t*(1-Math.pow(1-p,3)));if(p<1)requestAnimationFrame(step);else el.textContent=String(t);}requestAnimationFrame(step);});}cu();window.addEventListener('load',cu);setInterval(cu,1000);})();
+(function(){var h=document.documentElement;var reduce=window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches;var bar=document.getElementById('wlprog');function prog(){var m=(h.scrollHeight-h.clientHeight)||1;bar.style.width=Math.min(100,Math.max(0,(h.scrollTop/m)*100))+'%';}window.addEventListener('scroll',prog,{passive:true});window.addEventListener('resize',prog);prog();function cu(){if(reduce)return;document.querySelectorAll('.glance .n').forEach(function(el){if(el.dataset.wlCount)return;var raw=(el.textContent||'').trim();if(!/^\d{1,4}$/.test(raw))return;var t=parseInt(raw,10);if(!(t>0))return;el.dataset.wlCount='1';var s=null,d=900;function step(ts){if(!s)s=ts;var p=Math.min(1,(ts-s)/d);el.textContent=Math.round(t*(1-Math.pow(1-p,3)));if(p<1)requestAnimationFrame(step);else el.textContent=String(t);}requestAnimationFrame(step);});}cu();window.addEventListener('load',cu);setInterval(cu,1000);
+/* iOS: pre-open a tab ON THE TAP (before the async export) so the generated file can be loaded into it; window.open is blocked once the export finishes. */
+var _ios=/iP(hone|ad|od)/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+if(_ios){document.addEventListener('click',function(e){var btn=e.target&&e.target.closest&&e.target.closest('.dco-fbtn');if(!btn)return;var t=(btn.textContent||'').toLowerCase();if(!/word|pdf|export|download|library|note/.test(t))return;try{var w=window.open('','_blank');if(w){w.document.write('<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><body style="margin:0;font:16px -apple-system,Segoe UI,Arial,sans-serif;padding:26px;color:#2B3360;background:#E9EDF6">Preparing your file…</body>');window.__dcoWin=w;}}catch(_){}} ,true);}
+})();
 </script>
 </body></html>
