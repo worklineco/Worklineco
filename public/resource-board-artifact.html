@@ -1336,10 +1336,17 @@ ${m.stats && m.stats.length ? `<div class="glance">${m.stats.map((s) => `<div><b
       // Files / Print to PDF from the Share sheet.
       const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
       if (isIOS) {
-        const w = window.open(url, '_blank');
-        if (!w) { location.href = url; }
-        setTimeout(() => URL.revokeObjectURL(url), 15000);
-        return 'Opened ' + filename + ' — use Share to save it.';
+        // iOS Safari ignores <a download> for blobs and blocks window.open after
+        // the async export. Navigating to a data: URL (not gesture-restricted)
+        // is handled reliably - iOS opens the file with a Share button so it can
+        // be saved to Files or printed to PDF. (Falls back to the blob URL.)
+        try {
+          const reader = new FileReader();
+          reader.onload = () => { location.href = reader.result; };
+          reader.onerror = () => { location.href = url; };
+          reader.readAsDataURL(blob);
+        } catch (_) { location.href = url; }
+        return 'Opening ' + filename + ' — use the Share button to save it.';
       }
       const a = document.createElement('a'); a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 4000);
       return 'Downloaded ' + filename + '.';
