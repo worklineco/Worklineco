@@ -160,7 +160,7 @@ async function createBillingEntry(
     ope_remarks: "",
     organisation_code: defaultOrganisationCode,
     organisation_id: client.organisation_id,
-    owner_team: "",
+    owner_team: text(values["Billing Team"]),
     place_of_supply: text(values.State),
     poc_email: text(values["Email ID"]),
     poc_mobile: text(values["POC Contact no."]),
