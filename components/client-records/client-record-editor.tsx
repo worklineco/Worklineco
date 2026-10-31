@@ -122,6 +122,10 @@ export const registrationTypes = [
 
 export const otherTerritoryOption = "Other Territory (Outside India)";
 
+// Teams the monthly autobilling entry can be booked under (owner team on the
+// Billing Sheet). Same canonical "Team NN" labels the rest of WorkLine uses.
+export const billingTeams = ["Team 01", "Team 02", "Team 03", "Team 04", "Team 05", "Team 06", "Team 07", "Team 08"];
+
 // GST state codes (first two digits of a GSTIN) to state names.
 const gstStateCodeMap: Record<string, string> = {
   "01": "Jammu and Kashmir",
@@ -215,7 +219,7 @@ const sections: Array<{ fields: string[]; key: string; title: string }> = [
   { fields: ["POC Name", "POC Contact no.", "Email ID"], key: "poc", title: "Point of Contact" },
   { fields: ["Address", "State", "Country"], key: "address", title: "Address" },
   { fields: ["GSTIN/UIN", "PAN/IT No.", "GST-ID", "GST-PASS"], key: "tax", title: "Tax & Compliance" },
-  { fields: ["Client Type", "Autobilling", "Billing Date", "Fixed Monthly Amount"], key: "billing", title: "Billing" }
+  { fields: ["Client Type", "Billing Team", "Autobilling", "Billing Date", "Fixed Monthly Amount"], key: "billing", title: "Billing" }
 ];
 
 const fieldLabels: Record<string, string> = {
@@ -255,6 +259,10 @@ export function validateClientRecord(values: RowValues) {
   }
 
   if (values["Client Type"] === "Retainer" && values.Autobilling === "Yes") {
+    if (!String(values["Billing Team"] ?? "").trim()) {
+      errors["Billing Team"] = "Pick the team whose billing sheet gets the monthly entry.";
+    }
+
     const day = Number(values["Billing Date"]);
     if (!Number.isInteger(day) || day < 1 || day > 31) {
       errors["Billing Date"] = "Enter a day of the month from 1 to 31.";
@@ -707,6 +715,7 @@ const BillingFields = memo(function BillingFields({ store }: { store: FormStore 
             store.setValue("Client Type", next);
             if (next !== "Retainer") {
               store.setValue("Autobilling", "");
+              store.setValue("Billing Team", "");
               store.setValue("Billing Date", "");
               store.setValue("Fixed Monthly Amount", "");
             }
@@ -718,6 +727,7 @@ const BillingFields = memo(function BillingFields({ store }: { store: FormStore 
           <option value="Retainer">Retainer</option>
         </select>
       </FieldShell>
+      {isRetainer ? <SelectField field="Billing Team" options={billingTeams} store={store} /> : null}
       {isRetainer ? (
         <FieldShell error={autobillingError} field="Autobilling">
           <select
