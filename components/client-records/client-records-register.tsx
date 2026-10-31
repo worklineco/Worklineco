@@ -77,7 +77,7 @@ const columns = [
 ];
 // Autobilling fields live only in the editor modal (not in the table or the
 // Excel import/export), but persist on the record alongside the columns above.
-const editorOnlyFields = ["Autobilling", "Billing Date", "Fixed Monthly Amount"];
+const editorOnlyFields = ["Autobilling", "Billing Team", "Billing Date", "Fixed Monthly Amount"];
 const editorFields = [...columns, ...editorOnlyFields];
 const importActionColumn = "Import Action";
 const importActionOptions = ["Add", "Update", "Delete"];
