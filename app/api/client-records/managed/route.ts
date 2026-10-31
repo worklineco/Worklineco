@@ -39,7 +39,7 @@ const columns = [
 ];
 // Autobilling fields are edited in the record modal and persisted in
 // custom_values like every other column, but stay out of the Excel flows.
-const autobillingColumns = ["Autobilling", "Billing Date", "Fixed Monthly Amount"];
+const autobillingColumns = ["Autobilling", "Billing Team", "Billing Date", "Fixed Monthly Amount"];
 const storedColumns = [...columns, ...autobillingColumns];
 
 export async function GET() {
