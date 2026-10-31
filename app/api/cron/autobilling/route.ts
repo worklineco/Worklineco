@@ -45,7 +45,18 @@ export async function GET(request: Request) {
     if (String(client.custom_values?.["Client Type"] ?? "").trim() !== "Retainer") return false;
     const day = Number(String(client.custom_values?.["Billing Date"] ?? "").trim());
     if (!Number.isInteger(day) || day < 1 || day > 31) return false;
-    return Math.min(day, lastDayOfMonth) === today.day;
+    if (Math.min(day, lastDayOfMonth) !== today.day) return false;
+
+    // Billing frequency: monthly bills every month; quarterly / half-yearly /
+    // annual bill only in the months the cycle lands on, counted from the
+    // chosen start month. A longer cycle without a start month never bills.
+    const interval = frequencyInterval(client.custom_values?.["Billing Frequency"]);
+
+    if (interval === 1) return true;
+
+    const startMonth = monthNumber(client.custom_values?.["Billing Start Month"]);
+    if (!startMonth) return false;
+    return ((today.month - startMonth + 12) % 12) % interval === 0;
   });
 
   if (!dueClients.length) {
@@ -137,6 +148,8 @@ async function createBillingEntry(
   let sequence = startSequence;
 
   const now = new Date().toISOString();
+  const interval = frequencyInterval(values["Billing Frequency"]);
+  const frequencyLabel = interval === 3 ? "Quarterly" : interval === 6 ? "Half-yearly" : interval === 12 ? "Annual" : "Monthly";
   let record: Record<string, unknown> = {
     address: text(values.Address),
     amount,
@@ -144,7 +157,7 @@ async function createBillingEntry(
     cgst: 0,
     client: text(values.Particulars) || client.name,
     cost_center: "",
-    description: `Monthly retainer bill for ${today.monthName} ${today.year} (autobilling)`,
+    description: `${frequencyLabel} retainer bill for ${today.monthName} ${today.year} (autobilling)`,
     escalation_1: "",
     group_name: text(values.Group),
     gstin: text(values["GSTIN/UIN"]),
@@ -237,6 +250,33 @@ function autobillingCode(monthKey: string, sequence: number) {
 
 function text(value: unknown) {
   return String(value ?? "").trim();
+}
+
+// "Quarterly" -> 3 months, "Half-Yearly" / "6 months" -> 6, "Annually" -> 12;
+// anything else (blank, "Monthly") bills every month.
+function frequencyInterval(value: unknown) {
+  const normalized = String(value ?? "").trim().toLowerCase();
+
+  if (normalized.startsWith("quarter")) return 3;
+  if (normalized.startsWith("half") || normalized.startsWith("semi") || normalized.startsWith("6")) return 6;
+  if (normalized.startsWith("annual") || normalized.startsWith("year") || normalized.startsWith("12")) return 12;
+  return 1;
+}
+
+const billingMonthNames = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
+
+function monthNumber(value: unknown) {
+  const normalized = String(value ?? "").trim().toLowerCase();
+
+  if (!normalized) return 0;
+
+  if (/[a-z]/.test(normalized)) {
+    const index = billingMonthNames.findIndex((name) => name.startsWith(normalized.slice(0, 3)));
+    return index >= 0 ? index + 1 : 0;
+  }
+
+  const numeric = Number(normalized);
+  return Number.isInteger(numeric) && numeric >= 1 && numeric <= 12 ? numeric : 0;
 }
 
 function daysInMonth(year: number, month: number) {
