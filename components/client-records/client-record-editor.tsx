@@ -126,6 +126,24 @@ export const otherTerritoryOption = "Other Territory (Outside India)";
 // Billing Sheet). Same canonical "Team NN" labels the rest of WorkLine uses.
 export const billingTeams = ["Team 01", "Team 02", "Team 03", "Team 04", "Team 05", "Team 06", "Team 07", "Team 08"];
 
+// How often the retainer is billed. Blank means Monthly; the longer cycles
+// also need the month the cycle starts in.
+export const billingFrequencyChoices = ["Quarterly", "Half-Yearly", "Annually"];
+export const billingMonths = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December"
+];
+
 // GST state codes (first two digits of a GSTIN) to state names.
 const gstStateCodeMap: Record<string, string> = {
   "01": "Jammu and Kashmir",
@@ -219,11 +237,12 @@ const sections: Array<{ fields: string[]; key: string; title: string }> = [
   { fields: ["POC Name", "POC Contact no.", "Email ID"], key: "poc", title: "Point of Contact" },
   { fields: ["Address", "State", "Country"], key: "address", title: "Address" },
   { fields: ["GSTIN/UIN", "PAN/IT No.", "GST-ID", "GST-PASS"], key: "tax", title: "Tax & Compliance" },
-  { fields: ["Client Type", "Billing Team", "Autobilling", "Billing Date", "Fixed Monthly Amount"], key: "billing", title: "Billing" }
+  { fields: ["Client Type", "Billing Team", "Autobilling", "Billing Frequency", "Billing Start Month", "Billing Date", "Fixed Monthly Amount"], key: "billing", title: "Billing" }
 ];
 
 const fieldLabels: Record<string, string> = {
   "Email ID": "POC Email",
+  "Fixed Monthly Amount": "Fixed Bill Amount",
   Particulars: "Entity Name"
 };
 
@@ -263,6 +282,11 @@ export function validateClientRecord(values: RowValues) {
       errors["Billing Team"] = "Pick the team whose billing sheet gets the monthly entry.";
     }
 
+    const frequency = String(values["Billing Frequency"] ?? "").trim();
+    if (frequency && frequency !== "Monthly" && !String(values["Billing Start Month"] ?? "").trim()) {
+      errors["Billing Start Month"] = "Pick the month the billing cycle starts in.";
+    }
+
     const day = Number(values["Billing Date"]);
     if (!Number.isInteger(day) || day < 1 || day > 31) {
       errors["Billing Date"] = "Enter a day of the month from 1 to 31.";
@@ -270,7 +294,7 @@ export function validateClientRecord(values: RowValues) {
 
     const amount = Number(String(values["Fixed Monthly Amount"] ?? "").replace(/[,\s₹]/g, ""));
     if (!(amount > 0)) {
-      errors["Fixed Monthly Amount"] = "Enter the fixed monthly amount.";
+      errors["Fixed Monthly Amount"] = "Enter the fixed bill amount.";
     }
   }
 
@@ -700,10 +724,13 @@ const BillingFields = memo(function BillingFields({ store }: { store: FormStore 
   const clientType = useFieldValue(store, "Client Type");
   const autobilling = useFieldValue(store, "Autobilling");
   const billingDate = useFieldValue(store, "Billing Date");
+  const frequency = useFieldValue(store, "Billing Frequency");
   const clientTypeError = useFieldError(store, "Client Type");
   const autobillingError = useFieldError(store, "Autobilling");
+  const frequencyError = useFieldError(store, "Billing Frequency");
   const isRetainer = clientType === "Retainer";
   const autobillingOn = isRetainer && autobilling === "Yes";
+  const isPeriodic = autobillingOn && Boolean(frequency) && frequency !== "Monthly";
 
   return (
     <>
@@ -716,6 +743,8 @@ const BillingFields = memo(function BillingFields({ store }: { store: FormStore 
             if (next !== "Retainer") {
               store.setValue("Autobilling", "");
               store.setValue("Billing Team", "");
+              store.setValue("Billing Frequency", "");
+              store.setValue("Billing Start Month", "");
               store.setValue("Billing Date", "");
               store.setValue("Fixed Monthly Amount", "");
             }
@@ -736,6 +765,8 @@ const BillingFields = memo(function BillingFields({ store }: { store: FormStore 
               const next = event.target.value;
               store.setValue("Autobilling", next);
               if (next !== "Yes") {
+                store.setValue("Billing Frequency", "");
+                store.setValue("Billing Start Month", "");
                 store.setValue("Billing Date", "");
                 store.setValue("Fixed Monthly Amount", "");
               }
@@ -749,15 +780,37 @@ const BillingFields = memo(function BillingFields({ store }: { store: FormStore 
         </FieldShell>
       ) : null}
       {autobillingOn ? (
+        <FieldShell error={frequencyError} field="Billing Frequency">
+          <select
+            className={`input mt-2 ${frequencyError ? "border-rose-400" : ""}`}
+            onChange={(event) => {
+              const next = event.target.value;
+              store.setValue("Billing Frequency", next);
+              if (!next || next === "Monthly") {
+                store.setValue("Billing Start Month", "");
+              }
+            }}
+            value={frequency}
+          >
+            <option value="">Monthly (default)</option>
+            {billingFrequencyChoices.map((choice) => (
+              <option key={choice} value={choice}>{choice}</option>
+            ))}
+          </select>
+        </FieldShell>
+      ) : null}
+      {isPeriodic ? <SelectField field="Billing Start Month" options={billingMonths} store={store} /> : null}
+      {autobillingOn ? (
         <TextField field="Billing Date" inputMode="numeric" placeholder="Day of month (1-31)" store={store} />
       ) : null}
       {autobillingOn && billingDate.trim() ? (
-        <TextField field="Fixed Monthly Amount" inputMode="decimal" placeholder="Amount billed every month" store={store} />
+        <TextField field="Fixed Monthly Amount" inputMode="decimal" placeholder="Amount billed every cycle" store={store} />
       ) : null}
       {autobillingOn ? (
         <p className="text-xs font-semibold text-slate-500 md:col-span-2 xl:col-span-3">
-          A billing entry is created automatically for this client on the chosen day every month. When a month is shorter
-          than the chosen day, the entry is created on the month&apos;s last day.
+          A billing entry is created automatically on the chosen day — every month, or every quarter / half-year / year
+          starting from the chosen start month. When a month is shorter than the chosen day, the entry is created on the
+          month&apos;s last day.
         </p>
       ) : null}
     </>
