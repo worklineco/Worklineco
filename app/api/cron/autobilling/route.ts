@@ -150,18 +150,31 @@ async function createBillingEntry(
   const now = new Date().toISOString();
   const interval = frequencyInterval(values["Billing Frequency"]);
   const frequencyLabel = interval === 3 ? "Quarterly" : interval === 6 ? "Half-yearly" : interval === 12 ? "Annual" : "Monthly";
+
+  // GST exactly as the Billing Sheet calculates it for manual entries:
+  // Rajasthan (intra-state) bills CGST 9% + SGST 9%, anywhere else IGST 18%.
+  // The state is read off the GSTIN's code when there is one, else the
+  // record's State field.
+  const gstin = text(values["GSTIN/UIN"]);
+  const isRajasthan = gstin
+    ? gstin.slice(0, 2) === "08"
+    : text(values.State).toLowerCase() === "rajasthan";
+  const cgst = isRajasthan ? roundMoney(amount * 0.09) : 0;
+  const sgst = isRajasthan ? roundMoney(amount * 0.09) : 0;
+  const igst = isRajasthan ? 0 : roundMoney(amount * 0.18);
+
   let record: Record<string, unknown> = {
     address: text(values.Address),
     amount,
     billing_status: "Draft",
-    cgst: 0,
+    cgst,
     client: text(values.Particulars) || client.name,
     cost_center: "",
     description: `${frequencyLabel} retainer bill for ${today.monthName} ${today.year} (autobilling)`,
     escalation_1: "",
     group_name: text(values.Group),
     gstin: text(values["GSTIN/UIN"]),
-    igst: 0,
+    igst,
     include_ope_in_fees: false,
     income_head: "",
     invoice_date: null,
@@ -183,10 +196,10 @@ async function createBillingEntry(
     registration_type: text(values["Registration Type"]),
     remarks: `Created automatically on billing day ${today.day}. [AB ${client.id}]`,
     serial_no: 0,
-    sgst: 0,
+    sgst,
     source_module: "autobilling",
     task_code: autobillingCode(monthKey, sequence),
-    total: amount,
+    total: roundMoney(amount + cgst + sgst + igst),
     updated_at: now,
     voucher_type: "Proforma Invoice"
   };
@@ -250,6 +263,10 @@ function autobillingCode(monthKey: string, sequence: number) {
 
 function text(value: unknown) {
   return String(value ?? "").trim();
+}
+
+function roundMoney(value: number) {
+  return Math.round(value * 100) / 100;
 }
 
 // "Quarterly" -> 3 months, "Half-Yearly" / "6 months" -> 6, "Annually" -> 12;
