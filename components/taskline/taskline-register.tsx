@@ -204,7 +204,13 @@ function isPendingBillableRow(row: TaskLineRow, billedCodes: Map<string, string>
   }
   return !billedCodes.has(code.toUpperCase());
 }
-type TeamMemberLite = { designation: string; joining_date: string; leaving_date: string; name: string; team: string };
+type TeamMemberLite = { designation: string; joining_date: string; leaving_date: string; name: string; team: string; teams: string[] };
+
+// A member belongs to their primary team plus any secondary teams, and shows
+// in the dropdowns of every one of them.
+function memberTeamList(member: TeamMemberLite) {
+  return member.teams.length ? member.teams : [member.team];
+}
 type EntityMasterOption = { entity: string; group: string; gstin: string; state: string };
 const emptyOptions: string[] = [];
 const teamOptions = ["Team-02", "Team-03", "Team-04", "Team-05", "Team-06", "Team-08"];
@@ -416,10 +422,12 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
       if (isArticleDesignation(member.designation) || !isTaskLineMemberActive(member)) {
         continue;
       }
-      const key = teamMatchKey(member.team);
-      const list = byTeam.get(key) ?? [];
-      list.push(canonicalTaskLineName(member.name));
-      byTeam.set(key, list);
+      for (const memberTeam of memberTeamList(member)) {
+        const key = teamMatchKey(memberTeam);
+        const list = byTeam.get(key) ?? [];
+        list.push(canonicalTaskLineName(member.name));
+        byTeam.set(key, list);
+      }
     }
     const team03Key = teamMatchKey("Team 03");
     byTeam.set(team03Key, [...(byTeam.get(team03Key) ?? []), "Sourabh Chhipa", "Mohit Gupta"]);
@@ -435,10 +443,12 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
       if (!isArticleDesignation(member.designation) || !isTaskLineMemberActive(member)) {
         continue;
       }
-      const key = teamMatchKey(member.team);
-      const list = map.get(key) ?? [];
-      list.push(member.name.trim());
-      map.set(key, list);
+      for (const memberTeam of memberTeamList(member)) {
+        const key = teamMatchKey(memberTeam);
+        const list = map.get(key) ?? [];
+        list.push(member.name.trim());
+        map.set(key, list);
+      }
     }
     for (const [key, names] of map) {
       map.set(key, Array.from(new Set(names.filter(Boolean))));
@@ -1021,7 +1031,7 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
     try {
       const response = await fetch("/api/teams", { cache: "no-store" });
       const result = (await response.json()) as {
-        members?: { designation?: string; joining_date?: string; leaving_date?: string; name?: string; team?: string }[];
+        members?: { designation?: string; joining_date?: string; leaving_date?: string; name?: string; team?: string; teams?: string[] }[];
         me?: { team?: string };
       };
       if (!response.ok) {
@@ -1035,7 +1045,8 @@ export function TaskLineRegister({ registerKey = "taskline", registerName = "Tas
           joining_date: text(member.joining_date),
           leaving_date: text(member.leaving_date),
           name: text(member.name),
-          team: text(member.team)
+          team: text(member.team),
+          teams: Array.isArray(member.teams) ? member.teams.map(text).filter(Boolean) : []
         }))
       );
     } catch {
