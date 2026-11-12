@@ -219,7 +219,7 @@ const registerLabels: Record<string, string> = {
 };
 type GstatAppealRow = { data: Record<string, string | number> | null; id: string; row_number: number | null; updated_at?: string | null };
 const organisationIdCache = new Map<string, string>();
-const taskLineDateColumns = new Set(["due_date", "ref_date", "entry_date", "completion_date"]);
+const taskLineDateColumns = new Set(["due_date", "target_date", "ref_date", "entry_date", "completion_date"]);
 const taskLineMoneyColumns = new Set(["total_agreed_fee", "amount_raised", "amount_realised", "counsel_fee", "referral_fee"]);
 const taskLineNumberColumns = new Set(["reminder_days"]);
 const taskLineColumns = [
@@ -235,6 +235,7 @@ const taskLineColumns = [
   "gstin",
   "task",
   "due_date",
+  "target_date",
   "stage",
   "status_open_close",
   "billable",

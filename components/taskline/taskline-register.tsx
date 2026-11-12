@@ -107,14 +107,14 @@ const taskLineImportRequestTimeoutMs = 90_000;
 const taskLineImportRetryDelayMs = 1_000;
 const taskLinePageSize = 200;
 const taskLineColumnGroups: { columns: string[] | null; key: string; label: string }[] = [
-  { key: "core", label: "Core", columns: ["team", "task_code", "name", "resource", "entity_group", "entity", "state_name", "task", "due_date", "reminder_days", "stage", "status_open_close", "remarks", "document_link"] },
+  { key: "core", label: "Core", columns: ["team", "task_code", "name", "resource", "entity_group", "entity", "state_name", "task", "due_date", "target_date", "reminder_days", "stage", "status_open_close", "remarks", "document_link"] },
   { key: "legal", label: "Legal / Order", columns: ["task_code", "name", "entity", "task", "ref_date", "ref_no", "period", "section", "issue", "refer_other_task", "appeal_no", "order_type", "court_location", "engaged_counsel", "printing", "due_date", "reminder_days", "stage"] },
   { key: "billing", label: "Billing / Fees", columns: ["task_code", "name", "entity", "gstin", "task", "billable", "billing_status", "total_agreed_fee", "amount_raised", "amount_realised", "counsel_fee", "referral_fee", "fee_comments", "reminder_days"] },
   { key: "all", label: "All", columns: null }
 ];
 
 const taskLineFormSections: { columns: string[]; key: string; label: string }[] = [
-  { key: "core", label: "Core", columns: ["team", "name", "resource", "entity_group", "entity", "state_name", "gstin", "task", "gstat_task_code", "due_date", "reminder_days", "stage", "status_open_close", "billable", "remarks", "document_link"] },
+  { key: "core", label: "Core", columns: ["team", "name", "resource", "entity_group", "entity", "state_name", "gstin", "task", "gstat_task_code", "due_date", "target_date", "reminder_days", "stage", "status_open_close", "billable", "remarks", "document_link"] },
   { key: "legal", label: "Legal / Order", columns: ["ref_date", "ref_no", "period", "section", "issue", "refer_other_task", "appeal_no", "order_type", "court_location", "engaged_counsel", "printing"] },
   { key: "billing", label: "Billing / Fees", columns: ["billing_status", "total_agreed_fee", "amount_raised", "amount_realised", "counsel_fee", "referral_fee", "fee_comments"] },
   { key: "other", label: "Other", columns: ["any_other", "any_other_1"] }
@@ -139,6 +139,7 @@ const taskLineColumns: TaskLineColumn[] = [
   { key: "gstin", label: "GSTIN", width: 170 },
   { key: "task", label: "Task", width: 210 },
   { key: "due_date", label: "Due Date", type: "date", width: 128 },
+  { key: "target_date", label: "Target Date", type: "date", width: 132 },
   { key: "stage", label: "Stage", width: 132 },
   { key: "status_open_close", label: "Status Open/Close", type: "select", width: 112 },
   { key: "billable", label: "Billable", type: "select", width: 108 },
@@ -3329,7 +3330,7 @@ const TaskLineCell = memo(function TaskLineCell({
     );
   }
 
-  if (column.key === "due_date" || column.key === "ref_date") {
+  if (column.type === "date") {
     const dueColor = column.key === "due_date" ? dueDateColorClass(row[column.key] ?? "") : "";
     return (
       <td className={`border-r border-slate-100 px-3 py-1 last:border-r-0 ${dueColor} ${isFrozen ? (dueColor ? "sticky z-[5]" : "sticky z-[5] bg-white") : ""}`} style={frozenStyle}>
@@ -3348,7 +3349,6 @@ const TaskLineCell = memo(function TaskLineCell({
       <input
         className="h-7 w-full rounded-md border border-transparent bg-transparent px-1.5 text-xs font-semibold text-slate-700 outline-none hover:border-slate-200 hover:bg-white focus:border-rose-300 focus:bg-white focus:ring-2 focus:ring-rose-100"
         onChange={(event) => onChange(event.target.value)}
-        placeholder={column.type === "date" ? "dd-mm-yyyy" : undefined}
         type={column.type === "number" || column.type === "money" ? "number" : "text"}
         value={row[column.key] ?? ""}
       />
@@ -3674,7 +3674,7 @@ function TaskLineForm({
               {financialPeriodOptions.map((period) => <option key={period} value={period} />)}
             </datalist>
           </>
-        ) : column.key === "due_date" || column.key === "ref_date" ? (
+        ) : column.type === "date" ? (
           <TaskLineDateInput onChange={(value) => onChange(column.key, value)} value={currentValue} />
         ) : column.key === "name" ? (
           <TaskLineSearchableSelect
@@ -3739,7 +3739,6 @@ function TaskLineForm({
           <input
             className={formControlClass}
             onChange={(event) => onChange(column.key, event.target.value)}
-            placeholder={column.type === "date" ? "dd-mm-yyyy" : undefined}
             type={column.type === "number" || column.type === "money" ? "number" : "text"}
             value={currentValue}
           />
@@ -5038,11 +5037,40 @@ function addImportActionDropdown(worksheet: XLSX.WorkSheet, rowCount: number) {
   });
 }
 
+/**
+ * Place a column that a saved layout predates straight after the column it
+ * follows by default, rather than at the far end of the table.
+ */
+function mergeTaskLineColumnOrder(savedOrder: string[]) {
+  const merged = [...savedOrder];
+
+  defaultTaskLineColumnOrder.forEach((key, defaultIndex) => {
+    if (merged.includes(key)) {
+      return;
+    }
+
+    let insertAt = merged.length;
+
+    for (let previous = defaultIndex - 1; previous >= 0; previous -= 1) {
+      const anchor = merged.indexOf(defaultTaskLineColumnOrder[previous]);
+
+      if (anchor >= 0) {
+        insertAt = anchor + 1;
+        break;
+      }
+    }
+
+    merged.splice(insertAt, 0, key);
+  });
+
+  return merged;
+}
+
 function normalizeTaskLineColumnLayout(layout: Partial<TaskLineColumnLayout>): TaskLineColumnLayout {
   const knownColumnKeys = new Set(defaultTaskLineColumnOrder);
   const toggleableKeys = new Set([...defaultTaskLineColumnOrder, actionColumnKey]);
   const savedOrder = Array.isArray(layout.order) ? layout.order.filter((key) => knownColumnKeys.has(key)) : [];
-  const order = [...savedOrder, ...defaultTaskLineColumnOrder.filter((key) => !savedOrder.includes(key))];
+  const order = mergeTaskLineColumnOrder(savedOrder);
   const hiddenColumnKeys = Array.isArray(layout.hiddenColumnKeys)
     ? layout.hiddenColumnKeys.filter((key) => toggleableKeys.has(key))
     : ["serial_no"];
