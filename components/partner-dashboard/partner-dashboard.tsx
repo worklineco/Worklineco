@@ -1,7 +1,7 @@
 "use client";
 
 import { getCurrentUser } from "@/lib/supabase/session";
-import { CalendarDays, MessagesSquare, NotebookPen, Pencil, Plus, Send, Target, Trash2, X } from "lucide-react";
+import { CalendarDays, MessagesSquare, NotebookPen, Pencil, Plus, RefreshCw, Send, Target, Trash2, X } from "lucide-react";
 import { MonthCalendar, type CalendarEvent } from "@/components/home/month-calendar";
 import { TaskNotificationBell } from "@/components/home/task-notification-bell";
 import { clearPersistentDataCache, getCached, setCached } from "@/lib/data-cache";
@@ -162,6 +162,7 @@ export function PartnerDashboard() {
   // read-only tabs here and a user's own pad follows them across devices.
   const [teamPads, setTeamPads] = useState<TeamScratchpad[]>([]);
   const [activePadUserId, setActivePadUserId] = useState("");
+  const [isRefreshingPads, setIsRefreshingPads] = useState(false);
   const scratchpadSyncTimerRef = useRef<number | null>(null);
   const scratchpadReadyRef = useRef(false);
   const stateRef = useRef(state);
@@ -264,14 +265,8 @@ export function PartnerDashboard() {
       });
 
     // Team scratchpad tabs (the server only answers this for allowed users).
-    void fetch("/api/scratchpad?team=1", { cache: "no-store" })
-      .then((response) => (response.ok ? response.json() : null))
-      .then((data: { members?: TeamScratchpad[] } | null) => {
-        if (Array.isArray(data?.members)) {
-          setTeamPads(data.members);
-        }
-      })
-      .catch(() => undefined);
+    void loadTeamPads();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -328,6 +323,22 @@ export function PartnerDashboard() {
       pad.email.trim().toLowerCase() !== profileEmail.trim().toLowerCase()
   );
   const activePad = visiblePads.find((pad) => pad.userId === activePadUserId) ?? null;
+
+  // Re-pulls the team scratchpad tabs without reloading the page.
+  async function loadTeamPads() {
+    setIsRefreshingPads(true);
+    try {
+      const response = await fetch("/api/scratchpad?team=1", { cache: "no-store" });
+      const data = (await response.json().catch(() => null)) as { members?: TeamScratchpad[] } | null;
+      if (response.ok && Array.isArray(data?.members)) {
+        setTeamPads(data.members);
+      }
+    } catch {
+      // keep the current tabs when a refresh fails
+    } finally {
+      setIsRefreshingPads(false);
+    }
+  }
 
   function addCalendarNote(dateKey: string, textValue: string) {
     setState((current) => ({
@@ -672,6 +683,16 @@ export function PartnerDashboard() {
         <div className="flex items-center gap-2">
           <NotebookPen className="size-5 text-navy-700" />
           <h3 className="text-base font-black text-slate-950">Quick notes / scratchpad</h3>
+          <button
+            aria-label="Refresh scratchpads"
+            className="ml-auto flex size-8 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition hover:bg-slate-50 hover:text-navy-700 disabled:opacity-50"
+            disabled={isRefreshingPads}
+            onClick={() => void loadTeamPads()}
+            title="Refresh the scratchpad tabs"
+            type="button"
+          >
+            <RefreshCw className={`size-4 ${isRefreshingPads ? "animate-spin" : ""}`} />
+          </button>
         </div>
         {visiblePads.length ? (
           <div className="mt-3 flex flex-wrap items-center gap-1.5">
