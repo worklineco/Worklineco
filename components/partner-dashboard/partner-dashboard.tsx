@@ -9,8 +9,8 @@ import { PendencyReport } from "@/components/partner-dashboard/pendency-report";
 import { TaskAgingReport } from "@/components/partner-dashboard/task-aging-report";
 import { useEffect, useRef, useState } from "react";
 
-type NoteTask = { color: string; done: boolean; id: string; targetDate: string; text: string };
-type NoteFile = { date?: string; discuss?: boolean; id: string; tasks: NoteTask[]; title: string; updatedAt: string };
+type NoteTask = { color: string; discuss?: boolean; done: boolean; id: string; targetDate: string; text: string };
+type NoteFile = { date?: string; id: string; tasks: NoteTask[]; title: string; updatedAt: string };
 type DashboardState = { calendarNotes: Record<string, string[]>; notes: NoteFile[] };
 type Thread = { count: number; entity: string; last_at: string; last_body: string; messages: ChatMessage[]; task: string; task_code: string; team: string };
 type TeamScratchpad = { designation: string; email: string; name: string; notes: NoteFile[]; updatedAt: string; userId: string };
@@ -62,6 +62,7 @@ function restoreNoteTasks(note: Partial<NoteFile> & LegacyNoteFields, noteIndex:
       const item = task as Partial<NoteTask>;
       return [{
         color: typeof item.color === "string" && item.color in noteLineColorFills ? item.color : "",
+        discuss: item.discuss === true,
         done: item.done === true,
         id: typeof item.id === "string" && item.id ? item.id : `task-${noteIndex + 1}-${index + 1}`,
         targetDate: typeof item.targetDate === "string" ? item.targetDate : "",
@@ -124,7 +125,6 @@ function restoreDashboardState(saved: string): DashboardState | null {
           const item = note as Partial<NoteFile> & LegacyNoteFields;
           return [{
             ...(typeof item.date === "string" ? { date: item.date } : {}),
-            ...(item.discuss === true ? { discuss: true } : {}),
             id: typeof item.id === "string" && item.id ? item.id : `saved-note-${index + 1}`,
             tasks: restoreNoteTasks(item, index),
             title: typeof item.title === "string" && item.title.trim() ? item.title : `Note ${index + 1}`,
@@ -423,18 +423,6 @@ export function PartnerDashboard() {
     setState((current) => ({
       ...current,
       notes: current.notes.map((note) => (note.id === activeNote.id ? { ...note, date, updatedAt: new Date().toISOString() } : note))
-    }));
-  }
-
-  // Flags the open note for discussion; the flag shows on the read-only
-  // team tabs as prominently as the note's heading.
-  function updateActiveNoteDiscuss(discuss: boolean) {
-    if (!activeNote) {
-      return;
-    }
-    setState((current) => ({
-      ...current,
-      notes: current.notes.map((note) => (note.id === activeNote.id ? { ...note, discuss, updatedAt: new Date().toISOString() } : note))
     }));
   }
 
@@ -746,7 +734,7 @@ export function PartnerDashboard() {
                   <p className="text-sm font-black text-slate-800">
                     {note.title || `Note ${noteIndex + 1}`}
                     {note.date ? <span className="ml-2 text-[10px] font-bold text-slate-400">{formatNoteDate(note.date)}</span> : null}
-                    {note.discuss ? (
+                    {restoreNoteTasks(note, noteIndex).some((task) => task.discuss) ? (
                       <span className="ml-2 rounded-md bg-amber-100 px-2 py-0.5 text-xs font-black uppercase tracking-wide text-amber-700">
                         To be discussed
                       </span>
@@ -762,6 +750,11 @@ export function PartnerDashboard() {
                           style={{ backgroundColor: noteLineColorFills[task.color] ?? "transparent" }}
                         >
                           {taskIndex + 1}. {task.text}
+                          {task.discuss ? (
+                            <span className="ml-2 rounded-md bg-amber-100 px-1.5 py-0.5 text-[10px] font-black uppercase tracking-wide text-amber-700">
+                              To be discussed
+                            </span>
+                          ) : null}
                           {task.targetDate ? (
                             <span className={`ml-2 text-[10px] font-black ${task.done ? "text-slate-300" : "text-emerald-700"}`}>
                               ⏱ {formatNoteDate(task.targetDate)}
@@ -795,7 +788,9 @@ export function PartnerDashboard() {
                   <button className="min-w-0 flex-1 truncate px-1 text-left text-sm font-black" onClick={() => setActiveNoteId(note.id)} onDoubleClick={() => renameNote(note)} title="Double click to rename" type="button">
                     {note.title}
                     {note.date ? <span className="ml-1 text-[10px] font-bold text-slate-400">{formatNoteDate(note.date)}</span> : null}
-                    {note.discuss ? <span className="ml-1 text-[10px] font-black uppercase text-amber-600">Discuss</span> : null}
+                    {note.tasks.some((task) => task.discuss) ? (
+                      <span className="ml-1 text-[10px] font-black uppercase text-amber-600">Discuss</span>
+                    ) : null}
                     {noteSummary(note).open ? (
                       <span className="ml-1 text-[10px] font-bold text-slate-500">{noteSummary(note).open} open</span>
                     ) : null}
@@ -837,15 +832,6 @@ export function PartnerDashboard() {
                   onChange={updateActiveNoteDate}
                   value={activeNote?.date ?? ""}
                 />
-              </label>
-              <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl bg-amber-50 px-3 py-2 text-sm font-black text-amber-800">
-                <input
-                  checked={activeNote?.discuss ?? false}
-                  className="size-4 accent-amber-600"
-                  onChange={(event) => updateActiveNoteDiscuss(event.target.checked)}
-                  type="checkbox"
-                />
-                To be discussed
               </label>
               {activeNote?.tasks.some((task) => task.done) ? (
                 <button
@@ -912,6 +898,21 @@ export function PartnerDashboard() {
                         onChange={(targetDate) => updateNoteTask(task.id, { targetDate })}
                         value={task.targetDate}
                       />
+                    </label>
+
+                    <label
+                      className={`flex shrink-0 cursor-pointer items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px] font-black ${
+                        task.discuss ? "border-amber-300 bg-amber-100 text-amber-800" : "border-slate-200 bg-white/70 text-slate-500"
+                      }`}
+                      title="Tick to flag this task to be discussed"
+                    >
+                      <input
+                        checked={task.discuss ?? false}
+                        className="size-3.5 accent-amber-600"
+                        onChange={(event) => updateNoteTask(task.id, { discuss: event.target.checked })}
+                        type="checkbox"
+                      />
+                      Discuss
                     </label>
 
                     <select
