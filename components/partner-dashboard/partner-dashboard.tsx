@@ -13,6 +13,7 @@ type NoteTask = { color: string; done: boolean; id: string; targetDate: string; 
 type NoteFile = { date?: string; id: string; tasks: NoteTask[]; title: string; updatedAt: string };
 type DashboardState = { calendarNotes: Record<string, string[]>; notes: NoteFile[] };
 type Thread = { count: number; entity: string; last_at: string; last_body: string; messages: ChatMessage[]; task: string; task_code: string; team: string };
+type TeamScratchpad = { designation: string; email: string; name: string; notes: NoteFile[]; updatedAt: string; userId: string };
 type ChatMessage = { author_name?: string; body: string; created_at: string; id: string };
 
 const storageKey = "workline-partner-dashboard";
@@ -157,6 +158,12 @@ export function PartnerDashboard() {
   const [noteStorageWarning, setNoteStorageWarning] = useState("");
   const skipInitialDashboardSaveRef = useRef(true);
   const [focusTaskId, setFocusTaskId] = useState("");
+  // Scratchpads sync to the server, so partners see the team's pads as
+  // read-only tabs here and a user's own pad follows them across devices.
+  const [teamPads, setTeamPads] = useState<TeamScratchpad[]>([]);
+  const [activePadUserId, setActivePadUserId] = useState("");
+  const scratchpadSyncTimerRef = useRef<number | null>(null);
+  const scratchpadReadyRef = useRef(false);
 
   useEffect(() => {
     const saved = window.localStorage.getItem(storageKey);
@@ -208,6 +215,45 @@ export function PartnerDashboard() {
       .catch(() => undefined);
 
     void loadChats();
+
+    // Pull the server copy of the scratchpad; the newer side wins, so the
+    // same notes follow the user across browsers and devices.
+    void fetch("/api/scratchpad", { cache: "no-store" })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((server: { notes?: unknown[]; updatedAt?: string } | null) => {
+        if (server && Array.isArray(server.notes) && server.notes.length) {
+          setState((current) => {
+            const localNewest = current.notes.reduce(
+              (max, note) => (String(note.updatedAt ?? "") > max ? String(note.updatedAt ?? "") : max),
+              ""
+            );
+            if (String(server.updatedAt ?? "") > localNewest) {
+              const restored = restoreDashboardState(
+                JSON.stringify({ calendarNotes: current.calendarNotes, notes: server.notes })
+              );
+              if (restored) {
+                setActiveNoteId(restored.notes[0]?.id ?? "");
+                return restored;
+              }
+            }
+            return current;
+          });
+        }
+        scratchpadReadyRef.current = true;
+      })
+      .catch(() => {
+        scratchpadReadyRef.current = true;
+      });
+
+    // Team scratchpad tabs (the server only answers this for allowed users).
+    void fetch("/api/scratchpad?team=1", { cache: "no-store" })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data: { members?: TeamScratchpad[] } | null) => {
+        if (Array.isArray(data?.members)) {
+          setTeamPads(data.members);
+        }
+      })
+      .catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -229,6 +275,22 @@ export function PartnerDashboard() {
         setNoteStorageWarning("Quick Notes could not be saved because browser storage is unavailable or full.");
       }
     }
+
+    // Mirror the scratchpad to the server (debounced) so the team tabs and
+    // the user's other devices stay current.
+    if (scratchpadSyncTimerRef.current) {
+      window.clearTimeout(scratchpadSyncTimerRef.current);
+    }
+    scratchpadSyncTimerRef.current = window.setTimeout(() => {
+      if (!scratchpadReadyRef.current) {
+        return;
+      }
+      void fetch("/api/scratchpad", {
+        body: JSON.stringify({ notes: state.notes }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST"
+      }).catch(() => undefined);
+    }, 1500);
   }, [state]);
 
   useEffect(() => {
@@ -240,6 +302,14 @@ export function PartnerDashboard() {
   }, [chatHidden]);
 
   const activeNote = state.notes.find((note) => note.id === activeNoteId) ?? state.notes[0];
+  // Tabs show manager and associate scratchpads; the viewer's own pad stays
+  // the first tab and the only editable one.
+  const visiblePads = teamPads.filter(
+    (pad) =>
+      /manager|associate/i.test(pad.designation) &&
+      pad.email.trim().toLowerCase() !== profileEmail.trim().toLowerCase()
+  );
+  const activePad = visiblePads.find((pad) => pad.userId === activePadUserId) ?? null;
 
   function addCalendarNote(dateKey: string, textValue: string) {
     setState((current) => ({
@@ -585,11 +655,77 @@ export function PartnerDashboard() {
           <NotebookPen className="size-5 text-navy-700" />
           <h3 className="text-base font-black text-slate-950">Quick notes / scratchpad</h3>
         </div>
+        {visiblePads.length ? (
+          <div className="mt-3 flex flex-wrap items-center gap-1.5">
+            <button
+              className={`rounded-xl px-3 py-1.5 text-xs font-black transition ${
+                activePad ? "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50" : "bg-navy-700 text-white"
+              }`}
+              onClick={() => setActivePadUserId("")}
+              type="button"
+            >
+              My scratchpad
+            </button>
+            {visiblePads.map((pad) => (
+              <button
+                className={`rounded-xl px-3 py-1.5 text-xs font-black transition ${
+                  activePad?.userId === pad.userId
+                    ? "bg-navy-700 text-white"
+                    : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                }`}
+                key={pad.userId}
+                onClick={() => setActivePadUserId(pad.userId)}
+                title={pad.designation || "Team member"}
+                type="button"
+              >
+                {pad.name}
+              </button>
+            ))}
+          </div>
+        ) : null}
+        {activePad ? (
+          <div className="mt-4 space-y-3">
+            <p className="text-xs font-bold text-slate-400">
+              {activePad.name}&apos;s scratchpad{activePad.designation ? ` · ${activePad.designation}` : ""} — read-only
+            </p>
+            {activePad.notes.length ? (
+              activePad.notes.map((note, noteIndex) => (
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3" key={note.id ?? `pad-note-${noteIndex}`}>
+                  <p className="text-sm font-black text-slate-800">
+                    {note.title || `Note ${noteIndex + 1}`}
+                    {note.date ? <span className="ml-2 text-[10px] font-bold text-slate-400">{formatNoteDate(note.date)}</span> : null}
+                  </p>
+                  <ul className="mt-2 space-y-1">
+                    {restoreNoteTasks(note, noteIndex)
+                      .filter((task) => task.text.trim())
+                      .map((task, taskIndex) => (
+                        <li
+                          className={`rounded-md px-2 py-1 text-sm font-semibold ${task.done ? "text-slate-400 line-through" : "text-slate-700"}`}
+                          key={task.id ?? `pad-task-${noteIndex}-${taskIndex}`}
+                          style={{ backgroundColor: noteLineColorFills[task.color] ?? "transparent" }}
+                        >
+                          {taskIndex + 1}. {task.text}
+                          {task.targetDate ? (
+                            <span className={`ml-2 text-[10px] font-black ${task.done ? "text-slate-300" : "text-emerald-700"}`}>
+                              ⏱ {formatNoteDate(task.targetDate)}
+                            </span>
+                          ) : null}
+                        </li>
+                      ))}
+                  </ul>
+                </div>
+              ))
+            ) : (
+              <p className="text-sm font-semibold text-slate-500">No notes on this scratchpad yet.</p>
+            )}
+          </div>
+        ) : null}
         {noteStorageWarning ? (
           <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-800">
             {noteStorageWarning}
           </p>
         ) : null}
+        {activePad ? null : (
         <div className="mt-4 grid gap-3 lg:grid-cols-[168px_minmax(0,1fr)]">
           <div>
             <button className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-navy-700 px-3 text-sm font-black text-white" onClick={createNote} type="button">
@@ -750,6 +886,7 @@ export function PartnerDashboard() {
             </button>
           </div>
         </div>
+        )}
       </section>
 
       <MonthCalendar
