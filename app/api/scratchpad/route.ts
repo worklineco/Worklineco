@@ -2,6 +2,7 @@ import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { createClient, type User } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
+import { normalizeTeam, readUserTeams } from "@/lib/user-teams";
 
 type CookieToSet = { name: string; options: CookieOptions; value: string };
 
@@ -11,6 +12,11 @@ const defaultOrganisationCode = "DCO1433";
 const scratchpadViewName = "__scratchpad__";
 // Accounts that may read the team's scratchpads besides Partner-role users.
 const extraScratchpadViewers = ["shuchis.dco@gmail.com"];
+// Viewers listed here see only these teams' scratchpads (whatever their
+// role); viewers not listed see every team.
+const viewerTeamScope: Record<string, string[]> = {
+  "shuchis.dco@gmail.com": ["Team 03"]
+};
 
 export async function GET(request: Request) {
   const auth = await requireUser();
@@ -75,14 +81,22 @@ export async function GET(request: Request) {
         email: text(target?.user?.email),
         name: text(metadata.full_name ?? metadata.name) || text(target?.user?.email) || "WorkLine User",
         notes: Array.isArray(config.notes) ? config.notes : [],
+        teams: readUserTeams(target?.user ?? null),
         updatedAt: text(config.updatedAt),
         userId
       };
     })
   );
 
-  members.sort((first, second) => first.name.localeCompare(second.name));
-  return NextResponse.json({ members });
+  const scope = viewerTeamScope[email] ?? [];
+  const scopedMembers = scope.length
+    ? members.filter((member) =>
+        member.teams.some((team) => scope.some((allowed) => normalizeTeam(allowed) === normalizeTeam(team)))
+      )
+    : members;
+
+  scopedMembers.sort((first, second) => first.name.localeCompare(second.name));
+  return NextResponse.json({ members: scopedMembers });
 }
 
 export async function POST(request: Request) {
