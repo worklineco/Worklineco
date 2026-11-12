@@ -147,6 +147,9 @@ async function listViews(admin: ReturnType<typeof createAdminClient>, organisati
     .select("id,name,config,is_default")
     .eq("organisation_id", organisationId)
     .eq("user_id", userId)
+    // The dashboard scratchpad is stored in this table under a reserved
+    // name; it is not a saved view, so keep it out of the views list.
+    .neq("name", "__scratchpad__")
     .order("name", { ascending: true });
 
   if (error) {
