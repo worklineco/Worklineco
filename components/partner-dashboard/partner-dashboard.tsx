@@ -164,6 +164,11 @@ export function PartnerDashboard() {
   const [activePadUserId, setActivePadUserId] = useState("");
   const scratchpadSyncTimerRef = useRef<number | null>(null);
   const scratchpadReadyRef = useRef(false);
+  const stateRef = useRef(state);
+
+  useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
 
   useEffect(() => {
     const saved = window.localStorage.getItem(storageKey);
@@ -240,6 +245,19 @@ export function PartnerDashboard() {
           });
         }
         scratchpadReadyRef.current = true;
+
+        // First visit after the sync feature: nothing on the server yet, so
+        // upload the locally saved pad as-is - opening the dashboard is
+        // enough for a member's pad to appear in the partners' team tabs.
+        if (!server || !Array.isArray(server.notes) || !server.notes.length) {
+          window.setTimeout(() => {
+            void fetch("/api/scratchpad", {
+              body: JSON.stringify({ notes: stateRef.current.notes }),
+              headers: { "Content-Type": "application/json" },
+              method: "POST"
+            }).catch(() => undefined);
+          }, 800);
+        }
       })
       .catch(() => {
         scratchpadReadyRef.current = true;
