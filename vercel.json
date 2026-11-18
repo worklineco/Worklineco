@@ -11,6 +11,10 @@
     {
       "path": "/api/cron/autobilling",
       "schedule": "40 3 * * *"
+    },
+    {
+      "path": "/api/cron/taskline-daily-excel",
+      "schedule": "30 4 * * *"
     }
   ]
 }
