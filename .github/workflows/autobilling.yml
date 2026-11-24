@@ -1,0 +1,16 @@
+name: Autobilling (09:10 IST)
+
+on:
+  schedule:
+    - cron: "40 3 * * *" # 09:10 IST
+  workflow_dispatch: {}
+
+jobs:
+  run-autobilling:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call WorkLine autobilling endpoint
+        run: |
+          curl -fsS --max-time 290 \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            https://www.worklineco.com/api/cron/autobilling
