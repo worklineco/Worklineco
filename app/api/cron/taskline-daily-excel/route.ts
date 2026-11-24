@@ -52,6 +52,23 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Organisation not found." }, { status: 500 });
   }
 
+  // One send per IST day: both the Vercel cron and the GitHub trigger call
+  // this endpoint, so whichever runs first sends and the later one skips.
+  const dayKey = indiaDateKey();
+  const alreadySent = await admin
+    .from("audit_logs")
+    .select("id")
+    .eq("organisation_id", organisationId)
+    .eq("entity_type", "taskline_daily_excel")
+    .eq("action", "taskline.daily_excel_sent")
+    .eq("new_value->>day", dayKey)
+    .limit(1)
+    .maybeSingle();
+
+  if (alreadySent.data) {
+    return NextResponse.json({ ok: true, sent: false, skipped: `Already sent for ${dayKey}.` });
+  }
+
   const dueRange = dueWindow();
 
   const ExcelJS = (await import("exceljs")).default;
@@ -160,6 +177,18 @@ export async function GET(request: Request) {
       { status: 500 }
     );
   }
+
+  // Record the send so a second trigger on the same IST day skips instead of
+  // mailing the workbook twice. A failed log never fails the already-sent run.
+  await admin.from("audit_logs").insert({
+    action: "taskline.daily_excel_sent",
+    actor_user_id: null,
+    entity_id: organisationId,
+    entity_type: "taskline_daily_excel",
+    new_value: { day: dayKey, recipient: RECIPIENT, sent_at: new Date().toISOString() },
+    old_value: null,
+    organisation_id: organisationId
+  });
 
   return NextResponse.json({
     dueFrom: dueRange.startDisplay,
