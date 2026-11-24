@@ -3,6 +3,9 @@ name: TaskLine due reminders (09:00 IST)
 on:
   schedule:
     - cron: "30 3 * * *" # 09:00 IST
+    # GitHub delivers scheduled events hours late, so retry through the day;
+    # the endpoint holds mails until 09:00 IST and dedupes repeat sends.
+    - cron: "*/20 3-12 * * *"
   workflow_dispatch: {}
 
 jobs:
