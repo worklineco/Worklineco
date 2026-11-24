@@ -43,6 +43,16 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   }
 
+  // Mails go out from 09:00 IST, never earlier and never in the evening.
+  // The schedulers (Vercel cron, GitHub Actions) fire at unreliable times, so
+  // the GitHub workflow retries through the morning and this gate holds every
+  // run outside the 09:00-17:59 IST window; the first run inside the window
+  // sends the day's batch and the audit-log keys make the later runs skip.
+  const hourNow = indiaHourNow();
+  if (hourNow < 9 || hourNow >= 18) {
+    return NextResponse.json({ held: true, reason: "Outside the 09:00-18:00 IST send window." });
+  }
+
   const smtp = smtpConfiguration();
 
   if ("error" in smtp) {
